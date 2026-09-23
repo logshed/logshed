@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SettingsPanel } from '../components/settings/SettingsPanel.tsx';
+import { SettingsPanel, pathToSettingsSubTab, settingsSubTabToPath } from '../components/settings/SettingsPanel.tsx';
 import * as settingsApi from '../api/settings.ts';
 import * as aiApi from '../api/ai.ts';
 import * as authApi from '../api/auth.ts';
@@ -20,6 +20,7 @@ vi.mock('../context/AuthContext.tsx', () => ({
 describe('SettingsPanel Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.pushState(null, '', '/settings');
     vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
       current_version: '1.1.0-beta.3',
       latest_version: '1.0.0',
@@ -477,7 +478,7 @@ describe('SettingsPanel Component', () => {
   });
 
   it('validates password fields and shows error when passwords do not match', async () => {
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
@@ -505,7 +506,7 @@ describe('SettingsPanel Component', () => {
   it('handles successful admin password change with login notice and logout redirect', async () => {
     const changePwdSpy = vi.spyOn(authApi, 'changePassword').mockResolvedValue({ status: 'ok' });
 
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
@@ -543,7 +544,7 @@ describe('SettingsPanel Component', () => {
   });
 
   it('renders About LogShed section with installed version and up to date status', async () => {
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -571,7 +572,7 @@ describe('SettingsPanel Component', () => {
       checked_at: 1700000000.0,
     });
 
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -593,7 +594,7 @@ describe('SettingsPanel Component', () => {
       checked_at: 1700000000.0,
     });
 
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -629,6 +630,99 @@ describe('SettingsPanel Component', () => {
           check_for_updates: false,
         })
       );
+    });
+  });
+
+  describe('Sub-tabs and route helpers', () => {
+    it('maps pathname to corresponding SettingsSubTab and vice versa', () => {
+      expect(pathToSettingsSubTab('/settings')).toBe('app');
+      expect(pathToSettingsSubTab('/settings/')).toBe('app');
+      expect(pathToSettingsSubTab('/settings/app')).toBe('app');
+      expect(pathToSettingsSubTab('/settings/aliases')).toBe('aliases');
+      expect(pathToSettingsSubTab('/aliases')).toBe('aliases');
+      expect(pathToSettingsSubTab('/aliases/')).toBe('aliases');
+      expect(pathToSettingsSubTab('/settings/advanced')).toBe('advanced');
+
+      expect(settingsSubTabToPath('app')).toBe('/settings/app');
+      expect(settingsSubTabToPath('aliases')).toBe('/settings/aliases');
+      expect(settingsSubTabToPath('advanced')).toBe('/settings/advanced');
+    });
+
+    it('switches between sub-tabs when tab buttons are clicked', async () => {
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+      });
+
+      // Switch to Host Aliases tab
+      const aliasesTab = screen.getByRole('button', { name: /^Host Aliases$/i });
+      fireEvent.click(aliasesTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('Host Alias Manager')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Internal Application Logging')).toBeNull();
+
+      // Switch to Advanced tab
+      const advancedTab = screen.getByRole('button', { name: /^Advanced$/i });
+      fireEvent.click(advancedTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
+        expect(screen.getByText('About LogShed')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Host Alias Manager')).toBeNull();
+
+      // Switch back to Application tab
+      const appTab = screen.getByRole('button', { name: /^Application$/i });
+      fireEvent.click(appTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+      });
+    });
+
+    it('initializes on given initialSubTab prop', async () => {
+      render(<SettingsPanel initialSubTab="aliases" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Host Alias Manager')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Internal Application Logging')).toBeNull();
+    });
+
+    it('reports dirty state only when App sub-tab is active', async () => {
+      const onDirtyChange = vi.fn();
+      render(<SettingsPanel onDirtyChange={onDirtyChange} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+      });
+
+      // Make change in app subtab
+      const select = screen.getByLabelText('Internal Log Severity Threshold');
+      fireEvent.change(select, { target: { value: 'ERROR' } });
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      });
+
+      // Switch to Host Aliases tab
+      const aliasesTab = screen.getByRole('button', { name: /^Host Aliases$/i });
+      fireEvent.click(aliasesTab);
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+      });
+
+      // Switch back to Application tab
+      const appTab = screen.getByRole('button', { name: /^Application$/i });
+      fireEvent.click(appTab);
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      });
     });
   });
 });

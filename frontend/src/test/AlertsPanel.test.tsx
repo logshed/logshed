@@ -1,8 +1,9 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AlertsPanel } from '../components/alerts/AlertsPanel.tsx';
+import { AlertsPanel, pathToAlertSubTab, alertSubTabToPath } from '../components/alerts/AlertsPanel.tsx';
 import * as alertsApi from '../api/alerts.ts';
 import * as notificationsApi from '../api/notifications.ts';
+import * as dropRulesApi from '../api/dropRules.ts';
 
 const mockRules = [
   {
@@ -84,6 +85,29 @@ const mockChannels = [
   },
 ];
 
+const mockDropRules = [
+  {
+    id: 1,
+    source_pattern: '192.168.1.*',
+    app_pattern: null,
+    message_pattern: 'noise',
+    is_regex: false,
+    is_enabled: true,
+    dropped_count: 15,
+    created_at: '2026-09-18T10:00:00Z',
+  },
+  {
+    id: 2,
+    source_pattern: null,
+    app_pattern: null,
+    message_pattern: 'debug test',
+    is_regex: false,
+    is_enabled: false,
+    dropped_count: 0,
+    created_at: '2026-09-18T10:05:00Z',
+  },
+];
+
 describe('AlertsPanel Component', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -92,6 +116,54 @@ describe('AlertsPanel Component', () => {
     vi.spyOn(alertsApi, 'fetchSecurityPresets').mockResolvedValue(mockPresets);
     vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
     vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue(mockChannels);
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
+  });
+
+  it('renders Alerts and Rules heading, subtitle with drop rules, and enabled drop rules tab count', async () => {
+    render(<AlertsPanel />);
+
+    expect(screen.getByRole('heading', { level: 2, name: /Alerts and Rules/i })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Configure real-time threshold and pattern alert rules, manage ingestion drop rules/i)
+    ).toBeInTheDocument();
+
+    // Verify top refresh button and Total active are removed
+    expect(screen.queryByTitle('Refresh rules and status')).toBeNull();
+    expect(screen.queryByText(/Total active:/i)).toBeNull();
+
+    await waitFor(() => {
+      // 1 enabled alert rule of 1 total in Option 1 split badge format
+      expect(screen.getByRole('button', { name: /Alert Rules.*1\s*\/\s*1/i })).toBeInTheDocument();
+      // 1 enabled drop rule out of 2 in Option 1 split badge format
+      expect(screen.getByRole('button', { name: /Drop Rules.*1\s*\/\s*2/i })).toBeInTheDocument();
+    });
+
+    // On alert rules tab, New Alert Rule is visible
+    expect(screen.getByRole('button', { name: /New Alert Rule/i })).toBeInTheDocument();
+
+    // Switch to Drop Rules tab: New Alert Rule is hidden, New Rule for drop rules is visible
+    const dropRulesTab = screen.getByRole('button', { name: /Drop Rules/i });
+    fireEvent.click(dropRulesTab);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /New Alert Rule/i })).toBeNull();
+      expect(screen.getByRole('button', { name: /New Rule/i })).toBeInTheDocument();
+    });
+  });
+
+  it('maps pathname to corresponding AlertViewTab and vice versa', () => {
+    expect(pathToAlertSubTab('/alerts')).toBe('rules');
+    expect(pathToAlertSubTab('/alerts/rules')).toBe('rules');
+    expect(pathToAlertSubTab('/alerts/presets')).toBe('presets');
+    expect(pathToAlertSubTab('/alerts/quick-rules')).toBe('presets');
+    expect(pathToAlertSubTab('/alerts/history')).toBe('history');
+    expect(pathToAlertSubTab('/alerts/drop-rules')).toBe('drop-rules');
+    expect(pathToAlertSubTab('/alerts/drop')).toBe('drop-rules');
+
+    expect(alertSubTabToPath('rules')).toBe('/alerts/rules');
+    expect(alertSubTabToPath('presets')).toBe('/alerts/presets');
+    expect(alertSubTabToPath('history')).toBe('/alerts/history');
+    expect(alertSubTabToPath('drop-rules')).toBe('/alerts/drop-rules');
   });
 
   it('renders alert rules and switches between tabs', async () => {
@@ -103,17 +175,17 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('Fired 2x')).toBeInTheDocument();
     });
 
-    // Switch to Quick Rules tab
-    const presetsTab = screen.getByRole('button', { name: /Quick Rules/i });
+    // Switch to Alert Presets tab
+    const presetsTab = screen.getByRole('button', { name: /Alert Presets/i });
     fireEvent.click(presetsTab);
 
     await waitFor(() => {
-      expect(screen.getByText('1-Click Quick Rule Presets')).toBeInTheDocument();
+      expect(screen.getByText('1-Click Alert Rule Presets')).toBeInTheDocument();
       expect(screen.getByText('Kernel Out-Of-Memory (OOM) Kill')).toBeInTheDocument();
     });
 
-    // Switch to Incident History tab
-    const historyTab = screen.getByRole('button', { name: /Incident History/i });
+    // Switch to Alert History tab
+    const historyTab = screen.getByRole('button', { name: /Alert History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
@@ -128,9 +200,17 @@ describe('AlertsPanel Component', () => {
     await waitFor(() => {
       expect(screen.getByText('Brute-force attack from host 192.168.1.100 against root.')).toBeInTheDocument();
     });
+
+    // Switch to Drop Rules tab
+    const dropRulesTab = screen.getByRole('button', { name: /Drop Rules/i });
+    fireEvent.click(dropRulesTab);
+
+    await waitFor(() => {
+      expect(screen.getByText('Ingestion Drop Rules')).toBeInTheDocument();
+    });
   });
 
-  it('allows toggling an alert rule status', async () => {
+  it('allows toggling an alert rule status and dynamically updates the tab counter', async () => {
     const updateSpy = vi.spyOn(alertsApi, 'updateAlertRule').mockResolvedValue({
       ...mockRules[0],
       is_enabled: false,
@@ -140,6 +220,7 @@ describe('AlertsPanel Component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Alert Rules.*1\s*\/\s*1/i })).toBeInTheDocument();
     });
 
     const toggleBtn = screen.getByTitle('Click to disable');
@@ -147,6 +228,7 @@ describe('AlertsPanel Component', () => {
 
     await waitFor(() => {
       expect(updateSpy).toHaveBeenCalledWith(1, { is_enabled: false });
+      expect(screen.getByRole('button', { name: /Alert Rules.*0\s*\/\s*1/i })).toBeInTheDocument();
     });
   });
 
@@ -216,7 +298,7 @@ describe('AlertsPanel Component', () => {
     });
 
     // Go to presets tab
-    const presetsTab = screen.getByRole('button', { name: /Quick Rules/i });
+    const presetsTab = screen.getByRole('button', { name: /Alert Presets/i });
     fireEvent.click(presetsTab);
 
     await waitFor(() => {
@@ -261,8 +343,8 @@ describe('AlertsPanel Component', () => {
     const testBtn = screen.getByTitle('Test Rule');
     expect(testBtn).toBeInTheDocument();
 
-    // Switch to Incident History tab
-    const historyTab = screen.getByRole('button', { name: /Incident History/i });
+    // Switch to Alert History tab
+    const historyTab = screen.getByRole('button', { name: /Alert History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
@@ -293,7 +375,7 @@ describe('AlertsPanel Component', () => {
 
     render(<AlertsPanel />);
 
-    const historyTab = screen.getByRole('button', { name: /Incident History/i });
+    const historyTab = screen.getByRole('button', { name: /Alert History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
@@ -320,8 +402,8 @@ describe('AlertsPanel Component', () => {
 
     render(<AlertsPanel />);
 
-    // Switch to Incident History tab
-    const historyTab = screen.getByRole('button', { name: /Incident History/i });
+    // Switch to Alert History tab
+    const historyTab = screen.getByRole('button', { name: /Alert History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
@@ -379,7 +461,7 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
     });
 
-    const historyTab = screen.getByRole('button', { name: /Incident History/i });
+    const historyTab = screen.getByRole('button', { name: /Alert History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
@@ -415,18 +497,18 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
     });
 
-    // Click Quick Rules
-    const presetsTab = screen.getByRole('button', { name: /Quick Rules \(\d+\)/i });
+    // Click Alert Presets
+    const presetsTab = screen.getByRole('button', { name: /Alert Presets/i });
     fireEvent.click(presetsTab);
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/presets');
 
-    // Click Incident History
-    const historyTab = screen.getByRole('button', { name: /Incident History \(\d+\)/i });
+    // Click Alert History
+    const historyTab = screen.getByRole('button', { name: /Alert History/i });
     fireEvent.click(historyTab);
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/history');
 
-    // Click Active Rules
-    const rulesTab = screen.getByRole('button', { name: /Active Rules \(\d+\)/i });
+    // Click Alert Rules
+    const rulesTab = screen.getByRole('button', { name: /Alert Rules/i });
     fireEvent.click(rulesTab);
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/rules');
   });

@@ -28,8 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Alert Test Dry-Run Modal**: Extracted `AlertTestModal` with signature-aware sample generation (detecting HTTP 401/403, SSH brute-force, sudo escalation, and OOM signatures) and helpful usage hints.
 - **Incident Status Badge Component**: Reusable `IncidentStatusBadge` component for triggered, AI-enriched, and AI-failed status indicators across mobile cards and desktop tables.
 - **Automated AI Redaction Notice**: Informative disclaimer banner displayed beneath active alert rules whenever any configured rule has AI enrichment enabled.
+- **Settings Sub-Tabs**: Embedded Host Aliases into Settings as a dedicated sub-tab (`/settings/aliases`), structuring Settings into Application (`/settings/app`), Host Aliases (`/settings/aliases`), and Advanced (`/settings/advanced`) sections with browser URL history tracking and backward-compatible redirects from legacy `/aliases` bookmarks.
+- **Two-Tone Sub-Tab Count Badges**: Monospace count indicators on Alerts & Rules sub-tabs rendering active versus total figures (`active / total`) with emerald tinting for running rules and muted styling for totals without visual distraction.
 
 ### Changed
+- **Navigation Restructure to 4 Core Tabs**: Restructured top-level navigation to Stream, Alerts & Rules, Storage, and Settings. Moved Ingestion Drop Rules into Alerts & Rules as a dedicated sub-tab (`/alerts/drop-rules`).
+- **Alerts and Rules Layout Alignment**: Scoped the New Alert Rule action directly to the Alert Rules tab header bar, unified all sub-tab headers in uppercase with accent icons and divider lines matching Settings sections, and aligned Host Alias card presentation.
 - **Alerts Tab Layout Alignment**: Standardized container width and header styling in the Alerts tab to match Storage and Settings, including seamless Alert Firing Log table headers.
 - **Alerts Subtab Deep-Linking**: Added unique browser URL routes for Active Rules (`/alerts/rules`), Quick Rules (`/alerts/presets`), and Incident History (`/alerts/history`) with bidirectional browser navigation.
 - **Incident History Modal Presentation**: Replaced inline accordion rows in Incident History with responsive desktop table and mobile card layouts that open a dedicated modal overlay for log analysis and diagnosis details.

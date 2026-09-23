@@ -37,7 +37,9 @@ export interface SystemSettings {
   check_for_updates?: boolean;
 }
 
-export type AppTab = 'stream' | 'aliases' | 'storage' | 'settings' | 'alerts';
+export type AppTab = 'stream' | 'storage' | 'alerts' | 'settings';
+export type SettingsSubTab = 'app' | 'aliases' | 'advanced';
+
 export interface StorageMetricsSnapshot {
   recorded_at: string;
   db_size_bytes: number;

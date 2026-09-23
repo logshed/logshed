@@ -114,20 +114,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   const isMobile = useMediaQuery('(max-width: 767px)');
 
   return (
-    <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <Server className="w-5 h-5 text-accent-500" />
-            <span>Host Alias Manager</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Map incoming source IP addresses to friendly host names (e.g. 192.168.1.1 -&gt; OPNsense Firewall).
-          </p>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       {errorMsg && (
         <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
           <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -136,10 +123,26 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       )}
 
       {/* Add / Edit Form Card */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-4 shadow-md">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">
-          {editingIp ? `Edit Mapping for ${editingIp}` : 'Add New Host Mapping'}
-        </h3>
+      <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <Server className="w-4 h-4 text-accent-500" />
+              <span>Host Alias Manager</span>
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {editingIp
+                ? `Editing host mapping for ${editingIp}.`
+                : 'Map incoming source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall).'}
+            </p>
+          </div>
+          {editingIp && (
+            <span className="px-2 py-0.5 rounded bg-accent-950/50 text-accent-400 border border-accent-800 text-[11px] font-mono shrink-0 self-start sm:self-auto">
+              Editing: {editingIp}
+            </span>
+          )}
+        </div>
+
         <form onSubmit={handleSave} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
           <div>
             <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
@@ -203,14 +206,15 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
             </button>
           </div>
         </form>
-      </div>
+      </section>
 
       {/* Aliases Table Card */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-md">
-        <div className="p-3 bg-dark-950 border-b border-dark-700 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            Active Host Mappings ({aliases.length})
-          </span>
+      <section className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-md">
+        <div className="p-3.5 sm:p-4 bg-dark-900 border-b border-dark-700 flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <Server className="w-4 h-4 text-accent-500" />
+            <span>Active Host Mappings ({aliases.length})</span>
+          </h3>
         </div>
 
         {isLoading ? (
@@ -296,7 +300,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {/* Delete Host Alias Confirmation Modal */}
       {deleteTargetIp && (

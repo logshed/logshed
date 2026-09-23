@@ -491,7 +491,7 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       expect(aiApi.previewAiPrompt).toHaveBeenCalled();
     });
 
-    const runBtn = screen.getByText('Run AI Analysis');
+    const runBtn = await screen.findByText('Run AI Analysis');
     fireEvent.click(runBtn);
 
     await waitFor(() => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Settings,
   Brain,
@@ -16,23 +16,61 @@ import {
   Info,
   ExternalLink,
   ArrowUpCircle,
+  Server,
+  Shield,
 } from 'lucide-react';
-import { AiModelInfo, VersionInfo } from '../../types.ts';
+import { AiModelInfo, VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
 import { fetchVersion } from '../../api/system.ts';
 import { getAiModels } from '../../api/ai.ts';
 import { changePassword } from '../../api/auth.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
-import { DropRulesCard } from './DropRulesCard.tsx';
 import { NotificationsCard } from './NotificationsCard.tsx';
+import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
+
+export type { SettingsSubTab };
+
+export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
+  const clean = pathname.replace(/\/+$/, '').toLowerCase();
+  if (
+    clean === '/aliases' ||
+    clean.startsWith('/aliases/') ||
+    clean === '/settings/aliases' ||
+    clean.startsWith('/settings/aliases/')
+  ) {
+    return 'aliases';
+  }
+  if (clean === '/settings/advanced' || clean.startsWith('/settings/advanced/')) {
+    return 'advanced';
+  }
+  return 'app';
+};
+
+export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
+  switch (subTab) {
+    case 'aliases':
+      return '/settings/aliases';
+    case 'advanced':
+      return '/settings/advanced';
+    case 'app':
+    default:
+      return '/settings/app';
+  }
+};
 
 export interface SettingsPanelProps {
+  initialSubTab?: SettingsSubTab;
+  initialAddIp?: string | null;
+  onAliasSaved?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
   saveTriggerRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  initialSubTab,
+  initialAddIp,
+  onAliasSaved,
   onDirtyChange,
   saveTriggerRef,
 }) => {
@@ -40,6 +78,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [settings, setSettings] = useState<SettingsResponseData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Sub-tab state
+  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>(() => {
+    if (initialSubTab) return initialSubTab;
+    return pathToSettingsSubTab(window.location.pathname);
+  });
+
+  const handleSubTabChange = (nextSubTab: SettingsSubTab) => {
+    setActiveSubTab(nextSubTab);
+    const targetPath = settingsSubTabToPath(nextSubTab);
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(null, '', targetPath);
+    }
+  };
 
   // Form states
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'openai_compatible'>('gemini');
@@ -66,6 +118,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
   const [saveInlineSuccess, setSaveInlineSuccess] = useState<boolean>(false);
   const [saveInlineError, setSaveInlineError] = useState<string | null>(null);
+  const saveSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveSuccessTimeoutRef.current) {
+        clearTimeout(saveSuccessTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Track dirty state against loaded baseline settings
   const isDirty = Boolean(
@@ -194,15 +255,44 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     loadVersionData();
   }, []);
 
-  // Notify parent component of dirty state changes
   useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+      const target = settingsSubTabToPath(initialSubTab);
+      if (window.location.pathname !== target) {
+        window.history.pushState(null, '', target);
+      }
+    }
+  }, [initialSubTab]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveSubTab(pathToSettingsSubTab(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    const clean = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+    if (clean === '/aliases') {
+      window.history.replaceState(null, '', '/settings/aliases');
+    }
+  }, []);
+
+  // Notify parent component of dirty state changes - only applies when App sub-tab is active
+  useEffect(() => {
+    if (activeSubTab === 'app') {
+      onDirtyChange?.(isDirty);
+    } else {
+      onDirtyChange?.(false);
+    }
+  }, [activeSubTab, isDirty, onDirtyChange]);
 
   // Warn on page unload/refresh when unsaved changes exist
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
+      if (activeSubTab === 'app' && isDirty) {
         e.preventDefault();
         e.returnValue = '';
         return '';
@@ -210,7 +300,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isDirty]);
+  }, [activeSubTab, isDirty]);
 
   const handleResetChanges = () => {
     if (!settings) return;
@@ -271,7 +361,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       loadVersionData(true);
 
       setSaveInlineSuccess(true);
-      setTimeout(() => setSaveInlineSuccess(false), 3000);
+      if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
+      saveSuccessTimeoutRef.current = setTimeout(() => {
+        setSaveInlineSuccess(false);
+      }, 3000);
       return true;
     } catch (err: any) {
       const msg = err.message || 'Failed to update settings.';
@@ -290,10 +383,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     await executeSave();
   };
 
-  // Expose programmatic save function for navigation guards
+  // Expose programmatic save function for navigation guards - only applies when App sub-tab is active
   useEffect(() => {
     if (saveTriggerRef) {
-      saveTriggerRef.current = executeSave;
+      if (activeSubTab === 'app') {
+        saveTriggerRef.current = executeSave;
+      } else {
+        saveTriggerRef.current = null;
+      }
     }
     return () => {
       if (saveTriggerRef) {
@@ -361,8 +458,53 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       )}
 
-      {/* Settings Form: Logging & AI */}
-      <form id="settings-form" onSubmit={handleSaveSettings} className="space-y-6">
+      {/* Section Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-dark-700 pb-2">
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('app')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+            activeSubTab === 'app'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+          }`}
+        >
+          <Settings className="w-3.5 h-3.5" />
+          <span>Application</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('aliases')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+            activeSubTab === 'aliases'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+          }`}
+        >
+          <Server className="w-3.5 h-3.5" />
+          <span>Host Aliases</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('advanced')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+            activeSubTab === 'advanced'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+          }`}
+        >
+          <Shield className="w-3.5 h-3.5" />
+          <span>Advanced</span>
+        </button>
+      </div>
+
+      {/* Sub-tab 1: Application */}
+      {activeSubTab === 'app' && (
+        <div className="space-y-6">
+          {/* Settings Form: Logging & AI */}
+          <form id="settings-form" onSubmit={handleSaveSettings} className="space-y-6">
         {/* Application Self-Logging Section */}
         <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -859,168 +1001,180 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
           </aside>
         )}
-      </form>
+          </form>
 
-      {/* Ingestion Drop Rules Section */}
-      <DropRulesCard />
-
-      {/* Notification Channels & Webhooks Section */}
-      <NotificationsCard />
-
-      {/* Admin Password Reset Section */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-          <Lock className="w-4 h-4 text-accent-500" />
-          <span>Change Admin Password</span>
-        </h3>
-
-        {pwdMsg && (
-          <div
-            className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${pwdMsg.isError
-                ? 'bg-red-950/60 border-red-800 text-red-300'
-                : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-              }`}
-          >
-            {pwdMsg.isError ? (
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-            ) : (
-              <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            )}
-            <span>{pwdMsg.text}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-          <div>
-            <label htmlFor="current-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-              Current Password
-            </label>
-            <input
-              id="current-password"
-              type="password"
-              value={currentPwd}
-              onChange={(e) => setCurrentPwd(e.target.value)}
-              required
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="new-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-              New Password (min 8 chars)
-            </label>
-            <input
-              id="new-password"
-              type="password"
-              value={newPwd}
-              onChange={(e) => setNewPwd(e.target.value)}
-              minLength={8}
-              required
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="confirm-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-              Confirm New Password
-            </label>
-            <input
-              id="confirm-password"
-              type="password"
-              value={confirmPwd}
-              onChange={(e) => setConfirmPwd(e.target.value)}
-              minLength={8}
-              required
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-            />
-          </div>
-
-          <div className="sm:col-span-3 flex justify-end pt-1">
-            <button
-              type="submit"
-              disabled={isChangingPwd || !currentPwd || newPwd.length < 8 || newPwd !== confirmPwd}
-              className="w-full sm:w-auto justify-center bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-dark-600 font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>{isChangingPwd ? 'Updating...' : 'Update Password'}</span>
-            </button>
-          </div>
-        </form>
-      </section>
-
-      {/* About LogShed Section */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Info className="w-4 h-4 text-accent-500" />
-            <span>About LogShed</span>
-          </h3>
-          {versionInfo && (
-            <span className="font-mono text-xs px-2 py-0.5 rounded bg-dark-950 border border-dark-700 text-slate-300">
-              v{versionInfo.current_version}
-            </span>
-          )}
+          {/* Notification Channels & Webhooks Section */}
+          <NotificationsCard />
         </div>
+      )}
 
-        {/* Version & Update Status */}
-        {versionInfo && (
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            {versionInfo.update_available && versionInfo.check_enabled !== false && checkForUpdates ? (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-300">
-                <ArrowUpCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>
-                  App update available: <strong className="font-semibold font-mono">v{versionInfo.latest_version}</strong>
-                </span>
-                <a
-                  href="https://github.com/BenHornerTech/logshed/releases"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ml-1 inline-flex items-center gap-1 text-amber-400 hover:text-amber-200 underline text-[11px]"
+      {/* Sub-tab 2: Host Aliases */}
+      {activeSubTab === 'aliases' && (
+        <HostAliasManager
+          initialAddIp={initialAddIp}
+          onAliasSaved={onAliasSaved}
+        />
+      )}
+
+      {/* Sub-tab 3: Advanced */}
+      {activeSubTab === 'advanced' && (
+        <div className="space-y-6">
+          {/* Admin Password Reset Section */}
+          <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <Lock className="w-4 h-4 text-accent-500" />
+              <span>Change Admin Password</span>
+            </h3>
+
+            {pwdMsg && (
+              <div
+                className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${pwdMsg.isError
+                    ? 'bg-red-950/60 border-red-800 text-red-300'
+                    : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                  }`}
+              >
+                {pwdMsg.isError ? (
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                ) : (
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                )}
+                <span>{pwdMsg.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+              <div>
+                <label htmlFor="current-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                  Current Password
+                </label>
+                <input
+                  id="current-password"
+                  type="password"
+                  value={currentPwd}
+                  onChange={(e) => setCurrentPwd(e.target.value)}
+                  required
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="new-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                  New Password (min 8 chars)
+                </label>
+                <input
+                  id="new-password"
+                  type="password"
+                  value={newPwd}
+                  onChange={(e) => setNewPwd(e.target.value)}
+                  minLength={8}
+                  required
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirm-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                  Confirm New Password
+                </label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPwd}
+                  onChange={(e) => setConfirmPwd(e.target.value)}
+                  minLength={8}
+                  required
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                />
+              </div>
+
+              <div className="sm:col-span-3 flex justify-end pt-1">
+                <button
+                  type="submit"
+                  disabled={isChangingPwd || !currentPwd || newPwd.length < 8 || newPwd !== confirmPwd}
+                  className="w-full sm:w-auto justify-center bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-dark-600 font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
                 >
-                  <span>Release Notes</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{isChangingPwd ? 'Updating...' : 'Update Password'}</span>
+                </button>
               </div>
-            ) : versionInfo.check_enabled === false || !checkForUpdates ? (
-              <div className="flex items-center gap-1.5 text-slate-400 text-xs">
-                <span>Update checks are disabled</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 text-slate-400 text-xs">
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>LogShed is up to date</span>
+            </form>
+          </section>
+
+          {/* About LogShed Section */}
+          <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Info className="w-4 h-4 text-accent-500" />
+                <span>About LogShed</span>
+              </h3>
+              {versionInfo && (
+                <span className="font-mono text-xs px-2 py-0.5 rounded bg-dark-950 border border-dark-700 text-slate-300">
+                  v{versionInfo.current_version}
+                </span>
+              )}
+            </div>
+
+            {/* Version & Update Status */}
+            {versionInfo && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {versionInfo.update_available && versionInfo.check_enabled !== false && checkForUpdates ? (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-300">
+                    <ArrowUpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      App update available: <strong className="font-semibold font-mono">v{versionInfo.latest_version}</strong>
+                    </span>
+                    <a
+                      href="https://github.com/BenHornerTech/logshed/releases"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-1 inline-flex items-center gap-1 text-amber-400 hover:text-amber-200 underline text-[11px]"
+                    >
+                      <span>Release Notes</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                ) : versionInfo.check_enabled === false || !checkForUpdates ? (
+                  <div className="flex items-center gap-1.5 text-slate-400 text-xs">
+                    <span>Update checks are disabled</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-slate-400 text-xs">
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>LogShed is up to date</span>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* License & Copyright */}
-        <p className="text-xs text-slate-400">
-          MIT License - Copyright (c) 2026 LogShed Contributors
-        </p>
+            {/* License & Copyright */}
+            <p className="text-xs text-slate-400">
+              MIT License - Copyright (c) 2026 LogShed Contributors
+            </p>
 
-        {/* Links */}
-        <div className="flex flex-wrap items-center gap-4 text-xs pt-1 border-t border-dark-800">
-          <a
-            href="https://github.com/BenHornerTech/logshed"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
-          >
-            <span>GitHub Repository</span>
-            <ExternalLink className="w-3 h-3" />
-          </a>
-          <a
-            href="https://github.com/BenHornerTech/logshed/blob/main/CHANGELOG.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
-          >
-            <span>Changelog</span>
-            <ExternalLink className="w-3 h-3" />
-          </a>
+            {/* Links */}
+            <div className="flex flex-wrap items-center gap-4 text-xs pt-1 border-t border-dark-800">
+              <a
+                href="https://github.com/BenHornerTech/logshed"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
+              >
+                <span>GitHub Repository</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <a
+                href="https://github.com/BenHornerTech/logshed/blob/main/CHANGELOG.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
+              >
+                <span>Changelog</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </section>
         </div>
-      </section>
+      )}
     </div>
   );
 };

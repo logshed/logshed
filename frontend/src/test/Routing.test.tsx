@@ -74,8 +74,8 @@ describe('URL Routing and History API Synchronization', () => {
     it('maps pathname to corresponding AppTab', () => {
       expect(pathToTab('/')).toBe('stream');
       expect(pathToTab('/console')).toBe('stream');
-      expect(pathToTab('/aliases')).toBe('aliases');
-      expect(pathToTab('/aliases/')).toBe('aliases');
+      expect(pathToTab('/aliases')).toBe('settings');
+      expect(pathToTab('/aliases/')).toBe('settings');
       expect(pathToTab('/storage')).toBe('storage');
       expect(pathToTab('/alerts')).toBe('alerts');
       expect(pathToTab('/alerts/rules')).toBe('alerts');
@@ -83,12 +83,14 @@ describe('URL Routing and History API Synchronization', () => {
       expect(pathToTab('/alerts/quick-rules')).toBe('alerts');
       expect(pathToTab('/alerts/history')).toBe('alerts');
       expect(pathToTab('/settings')).toBe('settings');
+      expect(pathToTab('/settings/app')).toBe('settings');
+      expect(pathToTab('/settings/aliases')).toBe('settings');
+      expect(pathToTab('/settings/advanced')).toBe('settings');
       expect(pathToTab('/unknown-path')).toBe('stream');
     });
 
     it('maps AppTab to canonical URL path', () => {
       expect(tabToPath('stream')).toBe('/');
-      expect(tabToPath('aliases')).toBe('/aliases');
       expect(tabToPath('storage')).toBe('/storage');
       expect(tabToPath('alerts')).toBe('/alerts');
       expect(tabToPath('settings')).toBe('/settings');
@@ -115,7 +117,7 @@ describe('URL Routing and History API Synchronization', () => {
       });
     });
 
-    it('initializes on aliases tab when URL pathname is /aliases', async () => {
+    it('initializes on settings aliases sub-tab when URL pathname is /aliases (backward compatibility)', async () => {
       window.history.pushState(null, '', '/aliases');
       render(<App />);
 
@@ -140,14 +142,14 @@ describe('URL Routing and History API Synchronization', () => {
       render(<App />);
       expect(screen.getByTestId('live-log-stream')).toBeInTheDocument();
 
-      // Click Host Aliases tab
-      const aliasesBtn = screen.getByRole('button', { name: /^Host Aliases$/i });
+      // Click Alerts & Rules tab
+      const alertsBtn = screen.getByRole('button', { name: /^Alerts & Rules$/i });
       await act(async () => {
-        fireEvent.click(aliasesBtn);
+        fireEvent.click(alertsBtn);
       });
 
-      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/aliases');
-      expect(screen.getByTestId('host-alias-manager')).toBeInTheDocument();
+      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts');
+      expect(screen.getByTestId('alerts-panel')).toBeInTheDocument();
 
       // Click Storage tab
       const storageBtn = screen.getByRole('button', { name: /^Storage$/i });
@@ -157,6 +159,15 @@ describe('URL Routing and History API Synchronization', () => {
 
       expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/storage');
       expect(screen.getByTestId('storage-panel')).toBeInTheDocument();
+
+      // Click Settings tab
+      const settingsBtn = screen.getByRole('button', { name: /^Settings$/i });
+      await act(async () => {
+        fireEvent.click(settingsBtn);
+      });
+
+      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/settings');
+      expect(screen.getByText('System Configuration')).toBeInTheDocument();
 
       // Click Brand logo to return to console stream
       const brandLogo = screen.getByTitle('Go to Console View');
@@ -183,7 +194,7 @@ describe('URL Routing and History API Synchronization', () => {
         expect(screen.getByTestId('storage-panel')).toBeInTheDocument();
       });
 
-      // Simulate user navigating to /aliases
+      // Simulate user navigating to /aliases (backward compatibility redirects to settings aliases)
       act(() => {
         window.history.pushState(null, '', '/aliases');
         window.dispatchEvent(new PopStateEvent('popstate'));

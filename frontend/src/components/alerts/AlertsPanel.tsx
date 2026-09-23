@@ -13,10 +13,12 @@ import {
   Sparkles,
   Zap,
   FlaskConical,
+  FilterX,
 } from 'lucide-react';
 import {
   AlertHistoryItem,
   AlertRule,
+  DropRule,
   NotificationChannel,
   SecurityPreset,
 } from '../../types.ts';
@@ -31,15 +33,17 @@ import {
   clearAlertHistory,
 } from '../../api/alerts.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
+import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal } from './AlertRuleModal.tsx';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
+import { DropRulesCard } from '../settings/DropRulesCard.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
 
-export type AlertViewTab = 'rules' | 'presets' | 'history';
+export type AlertViewTab = 'rules' | 'presets' | 'history' | 'drop-rules';
 
 export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
@@ -48,6 +52,9 @@ export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   }
   if (clean === '/alerts/history') {
     return 'history';
+  }
+  if (clean === '/alerts/drop-rules' || clean === '/alerts/drop') {
+    return 'drop-rules';
   }
   return 'rules';
 };
@@ -58,11 +65,35 @@ export const alertSubTabToPath = (subTab: AlertViewTab): string => {
       return '/alerts/presets';
     case 'history':
       return '/alerts/history';
+    case 'drop-rules':
+      return '/alerts/drop-rules';
     case 'rules':
     default:
       return '/alerts/rules';
   }
 };
+
+const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
+  <span
+    title={title}
+    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none"
+  >
+    <span className={active > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>
+      {active}
+    </span>
+    <span className="text-slate-600">/</span>
+    <span className="text-slate-400">{total}</span>
+  </span>
+);
+
+const SimpleCountBadge: React.FC<{ count: number; title?: string }> = ({ count, title }) => (
+  <span
+    title={title}
+    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none text-slate-400 select-none"
+  >
+    {count}
+  </span>
+);
 
 export const AlertsPanel: React.FC = () => {
   const isMobile = useMediaQuery('(max-width: 767px)');
@@ -74,8 +105,8 @@ export const AlertsPanel: React.FC = () => {
   const [presets, setPresets] = useState<SecurityPreset[]>([]);
   const [historyItems, setHistoryItems] = useState<AlertHistoryItem[]>([]);
   const [historyTotal, setHistoryTotal] = useState<number>(0);
+  const [dropRules, setDropRules] = useState<DropRule[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
   // Modals state
@@ -97,6 +128,21 @@ export const AlertsPanel: React.FC = () => {
   // Pre-index notification channels into a lookup Map using useMemo for O(1) lookups
   const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
 
+  const enabledRulesCount = useMemo(
+    () => rules.filter((r) => r.is_enabled).length,
+    [rules]
+  );
+
+  const installedPresetsCount = useMemo(
+    () => presets.filter((p) => rules.some((r) => r.name.toLowerCase() === p.name.toLowerCase())).length,
+    [presets, rules]
+  );
+
+  const enabledDropRulesCount = useMemo(
+    () => dropRules.filter((r) => r.is_enabled).length,
+    [dropRules]
+  );
+
   const handleSubTabChange = (nextSubTab: AlertViewTab) => {
     setActiveSubTab(nextSubTab);
     const targetPath = alertSubTabToPath(nextSubTab);
@@ -114,27 +160,26 @@ export const AlertsPanel: React.FC = () => {
   }, []);
 
   const loadAll = useCallback(async () => {
-    setIsLoading(true);
     try {
-      const [rulesData, channelsData, presetsData, historyData, facetsData] = await Promise.all([
+      const [rulesData, channelsData, presetsData, historyData, facetsData, dropRulesData] = await Promise.all([
         fetchAlertRules(),
         fetchNotificationChannels(),
         fetchSecurityPresets(),
         fetchAlertHistory(50, 0),
         fetchLogFacets().catch(() => ({ sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} })),
+        fetchDropRules().catch(() => []),
       ]);
       setRules(rulesData);
       setChannels(channelsData);
       setPresets(presetsData);
       setHistoryItems(historyData.items);
       setHistoryTotal(historyData.total);
+      setDropRules(dropRulesData);
       if (facetsData?.apps) {
         setAvailableApps(facetsData.apps);
       }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to load alert configuration.', isError: true });
-    } finally {
-      setIsLoading(false);
     }
   }, []);
 
@@ -283,36 +328,14 @@ export const AlertsPanel: React.FC = () => {
   return (
     <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <ShieldAlert className="w-5 h-5 text-accent-500" />
-            <span>Alert Engine</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Configure real-time threshold and pattern alert rules, deploy 1-click quick rules, and review past incidents.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
-          <button
-            onClick={loadAll}
-            disabled={isLoading}
-            className="p-2 rounded-lg text-slate-400 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 transition cursor-pointer disabled:opacity-50"
-            title="Refresh rules and status"
-            aria-label="Refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
-
-          <button
-            onClick={handleOpenCreateModal}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition shadow-xs cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Alert Rule</span>
-          </button>
-        </div>
+      <div>
+        <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+          <ShieldAlert className="w-5 h-5 text-accent-500" />
+          <span>Alerts and Rules</span>
+        </h2>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Configure real-time threshold and pattern alert rules, manage ingestion drop rules, deploy 1-click quick rules, and review past incidents.
+        </p>
       </div>
 
       {/* Global Toast Feedback */}
@@ -341,55 +364,96 @@ export const AlertsPanel: React.FC = () => {
       <div className="flex items-center gap-2 border-b border-dark-700 pb-2">
         <button
           onClick={() => handleSubTabChange('rules')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
             activeSubTab === 'rules'
               ? 'bg-dark-800 text-accent-400 border border-dark-650'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
           }`}
         >
           <Bell className="w-3.5 h-3.5" />
-          <span>Active Rules ({rules.length})</span>
+          <span>Alert Rules</span>
+          <SplitCountBadge
+            active={enabledRulesCount}
+            total={rules.length}
+            title={`${enabledRulesCount} of ${rules.length} rules active`}
+          />
         </button>
 
         <button
           onClick={() => handleSubTabChange('presets')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
             activeSubTab === 'presets'
               ? 'bg-dark-800 text-accent-400 border border-dark-650'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
           }`}
         >
           <Zap className="w-3.5 h-3.5" />
-          <span>Quick Rules ({presets.length})</span>
+          <span>Alert Presets</span>
+          <SplitCountBadge
+            active={installedPresetsCount}
+            total={presets.length}
+            title={`${installedPresetsCount} of ${presets.length} presets installed`}
+          />
         </button>
 
         <button
           onClick={() => handleSubTabChange('history')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
             activeSubTab === 'history'
               ? 'bg-dark-800 text-accent-400 border border-dark-650'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
           }`}
         >
           <History className="w-3.5 h-3.5" />
-          <span>Incident History ({historyTotal})</span>
+          <span>Alert History</span>
+          <SimpleCountBadge
+            count={historyTotal}
+            title={`${historyTotal} total incidents recorded`}
+          />
+        </button>
+
+        <button
+          onClick={() => handleSubTabChange('drop-rules')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+            activeSubTab === 'drop-rules'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+          }`}
+        >
+          <FilterX className="w-3.5 h-3.5" />
+          <span>Drop Rules</span>
+          <SplitCountBadge
+            active={enabledDropRulesCount}
+            total={dropRules.length}
+            title={`${enabledDropRulesCount} of ${dropRules.length} drop rules active`}
+          />
         </button>
       </div>
 
 
-      {/* TAB 1: Active Alert Rules */}
+      {/* TAB 1: Alert Rules */}
       {activeSubTab === 'rules' && (
         <div className="space-y-4">
           <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-          <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-100">Configured Alert Rules</h2>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Bell className="w-4 h-4 text-accent-500" />
+                <span>Configured Alert Rules</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
                 Rules evaluated continuously against ingested log batches.
               </p>
             </div>
-            <div className="text-xs text-slate-400 font-mono">
-              Total active: {rules.filter((r) => r.is_enabled).length} / {rules.length}
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={handleOpenCreateModal}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition shadow-xs cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Alert Rule</span>
+              </button>
             </div>
           </div>
 
@@ -547,16 +611,16 @@ export const AlertsPanel: React.FC = () => {
       </div>
     )}
 
-      {/* TAB 2: Quick Rules Presets */}
+      {/* TAB 2: Alert Presets */}
       {activeSubTab === 'presets' && (
         <div className="space-y-4">
           <div className="bg-dark-900 border border-dark-700 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-1.5">
-                <Zap className="w-4 h-4 text-amber-400" />
-                <span>1-Click Quick Rule Presets</span>
-              </h2>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Zap className="w-4 h-4 text-accent-500" />
+                <span>1-Click Alert Rule Presets</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
                 Pre-tuned monitoring rules for instant deployment with automated threat signature detection.
               </p>
             </div>
@@ -642,13 +706,16 @@ export const AlertsPanel: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: Incident History */}
+      {/* TAB 3: Alert History */}
       {activeSubTab === 'history' && (
         <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-          <div className="px-5 py-4 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-slate-100">Alert Firing Log</h2>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <History className="w-4 h-4 text-accent-500" />
+                <span>Alert Firing Log</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
                 Audited record of recent alert triggers, log messages, and AI incident diagnoses.
               </p>
             </div>
@@ -805,6 +872,9 @@ export const AlertsPanel: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* TAB 4: Ingestion Drop Rules */}
+      {activeSubTab === 'drop-rules' && <DropRulesCard onRulesChange={setDropRules} />}
 
       {/* CREATE / EDIT RULE MODAL */}
       <AlertRuleModal

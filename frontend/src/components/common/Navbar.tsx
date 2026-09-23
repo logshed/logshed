@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Server, Settings, LogOut, Radio, Database, ArrowUpCircle, Bell } from 'lucide-react';
+import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell } from 'lucide-react';
 import { LogShedLogo } from './LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
@@ -125,15 +125,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => onTabChange('aliases')}
+              onClick={() => onTabChange('alerts')}
               className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                activeTab === 'aliases'
+                activeTab === 'alerts'
                   ? 'bg-dark-700 text-slate-100 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
               }`}
             >
-              <Server className="w-3.5 h-3.5" />
-              <span>Host Aliases</span>
+              <Bell className="w-3.5 h-3.5" />
+              <span>Alerts & Rules</span>
             </button>
 
             <button
@@ -146,18 +146,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Database className="w-3.5 h-3.5" />
               <span>Storage</span>
-            </button>
-
-            <button
-              onClick={() => onTabChange('alerts')}
-              className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                activeTab === 'alerts'
-                  ? 'bg-dark-700 text-slate-100 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
-              }`}
-            >
-              <Bell className="w-3.5 h-3.5" />
-              <span>Alerts</span>
             </button>
 
             <button
@@ -203,7 +191,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {isMobile && (
         <nav
           aria-label="Mobile navigation"
-          className="grid grid-cols-5 fixed bottom-0 inset-x-0 bg-dark-950/95 backdrop-blur-md border-t border-dark-700 z-40 px-1 py-1 select-none"
+          className="grid grid-cols-4 fixed bottom-0 inset-x-0 bg-dark-950/95 backdrop-blur-md border-t border-dark-700 z-40 px-1 py-1 select-none"
         >
           <button
             onClick={() => onTabChange('stream')}
@@ -218,15 +206,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           <button
-            onClick={() => onTabChange('aliases')}
+            onClick={() => onTabChange('alerts')}
             className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
-              activeTab === 'aliases'
+              activeTab === 'alerts'
                 ? 'text-accent-400 font-semibold bg-dark-800/80'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Server className="w-4 h-4 mb-0.5" />
-            <span>Aliases</span>
+            <Bell className="w-4 h-4 mb-0.5" />
+            <span>Alerts & Rules</span>
           </button>
 
           <button
@@ -239,18 +227,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Database className="w-4 h-4 mb-0.5" />
             <span>Storage</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('alerts')}
-            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
-              activeTab === 'alerts'
-                ? 'text-accent-400 font-semibold bg-dark-800/80'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Bell className="w-4 h-4 mb-0.5" />
-            <span>Alerts</span>
           </button>
 
           <button

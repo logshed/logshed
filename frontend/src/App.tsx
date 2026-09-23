@@ -6,12 +6,11 @@ import { Modal } from './components/common/Modal.tsx';
 import { LoginForm } from './components/auth/LoginForm.tsx';
 import { SetupModal } from './components/auth/SetupModal.tsx';
 import { LiveLogStream } from './components/logs/LiveLogStream.tsx';
-import { HostAliasManager } from './components/aliases/HostAliasManager.tsx';
 import { StoragePanel } from './components/storage/StoragePanel.tsx';
 import { AlertsPanel } from './components/alerts/AlertsPanel.tsx';
 import { SettingsPanel } from './components/settings/SettingsPanel.tsx';
 import { AiAnalysisModal } from './components/ai/AiAnalysisModal.tsx';
-import { LogEntry, AppTab } from './types.ts';
+import { LogEntry, AppTab, SettingsSubTab } from './types.ts';
 import { LogShedLogo } from './components/common/LogShedLogo.tsx';
 import { useMediaQuery } from './utils/hooks.ts';
 import { usePullToRefresh } from './utils/usePullToRefresh.ts';
@@ -19,17 +18,15 @@ import { fetchVersion } from './api/system.ts';
 
 export const pathToTab = (pathname: string): AppTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
-  if (clean === '/aliases') return 'aliases';
-  if (clean === '/storage') return 'storage';
+  if (clean === '/aliases' || clean.startsWith('/aliases/')) return 'settings';
+  if (clean === '/storage' || clean.startsWith('/storage/')) return 'storage';
   if (clean === '/alerts' || clean.startsWith('/alerts/')) return 'alerts';
-  if (clean === '/settings') return 'settings';
+  if (clean === '/settings' || clean.startsWith('/settings/')) return 'settings';
   return 'stream';
 };
 
 export const tabToPath = (tab: AppTab): string => {
   switch (tab) {
-    case 'aliases':
-      return '/aliases';
     case 'storage':
       return '/storage';
     case 'alerts':
@@ -47,6 +44,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
   const [aiSelectedLogs, setAiSelectedLogs] = useState<LogEntry[]>([]);
   const [addAliasIp, setAddAliasIp] = useState<string | null>(null);
+  const [pendingSettingsSubTab, setPendingSettingsSubTab] = useState<SettingsSubTab | null>(null);
   const [clearSelectionSignal, setClearSelectionSignal] = useState<number>(0);
   const isMobile = useMediaQuery('(max-width: 767px)');
 
@@ -128,13 +126,17 @@ export const App: React.FC = () => {
 
   const handleAddAliasFromLog = (ip: string) => {
     setAddAliasIp(ip);
-    handleTabChange('aliases');
+    setPendingSettingsSubTab('aliases');
+    handleTabChange('settings');
   };
 
   const handleTabChange = (nextTab: AppTab) => {
     if (activeTab === 'settings' && isSettingsDirty && nextTab !== 'settings') {
       setPendingTab(nextTab);
       return;
+    }
+    if (nextTab !== 'settings') {
+      setPendingSettingsSubTab(null);
     }
     setActiveTab(nextTab);
     const targetPath = tabToPath(nextTab);
@@ -194,19 +196,18 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'aliases' && (
-          <HostAliasManager
-            initialAddIp={addAliasIp}
-            onAliasSaved={() => setAddAliasIp(null)}
-          />
-        )}
-
         {activeTab === 'storage' && <StoragePanel />}
 
         {activeTab === 'alerts' && <AlertsPanel />}
 
         {activeTab === 'settings' && (
           <SettingsPanel
+            initialSubTab={pendingSettingsSubTab || undefined}
+            initialAddIp={addAliasIp}
+            onAliasSaved={() => {
+              setAddAliasIp(null);
+              setPendingSettingsSubTab(null);
+            }}
             onDirtyChange={setIsSettingsDirty}
             saveTriggerRef={saveSettingsTriggerRef}
           />
