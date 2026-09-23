@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { AlertCircle, RefreshCw, Save } from 'lucide-react';
 import { useAuth } from './context/AuthContext.tsx';
+import { AliasContext } from './context/AliasContext.tsx';
 import { Navbar } from './components/common/Navbar.tsx';
 import { Modal } from './components/common/Modal.tsx';
 import { LoginForm } from './components/auth/LoginForm.tsx';
@@ -46,6 +47,14 @@ export const App: React.FC = () => {
   const [addAliasIp, setAddAliasIp] = useState<string | null>(null);
   const [pendingSettingsSubTab, setPendingSettingsSubTab] = useState<SettingsSubTab | null>(null);
   const [clearSelectionSignal, setClearSelectionSignal] = useState<number>(0);
+  const [aliasVersion, setAliasVersion] = useState<number>(0);
+  const bumpAliasVersion = useCallback(() => {
+    setAliasVersion((prev) => prev + 1);
+  }, []);
+  const aliasContextValue = useMemo(
+    () => ({ aliasVersion, bumpAliasVersion }),
+    [aliasVersion, bumpAliasVersion]
+  );
   const isMobile = useMediaQuery('(max-width: 767px)');
 
   const {
@@ -146,7 +155,8 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-dvh max-h-dvh w-full max-w-full bg-dark-950 text-slate-200 flex flex-col overflow-hidden select-text">
+    <AliasContext.Provider value={aliasContextValue}>
+      <div className="h-dvh max-h-dvh w-full max-w-full bg-dark-950 text-slate-200 flex flex-col overflow-hidden select-text">
       {/* Mobile Pull-to-Refresh Indicator */}
       {isMobile && (isPulling || isRefreshing) && (
         <div
@@ -318,6 +328,7 @@ export const App: React.FC = () => {
           </div>
         </div>
       </Modal>
-    </div>
+      </div>
+    </AliasContext.Provider>
   );
 };

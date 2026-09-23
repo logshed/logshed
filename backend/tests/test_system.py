@@ -1280,5 +1280,46 @@ class TestHostAliases:
             assert res_bad.status_code == 422
             assert "Invalid IP address format" in res_bad.json()["detail"]
 
+    def test_batch_update_log_aliases_orders_by_id_desc(self, tmp_path: Path, monkeypatch):
+        """_batch_update_log_aliases processes the newest logs (highest id) first."""
+        from app.api.aliases import _batch_update_log_aliases
+        db_file = tmp_path / "logs.db"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (id, timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES (?, ?, ?, '192.168.1.50', '192.168.1.50', 'app', 1, 6, 'msg', 'raw')""",
+                [(i, now, now) for i in [10, 20, 30, 40]],
+            )
+            conn.commit()
+
+            sleep_called = False
+
+            def mock_sleep(_duration):
+                nonlocal sleep_called
+                if not sleep_called:
+                    sleep_called = True
+                    # After first batch of 2 rows, IDs 40 and 30 should be updated, 10 and 20 not yet
+                    c = conn.cursor()
+                    c.execute("SELECT id, source_alias FROM logs ORDER BY id ASC")
+                    rows = c.fetchall()
+                    row_map = {r[0]: r[1] for r in rows}
+                    assert row_map[40] == "target-alias"
+                    assert row_map[30] == "target-alias"
+                    assert row_map[20] == "192.168.1.50"
+                    assert row_map[10] == "192.168.1.50"
+
+            monkeypatch.setattr("time.sleep", mock_sleep)
+            _batch_update_log_aliases(conn, "192.168.1.50", "target-alias", batch_size=2)
+            assert sleep_called is True
+
+            # All 4 rows should now be updated
+            c = conn.cursor()
+            c.execute("SELECT id, source_alias FROM logs ORDER BY id ASC")
+            rows = c.fetchall()
+            for r in rows:
+                assert r[1] == "target-alias"
+
+
 
 

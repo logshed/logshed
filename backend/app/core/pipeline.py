@@ -39,10 +39,15 @@ class InternalLogHandler(logging.Handler):
         "app.services.storage_metrics",
     }
 
-    def __init__(self, level: Optional[Union[int, str]] = None):
+    def __init__(
+        self,
+        level: Optional[Union[int, str]] = None,
+        alias_cache: Optional[Any] = None,
+    ):
         super().__init__()
         self._thread_local = threading.local()
         self._is_disabled = False
+        self.alias_cache = alias_cache
         if level is not None:
             self.set_internal_level(level)
         else:
@@ -52,6 +57,10 @@ class InternalLogHandler(logging.Handler):
                 self._is_disabled = True
             else:
                 self.setLevel(configured_level)
+
+    def set_alias_cache(self, alias_cache: Optional[Any]) -> None:
+        """Dynamically attach or update the shared AliasCache."""
+        self.alias_cache = alias_cache
 
     def set_internal_level(self, level: Optional[Union[int, str]]) -> None:
         """
@@ -114,11 +123,36 @@ class InternalLogHandler(logging.Handler):
 
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
             app_subname = record.name.split(".")[-1] if "." in record.name else record.name
+
+            source_ip = "127.0.0.1"
+            source_alias = "logshed"
+            if self.alias_cache is not None:
+                resolved_ip = self.alias_cache.resolve(source_ip)
+                resolved_name = self.alias_cache.resolve("logshed")
+                if resolved_ip != source_ip:
+                    source_alias = resolved_ip
+                elif resolved_name != "logshed":
+                    source_alias = resolved_name
+            else:
+                try:
+                    from app.collectors.syslog import _active_caches
+                    for cache in list(_active_caches):
+                        resolved_ip = cache.resolve(source_ip)
+                        resolved_name = cache.resolve("logshed")
+                        if resolved_ip != source_ip:
+                            source_alias = resolved_ip
+                            break
+                        elif resolved_name != "logshed":
+                            source_alias = resolved_name
+                            break
+                except Exception:
+                    pass
+
             log_entry = {
                 "timestamp": now_iso,
                 "received_at": now_iso,
-                "source_ip": "127.0.0.1",
-                "source_alias": "logshed",
+                "source_ip": source_ip,
+                "source_alias": source_alias,
                 "app_name": app_subname,
                 "facility": 1,
                 "severity": severity,

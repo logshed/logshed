@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automated AI Redaction Notice**: Informative disclaimer banner displayed beneath active alert rules whenever any configured rule has AI enrichment enabled.
 - **Settings Sub-Tabs**: Embedded Host Aliases into Settings as a dedicated sub-tab (`/settings/aliases`), structuring Settings into Application (`/settings/app`), Host Aliases (`/settings/aliases`), and Advanced (`/settings/advanced`) sections with browser URL history tracking and backward-compatible redirects from legacy `/aliases` bookmarks.
 - **Two-Tone Sub-Tab Count Badges**: Monospace count indicators on Alerts & Rules sub-tabs rendering active versus total figures (`active / total`) with emerald tinting for running rules and muted styling for totals without visual distraction.
+- **Dynamic Host Alias Stream Refresh**: Integrated React context `AliasContext` and memoized stream canonical mapping in `LiveLogStream`, updating displayed log rows, quick filter buttons, and source filter dropdowns immediately whenever a host alias is saved or deleted without requiring a page refresh.
+- **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
 - **Navigation Restructure to 4 Core Tabs**: Restructured top-level navigation to Stream, Alerts & Rules, Storage, and Settings. Moved Ingestion Drop Rules into Alerts & Rules as a dedicated sub-tab (`/alerts/drop-rules`).
@@ -49,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Single Snapshot Lock Acquisition for Drop Rules**: Consolidated pending drop count retrieval in `list_drop_rules` to a single snapshot read (`drop_filter.get_all_pending_counts()`), eliminating per-rule lock reacquisition during endpoint queries.
 - **Consolidated Wildcard & Timestamp Utilities**: Centralized case-insensitive wildcard matching (`match_wildcard`) and resilient ISO-8601 parsing (`parse_iso_to_epoch`) into `backend/app/core/utils.py`, eliminating redundant parsing logic across the alert evaluator, drop filter, and API route handlers.
 - **Consolidated Alert Response Mapping**: Centralized database row unpacking in `alerts.py` via `_row_to_alert_rule_response()`, eliminating repeated positional tuple unpacking across rule listing, retrieval, and update endpoints.
+- **Non-Blocking Background Alias Updates**: Offloaded bulk retroactive log batch updates to FastAPI `BackgroundTasks` with tuned 1,000-row chunks and 5ms sleep intervals, keeping host alias save and delete responses instantaneous (<20ms) even across hundreds of thousands of historical logs.
+- **Processing Newest Logs First During Alias Updates**: Updated `_batch_update_log_aliases` to process rows ordered by `id DESC` so the most recent logs visible in the live stream reflect alias modifications first.
 
 ### Fixed
 - **CompiledAlertRule Last Trigger Timestamp Assignment**: Fixed an initialization bug in `CompiledAlertRule.__init__` where `last_triggered_at` was received as an argument but never assigned to the instance attribute.
@@ -59,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Beta Browser Title**: Added dynamic document title updating on mount to display prerelease versions (e.g. `LogShed [1.2.0-beta.1]`) while retaining `LogShed` for stable releases.
 - **Mobile Custom Datetime Input Overflow**: Resolved WebKit datetime-local input overflow on mobile drawers and narrow viewports by isolating input chrome into styled wrapper divs and normalizing date and time pseudo-elements.
 - **Alerts Panel Mobile Sub-Tabs Layout**: Replaced the unconstrained horizontal tab row in Alerts & Rules with a responsive 2x2 grid on mobile viewports, ensuring all 4 sub-tabs and count badges are visible without horizontal scrolling or viewport blowout.
+- **Filter Facet Ghost Aliases During Updates**: Updated covering index skip-scans in `get_log_facets` to look up `source_ip` alongside `source_alias`, resolving stale historical aliases to their active alias name and eliminating duplicate ghost entries from filter dropdowns and quick filter buttons during in-flight updates.
 
 ### Security
 - **Sliding Window Bounds & Memory Caps**: Clamped incoming log timestamps between `now_epoch - 86400` and `now_epoch + 300` to prevent future timestamp spoofing, computed sliding window cutoffs relative to current epoch time, and bounded maximum sliding window deques to `threshold_count * 2` (capped to `threshold_count` during cooldown suppression) to prevent memory expansion.

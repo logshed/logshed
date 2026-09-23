@@ -23,6 +23,7 @@ import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts'
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { LogRow, ProcessedLogEntry, areLogRowPropsEqual } from './LogRow.tsx';
 import { CreateDropRuleModal } from '../settings/CreateDropRuleModal.tsx';
+import { useAlias } from '../../context/AliasContext.tsx';
 
 export function parseFiltersFromUrl(): LogFilterParams {
   if (typeof window === 'undefined') return {};
@@ -321,6 +322,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const isLoadingMoreRef = useRef<boolean>(false);
   const [filters, setFilters] = useState<LogFilterParams>(() => parseFiltersFromUrl());
   const [activeAliasesMap, setActiveAliasesMap] = useState<Record<string, string>>({});
+  const { aliasVersion } = useAlias();
 
   useEffect(() => {
     syncFiltersToUrl(filters);
@@ -373,6 +375,148 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       });
   }, []);
 
+  // Re-fetch aliases when aliasVersion changes (and is > 0)
+  useEffect(() => {
+    if (aliasVersion <= 0) return;
+    const previousAliases = mergedAliasesRef.current || {};
+    fetchAliases()
+      .then((list) => {
+        const map: Record<string, string> = {};
+        list.forEach((a) => {
+          if (a.ip && a.alias) {
+            map[a.ip] = a.alias;
+          }
+        });
+        const newMerged = { ...map, ...knownAliases };
+        mergedAliasesRef.current = newMerged;
+        setActiveAliasesMap(map);
+
+        // Build mapping of old host identifiers to new canonical hostnames
+        const hostReplacements: Record<string, string> = {};
+        const retiredHosts = new Set<string>();
+
+        Object.entries(previousAliases).forEach(([ip, oldAlias]) => {
+          const newAlias = newMerged[ip];
+          if (!newAlias) {
+            // Alias was deleted: revert to raw IP
+            hostReplacements[oldAlias] = ip;
+            retiredHosts.add(oldAlias);
+          } else if (newAlias !== oldAlias) {
+            // Alias was renamed
+            hostReplacements[oldAlias] = newAlias;
+            retiredHosts.add(oldAlias);
+          }
+        });
+
+        Object.entries(newMerged).forEach(([ip, newAlias]) => {
+          if (newAlias && (!previousAliases[ip] || previousAliases[ip] !== newAlias)) {
+            hostReplacements[ip] = newAlias;
+            retiredHosts.add(ip);
+          }
+        });
+
+        // Update source_alias on matching in-memory logs so displayed log rows reflect alias changes
+        setLogs((prev) =>
+          prev.map((log) => {
+            if (!log.source_ip) return log;
+            if (newMerged[log.source_ip]) {
+              const newAlias = newMerged[log.source_ip];
+              if (log.source_alias !== newAlias) {
+                return { ...log, source_alias: newAlias };
+              }
+            } else if (previousAliases[log.source_ip]) {
+              // Alias was removed; revert to raw IP matching backend behavior
+              if (log.source_alias !== log.source_ip) {
+                return { ...log, source_alias: log.source_ip };
+              }
+            }
+            return log;
+          })
+        );
+
+        // Update accumulatedSources: replace retired aliases/IPs with their new canonical names
+        setAccumulatedSources((prev) => {
+          const aliasedIps = new Set(Object.keys(newMerged));
+          const next = new Set<string>();
+          prev.forEach((s) => {
+            const mapped = hostReplacements[s] || (newMerged[s] ? newMerged[s] : s);
+            if (!retiredHosts.has(mapped) && !aliasedIps.has(mapped)) {
+              next.add(mapped);
+            }
+          });
+          Object.values(newMerged).forEach((alias) => {
+            if (alias && alias.trim()) next.add(alias.trim());
+          });
+          return Array.from(next).sort();
+        });
+
+        // Remap hostToAppsMap keys
+        setHostToAppsMap((prev) => {
+          const next: Record<string, string[]> = {};
+          Object.entries(prev).forEach(([h, apps]) => {
+            const mapped = hostReplacements[h] || (newMerged[h] ? newMerged[h] : h);
+            next[mapped] = Array.from(new Set([...(next[mapped] || []), ...apps])).sort();
+          });
+          return next;
+        });
+
+        // Remap appToHostsMap values
+        setAppToHostsMap((prev) => {
+          const next: Record<string, string[]> = {};
+          Object.entries(prev).forEach(([app, hosts]) => {
+            const mappedHosts = hosts
+              .map((h) => hostReplacements[h] || (newMerged[h] ? newMerged[h] : h))
+              .filter((h) => !retiredHosts.has(h));
+            next[app] = Array.from(new Set(mappedHosts)).sort();
+          });
+          return next;
+        });
+
+        // Update active filter if it is filtering on a retired source/alias
+        setFilters((prev) => {
+          let changed = false;
+          let nextSources = prev.sources;
+          let nextSource = prev.source;
+
+          if (prev.sources && Array.isArray(prev.sources)) {
+            const mapped = prev.sources.map((s) => hostReplacements[s] || s);
+            if (mapped.some((s, idx) => s !== prev.sources![idx])) {
+              nextSources = mapped;
+              changed = true;
+            }
+          }
+
+          if (prev.source) {
+            if (Array.isArray(prev.source)) {
+              const mapped = prev.source.map((s) => hostReplacements[s] || s);
+              if (mapped.some((s, idx) => s !== (prev.source as string[])[idx])) {
+                nextSource = mapped;
+                changed = true;
+              }
+            } else if (typeof prev.source === 'string') {
+              const parts = prev.source.split(',').map((s) => s.trim());
+              const mapped = parts.map((s) => hostReplacements[s] || s);
+              const mappedStr = mapped.join(',');
+              if (mappedStr !== prev.source) {
+                nextSource = mappedStr;
+                changed = true;
+              }
+            }
+          }
+
+          if (!changed) return prev;
+          return {
+            ...prev,
+            sources: nextSources,
+            source: nextSource,
+          };
+        });
+      })
+      .catch((err) => {
+        console.error('Failed to reload host aliases in stream', err);
+      });
+  }, [aliasVersion, knownAliases]);
+
   const mergedAliases = useMemo(() => {
     return { ...activeAliasesMap, ...knownAliases };
   }, [activeAliasesMap, knownAliases]);
@@ -381,6 +525,21 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     mergedAliasesRef.current = mergedAliases;
   }, [mergedAliases]);
+
+  const processedLogs = useMemo(() => {
+    if (!mergedAliases || Object.keys(mergedAliases).length === 0) {
+      return logs;
+    }
+    return logs.map((log) => {
+      const canonical =
+        (log.source_ip && mergedAliases[log.source_ip]) ||
+        (log.source_alias && mergedAliases[log.source_alias]);
+      if (canonical && log.source_alias !== canonical) {
+        return { ...log, source_alias: canonical };
+      }
+      return log;
+    });
+  }, [logs, mergedAliases]);
 
   const isMobile = useMediaQuery('(max-width: 767px)');
   const parentRef = useRef<HTMLDivElement>(null);
@@ -751,7 +910,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // Virtualizer with responsive row estimate (74px mobile cards, 28px desktop rows)
   const rowVirtualizer = useVirtualizer({
-    count: logs.length,
+    count: processedLogs.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => (isMobile ? 74 : 28),
     overscan: isMobile ? 12 : 25,
@@ -1232,7 +1391,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               }}
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const log = logs[virtualRow.index];
+                const log = processedLogs[virtualRow.index];
                 if (!log) return null;
                 const isSelected = selectedLogIds.has(log.id);
 

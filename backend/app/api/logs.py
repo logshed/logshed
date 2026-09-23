@@ -436,10 +436,12 @@ async def get_log_facets(
                 FROM distinct_sources s
                 WHERE s.val IS NOT NULL
             )
-            SELECT val FROM distinct_sources WHERE val IS NOT NULL;
+            SELECT s.val, (SELECT source_ip FROM logs WHERE source_alias = s.val LIMIT 1)
+            FROM distinct_sources s
+            WHERE s.val IS NOT NULL;
             """
         )
-        sources = [r[0] for r in cursor.fetchall()]
+        sources = cursor.fetchall()
 
         # 2. Distinct fallback IPs for logs where source_alias is empty
         cursor.execute(
@@ -523,8 +525,10 @@ async def get_log_facets(
                     host_to_apps[alias] = set()
 
         # Add all distinct sources from logs (even if they logged without app_name)
-        for s in sources:
-            canonical = aliases_map.get(s, s)
+        for row in sources:
+            s = row[0]
+            ip = row[1]
+            canonical = (ip and aliases_map.get(ip)) or aliases_map.get(s) or s or ip
             sources_set.add(canonical)
             if canonical not in host_to_apps:
                 host_to_apps[canonical] = set()

@@ -785,6 +785,55 @@ class TestLogStreamAndFacets:
         assert "192.168.1.50" not in data["app_to_hosts"]["smartd"]
 
     @pytest.mark.asyncio
+    async def test_log_facets_resolves_stale_source_alias_during_background_update(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """
+        When an alias is modified while logs still contain an older source_alias in SQLite,
+        facets must resolve the host to the active alias and omit the stale alias.
+        """
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        recent_ts = (now_utc - datetime.timedelta(hours=1)).isoformat()
+
+        test_entries = [
+            {
+                "timestamp": recent_ts,
+                "received_at": recent_ts,
+                "source_ip": "192.168.1.50",
+                "source_alias": "nas-legacy-name",
+                "app_name": "samba",
+                "facility": 1,
+                "severity": 6,
+                "message": "SMB connection established",
+                "raw": "SMB connection established",
+            },
+        ]
+        _seed_logs(db_file, test_entries)
+
+        with sqlite3.connect(str(db_file)) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
+                ("192.168.1.50", "nas-renamed", recent_ts),
+            )
+            conn.commit()
+
+        response = await client.get("/api/logs/facets")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "nas-renamed" in data["sources"]
+        assert "nas-legacy-name" not in data["sources"]
+        assert "192.168.1.50" not in data["sources"]
+        assert "samba" in data["host_to_apps"].get("nas-renamed", [])
+        assert "nas-legacy-name" not in data["host_to_apps"]
+        assert "nas-renamed" in data["app_to_hosts"].get("samba", [])
+        assert "nas-legacy-name" not in data["app_to_hosts"].get("samba", [])
+
+
+    @pytest.mark.asyncio
     async def test_log_facets_preserves_infrequent_unaliased_hosts_beyond_seven_days(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):

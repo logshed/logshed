@@ -1,9 +1,11 @@
+import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LiveLogStream, formatLocalTimestamp, matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
 import * as logsApi from '../api/logs.ts';
 import * as aliasesApi from '../api/aliases.ts';
 import { LogEntry } from '../types.ts';
+import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize?: () => number }) => {
@@ -166,10 +168,45 @@ describe('formatLocalTimestamp Helper (Item #5)', () => {
 });
 
 describe('LiveLogStream Component', () => {
+  const renderWithContext = (
+    ui: React.ReactElement,
+    contextValue: Partial<AliasContextValue> = {}
+  ) => {
+    const value: AliasContextValue = {
+      aliasVersion: 0,
+      bumpAliasVersion: vi.fn(),
+      ...contextValue,
+    };
+    const result = render(
+      <AliasContext.Provider value={value}>
+        {ui}
+      </AliasContext.Provider>
+    );
+    return {
+      ...result,
+      rerender: (newUi: React.ReactElement, newContextValue: Partial<AliasContextValue> = {}) =>
+        result.rerender(
+          <AliasContext.Provider value={{ ...value, ...newContextValue }}>
+            {newUi}
+          </AliasContext.Provider>
+        ),
+    };
+  };
+
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
     MockEventSource.instances = [];
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as any;
     vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({
       logs: [...sampleLogs],
       total: sampleLogs.length,
@@ -194,7 +231,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('displays Screen Buffer label and clear screen buffer tooltip (Item #14)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText(/Screen Buffer:/)).toBeInTheDocument();
@@ -205,7 +242,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('does not render the redundant Maximize2 row action button (Item #17)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -218,7 +255,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('formats timestamps and renders UTC + received_at tooltip (Item #5)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -233,7 +270,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('maintains top-to-bottom stream direction and prepends SSE logs to the top (Item #4)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -273,7 +310,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('handles checkbox clicking without bubbling to row detail modal (Item #15)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -302,7 +339,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('performs Shift-Click range selection across multiple hosts without error', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -333,7 +370,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('supports individual multi-host selection and shows multi-host status in action bar', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -356,7 +393,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('selects all logs currently in browser buffer with Select All action (capped at 200) and clears with Deselect All', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -388,7 +425,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('toggles Select All and Deselect All via table header column checkbox', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -418,7 +455,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('displays auto-scroll pause banner and jumps to top on click (Item #4)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -466,7 +503,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('anchors scroll position when incoming logs arrive while auto-scroll is paused so visible logs do not move down', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -518,7 +555,7 @@ describe('LiveLogStream Component', () => {
 
   it('maintains quick filter buttons even after a filter is applied (Item #32)', async () => {
     // Initially returns sampleLogs with homelab-host and opnsense-router
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -551,7 +588,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('scopes app/container dropdown options to only apps belonging to the chosen host', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -595,7 +632,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('scopes host dropdown options when an app is selected first (bidirectional scoping)', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -628,7 +665,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('captures click away on backdrop so clicking outside closes dropdown without opening log drawer', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -656,7 +693,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('preserves full database hosts and apps in dropdowns even after clearing the screen buffer', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -686,7 +723,7 @@ describe('LiveLogStream Component', () => {
 
   it('deduplicates aliased hosts and never shows the raw IP when an alias is set', async () => {
     // Provide knownAliases with 172.22.2.4 -> NPM and 192.168.1.50 -> homelab-host
-    render(
+    renderWithContext(
       <LiveLogStream
         onDiagnoseAi={vi.fn()}
         knownAliases={{
@@ -751,7 +788,7 @@ describe('LiveLogStream Component', () => {
       return { logs: batch2, total: 750, limit: 500, offset: 500 };
     });
 
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     // Wait for initial batch of 500 logs to load
     await waitFor(() => {
@@ -774,7 +811,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('pauses live SSE stream and displays indicator when a historical time ceiling (To) is set', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -809,7 +846,7 @@ describe('LiveLogStream Component', () => {
       offset: 0,
     });
 
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -873,7 +910,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('batches rapid SSE event bursts into state updates and accumulates facets incrementally', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -915,7 +952,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('resets stream back to live view when Reset button is clicked and restores all logs', async () => {
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -967,7 +1004,7 @@ describe('LiveLogStream Component', () => {
     let slowResolve: ((val: any) => void) | null = null;
     let fastResolve: ((val: any) => void) | null = null;
 
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -1026,7 +1063,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('resets selectedLogIds when clearSelectionSignal is incremented', async () => {
-    const { rerender } = render(<LiveLogStream onDiagnoseAi={vi.fn()} clearSelectionSignal={0} />);
+    const { rerender } = renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} clearSelectionSignal={0} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -1061,13 +1098,152 @@ describe('LiveLogStream Component', () => {
       dispatchEvent: vi.fn(),
     }));
 
-    render(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
     });
 
     expect(screen.getAllByText('(homelab-host)').length).toBeGreaterThan(0);
+  });
+
+  it('re-fetches aliases and updates displayed log rows when aliasVersion changes', async () => {
+    let currentAliases = [
+      { ip: '192.168.1.50', alias: 'homelab-host', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ];
+    vi.spyOn(aliasesApi, 'fetchAliases').mockImplementation(async () => currentAliases);
+
+    const { rerender } = renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />, { aliasVersion: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+
+    const initialRows = document.querySelectorAll('.log-row');
+    expect(within(initialRows[0] as HTMLElement).getByText('homelab-host')).toBeInTheDocument();
+
+    // Alias updated to nas-primary
+    currentAliases = [
+      { ip: '192.168.1.50', alias: 'nas-primary', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ];
+
+    // Increment aliasVersion
+    rerender(<LiveLogStream onDiagnoseAi={vi.fn()} />, { aliasVersion: 1 });
+
+    await waitFor(() => {
+      const updatedRows = document.querySelectorAll('.log-row');
+      expect(within(updatedRows[0] as HTMLElement).getByText('nas-primary')).toBeInTheDocument();
+      expect(within(updatedRows[0] as HTMLElement).queryByText('homelab-host')).toBeNull();
+    });
+  });
+
+  it('reverts displayed log rows to raw IP when an alias is deleted and aliasVersion changes', async () => {
+    let currentAliases = [
+      { ip: '192.168.1.50', alias: 'homelab-host', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ];
+    vi.spyOn(aliasesApi, 'fetchAliases').mockImplementation(async () => currentAliases);
+
+    const { rerender } = renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />, { aliasVersion: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+
+    const initialRows = document.querySelectorAll('.log-row');
+    expect(within(initialRows[0] as HTMLElement).getByText('homelab-host')).toBeInTheDocument();
+
+    // Alias deleted: empty list returned
+    currentAliases = [];
+
+    // Increment aliasVersion
+    rerender(<LiveLogStream onDiagnoseAi={vi.fn()} />, { aliasVersion: 1 });
+
+    await waitFor(() => {
+      const updatedRows = document.querySelectorAll('.log-row');
+      expect(within(updatedRows[0] as HTMLElement).getByText('192.168.1.50')).toBeInTheDocument();
+      expect(within(updatedRows[0] as HTMLElement).queryByText('homelab-host')).toBeNull();
+    });
+  });
+
+  it('updates quick filters and host dropdown options without ghost alias when aliasVersion changes', async () => {
+    let currentAliases = [
+      { ip: '192.168.1.50', alias: 'homelab-host', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ];
+    vi.spyOn(aliasesApi, 'fetchAliases').mockImplementation(async () => currentAliases);
+
+    const { rerender } = renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />, { aliasVersion: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+
+    // Check quick filter button initially shows homelab-host
+    expect(screen.getByRole('button', { name: /^homelab-host$/i })).toBeInTheDocument();
+
+    // Alias updated to nas-primary
+    currentAliases = [
+      { ip: '192.168.1.50', alias: 'nas-primary', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ];
+
+    // Increment aliasVersion
+    act(() => {
+      rerender(<LiveLogStream onDiagnoseAi={vi.fn()} />, { aliasVersion: 1 });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^nas-primary$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^homelab-host$/i })).toBeNull();
+    });
+
+    // Open Host dropdown to verify dropdown options
+    const hostTrigger = screen.getByText('Host / IP:').closest('[role="button"]') as HTMLElement;
+    const hostDropdown = hostTrigger.parentElement as HTMLElement;
+    act(() => {
+      fireEvent.click(hostTrigger);
+    });
+
+    expect(within(hostDropdown).getByText('nas-primary')).toBeInTheDocument();
+    expect(within(hostDropdown).queryByText('homelab-host')).toBeNull();
+    expect(within(hostDropdown).queryByText('192.168.1.50')).toBeNull();
+  });
+
+  it('resolves internal logshed logs to active alias in displayed log rows', async () => {
+    const internalLog: LogEntry = {
+      id: 555,
+      timestamp: '2026-09-03T12:00:00.000Z',
+      received_at: '2026-09-03T12:00:00.010Z',
+      source_ip: '127.0.0.1',
+      source_alias: 'logshed',
+      app_name: 'syslog',
+      facility: 1,
+      severity: 6,
+      message: 'LogShed internal status check',
+      raw: 'LogShed internal status check',
+    };
+
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([
+      { ip: '127.0.0.1', alias: 'Local', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ]);
+
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValueOnce({
+      logs: [internalLog],
+      total: 1,
+      limit: 500,
+      offset: 0,
+    });
+
+    renderWithContext(
+      <LiveLogStream onDiagnoseAi={vi.fn()} knownAliases={{ '127.0.0.1': 'Local' }} />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('LogShed internal status check')).toBeInTheDocument();
+    });
+
+    // The displayed log row must reflect 'Local', NOT the unaliased 'logshed'
+    const row = document.querySelector('.log-row') as HTMLElement;
+    expect(within(row).getByText('Local')).toBeInTheDocument();
+    expect(within(row).queryByText('logshed')).toBeNull();
   });
 });
 

@@ -1,7 +1,9 @@
+import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HostAliasManager } from '../components/aliases/HostAliasManager.tsx';
 import * as aliasesApi from '../api/aliases.ts';
+import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 
 describe('HostAliasManager Component', () => {
   const mockAliases = [
@@ -19,13 +21,32 @@ describe('HostAliasManager Component', () => {
     },
   ];
 
+  const renderWithContext = (
+    ui: React.ReactElement,
+    contextValue: Partial<AliasContextValue> = {}
+  ) => {
+    const value: AliasContextValue = {
+      aliasVersion: 0,
+      bumpAliasVersion: vi.fn(),
+      ...contextValue,
+    };
+    return {
+      ...render(
+        <AliasContext.Provider value={value}>
+          {ui}
+        </AliasContext.Provider>
+      ),
+      value,
+    };
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue(mockAliases);
   });
 
   it('renders active host aliases in the table', async () => {
-    render(<HostAliasManager />);
+    renderWithContext(<HostAliasManager />);
 
     await waitFor(() => {
       expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();
@@ -38,14 +59,50 @@ describe('HostAliasManager Component', () => {
     expect(screen.getByText('proxmox-01')).toBeInTheDocument();
   });
 
+  it('calls bumpAliasVersion when a host alias is saved', async () => {
+    const bumpAliasVersion = vi.fn();
+    const saveSpy = vi.spyOn(aliasesApi, 'saveAlias').mockResolvedValue({
+      ip: '10.0.0.1',
+      alias: 'gateway',
+      notes: null,
+      created_at: '2026-09-23T12:00:00Z',
+    });
+
+    renderWithContext(<HostAliasManager />, { bumpAliasVersion });
+
+    await waitFor(() => {
+      expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. 192.168.1.50'), {
+      target: { value: '10.0.0.1' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Proxmox-Node-01'), {
+      target: { value: 'gateway' },
+    });
+
+    const submitBtn = screen.getByRole('button', { name: /Add Mapping/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(saveSpy).toHaveBeenCalledWith({
+        ip: '10.0.0.1',
+        alias: 'gateway',
+        notes: null,
+      });
+      expect(bumpAliasVersion).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('opens confirmation modal and disables confirm button while deletion is pending', async () => {
     let resolveDelete: (val: any) => void;
     const deletePromise = new Promise((resolve) => {
       resolveDelete = resolve;
     });
     const deleteSpy = vi.spyOn(aliasesApi, 'deleteAlias').mockImplementation(() => deletePromise as any);
+    const bumpAliasVersion = vi.fn();
 
-    render(<HostAliasManager />);
+    renderWithContext(<HostAliasManager />, { bumpAliasVersion });
 
     await waitFor(() => {
       expect(screen.getByText('192.168.1.1')).toBeInTheDocument();
@@ -67,6 +124,7 @@ describe('HostAliasManager Component', () => {
     fireEvent.click(cancelBtn);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(deleteSpy).not.toHaveBeenCalled();
+    expect(bumpAliasVersion).not.toHaveBeenCalled();
 
     // Reopen modal and confirm deletion
     fireEvent.click(firstDeleteBtn);
@@ -93,6 +151,7 @@ describe('HostAliasManager Component', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(bumpAliasVersion).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -108,7 +167,7 @@ describe('HostAliasManager Component', () => {
       dispatchEvent: vi.fn(),
     }));
 
-    render(<HostAliasManager />);
+    renderWithContext(<HostAliasManager />);
 
     await waitFor(() => {
       expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();

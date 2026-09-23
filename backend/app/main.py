@@ -62,7 +62,10 @@ def get_internal_log_handler() -> Optional[InternalLogHandler]:
     return _internal_log_handler
 
 
-def configure_internal_log_handler(level: Optional[Union[int, str]]) -> Optional[InternalLogHandler]:
+def configure_internal_log_handler(
+    level: Optional[Union[int, str]],
+    alias_cache: Optional[Any] = None,
+) -> Optional[InternalLogHandler]:
     """
     Dynamically configure or disable the active internal log handler on logger 'app'.
     Accepts integer logging levels, string level names ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
@@ -85,11 +88,13 @@ def configure_internal_log_handler(level: Optional[Union[int, str]]) -> Optional
         return None
 
     if _internal_log_handler is None:
-        _internal_log_handler = InternalLogHandler(level=parsed)
+        _internal_log_handler = InternalLogHandler(level=parsed, alias_cache=alias_cache)
         if _internal_log_handler not in app_logger.handlers:
             app_logger.addHandler(_internal_log_handler)
     else:
         _internal_log_handler.set_internal_level(parsed)
+        if alias_cache is not None:
+            _internal_log_handler.set_alias_cache(alias_cache)
         if _internal_log_handler not in app_logger.handlers:
             app_logger.addHandler(_internal_log_handler)
 
@@ -276,8 +281,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    shared_cache = _syslog_server.alias_cache if _syslog_server else None
+    if shared_cache is None and _docker_tailer and hasattr(_docker_tailer, "alias_cache"):
+        shared_cache = _docker_tailer.alias_cache
+    if shared_cache is None:
+        from app.collectors.syslog import AliasCache
+        shared_cache = AliasCache(db_path)
+
     active_level = persisted_level if persisted_level is not None else get_internal_log_level()
-    _internal_log_handler = configure_internal_log_handler(active_level)
+    _internal_log_handler = configure_internal_log_handler(active_level, alias_cache=shared_cache)
     if _internal_log_handler is not None and not _internal_log_handler.is_disabled:
         logger.info(f"InternalLogHandler attached at level {logging.getLevelName(_internal_log_handler.level)}.")
     else:

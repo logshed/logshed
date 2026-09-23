@@ -4,6 +4,7 @@ import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { Modal } from '../common/Modal.tsx';
+import { useAlias } from '../../context/AliasContext.tsx';
 
 interface HostAliasManagerProps {
   initialAddIp?: string | null;
@@ -14,6 +15,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   initialAddIp,
   onAliasSaved,
 }) => {
+  const { bumpAliasVersion } = useAlias();
   const [aliases, setAliases] = useState<HostAlias[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       setNotes('');
       setEditingIp(null);
       await loadAliases();
+      bumpAliasVersion();
       if (onAliasSaved) onAliasSaved();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save host alias mapping.');
@@ -102,6 +105,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       await deleteAlias(targetIp);
       setDeleteTargetIp(null);
       await loadAliases();
+      bumpAliasVersion();
       if (onAliasSaved) onAliasSaved();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete host alias.');
