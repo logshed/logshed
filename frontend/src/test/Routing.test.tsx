@@ -194,4 +194,34 @@ describe('URL Routing and History API Synchronization', () => {
       });
     });
   });
+
+  describe('Dynamic browser title for beta / prerelease builds', () => {
+    it('sets document.title with version bracketed for prerelease versions', async () => {
+      vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+        current_version: '1.2.0-beta.1',
+        latest_version: '1.2.0-beta.1',
+        update_available: false,
+      });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(document.title).toBe('LogShed [1.2.0-beta.1]');
+      });
+    });
+
+    it('retains clean LogShed title for stable versions without hyphen', async () => {
+      vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+        current_version: '1.2.0',
+        latest_version: '1.2.0',
+        update_available: false,
+      });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(document.title).toBe('LogShed');
+      });
+    });
+  });
 });

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Server, Plus, Trash2, Edit2, Check, AlertCircle } from 'lucide-react';
+import { Server, Plus, Trash2, Edit2, Check, AlertCircle, AlertTriangle } from 'lucide-react';
 import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
+import { Modal } from '../common/Modal.tsx';
 
 interface HostAliasManagerProps {
   initialAddIp?: string | null;
@@ -23,6 +24,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [editingIp, setEditingIp] = useState<string | null>(null);
   const [isDeletingIp, setIsDeletingIp] = useState<string | null>(null);
+  const [deleteTargetIp, setDeleteTargetIp] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialAddIp) {
@@ -92,17 +94,18 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     setNotes('');
   };
 
-  const handleDelete = async (targetIp: string) => {
-    if (!window.confirm(`Are you sure you want to remove the alias for IP "${targetIp}"?`)) {
-      return;
-    }
+  const handleConfirmDelete = async () => {
+    if (!deleteTargetIp) return;
+    const targetIp = deleteTargetIp;
     try {
       setIsDeletingIp(targetIp);
       await deleteAlias(targetIp);
+      setDeleteTargetIp(null);
       await loadAliases();
       if (onAliasSaved) onAliasSaved();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete host alias.');
+      setDeleteTargetIp(null);
     } finally {
       setIsDeletingIp(null);
     }
@@ -234,7 +237,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     <button
                       type="button"
                       disabled={isDeletingIp === item.ip}
-                      onClick={() => handleDelete(item.ip)}
+                      onClick={() => setDeleteTargetIp(item.ip)}
                       title="Delete Alias"
                       className="p-2 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
@@ -282,7 +285,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                   <button
                     type="button"
                     disabled={isDeletingIp === item.ip}
-                    onClick={() => handleDelete(item.ip)}
+                    onClick={() => setDeleteTargetIp(item.ip)}
                     title="Delete Alias"
                     className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
@@ -294,6 +297,60 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Delete Host Alias Confirmation Modal */}
+      {deleteTargetIp && (
+        <Modal
+          isOpen={!!deleteTargetIp}
+          onClose={() => setDeleteTargetIp(null)}
+          title="Delete Host Alias"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4 text-xs font-sans">
+            <div className="flex items-start gap-3 p-3 bg-red-950/30 border border-red-800/60 rounded-lg text-slate-200">
+              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div className="space-y-2 flex-1">
+                <p className="font-semibold text-slate-100 text-xs">
+                  Remove host alias mapping?
+                </p>
+                <p className="text-slate-400 leading-relaxed">
+                  Incoming logs from this IP address will no longer be assigned a friendly alias.
+                </p>
+                <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+                  <div>
+                    <span className="text-slate-500">IP:</span> {deleteTargetIp}
+                  </div>
+                  {aliases.find((a) => a.ip === deleteTargetIp)?.alias && (
+                    <div>
+                      <span className="text-slate-500">Alias:</span>{' '}
+                      {aliases.find((a) => a.ip === deleteTargetIp)?.alias}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTargetIp(null)}
+                className="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-600 rounded-lg transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingIp === deleteTargetIp}
+                onClick={handleConfirmDelete}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingIp === deleteTargetIp ? 'Deleting...' : 'Delete Alias'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

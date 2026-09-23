@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { MarkdownRenderer } from '../components/common/MarkdownRenderer.tsx';
+import { MarkdownRenderer, dedentLines } from '../components/common/MarkdownRenderer.tsx';
 
 describe('MarkdownRenderer Component', () => {
   it('renders bold and inline code correctly without showing raw asterisks or backticks', () => {
@@ -156,6 +156,32 @@ The kernel log indicates a lockup.
     // Code blocks
     expect(screen.getByText('journalctl -b -1 -p emerg..err')).toBeInTheDocument();
     expect(screen.getByText('ipmitool sel list')).toBeInTheDocument();
+  });
+
+  it('dedents indented fenced code blocks while preserving relative inner indentation', () => {
+    const rawLines = [
+      '    if [ -f /etc/config ]; then',
+      '      cat /etc/config',
+      '    fi',
+    ];
+    const dedented = dedentLines(rawLines);
+    expect(dedented).toEqual([
+      'if [ -f /etc/config ]; then',
+      '  cat /etc/config',
+      'fi',
+    ]);
+
+    const markdown = `## Instructions
+    \`\`\`bash
+    echo "starting"
+      echo "indented step"
+    echo "finished"
+    \`\`\``;
+
+    const { container } = render(<MarkdownRenderer content={markdown} />);
+    const codeEl = container.querySelector('pre code');
+    expect(codeEl).not.toBeNull();
+    expect(codeEl?.textContent).toBe('echo "starting"\n  echo "indented step"\necho "finished"');
   });
 });
 

@@ -49,3 +49,27 @@ body {
 .log-row:hover {
   background-color: rgba(30, 41, 59, 0.4);
 }
+
+/* Ensure date and time inputs adhere to container bounds across all browsers */
+input[type="datetime-local"],
+input[type="date"],
+input[type="time"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+input[type="datetime-local"]::-webkit-date-and-time-value,
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+input[type="datetime-local"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit,
+input[type="time"]::-webkit-datetime-edit {
+  padding: 0;
+}
+
+

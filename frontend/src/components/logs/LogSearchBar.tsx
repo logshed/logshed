@@ -318,9 +318,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
 
         {/* Custom Datetime Pickers */}
         {showCustomTime && (
-          <div className="flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border border-dark-700">
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 text-[11px]">From:</span>
+          <div className="flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border border-dark-700 w-full max-w-full md:w-auto">
+            <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
+              <span className="text-slate-400 text-[11px] shrink-0">From:</span>
               <input
                 type="datetime-local"
                 value={toLocalDatetimeInputString(filters.from)}
@@ -330,11 +330,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
                     from: fromLocalDatetimeInputString(e.target.value),
                   })
                 }
-                className="bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 text-[11px]">To:</span>
+            <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
+              <span className="text-slate-400 text-[11px] shrink-0">To:</span>
               <input
                 type="datetime-local"
                 value={toLocalDatetimeInputString(filters.to)}
@@ -344,7 +344,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
                     to: fromLocalDatetimeInputString(e.target.value),
                   })
                 }
-                className="bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
           </div>
@@ -473,34 +473,38 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
 
           {/* Custom Time */}
           {showCustomTime && (
-            <div className="space-y-2 p-2.5 bg-dark-950 rounded border border-dark-700">
+            <div className="w-full space-y-2 p-2.5 bg-dark-950 rounded border border-dark-700">
               <div>
                 <label className="block text-slate-400 text-[11px] mb-1">From:</label>
-                <input
-                  type="datetime-local"
-                  value={toLocalDatetimeInputString(filters.from)}
-                  onChange={(e) =>
-                    onFilterChange({
-                      ...filters,
-                      from: fromLocalDatetimeInputString(e.target.value),
-                    })
-                  }
-                  className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 font-mono"
-                />
+                <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
+                  <input
+                    type="datetime-local"
+                    value={toLocalDatetimeInputString(filters.from)}
+                    onChange={(e) =>
+                      onFilterChange({
+                        ...filters,
+                        from: fromLocalDatetimeInputString(e.target.value),
+                      })
+                    }
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-slate-400 text-[11px] mb-1">To:</label>
-                <input
-                  type="datetime-local"
-                  value={toLocalDatetimeInputString(filters.to)}
-                  onChange={(e) =>
-                    onFilterChange({
-                      ...filters,
-                      to: fromLocalDatetimeInputString(e.target.value),
-                    })
-                  }
-                  className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 font-mono"
-                />
+                <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
+                  <input
+                    type="datetime-local"
+                    value={toLocalDatetimeInputString(filters.to)}
+                    onChange={(e) =>
+                      onFilterChange({
+                        ...filters,
+                        to: fromLocalDatetimeInputString(e.target.value),
+                      })
+                    }
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                  />
+                </div>
               </div>
             </div>
           )}

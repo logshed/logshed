@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **CompiledAlertRule Last Trigger Timestamp Assignment**: Fixed an initialization bug in `CompiledAlertRule.__init__` where `last_triggered_at` was received as an argument but never assigned to the instance attribute.
 - **Numeric Input Backspacing in Alert Rules**: Resolved an issue where clearing numeric input fields in the alert rule modal forced a leading zero, ensuring fields can be completely cleared and typed into smoothly.
+- **AI Code Block Copy Whitespace**: Dedented common leading whitespace from fenced markdown code blocks when copying to clipboard, preventing unwanted indentation in copied snippets.
+- **Host Alias Deletion Confirmation**: Replaced native browser `window.confirm` dialog with an in-app confirmation modal matching the design of other destructive actions.
+- **CI Container Architecture Manifest**: Added `provenance: false` to the Docker build-and-push GitHub Action workflow to prevent unknown/unknown multi-arch manifest entries on GHCR.
+- **Dynamic Beta Browser Title**: Added dynamic document title updating on mount to display prerelease versions (e.g. `LogShed [1.2.0-beta.1]`) while retaining `LogShed` for stable releases.
+- **Mobile Custom Datetime Input Overflow**: Resolved WebKit datetime-local input overflow on mobile drawers and narrow viewports by isolating input chrome into styled wrapper divs and normalizing date and time pseudo-elements.
 
 ### Security
 - **Sliding Window Bounds & Memory Caps**: Clamped incoming log timestamps between `now_epoch - 86400` and `now_epoch + 300` to prevent future timestamp spoofing, computed sliding window cutoffs relative to current epoch time, and bounded maximum sliding window deques to `threshold_count * 2` (capped to `threshold_count` during cooldown suppression) to prevent memory expansion.

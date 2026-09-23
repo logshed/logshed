@@ -15,6 +15,7 @@ import { LogEntry, AppTab } from './types.ts';
 import { LogShedLogo } from './components/common/LogShedLogo.tsx';
 import { useMediaQuery } from './utils/hooks.ts';
 import { usePullToRefresh } from './utils/usePullToRefresh.ts';
+import { fetchVersion } from './api/system.ts';
 
 export const pathToTab = (pathname: string): AppTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
@@ -84,6 +85,25 @@ export const App: React.FC = () => {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [activeTab, isSettingsDirty]);
+
+  // Dynamic browser title for beta / prerelease builds (e.g. LogShed [1.2.0-beta.1])
+  const titleSetRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!isAuthenticated || titleSetRef.current) return;
+    titleSetRef.current = true;
+
+    fetchVersion()
+      .then((data) => {
+        if (data.current_version && data.current_version.includes('-')) {
+          document.title = `LogShed [${data.current_version}]`;
+        } else {
+          document.title = 'LogShed';
+        }
+      })
+      .catch(() => {
+        // Fall back to default title on error
+      });
+  }, [isAuthenticated]);
 
   if (isLoading) {
     return (

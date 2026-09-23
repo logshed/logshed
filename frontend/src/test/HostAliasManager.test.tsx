@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HostAliasManager } from '../components/aliases/HostAliasManager.tsx';
 import * as aliasesApi from '../api/aliases.ts';
@@ -38,9 +38,7 @@ describe('HostAliasManager Component', () => {
     expect(screen.getByText('proxmox-01')).toBeInTheDocument();
   });
 
-  it('disables delete button while deletion is pending to prevent double-click race conditions', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
+  it('opens confirmation modal and disables confirm button while deletion is pending', async () => {
     let resolveDelete: (val: any) => void;
     const deletePromise = new Promise((resolve) => {
       resolveDelete = resolve;
@@ -56,25 +54,45 @@ describe('HostAliasManager Component', () => {
     const deleteButtons = screen.getAllByTitle('Delete Alias');
     const firstDeleteBtn = deleteButtons[0];
 
-    expect(firstDeleteBtn).not.toBeDisabled();
-
-    // Click delete
+    // Click trash button to trigger confirmation modal
     fireEvent.click(firstDeleteBtn);
 
-    // Button should now be disabled and marked with disabled styling
-    expect(firstDeleteBtn).toBeDisabled();
-    expect(firstDeleteBtn.className).toContain('disabled:opacity-50');
-    expect(firstDeleteBtn.className).toContain('disabled:cursor-not-allowed');
+    // Modal dialog should now be open
+    let dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Delete Host Alias')).toBeInTheDocument();
+    expect(within(dialog).getByText('Remove host alias mapping?')).toBeInTheDocument();
+
+    // Verify Cancel button closes modal without deleting
+    const cancelBtn = within(dialog).getByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelBtn);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deleteSpy).not.toHaveBeenCalled();
+
+    // Reopen modal and confirm deletion
+    fireEvent.click(firstDeleteBtn);
+    dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Delete Host Alias')).toBeInTheDocument();
+
+    const confirmDeleteBtn = within(dialog).getByRole('button', { name: /Delete Alias/i });
+    expect(confirmDeleteBtn).not.toBeDisabled();
+
+    // Click confirm delete in modal
+    fireEvent.click(confirmDeleteBtn);
+
+    // Button should now be disabled and show deleting state
+    expect(confirmDeleteBtn).toBeDisabled();
+    expect(within(dialog).getByText('Deleting...')).toBeInTheDocument();
 
     // Attempting second click should not trigger another deleteAlias call
-    fireEvent.click(firstDeleteBtn);
+    fireEvent.click(confirmDeleteBtn);
     expect(deleteSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledWith('192.168.1.1');
 
     // Resolve deletion
     resolveDelete!({ status: 'deleted', ip: '192.168.1.1' });
 
     await waitFor(() => {
-      expect(firstDeleteBtn).not.toBeDisabled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 
