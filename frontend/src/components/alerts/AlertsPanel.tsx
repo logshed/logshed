@@ -76,7 +76,7 @@ export const alertSubTabToPath = (subTab: AlertViewTab): string => {
 const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
   <span
     title={title}
-    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none"
+    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none shrink-0"
   >
     <span className={active > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>
       {active}
@@ -89,7 +89,7 @@ const SplitCountBadge: React.FC<{ active: number; total: number; title?: string 
 const SimpleCountBadge: React.FC<{ count: number; title?: string }> = ({ count, title }) => (
   <span
     title={title}
-    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none text-slate-400 select-none"
+    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none text-slate-400 select-none shrink-0"
   >
     {count}
   </span>
@@ -326,7 +326,7 @@ export const AlertsPanel: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8">
+    <div className="w-full max-w-5xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8 min-w-0">
       {/* Header */}
       <div>
         <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -361,17 +361,20 @@ export const AlertsPanel: React.FC = () => {
       )}
 
       {/* Section Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-dark-700 pb-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2 border-b border-dark-700 pb-3 sm:pb-2">
         <button
+          type="button"
           onClick={() => handleSubTabChange('rules')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
             activeSubTab === 'rules'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
+              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
           }`}
         >
-          <Bell className="w-3.5 h-3.5" />
-          <span>Alert Rules</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Bell className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Alert Rules</span>
+          </div>
           <SplitCountBadge
             active={enabledRulesCount}
             total={rules.length}
@@ -380,15 +383,18 @@ export const AlertsPanel: React.FC = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => handleSubTabChange('presets')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
             activeSubTab === 'presets'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
+              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
           }`}
         >
-          <Zap className="w-3.5 h-3.5" />
-          <span>Alert Presets</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Zap className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Alert Presets</span>
+          </div>
           <SplitCountBadge
             active={installedPresetsCount}
             total={presets.length}
@@ -397,15 +403,18 @@ export const AlertsPanel: React.FC = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => handleSubTabChange('history')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
             activeSubTab === 'history'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
+              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
           }`}
         >
-          <History className="w-3.5 h-3.5" />
-          <span>Alert History</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <History className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Alert History</span>
+          </div>
           <SimpleCountBadge
             count={historyTotal}
             title={`${historyTotal} total incidents recorded`}
@@ -413,15 +422,18 @@ export const AlertsPanel: React.FC = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => handleSubTabChange('drop-rules')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
             activeSubTab === 'drop-rules'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
+              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
           }`}
         >
-          <FilterX className="w-3.5 h-3.5" />
-          <span>Drop Rules</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <FilterX className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Drop Rules</span>
+          </div>
           <SplitCountBadge
             active={enabledDropRulesCount}
             total={dropRules.length}

@@ -203,6 +203,7 @@ export interface DropRule {
   message_pattern: string;
   is_regex: boolean;
   is_enabled: boolean;
+  severity_threshold?: number | null;
   dropped_count: number;
   created_at: string;
 }
@@ -213,6 +214,7 @@ export interface DropRuleCreate {
   message_pattern: string;
   is_regex?: boolean;
   is_enabled?: boolean;
+  severity_threshold?: number | null;
 }
 
 export interface DropRuleUpdate {
@@ -221,6 +223,7 @@ export interface DropRuleUpdate {
   message_pattern?: string;
   is_regex?: boolean;
   is_enabled?: boolean;
+  severity_threshold?: number | null;
   reset_counter?: boolean;
 }
 
@@ -229,9 +232,11 @@ export interface DropRuleTestRequest {
   app_pattern?: string | null;
   message_pattern: string;
   is_regex?: boolean;
+  severity_threshold?: number | null;
   sample_message: string;
   sample_source?: string | null;
   sample_app?: string | null;
+  sample_severity?: number | null;
 }
 
 export interface DropRuleTestResponse {

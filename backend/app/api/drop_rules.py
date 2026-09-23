@@ -34,7 +34,7 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
     def _query(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at "
+            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at "
             "FROM drop_rules ORDER BY id ASC"
         )
         rows = cur.fetchall()
@@ -50,6 +50,7 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
                     message_pattern=r["message_pattern"],
                     is_regex=bool(r["is_regex"]),
                     is_enabled=bool(r["is_enabled"]),
+                    severity_threshold=r["severity_threshold"],
                     dropped_count=live_count,
                     created_at=str(r["created_at"]),
                 )
@@ -69,10 +70,10 @@ async def create_drop_rule(
     app = payload.app_pattern.strip() if payload.app_pattern else None
     msg = payload.message_pattern.strip() if payload.message_pattern else "*"
 
-    if not source and not app and (not msg or msg == "*"):
+    if not source and not app and (not msg or msg == "*") and payload.severity_threshold is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one filter criterion (Host/IP, App/Container, or Message Pattern) must be specified.",
+            detail="At least one filter criterion (Host/IP, App/Container, Message Pattern, or Severity Threshold) must be specified.",
         )
 
     # Validate regex syntax and ReDoS safety if enabled
@@ -86,8 +87,8 @@ async def create_drop_rule(
         cur.execute(
             """
             INSERT INTO drop_rules (
-                source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at
-            ) VALUES (?, ?, ?, ?, ?, 0, ?)
+                source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?)
             """,
             (
                 source,
@@ -95,6 +96,7 @@ async def create_drop_rule(
                 msg,
                 1 if payload.is_regex else 0,
                 1 if payload.is_enabled else 0,
+                payload.severity_threshold,
                 now_iso,
             ),
         )
@@ -107,6 +109,7 @@ async def create_drop_rule(
             message_pattern=msg,
             is_regex=payload.is_regex,
             is_enabled=payload.is_enabled,
+            severity_threshold=payload.severity_threshold,
             dropped_count=0,
             created_at=now_iso,
         )
@@ -126,7 +129,7 @@ async def update_drop_rule(
     def _update(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at "
+            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at "
             "FROM drop_rules WHERE id = ?",
             (rule_id,),
         )
@@ -159,6 +162,11 @@ async def update_drop_rule(
             if payload.is_enabled is not None
             else bool(existing["is_enabled"])
         )
+        new_severity_threshold = (
+            payload.severity_threshold
+            if "severity_threshold" in payload.model_fields_set
+            else existing["severity_threshold"]
+        )
 
         if new_is_regex and new_message != "*":
             validate_regex_pattern(new_message)
@@ -173,6 +181,7 @@ async def update_drop_rule(
             or (payload.app_pattern is not None and app_normalized != existing_app)
             or (payload.message_pattern is not None and new_message != existing["message_pattern"])
             or (payload.is_regex is not None and new_is_regex != bool(existing["is_regex"]))
+            or ("severity_threshold" in payload.model_fields_set and new_severity_threshold != existing["severity_threshold"])
         )
         should_reset = (payload.reset_counter is True) or criteria_changed
 
@@ -183,7 +192,8 @@ async def update_drop_rule(
                 app_pattern = ?,
                 message_pattern = ?,
                 is_regex = ?,
-                is_enabled = ?
+                is_enabled = ?,
+                severity_threshold = ?
             WHERE id = ?
             """,
             (
@@ -192,6 +202,7 @@ async def update_drop_rule(
                 new_message,
                 1 if new_is_regex else 0,
                 1 if new_is_enabled else 0,
+                new_severity_threshold,
                 rule_id,
             ),
         )
@@ -210,6 +221,7 @@ async def update_drop_rule(
             message_pattern=new_message,
             is_regex=new_is_regex,
             is_enabled=new_is_enabled,
+            severity_threshold=new_severity_threshold,
             dropped_count=live_count,
             created_at=str(existing["created_at"]),
         )
@@ -248,7 +260,7 @@ async def reset_drop_rule_counter(
     def _reset(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, created_at "
+            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, created_at "
             "FROM drop_rules WHERE id = ?",
             (rule_id,),
         )
@@ -264,6 +276,7 @@ async def reset_drop_rule_counter(
             message_pattern=row["message_pattern"],
             is_regex=bool(row["is_regex"]),
             is_enabled=bool(row["is_enabled"]),
+            severity_threshold=row["severity_threshold"],
             dropped_count=0,
             created_at=str(row["created_at"]),
         )
@@ -297,6 +310,7 @@ async def test_drop_rule(
         message_pattern=msg_pat,
         is_regex=payload.is_regex,
         is_enabled=True,
+        severity_threshold=payload.severity_threshold,
         compiled_regex=compiled_re,
     )
 
@@ -305,5 +319,6 @@ async def test_drop_rule(
         source_ip=payload.sample_source,
         app_name=payload.sample_app,
         message=payload.sample_message,
+        severity=payload.sample_severity,
     )
     return DropRuleTestResponse(matched=matched, error=None)

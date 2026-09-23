@@ -13,6 +13,7 @@ describe('DropRulesCard Component', () => {
       message_pattern: 'DHCPACK',
       is_regex: false,
       is_enabled: true,
+      severity_threshold: 6,
       dropped_count: 42,
       created_at: '2026-09-18T10:00:00Z',
     },
@@ -23,6 +24,7 @@ describe('DropRulesCard Component', () => {
       message_pattern: 'probe request',
       is_regex: true,
       is_enabled: false,
+      severity_threshold: null,
       dropped_count: 10,
       created_at: '2026-09-18T10:05:00Z',
     },
@@ -42,6 +44,8 @@ describe('DropRulesCard Component', () => {
       expect(screen.getByText('probe request')).toBeInTheDocument();
       expect(screen.getByText('192.168.1.*')).toBeInTheDocument();
       expect(screen.getByText('dnsmasq')).toBeInTheDocument();
+      expect(screen.getByText('Info and below')).toBeInTheDocument();
+      expect(screen.getByText('Any severity')).toBeInTheDocument();
     });
 
     expect(screen.getByText('42')).toBeInTheDocument();
@@ -203,6 +207,7 @@ describe('DropRulesCard Component', () => {
         is_regex: false,
         source_pattern: undefined,
         app_pattern: undefined,
+        severity_threshold: undefined,
         is_enabled: true,
       });
       expect(screen.getByText('healthcheck')).toBeInTheDocument();
@@ -258,6 +263,7 @@ describe('DropRulesCard Component', () => {
         is_regex: false,
         source_pattern: 'router*',
         app_pattern: 'traefik',
+        severity_threshold: undefined,
         is_enabled: true,
       });
     });
@@ -325,6 +331,79 @@ describe('DropRulesCard Component', () => {
         is_regex: false,
         source_pattern: undefined,
         app_pattern: 'pvedaemon',
+        severity_threshold: undefined,
+        is_enabled: true,
+      });
+    });
+  });
+
+  it('creates a drop rule with severity threshold', async () => {
+    const testSpy = vi.spyOn(dropRulesApi, 'testDropRule').mockResolvedValue({
+      matched: true,
+      error: null,
+    });
+    const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({
+      id: 6,
+      source_pattern: null,
+      app_pattern: 'sshd',
+      message_pattern: '*',
+      is_regex: false,
+      is_enabled: true,
+      severity_threshold: 6,
+      dropped_count: 0,
+      created_at: '2026-09-18T10:25:00Z',
+    });
+
+    render(<DropRulesCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('New Rule'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // Select severity threshold: Info (6) and below
+    const sevSelect = screen.getByLabelText(/Drop if severity is\.\.\./i);
+    expect(sevSelect).toBeInTheDocument();
+    fireEvent.change(sevSelect, { target: { value: '6' } });
+
+    // Select custom app: sshd
+    const appSelect = screen.getByLabelText(/Application or Container/i);
+    fireEvent.change(appSelect, { target: { value: '__custom__' } });
+    const customAppInput = screen.getByPlaceholderText('e.g. dnsmasq, smartbulb*, traefik');
+    fireEvent.change(customAppInput, { target: { value: 'sshd' } });
+
+    // Fill sample message and test
+    const sampleMsg = screen.getByPlaceholderText('Paste a representative log line here...');
+    fireEvent.change(sampleMsg, { target: { value: 'Disconnected from authenticating user' } });
+
+    const sampleSevSelect = screen.getByLabelText(/Sample Severity/i);
+    fireEvent.change(sampleSevSelect, { target: { value: '7' } });
+
+    const testBtn = screen.getByText('Dry-Run Test');
+    fireEvent.click(testBtn);
+
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({
+        app_pattern: 'sshd',
+        severity_threshold: 6,
+        sample_severity: 7,
+      }));
+      expect(screen.getByText(/Rule matched/i)).toBeInTheDocument();
+    });
+
+    // Submit rule
+    const saveBtn = screen.getByRole('button', { name: 'Create Rule' });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith({
+        message_pattern: '*',
+        is_regex: false,
+        source_pattern: undefined,
+        app_pattern: 'sshd',
+        severity_threshold: 6,
         is_enabled: true,
       });
     });

@@ -33,6 +33,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [isCustomSource, setIsCustomSource] = useState<boolean>(false);
   const [appPattern, setAppPattern] = useState<string>('');
   const [isCustomApp, setIsCustomApp] = useState<boolean>(false);
+  const [severityThreshold, setSeverityThreshold] = useState<number | null>(null);
   const [isEnabled, setIsEnabled] = useState<boolean>(true);
   const [currentCount, setCurrentCount] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -42,6 +43,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [sampleMessage, setSampleMessage] = useState<string>('');
   const [sampleSource, setSampleSource] = useState<string>('');
   const [sampleApp, setSampleApp] = useState<string>('');
+  const [sampleSeverity, setSampleSeverity] = useState<string>('');
   const [testResult, setTestResult] = useState<{ matched?: boolean; error?: string | null } | null>(null);
   const [isTesting, setIsTesting] = useState<boolean>(false);
 
@@ -52,6 +54,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       if (ruleToEdit) {
         setMessagePattern(ruleToEdit.message_pattern || '');
         setIsRegex(ruleToEdit.is_regex || false);
+        setSeverityThreshold(ruleToEdit.severity_threshold ?? null);
         setIsEnabled(ruleToEdit.is_enabled);
         setCurrentCount(ruleToEdit.dropped_count || 0);
 
@@ -74,9 +77,11 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setSampleMessage(ruleToEdit.message_pattern || '');
         setSampleSource(ruleToEdit.source_pattern || '');
         setSampleApp(ruleToEdit.app_pattern || '');
+        setSampleSeverity(ruleToEdit.severity_threshold != null ? String(ruleToEdit.severity_threshold) : '');
       } else {
         setMessagePattern(initialMessage);
         setIsRegex(false);
+        setSeverityThreshold(null);
         setIsEnabled(true);
         setCurrentCount(0);
 
@@ -99,12 +104,13 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setSampleMessage(initialMessage);
         setSampleSource(initialSource);
         setSampleApp(initialApp);
+        setSampleSeverity('');
       }
     }
   }, [isOpen, ruleToEdit, initialSource, initialApp, initialMessage, availableSources, availableApps]);
 
   const hasFilterCriteria = Boolean(
-    messagePattern.trim() || sourcePattern.trim() || appPattern.trim()
+    messagePattern.trim() || sourcePattern.trim() || appPattern.trim() || severityThreshold !== null
   );
 
   const handleTestPattern = async () => {
@@ -117,9 +123,11 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         is_regex: isRegex,
         source_pattern: sourcePattern.trim() || undefined,
         app_pattern: appPattern.trim() || undefined,
+        severity_threshold: severityThreshold,
         sample_message: sampleMessage,
         sample_source: sampleSource.trim() || undefined,
         sample_app: sampleApp.trim() || undefined,
+        sample_severity: sampleSeverity !== '' ? Number(sampleSeverity) : undefined,
       });
       setTestResult(res);
     } catch (err: any) {
@@ -156,6 +164,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           is_regex: isRegex,
           source_pattern: sourcePattern.trim() || null,
           app_pattern: appPattern.trim() || null,
+          severity_threshold: severityThreshold,
           is_enabled: isEnabled,
         });
         onSuccess?.(updated);
@@ -165,6 +174,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           is_regex: isRegex,
           source_pattern: sourcePattern.trim() || undefined,
           app_pattern: appPattern.trim() || undefined,
+          severity_threshold: severityThreshold ?? undefined,
           is_enabled: isEnabled,
         });
         onSuccess?.(created);
@@ -342,6 +352,28 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           </div>
         </div>
 
+        <div>
+          <label htmlFor="modal-severity-select" className="block text-slate-300 font-medium mb-1">
+            Drop if severity is...
+          </label>
+          <select
+            id="modal-severity-select"
+            value={severityThreshold === null ? '' : severityThreshold.toString()}
+            onChange={(e) => setSeverityThreshold(e.target.value === '' ? null : Number(e.target.value))}
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+          >
+            <option value="">Any severity</option>
+            <option value="7">Debug (7) and below</option>
+            <option value="6">Info (6) and below</option>
+            <option value="5">Notice (5) and below</option>
+            <option value="4">Warning (4) and below</option>
+            <option value="3">Error (3) and below</option>
+          </select>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            Logs at or below this severity level will be dropped. Leave blank to match all severity levels.
+          </span>
+        </div>
+
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -381,7 +413,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
               <label className="block text-slate-400 text-[11px] mb-0.5">Sample Host / IP</label>
               <input
@@ -401,6 +433,25 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                 placeholder="e.g. dnsmasq"
                 className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden"
               />
+            </div>
+            <div>
+              <label htmlFor="modal-sample-severity-select" className="block text-slate-400 text-[11px] mb-0.5">Sample Severity</label>
+              <select
+                id="modal-sample-severity-select"
+                value={sampleSeverity}
+                onChange={(e) => setSampleSeverity(e.target.value)}
+                className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden"
+              >
+                <option value="">Unspecified</option>
+                <option value="7">Debug (7)</option>
+                <option value="6">Info (6)</option>
+                <option value="5">Notice (5)</option>
+                <option value="4">Warning (4)</option>
+                <option value="3">Error (3)</option>
+                <option value="2">Critical (2)</option>
+                <option value="1">Alert (1)</option>
+                <option value="0">Emergency (0)</option>
+              </select>
             </div>
           </div>
 

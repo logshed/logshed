@@ -184,7 +184,7 @@ export const App: React.FC = () => {
       {/* Main Content Area */}
       <main
         className={`flex-1 min-h-0 relative ${
-          activeTab === 'stream' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
+          activeTab === 'stream' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto overflow-x-hidden'
         } pb-14 md:pb-0`}
       >
         {activeTab === 'stream' && (

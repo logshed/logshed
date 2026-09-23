@@ -15,6 +15,7 @@ import {
 } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { Modal } from '../common/Modal.tsx';
+import { getSeverityInfo } from '../common/SeverityBadge.tsx';
 import { CreateDropRuleModal } from './CreateDropRuleModal.tsx';
 
 export interface DropRulesCardProps {
@@ -171,6 +172,7 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
                 <th className="py-2.5 px-3 text-left">Application</th>
                 <th className="py-2.5 px-3 text-left">Pattern</th>
                 <th className="py-2.5 px-3 text-left">Mode</th>
+                <th className="py-2.5 px-3 text-left">Severity</th>
                 <th className="py-2.5 px-3 text-right">Dropped</th>
                 <th className="py-2.5 pr-5 text-right">Actions</th>
               </tr>
@@ -209,6 +211,17 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
                     <span className="px-1.5 py-0.5 rounded text-[10px] bg-dark-800 text-slate-300 border border-dark-700">
                       {rule.is_regex ? 'Regex' : 'Substring'}
                     </span>
+                  </td>
+                  <td className="py-3 px-3">
+                    {rule.severity_threshold != null ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-950 text-slate-300 border border-dark-800 whitespace-nowrap">
+                        {getSeverityInfo(rule.severity_threshold).label} and below
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] text-slate-400 bg-dark-950 border border-dark-800/80 whitespace-nowrap">
+                        Any severity
+                      </span>
+                    )}
                   </td>
                   <td className="py-3 px-3 text-right font-mono text-slate-300">
                     {(rule.dropped_count || 0).toLocaleString()}
@@ -284,6 +297,9 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
                   )}
                   {ruleToDelete.message_pattern && (
                     <div><span className="text-slate-500">Pattern:</span> {ruleToDelete.message_pattern}</div>
+                  )}
+                  {ruleToDelete.severity_threshold != null && (
+                    <div><span className="text-slate-500">Severity:</span> {getSeverityInfo(ruleToDelete.severity_threshold).label} and below</div>
                   )}
                   {ruleToDelete.dropped_count > 0 && (
                     <div className="text-slate-400 text-[10px] pt-1 border-t border-dark-800">

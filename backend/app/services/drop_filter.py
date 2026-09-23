@@ -28,6 +28,7 @@ class CompiledDropRule:
     message_pattern: str
     is_regex: bool
     is_enabled: bool
+    severity_threshold: Optional[int] = None
     compiled_regex: Optional[re.Pattern] = None
 
     def matches(
@@ -36,6 +37,7 @@ class CompiledDropRule:
         source_ip: Optional[str],
         app_name: Optional[str],
         message: str,
+        severity: Optional[int] = None,
     ) -> bool:
         """Check if incoming log fields match this rule's criteria."""
         if not self.is_enabled:
@@ -57,23 +59,31 @@ class CompiledDropRule:
                 return False
 
         # 3. Message pattern matching
-        if not self.message_pattern or self.message_pattern.strip() == "*":
-            return True
+        if self.message_pattern and self.message_pattern.strip() != "*":
+            if self.is_regex:
+                if self.compiled_regex is None:
+                    return False
+                if not self.compiled_regex.search(message):
+                    return False
+            else:
+                pattern = self.message_pattern.strip()
+                if "*" in pattern or "?" in pattern:
+                    wildcard_pat = pattern.lower()
+                    if not wildcard_pat.startswith("*"):
+                        wildcard_pat = f"*{wildcard_pat}"
+                    if not wildcard_pat.endswith("*"):
+                        wildcard_pat = f"{wildcard_pat}*"
+                    if not fnmatch.fnmatchcase(message.lower(), wildcard_pat):
+                        return False
+                elif pattern.lower() not in message.lower():
+                    return False
 
-        if self.is_regex:
-            if self.compiled_regex is None:
-                return False
-            return bool(self.compiled_regex.search(message))
-        else:
-            pattern = self.message_pattern.strip()
-            if "*" in pattern or "?" in pattern:
-                wildcard_pat = pattern.lower()
-                if not wildcard_pat.startswith("*"):
-                    wildcard_pat = f"*{wildcard_pat}"
-                if not wildcard_pat.endswith("*"):
-                    wildcard_pat = f"{wildcard_pat}*"
-                return fnmatch.fnmatchcase(message.lower(), wildcard_pat)
-            return pattern.lower() in message.lower()
+        # 4. Severity threshold check
+        if self.severity_threshold is not None and severity is not None:
+            if severity < self.severity_threshold:
+                return False  # log is more critical than threshold - keep it
+
+        return True
 
 
 class DropFilter:
@@ -94,6 +104,7 @@ class DropFilter:
         source_ip: Optional[str],
         app_name: Optional[str],
         message: str,
+        severity: Optional[int] = None,
     ) -> Optional[int]:
         """
         Evaluate if a log entry matches any active drop rule.
@@ -106,7 +117,7 @@ class DropFilter:
 
         for rule in rules:
             try:
-                if rule.matches(source_alias, source_ip, app_name, message):
+                if rule.matches(source_alias, source_ip, app_name, message, severity):
                     with self._lock:
                         self._pending_counts[rule.id] = self._pending_counts.get(rule.id, 0) + 1
                     return rule.id
@@ -175,7 +186,7 @@ class DropFilter:
         def _load(c: sqlite3.Connection):
             cur = c.cursor()
             cur.execute(
-                "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled "
+                "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
                 "FROM drop_rules WHERE is_enabled = 1 ORDER BY id ASC"
             )
             return cur.fetchall()
@@ -199,6 +210,7 @@ class DropFilter:
             msg_pat = r[3]
             is_regex = bool(r[4])
             is_enabled = bool(r[5])
+            sev_thresh = r[6] if len(r) > 6 else None
 
             compiled_re = None
             if is_regex:
@@ -216,6 +228,7 @@ class DropFilter:
                     message_pattern=msg_pat,
                     is_regex=is_regex,
                     is_enabled=is_enabled,
+                    severity_threshold=sev_thresh,
                     compiled_regex=compiled_re,
                 )
             )

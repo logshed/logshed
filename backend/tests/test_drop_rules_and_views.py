@@ -146,6 +146,31 @@ class TestDropFilterUnit:
         flt = DropFilter(db_file)
         assert flt.should_drop("srv", "127.0.0.1", "app", "noise message") is None
 
+    def test_severity_threshold_matching(self, tmp_path: Path):
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        conn.execute(
+            """
+            INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at)
+            VALUES (NULL, 'sshd', '*', 0, 1, 6, 0, datetime('now'))
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        flt = DropFilter(db_file)
+        # Severity 7 (Debug >= 6) and 6 (Info >= 6) are at or below threshold -> dropped
+        assert flt.should_drop(None, None, "sshd", "debug details", severity=7) is not None
+        assert flt.should_drop(None, None, "sshd", "info details", severity=6) is not None
+
+        # Severity 5 (Notice < 6), 4 (Warning < 6), 3 (Error < 6) are more critical -> kept (not dropped)
+        assert flt.should_drop(None, None, "sshd", "notice details", severity=5) is None
+        assert flt.should_drop(None, None, "sshd", "warning details", severity=4) is None
+        assert flt.should_drop(None, None, "sshd", "error details", severity=3) is None
+
+        # Missing severity parameter defaults to None -> not blocked by threshold check
+        assert flt.should_drop(None, None, "sshd", "unspecified severity") is not None
+
     def test_in_memory_counter_and_flush(self, tmp_path: Path):
         db_file = tmp_path / "logs.db"
         conn = get_connection(db_file)
@@ -334,7 +359,36 @@ class TestDropRulesApi:
         assert res4.status_code == 200
         assert res4.json()["matched"] is True
 
-        # 5. Empty criteria rejected
+        # 5. Severity threshold dry-run testing
+        # Threshold 6 (Info and below): Debug (7) matches
+        res_sev_debug = await client.post(
+            "/api/drop-rules/test",
+            cookies=auth_cookie,
+            json={
+                "message_pattern": "*",
+                "severity_threshold": 6,
+                "sample_message": "debug level noise",
+                "sample_severity": 7,
+            },
+        )
+        assert res_sev_debug.status_code == 200
+        assert res_sev_debug.json()["matched"] is True
+
+        # Threshold 6: Warning (4) is more critical -> does not match
+        res_sev_warn = await client.post(
+            "/api/drop-rules/test",
+            cookies=auth_cookie,
+            json={
+                "message_pattern": "*",
+                "severity_threshold": 6,
+                "sample_message": "warning level event",
+                "sample_severity": 4,
+            },
+        )
+        assert res_sev_warn.status_code == 200
+        assert res_sev_warn.json()["matched"] is False
+
+        # 6. Empty criteria rejected
         empty_res = await client.post(
             "/api/drop-rules",
             cookies=auth_cookie,
@@ -342,7 +396,7 @@ class TestDropRulesApi:
         )
         assert empty_res.status_code == 400
 
-        # 6. Rule created with app only (message_pattern defaults to '*')
+        # 7. Rule created with app only (message_pattern defaults to '*')
         app_only_res = await client.post(
             "/api/drop-rules",
             cookies=auth_cookie,
@@ -406,6 +460,68 @@ class TestDropRulesApi:
         )
         assert update_res.status_code == 200
         assert update_res.json()["dropped_count"] == 0
+
+        # Re-enable rule
+        await client.put(
+            f"/api/drop-rules/{rule_id}",
+            cookies=auth_cookie,
+            json={"is_enabled": True},
+        )
+
+        # Simulate another drop
+        flt.should_drop(None, None, None, "new_pattern")
+        flt.flush_counts()
+        get_res2 = await client.get("/api/drop-rules", cookies=auth_cookie)
+        rule2 = next(r for r in get_res2.json() if r["id"] == rule_id)
+        assert rule2["dropped_count"] == 1
+
+        # Update severity_threshold (criteria change) - SHOULD reset counter to 0
+        update_sev_res = await client.put(
+            f"/api/drop-rules/{rule_id}",
+            cookies=auth_cookie,
+            json={"severity_threshold": 6},
+        )
+        assert update_sev_res.status_code == 200
+        assert update_sev_res.json()["dropped_count"] == 0
+        assert update_sev_res.json()["severity_threshold"] == 6
+
+    @pytest.mark.asyncio
+    async def test_severity_threshold_validation_and_crud(self, client: AsyncClient, auth_cookie: dict):
+        # 1. Invalid severity_threshold (< 0 or > 7) rejected
+        invalid_high = await client.post(
+            "/api/drop-rules",
+            cookies=auth_cookie,
+            json={"message_pattern": "test", "severity_threshold": 8},
+        )
+        assert invalid_high.status_code == 422
+
+        invalid_low = await client.post(
+            "/api/drop-rules",
+            cookies=auth_cookie,
+            json={"message_pattern": "test", "severity_threshold": -1},
+        )
+        assert invalid_low.status_code == 422
+
+        # 2. Rule created with severity_threshold only (message defaults to '*')
+        sev_only = await client.post(
+            "/api/drop-rules",
+            cookies=auth_cookie,
+            json={"severity_threshold": 7},
+        )
+        assert sev_only.status_code == 201
+        assert sev_only.json()["severity_threshold"] == 7
+        assert sev_only.json()["message_pattern"] == "*"
+        rule_id = sev_only.json()["id"]
+
+        # 3. Update clearing severity_threshold back to None (null)
+        clear_res = await client.put(
+            f"/api/drop-rules/{rule_id}",
+            cookies=auth_cookie,
+            json={"severity_threshold": None, "app_pattern": "sshd"},
+        )
+        assert clear_res.status_code == 200
+        assert clear_res.json()["severity_threshold"] is None
+        assert clear_res.json()["app_pattern"] == "sshd"
 
 
 # ===================================================================
@@ -585,3 +701,64 @@ class TestDropRulesIngestionPipeline:
 
         # Should be dropped and not enqueued
         assert queue.qsize() == 0
+
+    @pytest.mark.asyncio
+    async def test_pipeline_severity_threshold_filtering(self, tmp_path: Path):
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        conn.execute(
+            """
+            INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at)
+            VALUES (NULL, 'api-worker', '*', 0, 1, 6, 0, datetime('now'))
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        flt = get_drop_filter()
+        flt.db_path = db_file
+        flt.reload_rules()
+
+        asm = pipeline_mod.KeyedMultilineAssembler()
+        queue = pipeline_mod.get_queue()
+        while not queue.empty():
+            queue.get_nowait()
+
+        # 1. Info log (severity 6 >= threshold 6) -> dropped
+        await asm.feed(
+            "stream_info",
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "received_at": "2024-01-01T00:00:00Z",
+                "source_ip": "10.0.0.1",
+                "source_alias": "srv1",
+                "app_name": "api-worker",
+                "facility": 1,
+                "severity": 6,
+                "message": "Routine status ping",
+                "raw": "raw ping",
+            },
+        )
+        await asm.flush_all()
+        assert queue.qsize() == 0
+
+        # 2. Warning log (severity 4 < threshold 6) -> kept and enqueued
+        await asm.feed(
+            "stream_warn",
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "received_at": "2024-01-01T00:00:01Z",
+                "source_ip": "10.0.0.1",
+                "source_alias": "srv1",
+                "app_name": "api-worker",
+                "facility": 1,
+                "severity": 4,
+                "message": "High memory consumption warning",
+                "raw": "raw warning",
+            },
+        )
+        await asm.flush_all()
+        assert queue.qsize() == 1
+        item = queue.get_nowait()
+        assert item["message"] == "High memory consumption warning"
+        assert item["severity"] == 4

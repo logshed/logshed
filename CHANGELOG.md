@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Drop Rule Severity Thresholds**: Configurable severity threshold level (`severity_threshold`) for ingestion drop rules, enabling selective dropping of noisy logs at or below a specified severity (e.g. Info and Debug) while preserving higher-priority warning, error, and critical messages. Includes schema migration in `migrate_v2`, test pattern simulation with sample severity, and severity level badges in the drop rules table.
 - **Ingestion Drop Rules**: In-memory filtering engine evaluating host/source, application/container, and message patterns (substring, regex, or app-wide wildcard `*`) to discard repetitive log chatter before database persistence and FTS5 indexing. Includes in-memory drop counters with periodic SQLite flushing to eliminate disk write contention.
 - **Saved Filter Views & URL Synchronization**: Saved filter views menu on the Console filter bar and mobile filter drawer with pinned view support, 1-tap activation, and bidirectional query parameter synchronization in the browser URL for bookmarking and sharing.
 - **Interactive Rule Tester & Console Quick-Action**: Dry-run pattern tester in Settings and a "Create Drop Rule" shortcut directly within the log detail modal that pre-fills host, application, and message context.
@@ -57,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI Container Architecture Manifest**: Added `provenance: false` to the Docker build-and-push GitHub Action workflow to prevent unknown/unknown multi-arch manifest entries on GHCR.
 - **Dynamic Beta Browser Title**: Added dynamic document title updating on mount to display prerelease versions (e.g. `LogShed [1.2.0-beta.1]`) while retaining `LogShed` for stable releases.
 - **Mobile Custom Datetime Input Overflow**: Resolved WebKit datetime-local input overflow on mobile drawers and narrow viewports by isolating input chrome into styled wrapper divs and normalizing date and time pseudo-elements.
+- **Alerts Panel Mobile Sub-Tabs Layout**: Replaced the unconstrained horizontal tab row in Alerts & Rules with a responsive 2x2 grid on mobile viewports, ensuring all 4 sub-tabs and count badges are visible without horizontal scrolling or viewport blowout.
 
 ### Security
 - **Sliding Window Bounds & Memory Caps**: Clamped incoming log timestamps between `now_epoch - 86400` and `now_epoch + 300` to prevent future timestamp spoofing, computed sliding window cutoffs relative to current epoch time, and bounded maximum sliding window deques to `threshold_count * 2` (capped to `threshold_count` during cooldown suppression) to prevent memory expansion.

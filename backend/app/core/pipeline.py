@@ -133,6 +133,7 @@ class InternalLogHandler(logging.Handler):
                 log_entry.get("source_ip"),
                 log_entry.get("app_name"),
                 log_entry.get("message", ""),
+                severity=log_entry.get("severity"),
             ) is not None:
                 increment_dropped_by_filter_count(1)
                 return
@@ -563,6 +564,7 @@ class KeyedMultilineAssembler:
             merged_entry.get('source_ip'),
             merged_entry.get('app_name'),
             merged_entry.get('message', ''),
+            severity=merged_entry.get('severity'),
         ) is not None:
             increment_dropped_by_filter_count(1)
             return

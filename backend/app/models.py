@@ -369,6 +369,7 @@ class DropRuleCreate(BaseModel):
     message_pattern: Optional[str] = Field("*", max_length=1000, description="Substring, wildcard, or regular expression match pattern")
     is_regex: bool = Field(False, description="Whether message_pattern should be evaluated as a regular expression")
     is_enabled: bool = Field(True, description="Whether the rule is active")
+    severity_threshold: Optional[int] = Field(None, ge=0, le=7, description="Drop logs at or below this severity level (0-7, null matches any)")
 
 
 class DropRuleUpdate(BaseModel):
@@ -378,6 +379,7 @@ class DropRuleUpdate(BaseModel):
     message_pattern: Optional[str] = Field(None, max_length=1000)
     is_regex: Optional[bool] = None
     is_enabled: Optional[bool] = None
+    severity_threshold: Optional[int] = Field(None, ge=0, le=7)
     reset_counter: Optional[bool] = None
 
 
@@ -389,6 +391,7 @@ class DropRuleResponse(BaseModel):
     message_pattern: str
     is_regex: bool = False
     is_enabled: bool = True
+    severity_threshold: Optional[int] = None
     dropped_count: int = 0
     created_at: str
 
@@ -399,9 +402,11 @@ class DropRuleTestRequest(BaseModel):
     app_pattern: Optional[str] = Field(None, max_length=255)
     message_pattern: Optional[str] = Field("*", max_length=1000)
     is_regex: bool = Field(False)
+    severity_threshold: Optional[int] = Field(None, ge=0, le=7)
     sample_message: str = Field(..., description="Sample message payload to test against")
     sample_source: Optional[str] = Field(None, description="Sample host alias or IP")
     sample_app: Optional[str] = Field(None, description="Sample application or container name")
+    sample_severity: Optional[int] = Field(None, ge=0, le=7)
 
 
 class DropRuleTestResponse(BaseModel):
