@@ -369,7 +369,7 @@ export interface AlertTestResponse {
   error?: string | null;
 }
 
-export interface SecurityPreset {
+export interface AlertPreset {
   id: string;
   name: string;
   description: string;
@@ -381,7 +381,23 @@ export interface SecurityPreset {
   window_seconds: number;
   cooldown_seconds: number;
   ai_enrichment: boolean;
+  is_custom?: boolean;
 }
+
+export type SecurityPreset = AlertPreset;
+
+export interface DropPreset {
+  id: string;
+  name: string;
+  description: string;
+  source_pattern?: string | null;
+  app_pattern?: string | null;
+  message_pattern: string;
+  is_regex: boolean;
+  severity_threshold?: number | null;
+  is_custom?: boolean;
+}
+
 
 export interface AlertHistoryItem {
   id: number;

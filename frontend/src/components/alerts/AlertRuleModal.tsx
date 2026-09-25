@@ -101,7 +101,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           filter_app: filterAppPayload,
           filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
           match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
-          threshold_count: formRuleType === 'threshold' ? finalThreshold : 1,
+          threshold_count: (formRuleType === 'threshold' || formRuleType === 'rate') ? finalThreshold : 1,
           window_seconds: finalWindow,
           cooldown_seconds: finalCooldown,
           ai_enrichment: formAiEnrichment,
@@ -118,7 +118,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           filter_app: filterAppPayload,
           filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
           match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
-          threshold_count: formRuleType === 'threshold' ? finalThreshold : 1,
+          threshold_count: (formRuleType === 'threshold' || formRuleType === 'rate') ? finalThreshold : 1,
           window_seconds: finalWindow,
           cooldown_seconds: finalCooldown,
           ai_enrichment: formAiEnrichment,
@@ -185,6 +185,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             >
               <option value="threshold">Threshold (Sliding Window)</option>
               <option value="pattern">Pattern (Immediate Match)</option>
+              <option value="rate">Rate Spike (Logs / Second)</option>
             </select>
           </div>
 
@@ -205,10 +206,57 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
         </div>
 
+        {/* Rate Spike options placed directly below Rule Type */}
+        {formRuleType === 'rate' && (
+          <div className="p-3 bg-dark-850/60 rounded-lg border border-dark-800 space-y-2">
+            <div className="text-[11px] font-medium text-white">
+              Rate Spike Settings (Ingestion Volume)
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Rate Threshold (logs / second)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100000"
+                  value={formThresholdCount}
+                  onChange={(e) =>
+                    setFormThresholdCount(
+                      e.target.value === '' ? '' : Math.max(1, Number(e.target.value))
+                    )
+                  }
+                  className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+                />
+                <p className="text-[11px] text-slate-500">Average logs per second to trigger alert.</p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium">Measurement Window (seconds)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="86400"
+                  value={formWindowSeconds}
+                  onChange={(e) =>
+                    setFormWindowSeconds(
+                      e.target.value === '' ? '' : Math.max(1, Number(e.target.value))
+                    )
+                  }
+                  className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+                />
+                <p className="text-[11px] text-slate-500">Sustained duration window (e.g. 30s).</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 pt-1">
+              Triggers when incoming volume exceeds the specified rate over the window. Identifies top culprit services and message patterns.
+            </p>
+          </div>
+        )}
+
         {/* Threshold options placed directly below Rule Type */}
         {formRuleType === 'threshold' && (
           <div className="p-3 bg-dark-850/60 rounded-lg border border-dark-800 space-y-2">
-            <div className="text-[11px] font-medium text-accent-400">
+            <div className="text-[11px] font-medium text-white">
               Threshold Settings (Sliding Window)
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

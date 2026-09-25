@@ -17,6 +17,7 @@ from app.models import (
     AlertHistoryItem,
     AlertHistoryListResponse,
     AlertPresetInstallRequest,
+    AlertPresetResponse,
     AlertRuleCreate,
     AlertRuleResponse,
     AlertRuleUpdate,
@@ -26,7 +27,7 @@ from app.models import (
     SecurityPresetResponse,
 )
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
-from app.services.security_presets import extract_ip_from_message, get_security_presets, get_security_preset_by_id
+from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.core.regex_validator import check_regex_safety, validate_regex_pattern
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 
@@ -397,14 +398,17 @@ async def test_alert_pattern(
 
 
 # ---------------------------------------------------------------------------
-# Security Canary Presets
+# Alert Presets
 # ---------------------------------------------------------------------------
 
-@router.get("/presets", response_model=list[SecurityPresetResponse])
-async def list_security_presets(user: dict = Depends(get_current_user)) -> list[SecurityPresetResponse]:
-    """Retrieve all available 1-click security canary presets."""
-    presets = get_security_presets()
-    return [SecurityPresetResponse(**p) for p in presets]
+@router.get("/presets", response_model=list[AlertPresetResponse])
+async def list_alert_presets(user: dict = Depends(get_current_user)) -> list[AlertPresetResponse]:
+    """Retrieve all available 1-click alert presets."""
+    presets = get_alert_presets()
+    return [AlertPresetResponse(**p) for p in presets]
+
+
+list_security_presets = list_alert_presets
 
 
 @router.post("/presets/{preset_id}/install", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
@@ -414,13 +418,13 @@ async def install_preset(
     user: dict = Depends(get_current_user),
 ) -> AlertRuleResponse:
     """
-    1-click install of a security canary preset into active alert rules.
+    1-click install of an alert preset into active alert rules.
     """
-    preset = get_security_preset_by_id(preset_id)
+    preset = get_alert_preset_by_id(preset_id)
     if not preset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Security preset '{preset_id}' not found.",
+            detail=f"Alert preset '{preset_id}' not found.",
         )
 
     channel_id = payload.channel_id if payload else None

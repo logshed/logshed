@@ -25,6 +25,7 @@ from app.collectors.syslog import SyslogServer
 from app.core.config import (
     get_all_system_settings,
     get_cors_origins,
+    get_data_dir,
     get_db_path,
     get_syslog_port,
     get_syslog_max_tcp_connections,
@@ -209,6 +210,10 @@ async def lifespan(app: FastAPI):
     # 1. Run migrations and set up master key
     await asyncio.to_thread(run_migrations, db_path)
     await asyncio.to_thread(get_or_create_master_key)
+
+    # Ensure user presets directories exist in DATA_DIR
+    for preset_sub in ("alerts", "drops"):
+        (Path(get_data_dir()) / "presets" / preset_sub).mkdir(parents=True, exist_ok=True)
 
     # Initialize in-memory drop filter cache
     from app.services.drop_filter import init_drop_filter

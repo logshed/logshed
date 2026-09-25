@@ -1,0 +1,10 @@
+{
+  "id": "systemd_session",
+  "name": "Systemd Session Chatter",
+  "description": "Filters routine systemd PAM user session opened and closed logs.",
+  "source_pattern": null,
+  "app_pattern": "systemd*",
+  "message_pattern": "pam_unix(systemd-user:session): session opened|session closed",
+  "is_regex": true,
+  "severity_threshold": null
+}

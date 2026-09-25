@@ -207,12 +207,13 @@ class TestAlertsApi:
         res = await client.get("/api/alerts/presets", headers=auth_headers)
         assert res.status_code == 200
         presets = res.json()
-        assert len(presets) == 4
+        assert len(presets) == 5
         preset_ids = [p["id"] for p in presets]
         assert "ssh_bruteforce" in preset_ids
         assert "proxy_auth_flood" in preset_ids
         assert "sudo_escalation" in preset_ids
         assert "oom_killer" in preset_ids
+        assert "log_storm_detection" in preset_ids
 
         # 2. 1-Click install preset
         install_res = await client.post(

@@ -6,17 +6,21 @@ import {
   Edit2,
   RefreshCw,
   AlertTriangle,
+  Zap,
 } from 'lucide-react';
-import { DropRule } from '../../types.ts';
+import { DropPreset, DropRule } from '../../types.ts';
 import {
   fetchDropRules,
   updateDropRule,
   deleteDropRule,
+  fetchDropPresets,
+  installDropPreset,
 } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { Modal } from '../common/Modal.tsx';
 import { getSeverityInfo } from '../common/SeverityBadge.tsx';
 import { CreateDropRuleModal } from './CreateDropRuleModal.tsx';
+import { DropPresetsModal } from './DropPresetsModal.tsx';
 
 export interface DropRulesCardProps {
   onRulesChange?: (rules: DropRule[]) => void;
@@ -24,6 +28,9 @@ export interface DropRulesCardProps {
 
 export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) => {
   const [rules, setRules] = useState<DropRule[]>([]);
+  const [presets, setPresets] = useState<DropPreset[]>([]);
+  const [isPresetsModalOpen, setIsPresetsModalOpen] = useState<boolean>(false);
+  const [installingPresetId, setInstallingPresetId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [ruleToEdit, setRuleToEdit] = useState<DropRule | null>(null);
@@ -44,19 +51,43 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
     }
   }, []);
 
+  const loadPresets = useCallback(async () => {
+    try {
+      const data = await fetchDropPresets();
+      setPresets(data);
+    } catch {
+      // Ignore preset load error
+    }
+  }, []);
+
   useEffect(() => {
     loadRules();
+    loadPresets();
     fetchLogFacets()
       .then((res) => {
         setAvailableSources(res.sources || []);
         setAvailableApps(res.apps || []);
       })
       .catch(() => {});
-  }, [loadRules]);
+  }, [loadRules, loadPresets]);
 
   useEffect(() => {
     onRulesChange?.(rules);
   }, [rules, onRulesChange]);
+
+  const handleInstallPreset = async (preset: DropPreset) => {
+    setInstallingPresetId(preset.id);
+    try {
+      const installed = await installDropPreset(preset.id);
+      setRules((prev) => [...prev, installed]);
+      setFeedbackMsg({ text: `Drop preset "${preset.name}" installed.`, isError: false });
+      setTimeout(() => setFeedbackMsg(null), 3000);
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to install drop preset.', isError: true });
+    } finally {
+      setInstallingPresetId(null);
+    }
+  };
 
   const handleToggleStatus = async (rule: DropRule) => {
     try {
@@ -94,7 +125,7 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto sm:shrink-0">
           {totalDropped > 0 && (
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-mono whitespace-nowrap">
               {totalDropped.toLocaleString()} dropped
@@ -111,6 +142,16 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
+          <button
+            type="button"
+            onClick={() => setIsPresetsModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
+            title="Browse and install pre-configured drop rule presets"
+          >
+            <Zap className="w-3.5 h-3.5 text-accent-500" />
+            <span>Presets</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -150,16 +191,25 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
           <p className="text-xs text-slate-500 max-w-md mx-auto">
             Create a drop rule to filter noisy devices or repetitive syslog chatter at ingestion.
           </p>
-          <div className="flex justify-center pt-2">
+          <div className="flex flex-wrap justify-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setIsPresetsModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 text-accent-500" />
+              <span>Browse Presets</span>
+            </button>
             <button
               type="button"
               onClick={() => {
                 setRuleToEdit(null);
                 setIsModalOpen(true);
               }}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
             >
-              Create Drop Rule
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create Drop Rule</span>
             </button>
           </div>
         </div>
@@ -188,20 +238,24 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
                 >
                   <td className="py-3 pl-5 font-mono text-slate-300">
                     {rule.source_pattern ? (
-                      <span className="px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800">
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800">
                         {rule.source_pattern}
                       </span>
                     ) : (
-                      <span className="text-slate-400 italic">Any</span>
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950/60 border border-dark-800/60 text-slate-400 italic">
+                        Any
+                      </span>
                     )}
                   </td>
                   <td className="py-3 px-3 font-mono text-slate-300">
                     {rule.app_pattern ? (
-                      <span className="px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800">
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800">
                         {rule.app_pattern}
                       </span>
                     ) : (
-                      <span className="text-slate-400 italic">Any</span>
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950/60 border border-dark-800/60 text-slate-400 italic">
+                        Any
+                      </span>
                     )}
                   </td>
                   <td className="py-3 px-3 font-mono text-slate-200 max-w-[200px] truncate" title={rule.message_pattern}>
@@ -359,6 +413,16 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
           });
           setTimeout(() => setFeedbackMsg(null), 3000);
         }}
+      />
+
+      {/* Drop Presets Modal */}
+      <DropPresetsModal
+        isOpen={isPresetsModalOpen}
+        onClose={() => setIsPresetsModalOpen(false)}
+        presets={presets}
+        rules={rules}
+        onInstallPreset={handleInstallPreset}
+        installingPresetId={installingPresetId}
       />
     </div>
   );

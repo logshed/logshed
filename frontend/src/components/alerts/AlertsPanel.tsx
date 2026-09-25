@@ -9,7 +9,6 @@ import {
   Edit2,
   CheckCircle2,
   AlertTriangle,
-  RefreshCw,
   Sparkles,
   Zap,
   FlaskConical,
@@ -17,17 +16,17 @@ import {
 } from 'lucide-react';
 import {
   AlertHistoryItem,
+  AlertPreset,
   AlertRule,
   DropRule,
   NotificationChannel,
-  SecurityPreset,
 } from '../../types.ts';
 import {
   fetchAlertRules,
   updateAlertRule,
   deleteAlertRule,
-  fetchSecurityPresets,
-  installSecurityPreset,
+  fetchAlertPresets,
+  installAlertPreset,
   fetchAlertHistory,
   deleteAlertHistoryItem,
   clearAlertHistory,
@@ -39,17 +38,15 @@ import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal } from './AlertRuleModal.tsx';
 import { AlertTestModal } from './AlertTestModal.tsx';
+import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
 import { DropRulesCard } from '../settings/DropRulesCard.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
 
-export type AlertViewTab = 'rules' | 'presets' | 'history' | 'drop-rules';
+export type AlertViewTab = 'rules' | 'history' | 'drop-rules';
 
 export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
-  if (clean === '/alerts/presets' || clean === '/alerts/quick-rules' || clean === '/alerts/quick') {
-    return 'presets';
-  }
   if (clean === '/alerts/history') {
     return 'history';
   }
@@ -61,8 +58,6 @@ export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
 
 export const alertSubTabToPath = (subTab: AlertViewTab): string => {
   switch (subTab) {
-    case 'presets':
-      return '/alerts/presets';
     case 'history':
       return '/alerts/history';
     case 'drop-rules':
@@ -102,7 +97,7 @@ export const AlertsPanel: React.FC = () => {
   );
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
-  const [presets, setPresets] = useState<SecurityPreset[]>([]);
+  const [presets, setPresets] = useState<AlertPreset[]>([]);
   const [historyItems, setHistoryItems] = useState<AlertHistoryItem[]>([]);
   const [historyTotal, setHistoryTotal] = useState<number>(0);
   const [dropRules, setDropRules] = useState<DropRule[]>([]);
@@ -117,6 +112,7 @@ export const AlertsPanel: React.FC = () => {
   const [isTestModalOpen, setIsTestModalOpen] = useState<boolean>(false);
   const [ruleToTest, setRuleToTest] = useState<AlertRule | null>(null);
   const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState<boolean>(false);
+  const [isPresetsModalOpen, setIsPresetsModalOpen] = useState<boolean>(false);
 
   // Presets installation state
   const [installingPresetId, setInstallingPresetId] = useState<string | null>(null);
@@ -131,11 +127,6 @@ export const AlertsPanel: React.FC = () => {
   const enabledRulesCount = useMemo(
     () => rules.filter((r) => r.is_enabled).length,
     [rules]
-  );
-
-  const installedPresetsCount = useMemo(
-    () => presets.filter((p) => rules.some((r) => r.name.toLowerCase() === p.name.toLowerCase())).length,
-    [presets, rules]
   );
 
   const enabledDropRulesCount = useMemo(
@@ -164,7 +155,7 @@ export const AlertsPanel: React.FC = () => {
       const [rulesData, channelsData, presetsData, historyData, facetsData, dropRulesData] = await Promise.all([
         fetchAlertRules(),
         fetchNotificationChannels(),
-        fetchSecurityPresets(),
+        fetchAlertPresets(),
         fetchAlertHistory(50, 0),
         fetchLogFacets().catch(() => ({ sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} })),
         fetchDropRules().catch(() => []),
@@ -240,12 +231,12 @@ export const AlertsPanel: React.FC = () => {
   };
 
   // 1-Click Install Preset
-  const handleInstallPreset = async (preset: SecurityPreset) => {
+  const handleInstallPreset = async (preset: AlertPreset) => {
     setInstallingPresetId(preset.id);
     try {
-      const created = await installSecurityPreset(preset.id, presetChannelId);
+      const created = await installAlertPreset(preset.id, presetChannelId);
       setRules((prev) => [...prev, created]);
-      setFeedbackMsg({ text: `Quick rule "${preset.name}" installed and active.`, isError: false });
+      setFeedbackMsg({ text: `Alert preset "${preset.name}" installed and active.`, isError: false });
       setActiveSubTab('rules');
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to install preset.', isError: true });
@@ -361,20 +352,18 @@ export const AlertsPanel: React.FC = () => {
       )}
 
       {/* Section Navigation Tabs */}
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2 border-b border-dark-700 pb-3 sm:pb-2">
+      <div className="flex items-center gap-2 border-b border-dark-700 pb-2 overflow-x-auto no-scrollbar">
         <button
           type="button"
           onClick={() => handleSubTabChange('rules')}
-          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
             activeSubTab === 'rules'
               ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-transparent'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <Bell className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Alert Rules</span>
-          </div>
+          <Bell className="w-3.5 h-3.5 shrink-0" />
+          <span>Alert Rules</span>
           <SplitCountBadge
             active={enabledRulesCount}
             total={rules.length}
@@ -384,37 +373,15 @@ export const AlertsPanel: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => handleSubTabChange('presets')}
-          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
-            activeSubTab === 'presets'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
-          }`}
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <Zap className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Alert Presets</span>
-          </div>
-          <SplitCountBadge
-            active={installedPresetsCount}
-            total={presets.length}
-            title={`${installedPresetsCount} of ${presets.length} presets installed`}
-          />
-        </button>
-
-        <button
-          type="button"
           onClick={() => handleSubTabChange('history')}
-          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
             activeSubTab === 'history'
               ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-transparent'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <History className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Alert History</span>
-          </div>
+          <History className="w-3.5 h-3.5 shrink-0" />
+          <span>Alert History</span>
           <SimpleCountBadge
             count={historyTotal}
             title={`${historyTotal} total incidents recorded`}
@@ -424,16 +391,14 @@ export const AlertsPanel: React.FC = () => {
         <button
           type="button"
           onClick={() => handleSubTabChange('drop-rules')}
-          className={`flex items-center justify-between sm:justify-start gap-2 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-w-0 ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
             activeSubTab === 'drop-rules'
               ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'bg-dark-900/60 sm:bg-transparent text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-dark-800/80 sm:border-transparent'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-transparent'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <FilterX className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Drop Rules</span>
-          </div>
+          <FilterX className="w-3.5 h-3.5 shrink-0" />
+          <span>Drop Rules</span>
           <SplitCountBadge
             active={enabledDropRulesCount}
             total={dropRules.length}
@@ -457,7 +422,17 @@ export const AlertsPanel: React.FC = () => {
                 Rules evaluated continuously against ingested log batches.
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+            <div className="flex flex-wrap items-center gap-2 sm:shrink-0 self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setIsPresetsModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
+                title="Browse and install pre-configured alert presets"
+              >
+                <Zap className="w-3.5 h-3.5 text-accent-500" />
+                <span>Presets</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleOpenCreateModal}
@@ -476,20 +451,24 @@ export const AlertsPanel: React.FC = () => {
               </div>
               <p className="text-xs text-slate-300 font-medium">No alert rules configured yet.</p>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Create a custom rule or deploy one of the ready-made 1-click Quick Rule presets.
+                Set up real-time threshold and pattern alerts to get notified of critical system events and errors.
               </p>
-              <div className="flex justify-center gap-2 pt-2">
+              <div className="flex flex-wrap justify-center gap-2 pt-2">
                 <button
-                  onClick={() => handleSubTabChange('presets')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-accent-400 bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/30 transition cursor-pointer"
+                  type="button"
+                  onClick={() => setIsPresetsModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer"
                 >
-                  View Quick Rules
+                  <Zap className="w-3.5 h-3.5 text-accent-500" />
+                  <span>Browse Presets</span>
                 </button>
                 <button
+                  type="button"
                   onClick={handleOpenCreateModal}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
                 >
-                  Create Custom Rule
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create Alert Rule</span>
                 </button>
               </div>
             </div>
@@ -535,7 +514,11 @@ export const AlertsPanel: React.FC = () => {
                           </span>
                         )}
                         <span>
-                          Threshold: <span className="text-slate-300">&ge; {rule.threshold_count} in {rule.window_seconds}s</span>
+                          {rule.rule_type === 'rate' ? (
+                            <>Rate: <span className="text-slate-300">&ge; {rule.threshold_count} logs/s in {rule.window_seconds}s</span></>
+                          ) : (
+                            <>Threshold: <span className="text-slate-300">&ge; {rule.threshold_count} in {rule.window_seconds}s</span></>
+                          )}
                         </span>
                         <span>
                           Cooldown: <span className="text-slate-300">{rule.cooldown_seconds}s</span>
@@ -623,102 +606,7 @@ export const AlertsPanel: React.FC = () => {
       </div>
     )}
 
-      {/* TAB 2: Alert Presets */}
-      {activeSubTab === 'presets' && (
-        <div className="space-y-4">
-          <div className="bg-dark-900 border border-dark-700 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Zap className="w-4 h-4 text-accent-500" />
-                <span>1-Click Alert Rule Presets</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Pre-tuned monitoring rules for instant deployment with automated threat signature detection.
-              </p>
-            </div>
-
-            {channels.length > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">Target Channel:</span>
-                <select
-                  value={presetChannelId ?? ''}
-                  onChange={(e) => setPresetChannelId(e.target.value ? Number(e.target.value) : null)}
-                  className="bg-dark-800 border border-dark-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:border-accent-500"
-                >
-                  <option value="">All Enabled Channels</option>
-                  {channels.map((ch) => (
-                    <option key={ch.id} value={ch.id}>
-                      {ch.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {presets.map((preset) => {
-              const alreadyInstalled = rules.some((r) => r.name.toLowerCase() === preset.name.toLowerCase());
-              return (
-                <div
-                  key={preset.id}
-                  className="bg-dark-900 border border-dark-700 rounded-xl p-5 flex flex-col justify-between space-y-4 hover:border-dark-600 transition"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-100">{preset.name}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/40">
-                        {preset.rule_type}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 leading-relaxed">{preset.description}</p>
-                    <div className="pt-2 flex flex-wrap gap-2 text-[11px] text-slate-400">
-                      {preset.filter_app && (
-                        <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
-                          app: {preset.filter_app}
-                        </span>
-                      )}
-                      <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
-                        {preset.threshold_count} matches in {preset.window_seconds}s
-                      </span>
-                      <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
-                        cooldown: {preset.cooldown_seconds}s
-                      </span>
-                      {preset.ai_enrichment && (
-                        <span className="bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded border border-purple-800/40 flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>AI Enrichment</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-dark-800 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500">
-                      {alreadyInstalled ? 'Preset already installed' : 'Instant 1-click activation'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleInstallPreset(preset)}
-                      disabled={installingPresetId === preset.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-accent-400 bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/30 transition cursor-pointer disabled:opacity-50"
-                    >
-                      {installingPresetId === preset.id ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Plus className="w-3 h-3" />
-                      )}
-                      <span>{alreadyInstalled ? 'Install Again' : 'Install Rule'}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: Alert History */}
+      {/* TAB 2: Alert History */}
       {activeSubTab === 'history' && (
         <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
           <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
@@ -1010,6 +898,19 @@ export const AlertsPanel: React.FC = () => {
           />
         </Modal>
       )}
+
+      {/* ALERT PRESETS MODAL */}
+      <AlertPresetsModal
+        isOpen={isPresetsModalOpen}
+        onClose={() => setIsPresetsModalOpen(false)}
+        presets={presets}
+        rules={rules}
+        channels={channels}
+        presetChannelId={presetChannelId}
+        onSelectChannelId={setPresetChannelId}
+        onInstallPreset={handleInstallPreset}
+        installingPresetId={installingPresetId}
+      />
     </div>
   );
 };

@@ -400,9 +400,9 @@ class TestSecurityPresets:
 
     def test_presets_count_and_keys(self):
         presets = get_security_presets()
-        assert len(presets) == 4
+        assert len(presets) == 5
         preset_ids = {p["id"] for p in presets}
-        expected_ids = {"ssh_bruteforce", "proxy_auth_flood", "sudo_escalation", "oom_killer"}
+        expected_ids = {"ssh_bruteforce", "proxy_auth_flood", "sudo_escalation", "oom_killer", "log_storm_detection"}
         assert expected_ids == preset_ids
 
     def test_extract_ip_from_various_formats(self):
@@ -1152,6 +1152,152 @@ class TestQueueConsumerAlertIntegration:
 
         # Wait for background dispatch to finish cleanly
         await evaluator.stop()
+
+    @pytest.mark.asyncio
+    async def test_rate_spike_alert_evaluation_and_culprit_breakdown(self, test_db: Path, monkeypatch):
+        """Verify rate spike alerts calculate required thresholds, track culprits, and format notifications."""
+        conn = get_connection(test_db)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, 1, ?)
+            """,
+            ("Log Storm Watcher", "rate", 10, 5, 300, now_iso),
+        )
+        rule_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        notifications = []
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            notifications.append({"title": title, "body": body})
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc)
+
+        # 1. Send 40 logs (needed = 10 logs/s * 5s = 50 logs). Should NOT fire.
+        batch1 = [
+            {
+                "id": i,
+                "app_name": "worker" if i % 2 == 0 else "storm-service",
+                "source_alias": "edge-01",
+                "message": f"normal activity event {i}",
+                "timestamp": (now + timedelta(seconds=i * 0.05)).isoformat(),
+            }
+            for i in range(40)
+        ]
+        await evaluator.evaluate_batch(batch1)
+        await asyncio.sleep(0.05)
+        assert len(notifications) == 0
+
+        # 2. Send 15 more logs (bringing total in window to 55 >= 50). Should fire!
+        batch2 = [
+            {
+                "id": 100 + i,
+                "app_name": "storm-service",
+                "source_alias": "edge-01",
+                "message": "database connection pool exhausted",
+                "timestamp": (now + timedelta(seconds=2.0 + i * 0.05)).isoformat(),
+            }
+            for i in range(15)
+        ]
+        await evaluator.evaluate_batch(batch2)
+        await asyncio.sleep(0.1)
+        await evaluator.stop()
+
+        assert len(notifications) == 1
+        title = notifications[0]["title"]
+        body = notifications[0]["body"]
+
+        assert "[Log Storm] Log Storm Watcher" in title
+        assert "logs/s" in title
+        assert "storm-service" in body
+        assert "edge-01" in body
+        assert "database connection pool exhausted" in body
+
+        # 3. Check alert_history record in SQLite
+        conn = get_connection(test_db)
+        cur = conn.cursor()
+        cur.execute("SELECT trigger_count, incident_summary FROM alert_history WHERE rule_id = ?", (rule_id,))
+        row = cur.fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] >= 50
+        summary = row[1]
+        assert "Log storm detected" in summary
+        assert "storm-service" in summary
+        assert "edge-01" in summary
+        assert "database connection pool exhausted" in summary
+
+    @pytest.mark.asyncio
+    async def test_rate_spike_alert_ai_enrichment_prompt(self, test_db: Path, monkeypatch):
+        """Verify rate spike alerts include culprit breakdown in AI prompt."""
+        conn = get_connection(test_db)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, 1, ?)
+            """,
+            ("AI Rate Storm", "rate", 5, 2, 300, now_iso),
+        )
+        rule_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        captured_prompt = None
+        async def mock_ai(**kwargs):
+            nonlocal captured_prompt
+            captured_prompt = kwargs.get("prompt_override")
+            return (
+                "Rate spike diagnosis",
+                "Culprit storm service flooded pool",
+                "Restart service and scale replicas",
+                1, 2, 3, 4, 5, 6, "mock-model", [],
+            )
+
+        monkeypatch.setattr("app.services.ai_engine.execute_ai_analysis", mock_ai)
+
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc)
+
+        # Send 12 logs (needed = 5 logs/s * 2s = 10 logs)
+        batch = [
+            {
+                "id": i,
+                "app_name": "leaky-collector",
+                "source_alias": "k8s-node-2",
+                "message": "repeated failure payload",
+                "timestamp": (now + timedelta(seconds=i * 0.1)).isoformat(),
+            }
+            for i in range(12)
+        ]
+        await evaluator.evaluate_batch(batch)
+        await asyncio.sleep(0.1)
+        await evaluator.stop()
+
+        assert captured_prompt is not None
+        assert "Primary Culprits" in captured_prompt
+        assert "leaky-collector" in captured_prompt
+        assert "k8s-node-2" in captured_prompt
+        assert "repeated failure payload" in captured_prompt
+        assert "logs/s" in captured_prompt
 
 
 

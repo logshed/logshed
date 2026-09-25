@@ -1,12 +1,12 @@
 import { apiFetch } from './client.ts';
 import {
   AlertHistoryResponse,
+  AlertPreset,
   AlertRule,
   AlertRuleCreate,
   AlertRuleUpdate,
   AlertTestRequest,
   AlertTestResponse,
-  SecurityPreset,
 } from '../types.ts';
 
 export async function fetchAlertRules(): Promise<AlertRule[]> {
@@ -40,11 +40,11 @@ export async function testAlertRule(data: AlertTestRequest): Promise<AlertTestRe
   });
 }
 
-export async function fetchSecurityPresets(): Promise<SecurityPreset[]> {
-  return apiFetch<SecurityPreset[]>('/api/alerts/presets');
+export async function fetchAlertPresets(): Promise<AlertPreset[]> {
+  return apiFetch<AlertPreset[]>('/api/alerts/presets');
 }
 
-export async function installSecurityPreset(
+export async function installAlertPreset(
   presetId: string,
   channelId?: number | null
 ): Promise<AlertRule> {
@@ -53,6 +53,10 @@ export async function installSecurityPreset(
     body: JSON.stringify({ channel_id: channelId ?? null }),
   });
 }
+
+export const fetchSecurityPresets = fetchAlertPresets;
+export const installSecurityPreset = installAlertPreset;
+
 
 export async function fetchAlertHistory(
   limit: number = 50,

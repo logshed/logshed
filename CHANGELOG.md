@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Standalone JSON Alert and Drop Presets**: Decoupled predefined rule definitions into standalone JSON files in `backend/app/presets/alerts/` and `backend/app/presets/drops/`, supporting dual-directory discovery from the application bundle and `/data/presets/` with `is_custom` indicator badges and automatic directory creation on startup.
+- **Preset Catalogs & Symmetrical Sub-Tabs**: Added dedicated modal catalogs for browsing and 1-click activating alert presets (`AlertPresetsModal`) and drop rule presets (`DropPresetsModal`), streamlining Alerts & Rules into 3 focused sub-tabs (`rules`, `history`, `drop-rules`) with symmetrical action toolbars.
+- **Ingestion Rate Spike & Log Storm Detection**: Introduced real-time rate spike alert rule type (`rate`) evaluating incoming log velocity in logs/second against a configurable window, backed by dynamic sliding-window deque bounds.
+- **In-Memory Top-Talker Culprit Analysis**: Integrated zero-disk-I/O frequency analysis using `collections.Counter` to identify primary culprit services/containers, hosts, and repeated log patterns during log storms.
+- **Rich Rate Alert Notifications & Incident Summaries**: Enhanced push notifications and fallback incident summaries with culprit counts, storm percentages, and observed rates, plus LLM prompt enrichment for AI root-cause analysis.
+- **Built-in Log Storm Alert Preset**: Pre-configured canary alert preset (`alert_log_storm.json`) monitoring for log spikes >= 100 logs/second over a 30s window.
 - **Drop Rule Severity Thresholds**: Configurable severity threshold level (`severity_threshold`) for ingestion drop rules, enabling selective dropping of noisy logs at or below a specified severity (e.g. Info and Debug) while preserving higher-priority warning, error, and critical messages. Includes schema migration in `migrate_v2`, test pattern simulation with sample severity, and severity level badges in the drop rules table.
 - **Ingestion Drop Rules**: In-memory filtering engine evaluating host/source, application/container, and message patterns (substring, regex, or app-wide wildcard `*`) to discard repetitive log chatter before database persistence and FTS5 indexing. Includes in-memory drop counters with periodic SQLite flushing to eliminate disk write contention.
 - **Saved Filter Views & URL Synchronization**: Saved filter views menu on the Console filter bar and mobile filter drawer with pinned view support, 1-tap activation, and bidirectional query parameter synchronization in the browser URL for bookmarking and sharing.
@@ -35,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Alert Preset Terminology Alignment**: Renamed `SecurityPreset` to `AlertPreset` across backend models, service modules (`alert_presets.py`), and frontend types.
+- **Rate Threshold Display Formatting**: Formatted rate rules and presets across alert rule listings and preset cards to clearly indicate logs/second over window duration.
+- **Symmetrical Alert and Drop Rule Toolbars**: Aligned action toolbars on both Alert Rules and Drop Rules tabs with Presets and New Rule buttons.
 - **Navigation Restructure to 4 Core Tabs**: Restructured top-level navigation to Stream, Alerts & Rules, Storage, and Settings. Moved Ingestion Drop Rules into Alerts & Rules as a dedicated sub-tab (`/alerts/drop-rules`).
 - **Alerts and Rules Layout Alignment**: Scoped the New Alert Rule action directly to the Alert Rules tab header bar, unified all sub-tab headers in uppercase with accent icons and divider lines matching Settings sections, and aligned Host Alias card presentation.
 - **Alerts Tab Layout Alignment**: Standardized container width and header styling in the Alerts tab to match Storage and Settings, including seamless Alert Firing Log table headers.
@@ -55,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Processing Newest Logs First During Alias Updates**: Updated `_batch_update_log_aliases` to process rows ordered by `id DESC` so the most recent logs visible in the live stream reflect alias modifications first.
 
 ### Fixed
+- **Alert Processing Self-Referential Logging Loops**: Suppressed `app.services.alert_evaluator`, `app.services.notifier`, `app.services.ai_engine`, and `app.services.ai_service` in `InternalLogHandler.IGNORED_LOGGERS` to prevent alert processing logs from being ingested and triggering cascading alerts.
+- **Mobile Drop Rule Action Clipping**: Fixed button clipping and column alignment in the drop rules table on mobile and desktop viewports.
+- **Rate Rule Sample Log Selection**: Selected sample logs from the primary culprit service over arbitrary trailing batch entries.
+- **Setting Section Header Consistency**: Unified section title styling to consistent white for both Rate Spike and Threshold settings in `AlertRuleModal`.
 - **CompiledAlertRule Last Trigger Timestamp Assignment**: Fixed an initialization bug in `CompiledAlertRule.__init__` where `last_triggered_at` was received as an argument but never assigned to the instance attribute.
 - **Numeric Input Backspacing in Alert Rules**: Resolved an issue where clearing numeric input fields in the alert rule modal forced a leading zero, ensuring fields can be completely cleared and typed into smoothly.
 - **AI Code Block Copy Whitespace**: Dedented common leading whitespace from fenced markdown code blocks when copying to clipboard, preventing unwanted indentation in copied snippets.

@@ -1,0 +1,13 @@
+{
+  "id": "sudo_escalation",
+  "name": "Sudo Privilege Escalation",
+  "description": "Detects execution of commands run with elevated root privileges via sudo.",
+  "rule_type": "pattern",
+  "filter_app": "sudo",
+  "filter_severity": null,
+  "match_pattern": "COMMAND=",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 60,
+  "ai_enrichment": true
+}

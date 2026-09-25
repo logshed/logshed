@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.models import (
+    DropPresetResponse,
     DropRuleCreate,
     DropRuleResponse,
     DropRuleTestRequest,
@@ -20,6 +21,7 @@ from app.models import (
     MessageResponse,
 )
 from app.services.drop_filter import CompiledDropRule, get_drop_filter
+from app.services.drop_presets import get_drop_presets, get_drop_preset_by_id
 from app.core.regex_validator import check_regex_safety, validate_regex_pattern
 
 router = APIRouter(prefix="/drop-rules", tags=["Drop Rules"])
@@ -322,3 +324,71 @@ async def test_drop_rule(
         severity=payload.sample_severity,
     )
     return DropRuleTestResponse(matched=matched, error=None)
+
+
+# ---------------------------------------------------------------------------
+# Drop Rule Presets
+# ---------------------------------------------------------------------------
+
+@router.get("/presets", response_model=list[DropPresetResponse])
+async def list_drop_presets(user: dict = Depends(get_current_user)) -> list[DropPresetResponse]:
+    """Retrieve all available 1-click drop rule presets."""
+    presets = get_drop_presets()
+    return [DropPresetResponse(**p) for p in presets]
+
+
+@router.post("/presets/{preset_id}/install", response_model=DropRuleResponse, status_code=status.HTTP_201_CREATED)
+async def install_drop_preset(
+    preset_id: str,
+    user: dict = Depends(get_current_user),
+) -> DropRuleResponse:
+    """1-click install of a predefined drop rule preset into active drop rules."""
+    preset = get_drop_preset_by_id(preset_id)
+    if not preset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Drop preset '{preset_id}' not found.",
+        )
+
+    msg = preset.get("message_pattern") or "*"
+    if preset.get("is_regex") and msg != "*":
+        validate_regex_pattern(msg)
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def _insert(conn):
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO drop_rules (
+                source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
+            ) VALUES (?, ?, ?, ?, 1, ?, 0, ?)
+            """,
+            (
+                preset.get("source_pattern"),
+                preset.get("app_pattern"),
+                msg,
+                1 if preset.get("is_regex") else 0,
+                preset.get("severity_threshold"),
+                now_iso,
+            ),
+        )
+        rule_id = cur.lastrowid
+        conn.commit()
+        return rule_id
+
+    rule_id = await run_db_query(_insert)
+    await asyncio.to_thread(get_drop_filter().reload_rules)
+
+    return DropRuleResponse(
+        id=rule_id,
+        source_pattern=preset.get("source_pattern"),
+        app_pattern=preset.get("app_pattern"),
+        message_pattern=msg,
+        is_regex=bool(preset.get("is_regex")),
+        is_enabled=True,
+        severity_threshold=preset.get("severity_threshold"),
+        dropped_count=0,
+        created_at=now_iso,
+    )
+

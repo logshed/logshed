@@ -1,5 +1,6 @@
 import { apiFetch } from './client.ts';
 import {
+  DropPreset,
   DropRule,
   DropRuleCreate,
   DropRuleUpdate,
@@ -48,3 +49,14 @@ export async function resetDropRuleCounter(id: number): Promise<DropRule> {
     method: 'POST',
   });
 }
+
+export async function fetchDropPresets(): Promise<DropPreset[]> {
+  return apiFetch<DropPreset[]>('/api/drop-rules/presets');
+}
+
+export async function installDropPreset(presetId: string): Promise<DropRule> {
+  return apiFetch<DropRule>(`/api/drop-rules/presets/${presetId}/install`, {
+    method: 'POST',
+  });
+}
+

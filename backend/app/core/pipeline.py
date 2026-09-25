@@ -37,6 +37,10 @@ class InternalLogHandler(logging.Handler):
         "app.core.migrations",
         "app.services.retention",
         "app.services.storage_metrics",
+        "app.services.alert_evaluator",
+        "app.services.notifier",
+        "app.services.ai_engine",
+        "app.services.ai_service",
     }
 
     def __init__(

@@ -408,4 +408,73 @@ describe('DropRulesCard Component', () => {
       });
     });
   });
+
+  it('displays Quick Drop Presets and installs a preset', async () => {
+    const mockPresets = [
+      {
+        id: 'docker_healthcheck',
+        name: 'Docker Healthcheck Noise',
+        description: 'Filters repetitive container health checks.',
+        source_pattern: null,
+        app_pattern: null,
+        message_pattern: 'healthcheck|health_status',
+        is_regex: true,
+        severity_threshold: null,
+        is_custom: false,
+      },
+      {
+        id: 'custom_preset',
+        name: 'Custom Noise Filter',
+        description: 'Custom community preset.',
+        source_pattern: null,
+        app_pattern: null,
+        message_pattern: 'ping_test',
+        is_regex: false,
+        severity_threshold: 7,
+        is_custom: true,
+      },
+    ];
+
+    vi.spyOn(dropRulesApi, 'fetchDropPresets').mockResolvedValue(mockPresets);
+    const installSpy = vi.spyOn(dropRulesApi, 'installDropPreset').mockResolvedValue({
+      id: 3,
+      source_pattern: null,
+      app_pattern: null,
+      message_pattern: 'healthcheck|health_status',
+      is_regex: true,
+      is_enabled: true,
+      severity_threshold: null,
+      dropped_count: 0,
+      created_at: '2026-09-18T11:00:00Z',
+    });
+
+    render(<DropRulesCard />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Presets/i })).toBeInTheDocument();
+    });
+
+    // Modal is initially closed
+    expect(screen.queryByText('Drop Presets Catalog')).not.toBeInTheDocument();
+
+    // Click Presets button to open modal
+    fireEvent.click(screen.getByRole('button', { name: /Presets/i }));
+
+    // Modal items visible
+    expect(screen.getByText('Drop Presets Catalog')).toBeInTheDocument();
+    expect(screen.getByText('Common Noise Filter Presets')).toBeInTheDocument();
+    expect(screen.getByText('Docker Healthcheck Noise')).toBeInTheDocument();
+    expect(screen.getByText('Custom Noise Filter')).toBeInTheDocument();
+    expect(screen.getByText('Custom')).toBeInTheDocument();
+
+    // Click Install on docker_healthcheck
+    const installBtns = screen.getAllByRole('button', { name: /Install Rule/i });
+    fireEvent.click(installBtns[0]);
+
+    await waitFor(() => {
+      expect(installSpy).toHaveBeenCalledWith('docker_healthcheck');
+      expect(screen.getByText(/Drop preset "Docker Healthcheck Noise" installed\./i)).toBeInTheDocument();
+    });
+  });
 });
+

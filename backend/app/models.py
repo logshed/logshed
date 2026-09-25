@@ -415,6 +415,20 @@ class DropRuleTestResponse(BaseModel):
     error: Optional[str] = None
 
 
+class DropPresetResponse(BaseModel):
+    """Predefined log drop rule preset."""
+    id: str
+    name: str
+    description: str
+    source_pattern: Optional[str] = None
+    app_pattern: Optional[str] = None
+    message_pattern: str
+    is_regex: bool = False
+    severity_threshold: Optional[int] = None
+    is_custom: bool = False
+
+
+
 # ---------------------------------------------------------------------------
 # Saved Views Models
 # ---------------------------------------------------------------------------
@@ -489,12 +503,12 @@ class NotificationTestResponse(BaseModel):
 class AlertRuleCreate(BaseModel):
     """Payload for creating a new alert rule."""
     name: str = Field(..., min_length=1, max_length=100, description="Friendly alert rule name")
-    rule_type: str = Field("threshold", description="Rule type: threshold or pattern")
+    rule_type: str = Field("threshold", description="Rule type: threshold, pattern, or rate")
     channel_id: Optional[int] = Field(None, description="Target notification channel ID (null dispatches to all enabled channels)")
     filter_app: Optional[str] = Field(None, max_length=100, description="Optional application or container filter")
     filter_severity: Optional[int] = Field(None, ge=0, le=7, description="Maximum severity threshold (0-7, lower is more critical)")
     match_pattern: Optional[str] = Field(None, max_length=1000, description="Regex or keyword pattern to match against log messages")
-    threshold_count: int = Field(1, ge=1, le=10000, description="Occurrences needed within window to trigger")
+    threshold_count: int = Field(1, ge=1, le=100000, description="Occurrences or logs/sec needed within window to trigger")
     window_seconds: int = Field(60, ge=1, le=86400, description="Sliding window duration in seconds")
     cooldown_seconds: int = Field(300, ge=5, le=86400, description="Cooldown dampening duration in seconds")
     ai_enrichment: bool = Field(False, description="Whether to enrich incident alerts with LLM root-cause analysis")
@@ -504,12 +518,12 @@ class AlertRuleCreate(BaseModel):
 class AlertRuleUpdate(BaseModel):
     """Payload for updating an existing alert rule."""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
-    rule_type: Optional[str] = None
+    rule_type: Optional[str] = Field(None, description="Rule type: threshold, pattern, or rate")
     channel_id: Optional[int] = None
     filter_app: Optional[str] = Field(None, max_length=100)
     filter_severity: Optional[int] = Field(None, ge=0, le=7)
     match_pattern: Optional[str] = Field(None, max_length=1000)
-    threshold_count: Optional[int] = Field(None, ge=1, le=10000)
+    threshold_count: Optional[int] = Field(None, ge=1, le=100000)
     window_seconds: Optional[int] = Field(None, ge=1, le=86400)
     cooldown_seconds: Optional[int] = Field(None, ge=5, le=86400)
     ai_enrichment: Optional[bool] = None
@@ -555,8 +569,8 @@ class AlertTestResponse(BaseModel):
     error: Optional[str] = None
 
 
-class SecurityPresetResponse(BaseModel):
-    """Predefined security canary alert preset."""
+class AlertPresetResponse(BaseModel):
+    """Predefined alert preset."""
     id: str
     name: str
     description: str
@@ -568,6 +582,12 @@ class SecurityPresetResponse(BaseModel):
     window_seconds: int = 60
     cooldown_seconds: int = 300
     ai_enrichment: bool = True
+    is_custom: bool = False
+
+
+# Backward compatibility alias
+SecurityPresetResponse = AlertPresetResponse
+
 
 
 class AlertPresetInstallRequest(BaseModel):

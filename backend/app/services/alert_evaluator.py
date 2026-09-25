@@ -7,7 +7,7 @@ Integrates with QueueConsumer batch processing, redactor, AI diagnosis, and noti
 """
 
 import asyncio
-from collections import deque
+from collections import Counter, deque
 import datetime
 import fnmatch
 import logging
@@ -22,7 +22,7 @@ from typing import Any, Optional, Union
 from app.core.redactor import redact
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
-from app.services.security_presets import extract_ip_from_message
+from app.services.alert_presets import extract_ip_from_message
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +287,8 @@ class AlertEvaluator:
                 window = self._windows.setdefault(rule.id, deque())
                 # Compute window cutoff using now_epoch - rule.window_seconds (SEC-05)
                 window_cutoff = now_epoch - rule.window_seconds
-                max_window_size = rule.threshold_count * 2
+                needed = (rule.threshold_count * rule.window_seconds) if rule.rule_type == "rate" else rule.threshold_count
+                max_window_size = max(500, min(20000, needed * 2)) if rule.rule_type == "rate" else rule.threshold_count * 2
 
                 for entry in batch:
                     try:
@@ -314,20 +315,20 @@ class AlertEvaluator:
                                 idx -= 1
                             window.insert(idx, (entry_epoch, entry))
 
-                        # Bound maximum deque size to rule.threshold_count * 2 (SEC-05)
+                        # Bound maximum deque size
                         while len(window) > max_window_size:
                             window.popleft()
 
                         # Check threshold condition
-                        if len(window) >= rule.threshold_count:
+                        if len(window) >= needed:
                             # Verify cooldown dampening via cached epoch
                             is_suppressed = bool(
                                 rule.suppress_until_epoch and now_epoch < rule.suppress_until_epoch
                             )
 
                             if is_suppressed:
-                                # Cap window to threshold_count during cooldown to avoid memory expansion
-                                while len(window) > rule.threshold_count:
+                                # Cap window to needed during cooldown to avoid memory expansion
+                                while len(window) > needed:
                                     window.popleft()
                             else:
                                 # Trigger alert firing
@@ -419,6 +420,52 @@ class AlertEvaluator:
                     if cand_app:
                         extracted_app = str(cand_app).strip()
 
+        # Culprit frequency analysis using collections.Counter
+        culprit_app: Optional[str] = None
+        culprit_host: Optional[str] = None
+        culprit_msg: Optional[str] = None
+        measured_rate: Optional[float] = None
+
+        if triggering_logs:
+            total_logs = len(triggering_logs)
+            app_counter: Counter[str] = Counter()
+            host_counter: Counter[str] = Counter()
+            msg_counter: Counter[str] = Counter()
+
+            for log_entry in triggering_logs:
+                app_val = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
+                host_val = log_entry.get("source_alias") or log_entry.get("source_ip") or log_entry.get("host") or "unknown"
+                msg_val = str(log_entry.get("message") or log_entry.get("raw") or "")[:150].strip()
+
+                app_counter[str(app_val)] += 1
+                host_counter[str(host_val)] += 1
+                if msg_val:
+                    msg_counter[msg_val] += 1
+
+            if app_counter:
+                top_app, app_count = app_counter.most_common(1)[0]
+                app_pct = round((app_count / total_logs) * 100)
+                culprit_app = f"{top_app} ({app_count}/{total_logs}, {app_pct}%)"
+                if rule.rule_type == "rate":
+                    extracted_app = top_app
+                    for log_entry in reversed(triggering_logs):
+                        cand_app = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
+                        if str(cand_app) == str(top_app):
+                            sample_log = str(log_entry.get("message") or log_entry.get("raw") or "")
+                            break
+            if host_counter:
+                top_host, host_count = host_counter.most_common(1)[0]
+                host_pct = round((host_count / total_logs) * 100)
+                culprit_host = f"{top_host} ({host_count}/{total_logs}, {host_pct}%)"
+                if rule.rule_type == "rate":
+                    extracted_host = top_host
+            if msg_counter:
+                top_msg, msg_count = msg_counter.most_common(1)[0]
+                msg_pct = round((msg_count / total_logs) * 100)
+                culprit_msg = f"{top_msg} (x{msg_count}, {msg_pct}%)"
+
+            measured_rate = round(total_logs / max(1.0, float(rule.window_seconds)), 1)
+
         incident_summary = None
         ai_success = False
         ai_error_note = None
@@ -451,14 +498,27 @@ class AlertEvaluator:
                 redacted_lines = redact(raw_lines)
                 redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
 
+                if rule.rule_type == "rate":
+                    threshold_line = f"- Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s (Measured: {measured_rate} logs/s)"
+                    culprit_section = (
+                        f"### Primary Culprits\n"
+                        f"- Top Service / App: {culprit_app or 'Unknown'}\n"
+                        f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
+                        f"- Top Pattern: {culprit_msg or 'N/A'}\n\n"
+                    )
+                else:
+                    threshold_line = f"- Threshold: {rule.threshold_count} matches in {rule.window_seconds}s"
+                    culprit_section = ""
+
                 prompt = (
                     f"### Security / Operations Incident Alert\n"
                     f"- Alert Rule: {rule.name}\n"
                     f"- Rule Type: {rule.rule_type}\n"
                     f"- Host / Source: {extracted_host or 'Unknown'}\n"
                     f"- App / Container: {extracted_app or 'Unknown'}\n"
-                    f"- Threshold: {rule.threshold_count} matches in {rule.window_seconds}s\n"
+                    f"{threshold_line}\n"
                     f"- Offending IP: {extracted_ip or 'None detected'}\n\n"
+                    f"{culprit_section}"
                     f"### Redacted Log Stream (Chronological)\n"
                     f"```\n{redacted_text}\n```\n\n"
                     f"Review this incident and provide structured Summary, Root Cause, and Actionable Remediation."
@@ -516,7 +576,16 @@ class AlertEvaluator:
                 incident_summary = f"AI analysis failed: {clean_err}"
                 ai_error_note = clean_err
         else:
-            incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
+            if rule.rule_type == "rate":
+                incident_summary = (
+                    f"Log storm detected: {len(triggering_logs)} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
+                    f"### Primary Culprits\n"
+                    f"- Top Service / App: {culprit_app or 'Unknown'}\n"
+                    f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
+                    f"- Top Pattern: {culprit_msg or 'N/A'}"
+                )
+            else:
+                incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
 
         # Record event in alert_history table via worker thread
         def _execute_insert(conn: sqlite3.Connection) -> None:
@@ -546,15 +615,31 @@ class AlertEvaluator:
             logger.error(f"Failed to record alert history for rule {rule.id}: {db_err}")
 
         # Construct clean push notification payload with secrets redacted
-        notification_title = str(redact(f"LogShed Alert: {rule.name}"))
+        if rule.rule_type == "rate":
+            notification_title = str(redact(f"LogShed Alert: [Log Storm] {rule.name} ({measured_rate} logs/s)"))
+        else:
+            notification_title = str(redact(f"LogShed Alert: {rule.name}"))
+
         redacted_sample_log = str(redact(sample_log)) if sample_log else ""
         truncated_log = format_sample_log_for_alert(redacted_sample_log)
         clean_log = truncated_log.replace("```", "").replace("`", "").strip()
-        body_lines = [
-            f"Host: {extracted_host or 'Unknown'}",
-            f"App: {extracted_app or 'Unknown'}",
-            f"Log: {clean_log}",
-        ]
+
+        if rule.rule_type == "rate":
+            body_lines = [
+                f"Host: {culprit_host or extracted_host or 'Unknown'}",
+                f"App: {culprit_app or extracted_app or 'Unknown'}",
+                f"Rate: {measured_rate} logs/s (Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s)",
+            ]
+            if culprit_msg:
+                body_lines.append(f"Top Pattern: {culprit_msg}")
+            if clean_log:
+                body_lines.append(f"Sample Log: {clean_log}")
+        else:
+            body_lines = [
+                f"Host: {extracted_host or 'Unknown'}",
+                f"App: {extracted_app or 'Unknown'}",
+                f"Log: {clean_log}",
+            ]
 
         if rule.ai_enrichment:
             if ai_success and summary:

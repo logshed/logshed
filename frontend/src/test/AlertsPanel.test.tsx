@@ -39,6 +39,7 @@ const mockPresets = [
     window_seconds: 60,
     cooldown_seconds: 300,
     ai_enrichment: true,
+    is_custom: false,
   },
   {
     id: 'oom_killer',
@@ -52,6 +53,7 @@ const mockPresets = [
     window_seconds: 60,
     cooldown_seconds: 300,
     ai_enrichment: true,
+    is_custom: true,
   },
 ];
 
@@ -113,7 +115,7 @@ describe('AlertsPanel Component', () => {
     vi.restoreAllMocks();
     window.history.pushState(null, '', '/alerts');
     vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(mockRules);
-    vi.spyOn(alertsApi, 'fetchSecurityPresets').mockResolvedValue(mockPresets);
+    vi.spyOn(alertsApi, 'fetchAlertPresets').mockResolvedValue(mockPresets);
     vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
     vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue(mockChannels);
     vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
@@ -154,19 +156,18 @@ describe('AlertsPanel Component', () => {
   it('maps pathname to corresponding AlertViewTab and vice versa', () => {
     expect(pathToAlertSubTab('/alerts')).toBe('rules');
     expect(pathToAlertSubTab('/alerts/rules')).toBe('rules');
-    expect(pathToAlertSubTab('/alerts/presets')).toBe('presets');
-    expect(pathToAlertSubTab('/alerts/quick-rules')).toBe('presets');
+    expect(pathToAlertSubTab('/alerts/presets')).toBe('rules');
+    expect(pathToAlertSubTab('/alerts/quick-rules')).toBe('rules');
     expect(pathToAlertSubTab('/alerts/history')).toBe('history');
     expect(pathToAlertSubTab('/alerts/drop-rules')).toBe('drop-rules');
     expect(pathToAlertSubTab('/alerts/drop')).toBe('drop-rules');
 
     expect(alertSubTabToPath('rules')).toBe('/alerts/rules');
-    expect(alertSubTabToPath('presets')).toBe('/alerts/presets');
     expect(alertSubTabToPath('history')).toBe('/alerts/history');
     expect(alertSubTabToPath('drop-rules')).toBe('/alerts/drop-rules');
   });
 
-  it('renders alert rules and switches between tabs', async () => {
+  it('renders alert rules and switches between tabs, and opens Presets modal', async () => {
     render(<AlertsPanel />);
 
     await waitFor(() => {
@@ -175,13 +176,22 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('Fired 2x')).toBeInTheDocument();
     });
 
-    // Switch to Alert Presets tab
-    const presetsTab = screen.getByRole('button', { name: /Alert Presets/i });
-    fireEvent.click(presetsTab);
+    // Open Alert Presets modal
+    const presetsBtn = screen.getByRole('button', { name: /^Presets/i });
+    fireEvent.click(presetsBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('1-Click Alert Rule Presets')).toBeInTheDocument();
+      expect(screen.getByText('Alert Presets Catalog')).toBeInTheDocument();
       expect(screen.getByText('Kernel Out-Of-Memory (OOM) Kill')).toBeInTheDocument();
+      expect(screen.getByText('Pre-tuned Monitoring Rules')).toBeInTheDocument();
+    });
+
+    // Close Presets modal
+    const closeDialogBtn = screen.getByRole('button', { name: 'Close dialog' });
+    fireEvent.click(closeDialogBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Alert Presets Catalog')).not.toBeInTheDocument();
     });
 
     // Switch to Alert History tab
@@ -274,7 +284,7 @@ describe('AlertsPanel Component', () => {
   });
 
   it('installs a 1-click quick rule preset', async () => {
-    const installSpy = vi.spyOn(alertsApi, 'installSecurityPreset').mockResolvedValue({
+    const installSpy = vi.spyOn(alertsApi, 'installAlertPreset').mockResolvedValue({
       id: 3,
       name: 'Kernel Out-Of-Memory (OOM) Kill',
       rule_type: 'pattern',
@@ -297,12 +307,13 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
     });
 
-    // Go to presets tab
-    const presetsTab = screen.getByRole('button', { name: /Alert Presets/i });
-    fireEvent.click(presetsTab);
+    // Open Presets modal
+    const presetsBtn = screen.getByRole('button', { name: /^Presets/i });
+    fireEvent.click(presetsBtn);
 
     await waitFor(() => {
       expect(screen.getByText('Kernel Out-Of-Memory (OOM) Kill')).toBeInTheDocument();
+      expect(screen.getByText('Custom')).toBeInTheDocument();
     });
 
     const installBtns = screen.getAllByRole('button', { name: /Install Rule/i });
@@ -497,10 +508,10 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
     });
 
-    // Click Alert Presets
-    const presetsTab = screen.getByRole('button', { name: /Alert Presets/i });
-    fireEvent.click(presetsTab);
-    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/presets');
+    // Click Drop Rules
+    const dropRulesTab = screen.getByRole('button', { name: /Drop Rules/i });
+    fireEvent.click(dropRulesTab);
+    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/drop-rules');
 
     // Click Alert History
     const historyTab = screen.getByRole('button', { name: /Alert History/i });
@@ -511,6 +522,53 @@ describe('AlertsPanel Component', () => {
     const rulesTab = screen.getByRole('button', { name: /Alert Rules/i });
     fireEvent.click(rulesTab);
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/rules');
+  });
+
+  it('installs alert preset from presets modal with target channel', async () => {
+    const installSpy = vi.spyOn(alertsApi, 'installAlertPreset').mockResolvedValue({
+      id: 3,
+      name: 'Kernel Out-Of-Memory (OOM) Kill',
+      rule_type: 'pattern',
+      channel_id: 1,
+      filter_app: null,
+      filter_severity: null,
+      match_pattern: 'Out of memory: Kill process',
+      threshold_count: 1,
+      window_seconds: 60,
+      cooldown_seconds: 300,
+      ai_enrichment: true,
+      is_enabled: true,
+      trigger_count: 0,
+      last_triggered_at: null,
+      suppress_until: null,
+      created_at: '2026-09-18T12:00:00Z',
+    });
+
+    render(<AlertsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Presets/i })).toBeInTheDocument();
+    });
+
+    // Open Presets modal
+    fireEvent.click(screen.getByRole('button', { name: /^Presets/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Alert Presets Catalog')).toBeInTheDocument();
+    });
+
+    // Select target channel
+    const channelSelect = screen.getByLabelText(/Target Channel:/i);
+    fireEvent.change(channelSelect, { target: { value: '1' } });
+
+    // Install OOM killer preset (second preset)
+    const installBtns = screen.getAllByRole('button', { name: /Install Rule/i });
+    fireEvent.click(installBtns[0]); // OOM is not already installed
+
+    await waitFor(() => {
+      expect(installSpy).toHaveBeenCalledWith('oom_killer', 1);
+      expect(screen.getByText(/Alert preset "Kernel Out-Of-Memory \(OOM\) Kill" installed and active\./i)).toBeInTheDocument();
+    });
   });
 
   it('displays updated description without QueueConsumer and matches Rule Guide link styling in modal', async () => {

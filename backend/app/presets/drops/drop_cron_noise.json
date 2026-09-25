@@ -1,0 +1,10 @@
+{
+  "id": "cron_noise",
+  "name": "Routine CRON Noise",
+  "description": "Filters routine CRON execution and service reload notices.",
+  "source_pattern": null,
+  "app_pattern": "CRON",
+  "message_pattern": "CMD|RELOAD|STARTUP",
+  "is_regex": true,
+  "severity_threshold": null
+}
