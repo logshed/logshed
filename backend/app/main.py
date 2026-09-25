@@ -455,6 +455,21 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
 
+    # API v1 alias router
+    api_v1_router = APIRouter(prefix="/api/v1")
+    api_v1_router.include_router(auth.router)
+    api_v1_router.include_router(logs.router)
+    api_v1_router.include_router(settings.router)
+    api_v1_router.include_router(aliases.router)
+    api_v1_router.include_router(drop_rules.router)
+    api_v1_router.include_router(saved_views.router)
+    api_v1_router.include_router(notifications.router)
+    api_v1_router.include_router(alerts.router)
+    api_v1_router.include_router(system.router)
+    api_v1_router.include_router(ai.router)
+
+    app.include_router(api_v1_router)
+
     # Static files serving with SPA fallback
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists():

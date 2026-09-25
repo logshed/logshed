@@ -428,6 +428,38 @@ class DropPresetResponse(BaseModel):
     is_custom: bool = False
 
 
+class DropRuleExportItem(BaseModel):
+    """Exportable drop rule definition."""
+    model_config = ConfigDict(extra="ignore")
+    source_pattern: Optional[str] = None
+    app_pattern: Optional[str] = None
+    message_pattern: str = "*"
+    is_regex: bool = False
+    is_enabled: bool = True
+    severity_threshold: Optional[int] = None
+
+
+class DropRuleExportBundle(BaseModel):
+    """Bundle containing multiple exported drop rules."""
+    version: str = "1"
+    exported_at: str
+    drop_rules: list[DropRuleExportItem]
+
+
+class DropRuleExportSingle(BaseModel):
+    """Export container for a single drop rule."""
+    version: str = "1"
+    exported_at: str
+    drop_rule: DropRuleExportItem
+
+
+class DropRuleImportResponse(BaseModel):
+    """Outcome summary for imported drop rules."""
+    imported: int
+    skipped: int
+    errors: list[str] = Field(default_factory=list)
+
+
 
 # ---------------------------------------------------------------------------
 # Saved Views Models
@@ -588,6 +620,41 @@ class AlertPresetResponse(BaseModel):
 # Backward compatibility alias
 SecurityPresetResponse = AlertPresetResponse
 
+
+class AlertRuleExportItem(BaseModel):
+    """Exportable alert rule definition."""
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    rule_type: str = "threshold"
+    filter_app: Optional[str] = None
+    filter_severity: Optional[int] = None
+    match_pattern: Optional[str] = None
+    threshold_count: int = 1
+    window_seconds: int = 60
+    cooldown_seconds: int = 300
+    ai_enrichment: bool = False
+    is_enabled: bool = True
+
+
+class AlertRuleExportBundle(BaseModel):
+    """Bundle containing multiple exported alert rules."""
+    version: str = "1"
+    exported_at: str
+    alert_rules: list[AlertRuleExportItem]
+
+
+class AlertRuleExportSingle(BaseModel):
+    """Export container for a single alert rule."""
+    version: str = "1"
+    exported_at: str
+    alert_rule: AlertRuleExportItem
+
+
+class AlertRuleImportResponse(BaseModel):
+    """Outcome summary for imported alert rules."""
+    imported: int
+    skipped: int
+    errors: list[str] = Field(default_factory=list)
 
 
 class AlertPresetInstallRequest(BaseModel):

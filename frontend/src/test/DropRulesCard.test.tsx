@@ -476,5 +476,60 @@ describe('DropRulesCard Component', () => {
       expect(screen.getByText(/Drop preset "Docker Healthcheck Noise" installed\./i)).toBeInTheDocument();
     });
   });
+
+  it('exports all drop rules when Export All button is clicked', async () => {
+    const exportSpy = vi.spyOn(dropRulesApi, 'exportAllDropRules').mockResolvedValue(
+      new Blob([JSON.stringify({ version: '1', drop_rules: mockRules })], { type: 'application/json' })
+    );
+
+    render(<DropRulesCard />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Export All/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Export All/i }));
+    expect(exportSpy).toHaveBeenCalled();
+  });
+
+  it('exports a single drop rule when row Export button is clicked', async () => {
+    const exportSpy = vi.spyOn(dropRulesApi, 'exportSingleDropRule').mockResolvedValue(
+      new Blob([JSON.stringify({ version: '1', drop_rule: mockRules[0] })], { type: 'application/json' })
+    );
+
+    render(<DropRulesCard />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Export rule 1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Export rule 1'));
+    expect(exportSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('imports drop rules from a JSON file and displays feedback', async () => {
+    const importSpy = vi.spyOn(dropRulesApi, 'importDropRules').mockResolvedValue({
+      imported: 1,
+      skipped: 1,
+      errors: [],
+    });
+
+    const { container } = render(<DropRulesCard />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument();
+    });
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput).toBeInTheDocument();
+
+    const file = new File([JSON.stringify({ drop_rules: [] })], 'rules.json', { type: 'application/json' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(importSpy).toHaveBeenCalled();
+      expect(screen.getByText(/Imported 1 rule \(1 skipped\)\./i)).toBeInTheDocument();
+    });
+  });
 });
 

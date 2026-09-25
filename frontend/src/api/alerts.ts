@@ -1,4 +1,4 @@
-import { apiFetch } from './client.ts';
+import { apiFetch, apiFetchBlob } from './client.ts';
 import {
   AlertHistoryResponse,
   AlertPreset,
@@ -79,5 +79,22 @@ export async function deleteAlertHistoryItem(id: number): Promise<{ status: stri
 export async function clearAlertHistory(): Promise<{ status: string }> {
   return apiFetch<{ status: string }>('/api/alerts/history', {
     method: 'DELETE',
+  });
+}
+
+export async function exportAllAlertRules(): Promise<Blob> {
+  return apiFetchBlob('/api/alerts/rules/export');
+}
+
+export async function exportSingleAlertRule(ruleId: number): Promise<Blob> {
+  return apiFetchBlob(`/api/alerts/rules/${ruleId}/export`);
+}
+
+export async function importAlertRules(
+  data: object
+): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  return apiFetch<{ imported: number; skipped: number; errors: string[] }>('/api/alerts/rules/import', {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }

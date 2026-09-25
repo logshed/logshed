@@ -654,5 +654,60 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('(1 or more target channels disabled)')).toBeInTheDocument();
     });
   });
+
+  it('exports all alert rules when Export All button is clicked', async () => {
+    const exportSpy = vi.spyOn(alertsApi, 'exportAllAlertRules').mockResolvedValue(
+      new Blob([JSON.stringify({ version: '1', alert_rules: [] })], { type: 'application/json' })
+    );
+
+    render(<AlertsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Export All/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Export All/i }));
+    expect(exportSpy).toHaveBeenCalled();
+  });
+
+  it('exports a single alert rule when row Export button is clicked', async () => {
+    const exportSpy = vi.spyOn(alertsApi, 'exportSingleAlertRule').mockResolvedValue(
+      new Blob([JSON.stringify({ version: '1', alert_rule: {} })], { type: 'application/json' })
+    );
+
+    render(<AlertsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Export rule SSH Brute-Force Detection')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Export rule SSH Brute-Force Detection'));
+    expect(exportSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('imports alert rules from a JSON file and displays feedback', async () => {
+    const importSpy = vi.spyOn(alertsApi, 'importAlertRules').mockResolvedValue({
+      imported: 2,
+      skipped: 0,
+      errors: [],
+    });
+
+    const { container } = render(<AlertsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument();
+    });
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput).toBeInTheDocument();
+
+    const file = new File([JSON.stringify({ alert_rules: [] })], 'rules.json', { type: 'application/json' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(importSpy).toHaveBeenCalled();
+      expect(screen.getByText(/Imported 2 rules \(0 skipped\)\./i)).toBeInTheDocument();
+    });
+  });
 });
 

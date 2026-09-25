@@ -7,10 +7,11 @@ dry-run pattern testing, and historical alert log auditing.
 
 import asyncio
 import datetime
+import json
 import logging
 import re
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.models import (
@@ -19,6 +20,10 @@ from app.models import (
     AlertPresetInstallRequest,
     AlertPresetResponse,
     AlertRuleCreate,
+    AlertRuleExportBundle,
+    AlertRuleExportItem,
+    AlertRuleExportSingle,
+    AlertRuleImportResponse,
     AlertRuleResponse,
     AlertRuleUpdate,
     AlertTestRequest,
@@ -81,6 +86,266 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
         return [_row_to_alert_rule_response(r) for r in rows]
 
     return await run_db_query(_query)
+
+
+@router.get("/export", response_model=AlertRuleExportBundle)
+@router.get("/rules/export", response_model=AlertRuleExportBundle, include_in_schema=False)
+async def export_alert_rules(user: dict = Depends(get_current_user)) -> Response:
+    """Export all configured alert rules as a JSON bundle."""
+    def _query(conn):
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT name, rule_type, filter_app, filter_severity, match_pattern,
+                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled
+            FROM alert_rules
+            ORDER BY id ASC
+            """
+        )
+        rows = cur.fetchall()
+        return [
+            AlertRuleExportItem(
+                name=r["name"],
+                rule_type=r["rule_type"] or "threshold",
+                filter_app=r["filter_app"],
+                filter_severity=r["filter_severity"],
+                match_pattern=r["match_pattern"],
+                threshold_count=r["threshold_count"] or 1,
+                window_seconds=r["window_seconds"] or 60,
+                cooldown_seconds=r["cooldown_seconds"] or 300,
+                ai_enrichment=bool(r["ai_enrichment"]),
+                is_enabled=bool(r["is_enabled"]),
+            )
+            for r in rows
+        ]
+
+    exported_rules = await run_db_query(_query)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    bundle = AlertRuleExportBundle(
+        version="1",
+        exported_at=now_iso,
+        alert_rules=exported_rules,
+    )
+    return Response(
+        content=json.dumps(bundle.model_dump(), indent=2),
+        media_type="application/json",
+    )
+
+
+@router.get("/{rule_id}/export", response_model=AlertRuleExportSingle)
+@router.get("/rules/{rule_id}/export", response_model=AlertRuleExportSingle, include_in_schema=False)
+async def export_single_alert_rule(
+    rule_id: int,
+    user: dict = Depends(get_current_user),
+) -> Response:
+    """Export a single alert rule as a JSON object."""
+    def _query(conn):
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT name, rule_type, filter_app, filter_severity, match_pattern,
+                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled
+            FROM alert_rules
+            WHERE id = ?
+            """,
+            (rule_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return AlertRuleExportItem(
+            name=row["name"],
+            rule_type=row["rule_type"] or "threshold",
+            filter_app=row["filter_app"],
+            filter_severity=row["filter_severity"],
+            match_pattern=row["match_pattern"],
+            threshold_count=row["threshold_count"] or 1,
+            window_seconds=row["window_seconds"] or 60,
+            cooldown_seconds=row["cooldown_seconds"] or 300,
+            ai_enrichment=bool(row["ai_enrichment"]),
+            is_enabled=bool(row["is_enabled"]),
+        )
+
+    item = await run_db_query(_query)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert rule {rule_id} not found.",
+        )
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    single = AlertRuleExportSingle(
+        version="1",
+        exported_at=now_iso,
+        alert_rule=item,
+    )
+    return Response(
+        content=json.dumps(single.model_dump(), indent=2),
+        media_type="application/json",
+    )
+
+
+@router.post("/import", response_model=AlertRuleImportResponse)
+@router.post("/rules/import", response_model=AlertRuleImportResponse, include_in_schema=False)
+async def import_alert_rules(
+    payload: Any = Body(...),
+    user: dict = Depends(get_current_user),
+) -> AlertRuleImportResponse:
+    """
+    Import alert rules from a bundle, single rule object, or raw dictionary.
+    Deduplicates rules with matching names case-insensitively.
+    """
+    if isinstance(payload, dict):
+        if "alert_rules" in payload and isinstance(payload["alert_rules"], list):
+            items = payload["alert_rules"]
+        elif "alert_rule" in payload and isinstance(payload["alert_rule"], dict):
+            items = [payload["alert_rule"]]
+        else:
+            items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        return AlertRuleImportResponse(
+            imported=0,
+            skipped=0,
+            errors=["Invalid payload format: expected JSON object or array."],
+        )
+
+    def _get_existing(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM alert_rules")
+        rows = cur.fetchall()
+        return {r["name"].strip().lower() for r in rows if r["name"]}
+
+    existing_names = await run_db_query(_get_existing)
+
+    skipped = 0
+    errors: list[str] = []
+    to_insert: list[dict[str, Any]] = []
+
+    for idx, raw_item in enumerate(items):
+        if not isinstance(raw_item, dict):
+            errors.append(f"Item #{idx + 1} is not a valid JSON object.")
+            continue
+
+        raw_name = raw_item.get("name")
+        if not raw_name or not str(raw_name).strip():
+            errors.append(f"Item #{idx + 1}: rule name is required.")
+            continue
+
+        name = str(raw_name).strip()
+        rule_type = str(raw_item.get("rule_type", "threshold")).strip().lower()
+        if rule_type not in ("threshold", "pattern", "rate"):
+            rule_type = "threshold"
+
+        filter_app = raw_item.get("filter_app")
+        filter_app = str(filter_app).strip() if filter_app is not None else None
+        if filter_app == "":
+            filter_app = None
+
+        filter_severity = raw_item.get("filter_severity")
+        if filter_severity is not None:
+            try:
+                filter_severity = int(filter_severity)
+                if not (0 <= filter_severity <= 7):
+                    errors.append(f"Rule '{name}': filter_severity must be between 0 and 7.")
+                    continue
+            except (ValueError, TypeError):
+                errors.append(f"Rule '{name}': invalid filter_severity value.")
+                continue
+
+        match_pattern = raw_item.get("match_pattern")
+        match_pattern = str(match_pattern).strip() if match_pattern is not None else None
+        if match_pattern == "":
+            match_pattern = None
+
+        if match_pattern:
+            is_safe, err_str = check_regex_safety(match_pattern)
+            if not is_safe:
+                errors.append(f"Rule '{name}': regex safety check failed: {err_str}")
+                continue
+            try:
+                re.compile(match_pattern)
+            except re.error as e:
+                errors.append(f"Rule '{name}': invalid regex pattern: {e}")
+                continue
+
+        threshold_count = raw_item.get("threshold_count", 1)
+        try:
+            threshold_count = max(1, min(100000, int(threshold_count)))
+        except (ValueError, TypeError):
+            threshold_count = 1
+
+        window_seconds = raw_item.get("window_seconds", 60)
+        try:
+            window_seconds = max(1, min(86400, int(window_seconds)))
+        except (ValueError, TypeError):
+            window_seconds = 60
+
+        cooldown_seconds = raw_item.get("cooldown_seconds", 300)
+        try:
+            cooldown_seconds = max(5, min(86400, int(cooldown_seconds)))
+        except (ValueError, TypeError):
+            cooldown_seconds = 300
+
+        ai_enrichment = bool(raw_item.get("ai_enrichment", False))
+        is_enabled = bool(raw_item.get("is_enabled", True))
+
+        if name.lower() in existing_names:
+            skipped += 1
+            continue
+
+        existing_names.add(name.lower())
+        to_insert.append({
+            "name": name,
+            "rule_type": rule_type,
+            "filter_app": filter_app,
+            "filter_severity": filter_severity,
+            "match_pattern": match_pattern,
+            "threshold_count": threshold_count,
+            "window_seconds": window_seconds,
+            "cooldown_seconds": cooldown_seconds,
+            "ai_enrichment": ai_enrichment,
+            "is_enabled": is_enabled,
+        })
+
+    if to_insert:
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        def _insert_all(conn):
+            cur = conn.cursor()
+            for rule in to_insert:
+                cur.execute(
+                    """
+                    INSERT INTO alert_rules
+                    (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
+                     threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
+                     is_enabled, trigger_count, created_at)
+                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    """,
+                    (
+                        rule["name"],
+                        rule["rule_type"],
+                        rule["filter_app"],
+                        rule["filter_severity"],
+                        rule["match_pattern"],
+                        rule["threshold_count"],
+                        rule["window_seconds"],
+                        rule["cooldown_seconds"],
+                        int(rule["ai_enrichment"]),
+                        int(rule["is_enabled"]),
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+
+        await run_db_query(_insert_all)
+        await asyncio.to_thread(get_alert_evaluator().reload_rules)
+
+    return AlertRuleImportResponse(
+        imported=len(to_insert),
+        skipped=skipped,
+        errors=errors,
+    )
 
 
 @router.post("/rules", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)

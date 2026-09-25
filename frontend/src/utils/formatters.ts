@@ -110,3 +110,32 @@ export function fromLocalDatetimeInputString(localString?: string | null): strin
   return d.toISOString();
 }
 
+/**
+ * Slugifies text into an alphanumeric kebab-cased string suitable for filenames.
+ */
+export function slugify(text: string): string {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '') || 'rule';
+}
+
+/**
+ * Initiates a browser-native file download from a Blob.
+ */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+

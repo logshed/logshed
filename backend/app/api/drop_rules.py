@@ -7,13 +7,19 @@ to discard repetitive syslog or container noise before persistence.
 
 import asyncio
 import datetime
+import json
 import re
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.models import (
     DropPresetResponse,
     DropRuleCreate,
+    DropRuleExportBundle,
+    DropRuleExportItem,
+    DropRuleExportSingle,
+    DropRuleImportResponse,
     DropRuleResponse,
     DropRuleTestRequest,
     DropRuleTestResponse,
@@ -60,6 +66,231 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
         return results
 
     return await run_db_query(_query)
+
+
+@router.get("/export", response_model=DropRuleExportBundle)
+async def export_drop_rules(user: dict = Depends(get_current_user)) -> Response:
+    """Export all configured drop rules as a JSON bundle."""
+    def _query(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
+            "FROM drop_rules ORDER BY id ASC"
+        )
+        rows = cur.fetchall()
+        return [
+            DropRuleExportItem(
+                source_pattern=r["source_pattern"],
+                app_pattern=r["app_pattern"],
+                message_pattern=r["message_pattern"],
+                is_regex=bool(r["is_regex"]),
+                is_enabled=bool(r["is_enabled"]),
+                severity_threshold=r["severity_threshold"],
+            )
+            for r in rows
+        ]
+
+    exported_rules = await run_db_query(_query)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    bundle = DropRuleExportBundle(
+        version="1",
+        exported_at=now_iso,
+        drop_rules=exported_rules,
+    )
+    return Response(
+        content=json.dumps(bundle.model_dump(), indent=2),
+        media_type="application/json",
+    )
+
+
+@router.get("/{rule_id}/export", response_model=DropRuleExportSingle)
+async def export_single_drop_rule(
+    rule_id: int,
+    user: dict = Depends(get_current_user),
+) -> Response:
+    """Export a single drop rule as a JSON object."""
+    def _query(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
+            "FROM drop_rules WHERE id = ?",
+            (rule_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return DropRuleExportItem(
+            source_pattern=row["source_pattern"],
+            app_pattern=row["app_pattern"],
+            message_pattern=row["message_pattern"],
+            is_regex=bool(row["is_regex"]),
+            is_enabled=bool(row["is_enabled"]),
+            severity_threshold=row["severity_threshold"],
+        )
+
+    item = await run_db_query(_query)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Drop rule {rule_id} not found.",
+        )
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    single = DropRuleExportSingle(
+        version="1",
+        exported_at=now_iso,
+        drop_rule=item,
+    )
+    return Response(
+        content=json.dumps(single.model_dump(), indent=2),
+        media_type="application/json",
+    )
+
+
+@router.post("/import", response_model=DropRuleImportResponse)
+async def import_drop_rules(
+    payload: Any = Body(...),
+    user: dict = Depends(get_current_user),
+) -> DropRuleImportResponse:
+    """
+    Import drop rules from a bundle, single rule object, or raw dictionary.
+    Deduplicates rules matching (source_pattern, app_pattern, message_pattern) case-insensitively.
+    """
+    if isinstance(payload, dict):
+        if "drop_rules" in payload and isinstance(payload["drop_rules"], list):
+            items = payload["drop_rules"]
+        elif "drop_rule" in payload and isinstance(payload["drop_rule"], dict):
+            items = [payload["drop_rule"]]
+        else:
+            items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        return DropRuleImportResponse(
+            imported=0,
+            skipped=0,
+            errors=["Invalid payload format: expected JSON object or array."],
+        )
+
+    def _get_existing(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT source_pattern, app_pattern, message_pattern FROM drop_rules")
+        rows = cur.fetchall()
+        return {
+            (
+                (r["source_pattern"] or "").lower(),
+                (r["app_pattern"] or "").lower(),
+                (r["message_pattern"] or "").lower(),
+            )
+            for r in rows
+        }
+
+    existing_keys = await run_db_query(_get_existing)
+
+    skipped = 0
+    errors: list[str] = []
+    to_insert: list[dict[str, Any]] = []
+
+    for idx, raw_item in enumerate(items):
+        if not isinstance(raw_item, dict):
+            errors.append(f"Item #{idx + 1} is not a valid JSON object.")
+            continue
+
+        src = raw_item.get("source_pattern")
+        src = str(src).strip() if src is not None else None
+        if src == "":
+            src = None
+
+        app = raw_item.get("app_pattern")
+        app = str(app).strip() if app is not None else None
+        if app == "":
+            app = None
+
+        msg = raw_item.get("message_pattern")
+        msg = str(msg).strip() if msg is not None else "*"
+        if not msg:
+            msg = "*"
+
+        is_regex = bool(raw_item.get("is_regex", False))
+        is_enabled = bool(raw_item.get("is_enabled", True))
+
+        sev = raw_item.get("severity_threshold")
+        if sev is not None:
+            try:
+                sev = int(sev)
+                if not (0 <= sev <= 7):
+                    errors.append(f"Item #{idx + 1}: severity_threshold must be between 0 and 7.")
+                    continue
+            except (ValueError, TypeError):
+                errors.append(f"Item #{idx + 1}: invalid severity_threshold value.")
+                continue
+
+        if not src and not app and (not msg or msg == "*") and sev is None:
+            errors.append(f"Item #{idx + 1}: at least one filter criterion must be specified.")
+            continue
+
+        if is_regex and msg != "*":
+            is_safe, err_str = check_regex_safety(msg)
+            if not is_safe:
+                errors.append(f"Item #{idx + 1}: regex safety check failed: {err_str}")
+                continue
+            try:
+                re.compile(msg)
+            except re.error as e:
+                errors.append(f"Item #{idx + 1}: invalid regex pattern: {e}")
+                continue
+
+        dedup_key = (
+            (src or "").lower(),
+            (app or "").lower(),
+            (msg or "").lower(),
+        )
+
+        if dedup_key in existing_keys:
+            skipped += 1
+            continue
+
+        existing_keys.add(dedup_key)
+        to_insert.append({
+            "source_pattern": src,
+            "app_pattern": app,
+            "message_pattern": msg,
+            "is_regex": is_regex,
+            "is_enabled": is_enabled,
+            "severity_threshold": sev,
+        })
+
+    if to_insert:
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        def _insert_all(conn):
+            cur = conn.cursor()
+            for rule in to_insert:
+                cur.execute(
+                    """
+                    INSERT INTO drop_rules (
+                        source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                    """,
+                    (
+                        rule["source_pattern"],
+                        rule["app_pattern"],
+                        rule["message_pattern"],
+                        1 if rule["is_regex"] else 0,
+                        1 if rule["is_enabled"] else 0,
+                        rule["severity_threshold"],
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+
+        await run_db_query(_insert_all)
+        await asyncio.to_thread(get_drop_filter().reload_rules)
+
+    return DropRuleImportResponse(
+        imported=len(to_insert),
+        skipped=skipped,
+        errors=errors,
+    )
 
 
 @router.post("", response_model=DropRuleResponse, status_code=status.HTTP_201_CREATED)

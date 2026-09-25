@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Zero-Zip Drop Rules Export & Import**: JSON export and import for ingestion drop rules, supporting complete configuration backup bundles (`logshed-drop-rules.json`), individual rule files (`drop-rule-${id}.json`), and polymorphic imports (bundle, single-rule container, or raw rule object) with case-insensitive deduplication, regex pattern validation, and drop filter cache reloads.
+- **Zero-Zip Alert Rules Export & Import**: JSON export and import for alert rules, generating clean backups (`logshed-alert-rules.json`) and individual rule files (`<rule-slug>.json`) stripped of instance-specific metadata, with polymorphic imports, case-insensitive deduplication by name, and unassigned channel defaults for community rule sharing.
+- **Rule Export and Import Actions**: Added "Export All" and "Import" header buttons using browser-native Blob downloads and file picker inputs to both Alert Rules and Drop Rules tabs, alongside row-level "Export" buttons in each table actions column.
 - **Standalone JSON Alert and Drop Presets**: Decoupled predefined rule definitions into standalone JSON files in `backend/app/presets/alerts/` and `backend/app/presets/drops/`, supporting dual-directory discovery from the application bundle and `/data/presets/` with `is_custom` indicator badges and automatic directory creation on startup.
 - **Preset Catalogs & Symmetrical Sub-Tabs**: Added dedicated modal catalogs for browsing and 1-click activating alert presets (`AlertPresetsModal`) and drop rule presets (`DropPresetsModal`), streamlining Alerts & Rules into 3 focused sub-tabs (`rules`, `history`, `drop-rules`) with symmetrical action toolbars.
 - **Ingestion Rate Spike & Log Storm Detection**: Introduced real-time rate spike alert rule type (`rate`) evaluating incoming log velocity in logs/second against a configurable window, backed by dynamic sliding-window deque bounds.
@@ -41,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Drop Rules Subtitle**: Simplified ingestion drop rules subtitle to "Discard repetitive syslog or container chatter".
 - **Alert Preset Terminology Alignment**: Renamed `SecurityPreset` to `AlertPreset` across backend models, service modules (`alert_presets.py`), and frontend types.
 - **Rate Threshold Display Formatting**: Formatted rate rules and presets across alert rule listings and preset cards to clearly indicate logs/second over window duration.
 - **Symmetrical Alert and Drop Rule Toolbars**: Aligned action toolbars on both Alert Rules and Drop Rules tabs with Presets and New Rule buttons.

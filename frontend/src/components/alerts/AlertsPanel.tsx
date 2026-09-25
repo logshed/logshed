@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Bell,
   Shield,
@@ -13,6 +13,8 @@ import {
   Zap,
   FlaskConical,
   FilterX,
+  Download,
+  Upload,
 } from 'lucide-react';
 import {
   AlertHistoryItem,
@@ -30,10 +32,14 @@ import {
   fetchAlertHistory,
   deleteAlertHistoryItem,
   clearAlertHistory,
+  exportAllAlertRules,
+  exportSingleAlertRule,
+  importAlertRules,
 } from '../../api/alerts.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
+import { downloadBlob, slugify } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal } from './AlertRuleModal.tsx';
@@ -245,6 +251,65 @@ export const AlertsPanel: React.FC = () => {
     }
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportAll = async () => {
+    try {
+      const blob = await exportAllAlertRules();
+      downloadBlob(blob, 'logshed-alert-rules.json');
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to export alert rules.', isError: true });
+    }
+  };
+
+  const handleExportSingle = async (rule: AlertRule) => {
+    try {
+      const blob = await exportSingleAlertRule(rule.id);
+      downloadBlob(blob, `${slugify(rule.name)}.json`);
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to export alert rule.', isError: true });
+    }
+  };
+
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const json = JSON.parse(text);
+        const res = await importAlertRules(json);
+        if (res.errors && res.errors.length > 0) {
+          setFeedbackMsg({
+            text: `Imported ${res.imported}, skipped ${res.skipped}. Errors: ${res.errors.join('; ')}`,
+            isError: res.imported === 0,
+          });
+        } else {
+          setFeedbackMsg({
+            text: `Imported ${res.imported} rule${res.imported === 1 ? '' : 's'} (${res.skipped} skipped).`,
+            isError: false,
+          });
+        }
+        loadAll();
+      } catch (err: any) {
+        setFeedbackMsg({
+          text: err.message || 'Failed to import rules. Invalid JSON file.',
+          isError: true,
+        });
+      }
+    };
+    reader.onerror = () => {
+      setFeedbackMsg({
+        text: 'Failed to read file.',
+        isError: true,
+      });
+    };
+    reader.readAsText(file);
+  };
+
   // Delete history item
   const handleDeleteHistory = async (id: number) => {
     try {
@@ -435,6 +500,33 @@ export const AlertsPanel: React.FC = () => {
 
               <button
                 type="button"
+                onClick={handleExportAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
+                title="Export all alert rules"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export All</span>
+              </button>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileImport}
+                accept=".json,application/json"
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
+                title="Import alert rules from JSON file"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Import</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleOpenCreateModal}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition shadow-xs cursor-pointer whitespace-nowrap"
               >
@@ -568,6 +660,16 @@ export const AlertsPanel: React.FC = () => {
                       aria-label={`Test rule ${rule.name}`}
                     >
                       <FlaskConical className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleExportSingle(rule)}
+                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      title="Export rule"
+                      aria-label={`Export rule ${rule.name}`}
+                    >
+                      <Download className="w-3.5 h-3.5" />
                     </button>
 
                     <button

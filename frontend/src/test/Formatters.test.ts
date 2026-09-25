@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   stripAnsi,
   cleanLogMessageForDisplay,
   toLocalDatetimeInputString,
   fromLocalDatetimeInputString,
+  slugify,
+  downloadBlob,
 } from '../utils/formatters.ts';
 
 describe('stripAnsi', () => {
@@ -161,6 +163,45 @@ describe('fromLocalDatetimeInputString', () => {
     const isoString = fromLocalDatetimeInputString(localString);
     expect(isoString).toBeDefined();
     expect(toLocalDatetimeInputString(isoString)).toBe(localString);
+  });
+});
+
+describe('slugify', () => {
+  it('converts rule names to kebab-case filenames', () => {
+    expect(slugify('SSH Brute-Force')).toBe('ssh-brute-force');
+    expect(slugify('High Ingestion Rate (Log Storm)')).toBe('high-ingestion-rate-log-storm');
+    expect(slugify('  noisy_daemon  ')).toBe('noisy_daemon');
+  });
+
+  it('falls back to rule for empty or non-alphanumeric text', () => {
+    expect(slugify('')).toBe('rule');
+    expect(slugify('   ')).toBe('rule');
+    expect(slugify('!@#$%^')).toBe('rule');
+  });
+});
+
+describe('downloadBlob', () => {
+  it('triggers browser download with object url and cleans up', () => {
+    let clicked = false;
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+    URL.revokeObjectURL = vi.fn();
+
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {
+      clicked = true;
+    });
+
+    const blob = new Blob(['{}'], { type: 'application/json' });
+    downloadBlob(blob, 'test-export.json');
+
+    expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
+    expect(clicked).toBe(true);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+
+    clickSpy.mockRestore();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
   });
 });
 

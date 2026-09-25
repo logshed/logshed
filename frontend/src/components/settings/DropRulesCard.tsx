@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   FilterX,
   Plus,
@@ -7,6 +7,8 @@ import {
   RefreshCw,
   AlertTriangle,
   Zap,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { DropPreset, DropRule } from '../../types.ts';
 import {
@@ -15,8 +17,12 @@ import {
   deleteDropRule,
   fetchDropPresets,
   installDropPreset,
+  exportAllDropRules,
+  exportSingleDropRule,
+  importDropRules,
 } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
+import { downloadBlob } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 import { getSeverityInfo } from '../common/SeverityBadge.tsx';
 import { CreateDropRuleModal } from './CreateDropRuleModal.tsx';
@@ -38,6 +44,7 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [availableSources, setAvailableSources] = useState<string[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadRules = useCallback(async () => {
     try {
@@ -109,6 +116,63 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
     }
   };
 
+  const handleExportAll = async () => {
+    try {
+      const blob = await exportAllDropRules();
+      downloadBlob(blob, 'logshed-drop-rules.json');
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to export drop rules.', isError: true });
+    }
+  };
+
+  const handleExportSingle = async (rule: DropRule) => {
+    try {
+      const blob = await exportSingleDropRule(rule.id);
+      downloadBlob(blob, `drop-rule-${rule.id}.json`);
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to export drop rule.', isError: true });
+    }
+  };
+
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const json = JSON.parse(text);
+        const res = await importDropRules(json);
+        if (res.errors && res.errors.length > 0) {
+          setFeedbackMsg({
+            text: `Imported ${res.imported}, skipped ${res.skipped}. Errors: ${res.errors.join('; ')}`,
+            isError: res.imported === 0,
+          });
+        } else {
+          setFeedbackMsg({
+            text: `Imported ${res.imported} rule${res.imported === 1 ? '' : 's'} (${res.skipped} skipped).`,
+            isError: false,
+          });
+        }
+        loadRules();
+      } catch (err: any) {
+        setFeedbackMsg({
+          text: err.message || 'Failed to import rules. Invalid JSON file.',
+          isError: true,
+        });
+      }
+    };
+    reader.onerror = () => {
+      setFeedbackMsg({
+        text: 'Failed to read file.',
+        isError: true,
+      });
+    };
+    reader.readAsText(file);
+  };
+
   const totalDropped = rules.reduce((acc, r) => acc + (r.dropped_count || 0), 0);
 
   return (
@@ -121,7 +185,7 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
             <span>Ingestion Drop Rules</span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Discard repetitive syslog or container chatter in memory before SQLite persistence and FTS5 indexing.
+            Discard repetitive syslog or container chatter
           </p>
         </div>
 
@@ -150,6 +214,33 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
           >
             <Zap className="w-3.5 h-3.5 text-accent-500" />
             <span>Presets</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
+            title="Export all drop rules"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export All</span>
+          </button>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileImport}
+            accept=".json,application/json"
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
+            title="Import drop rules from JSON file"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import</span>
           </button>
 
           <button
@@ -293,6 +384,15 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
                         title={rule.is_enabled ? 'Click to disable' : 'Click to enable'}
                       >
                         {rule.is_enabled ? 'Active' : 'Disabled'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportSingle(rule)}
+                        aria-label={`Export rule ${rule.id}`}
+                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                        title="Export rule"
+                      >
+                        <Download className="w-3.5 h-3.5" />
                       </button>
                       <button
                         type="button"

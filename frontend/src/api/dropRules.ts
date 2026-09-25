@@ -1,4 +1,4 @@
-import { apiFetch } from './client.ts';
+import { apiFetch, apiFetchBlob } from './client.ts';
 import {
   DropPreset,
   DropRule,
@@ -57,6 +57,23 @@ export async function fetchDropPresets(): Promise<DropPreset[]> {
 export async function installDropPreset(presetId: string): Promise<DropRule> {
   return apiFetch<DropRule>(`/api/drop-rules/presets/${presetId}/install`, {
     method: 'POST',
+  });
+}
+
+export async function exportAllDropRules(): Promise<Blob> {
+  return apiFetchBlob('/api/drop-rules/export');
+}
+
+export async function exportSingleDropRule(ruleId: number): Promise<Blob> {
+  return apiFetchBlob(`/api/drop-rules/${ruleId}/export`);
+}
+
+export async function importDropRules(
+  data: object
+): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  return apiFetch<{ imported: number; skipped: number; errors: string[] }>('/api/drop-rules/import', {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 
