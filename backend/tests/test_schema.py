@@ -281,6 +281,7 @@ class TestSchemaIntegrity:
             "tokens_thoughts",
             "tokens_used",
             "system_prompt",
+            "trigger_source",
         }
         assert expected.issubset(columns)
 

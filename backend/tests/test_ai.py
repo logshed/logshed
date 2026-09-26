@@ -1007,6 +1007,66 @@ class TestAiDiagnoseWorkflow:
         assert entry["log_count"] == 2
         assert entry["user_context"] == "Audit check context"
         assert entry["tokens_used"] == 111
+        assert entry["trigger_source"] == "on-demand"
+
+    @pytest.mark.asyncio
+    async def test_audit_log_filter_by_trigger_source(self, populated_db, auth_client):
+        from app.services.ai_service import save_diagnosis_audit
+
+        # Insert on-demand audit entry
+        await save_diagnosis_audit(
+            source_alias="host1",
+            app_name="app1",
+            log_count=5,
+            user_context="on-demand context",
+            actual_model="gemini-3.7-flash",
+            prompt_sent="prompt1",
+            raw_response="response1",
+            tokens_in=100,
+            tokens_out=50,
+            tokens_thoughts=0,
+            tokens_used=150,
+            system_prompt="sys1",
+            trigger_source="on-demand",
+        )
+
+        # Insert alert audit entry
+        await save_diagnosis_audit(
+            source_alias="host2",
+            app_name="app2",
+            log_count=3,
+            user_context="Alert Rule: High CPU",
+            actual_model="gemini-3.7-flash",
+            prompt_sent="prompt2",
+            raw_response="response2",
+            tokens_in=200,
+            tokens_out=60,
+            tokens_thoughts=0,
+            tokens_used=260,
+            system_prompt="sys2",
+            trigger_source="alert",
+        )
+
+        # Query all
+        res_all = await auth_client.get("/api/ai/audit")
+        assert res_all.status_code == 200
+        data_all = res_all.json()
+        assert any(i["trigger_source"] == "on-demand" for i in data_all["items"])
+        assert any(i["trigger_source"] == "alert" for i in data_all["items"])
+
+        # Query filtered by alert
+        res_alert = await auth_client.get("/api/ai/audit?trigger_source=alert")
+        assert res_alert.status_code == 200
+        data_alert = res_alert.json()
+        assert len(data_alert["items"]) >= 1
+        assert all(i["trigger_source"] == "alert" for i in data_alert["items"])
+
+        # Query filtered by on-demand
+        res_demand = await auth_client.get("/api/ai/audit?trigger_source=on-demand")
+        assert res_demand.status_code == 200
+        data_demand = res_demand.json()
+        assert len(data_demand["items"]) >= 1
+        assert all(i["trigger_source"] == "on-demand" for i in data_demand["items"])
 
     @pytest.mark.asyncio
     async def test_delete_ai_audit_item_and_clear_all(self, populated_db, auth_client):

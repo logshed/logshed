@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Unified AI and Alert History**: Combined alert triggers, AI incident diagnoses, and on-demand AI root-cause analyses into a single, unified "History" tab under "Alerts & History". Features distinct badges (`On-Demand`, `AI Alert`, `Alert`), a clean summary table, and a click-to-open detail modal displaying full diagnosis markdown, raw LLM prompts, model attribution, and token metrics.
+- **AI Audit Log Trigger Source Tracking**: Added `trigger_source` ('on-demand' vs 'alert') to `ai_audit_log` and `ai_audit_id` foreign key linkage to `alert_history` within `migrate_v2`, backfilling legacy records so all historical analyses appear in the unified history timeline.
+- **Responsive Sub-Tab Wrapping**: Flexible wrapping layout (`flex-wrap`) for sub-tabs in `AlertsPanel`, ensuring the History sub-tab and count badges remain fully visible and accessible on narrow mobile viewports.
+- **Subtle Tab Button Outlines**: Distinct subtle borders (`border-dark-700 hover:border-dark-600`) around non-selected sub-tab buttons in `AlertsPanel` and `SettingsPanel` for clear button affordance.
 - **Zero-Zip Drop Rules Export & Import**: JSON export and import for ingestion drop rules, supporting complete configuration backup bundles (`logshed-drop-rules.json`), individual rule files (`drop-rule-${id}.json`), and polymorphic imports (bundle, single-rule container, or raw rule object) with case-insensitive deduplication, regex pattern validation, and drop filter cache reloads.
 - **Zero-Zip Alert Rules Export & Import**: JSON export and import for alert rules, generating clean backups (`logshed-alert-rules.json`) and individual rule files (`<rule-slug>.json`) stripped of instance-specific metadata, with polymorphic imports, case-insensitive deduplication by name, and unassigned channel defaults for community rule sharing.
 - **Rule Export and Import Actions**: Added "Export All" and "Import" header buttons using browser-native Blob downloads and file picker inputs to both Alert Rules and Drop Rules tabs, alongside row-level "Export" buttons in each table actions column.
@@ -44,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Alerts & History Navigation Alignment**: Renamed the top-level navigation item and panel heading from "Alerts & Rules" to "Alerts & History" across desktop and mobile navigation bars.
+- **Storage Panel Streamlining**: Streamlined the Storage panel to focus solely on disk footprint metrics and retention policies, removing redundant AI audit log tables in place of the unified History view.
 - **Drop Rules Subtitle**: Simplified ingestion drop rules subtitle to "Discard repetitive syslog or container chatter".
 - **Alert Preset Terminology Alignment**: Renamed `SecurityPreset` to `AlertPreset` across backend models, service modules (`alert_presets.py`), and frontend types.
 - **Rate Threshold Display Formatting**: Formatted rate rules and presets across alert rule listings and preset cards to clearly indicate logs/second over window duration.
@@ -68,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Processing Newest Logs First During Alias Updates**: Updated `_batch_update_log_aliases` to process rows ordered by `id DESC` so the most recent logs visible in the live stream reflect alias modifications first.
 
 ### Fixed
+- **Storage Trend Graph Y-Axis Truncation**: Fixed Y-axis leading digit clipping in `StorageTrendChart` when log volumes exceed 1,000MB by resetting negative chart margins, allocating dedicated axis width, and formatting large values with localized thousands separators.
+- **Sub-Tab Layout Shift on Height Changes**: Eliminated horizontal content jumping when switching between short and tall sub-tabs by configuring `scrollbar-gutter: stable` on the main scroll container.
 - **Alert Processing Self-Referential Logging Loops**: Suppressed `app.services.alert_evaluator`, `app.services.notifier`, `app.services.ai_engine`, and `app.services.ai_service` in `InternalLogHandler.IGNORED_LOGGERS` to prevent alert processing logs from being ingested and triggering cascading alerts.
 - **Mobile Drop Rule Action Clipping**: Fixed button clipping and column alignment in the drop rules table on mobile and desktop viewports.
 - **Rate Rule Sample Log Selection**: Selected sample logs from the primary culprit service over arbitrary trailing batch entries.

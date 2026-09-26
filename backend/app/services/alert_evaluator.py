@@ -470,6 +470,7 @@ class AlertEvaluator:
         ai_success = False
         ai_error_note = None
         actual_ai_model = None
+        saved_audit_id = None
 
         # Perform AI enrichment if enabled on the rule
         if rule.ai_enrichment and triggering_logs:
@@ -542,9 +543,15 @@ class AlertEvaluator:
                     fallback_models=fallback_models,
                 )
                 if len(ai_res) == 11:
-                    summary, root_cause, remediation, _, _, _, _, _, _, actual_model, fallback_attempts = ai_res
+                    summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res
                 else:
                     summary, root_cause, remediation = ai_res[:3]
+                    raw_response = ""
+                    prompt_sent = prompt
+                    tokens_in = 0
+                    tokens_out = 0
+                    tokens_thoughts = 0
+                    tokens_used = 0
                     actual_model = ai_model
                     fallback_attempts = []
 
@@ -565,6 +572,43 @@ class AlertEvaluator:
                     diag_parts.append(f"### Remediation\n{remediation.strip()}")
                 incident_summary = "\n\n".join(diag_parts) if diag_parts else (summary or "Incident review complete.")
                 ai_success = True
+
+                from app.services.ai_service import save_diagnosis_audit
+
+                audit_source_alias = (
+                    extracted_host
+                    or (triggering_logs[0].get("source_alias") if triggering_logs else None)
+                    or (triggering_logs[0].get("source_ip") if triggering_logs else None)
+                    or "alert"
+                )
+                audit_app_name = (
+                    extracted_app
+                    or (triggering_logs[0].get("app_name") if triggering_logs else None)
+                    or "alert"
+                )
+
+                try:
+                    saved_audit_id = await save_diagnosis_audit(
+                        source_alias=audit_source_alias,
+                        app_name=audit_app_name,
+                        log_count=len(triggering_logs),
+                        user_context=f"Alert Rule: {rule.name}",
+                        actual_model=actual_ai_model,
+                        prompt_sent=prompt_sent or prompt,
+                        raw_response=incident_summary or raw_response,
+                        tokens_in=tokens_in or 0,
+                        tokens_out=tokens_out or 0,
+                        tokens_thoughts=tokens_thoughts or 0,
+                        tokens_used=tokens_used or 0,
+                        system_prompt=ai_settings.get("ai_system_prompt") or None,
+                        trigger_source="alert",
+                        custom_db_path=self.db_path,
+                    )
+                except Exception as audit_err:
+                    logger.warning(
+                        f"Failed to record AI audit log for alert rule '{rule.name}': {audit_err}"
+                    )
+
             except Exception as ai_err:
                 logger.warning(
                     f"AI enrichment failed for alert rule '{rule.name}' after attempting candidate models: {ai_err}"
@@ -592,8 +636,8 @@ class AlertEvaluator:
             conn.execute(
                 """
                 INSERT INTO alert_history
-                (rule_id, rule_name, channel_id, trigger_count, sample_log, incident_summary, ai_enrichment, ai_model, triggered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (rule_id, rule_name, channel_id, trigger_count, sample_log, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule.id,
@@ -604,6 +648,7 @@ class AlertEvaluator:
                     incident_summary,
                     int(rule.ai_enrichment),
                     actual_ai_model,
+                    saved_audit_id,
                     now_iso,
                 ),
             )

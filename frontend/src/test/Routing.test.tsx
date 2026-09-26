@@ -142,8 +142,8 @@ describe('URL Routing and History API Synchronization', () => {
       render(<App />);
       expect(screen.getByTestId('live-log-stream')).toBeInTheDocument();
 
-      // Click Alerts & Rules tab
-      const alertsBtn = screen.getByRole('button', { name: /^Alerts & Rules$/i });
+      // Click Alerts & History tab
+      const alertsBtn = screen.getByRole('button', { name: /^Alerts & History$/i });
       await act(async () => {
         fireEvent.click(alertsBtn);
       });

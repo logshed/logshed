@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import sqlite3
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
@@ -261,6 +262,8 @@ async def save_diagnosis_audit(
     tokens_thoughts: int,
     tokens_used: int,
     system_prompt: Optional[str],
+    trigger_source: str = "on-demand",
+    custom_db_path: Optional[Path] = None,
 ) -> int:
     """Persist an AI diagnosis result to the ai_audit_log table."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -270,8 +273,8 @@ async def save_diagnosis_audit(
         cursor.execute(
             """
             INSERT INTO ai_audit_log
-            (timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text, tokens_in, tokens_out, tokens_thoughts, tokens_used, system_prompt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text, tokens_in, tokens_out, tokens_thoughts, tokens_used, system_prompt, trigger_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 now,
@@ -287,36 +290,73 @@ async def save_diagnosis_audit(
                 tokens_thoughts,
                 tokens_used,
                 system_prompt,
+                trigger_source,
             ),
         )
         audit_id = cursor.lastrowid
+        if trigger_source == "on-demand":
+            cursor.execute(
+                """
+                INSERT INTO alert_history
+                (rule_id, rule_name, channel_id, trigger_count, sample_log, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
+                VALUES (NULL, 'On-Demand Analysis', NULL, ?, NULL, ?, 1, ?, ?, ?)
+                """,
+                (log_count, raw_response, actual_model, audit_id, now),
+            )
         conn.commit()
         return audit_id
 
-    return await run_db_query(_save)
+    return await run_db_query(_save, custom_db_path=custom_db_path)
 
 
-async def list_ai_audit_logs(limit: int, offset: int) -> tuple[list[AiAuditItem], int]:
-    """Retrieve historical AI audit log entries with pagination."""
+async def list_ai_audit_logs(
+    limit: int,
+    offset: int,
+    trigger_source: Optional[str] = None,
+) -> tuple[list[AiAuditItem], int]:
+    """Retrieve historical AI audit log entries with pagination, optionally filtered by trigger source."""
     def _read(conn: sqlite3.Connection):
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM ai_audit_log")
-        total = cursor.fetchone()[0]
+        if trigger_source:
+            cursor.execute("SELECT COUNT(*) FROM ai_audit_log WHERE trigger_source = ?", (trigger_source,))
+            total = cursor.fetchone()[0]
 
-        cursor.execute(
-            """
-            SELECT id, timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text,
-                   COALESCE(tokens_in, 0) AS tokens_in,
-                   COALESCE(tokens_out, 0) AS tokens_out,
-                   COALESCE(tokens_thoughts, MAX(0, tokens_used - (COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)))) AS tokens_thoughts,
-                   tokens_used,
-                   system_prompt
-            FROM ai_audit_log
-            ORDER BY timestamp DESC, id DESC
-            LIMIT ? OFFSET ?
-            """,
-            (limit, offset),
-        )
+            cursor.execute(
+                """
+                SELECT id, timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text,
+                       COALESCE(tokens_in, 0) AS tokens_in,
+                       COALESCE(tokens_out, 0) AS tokens_out,
+                       COALESCE(tokens_thoughts, MAX(0, tokens_used - (COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)))) AS tokens_thoughts,
+                       tokens_used,
+                       system_prompt,
+                       COALESCE(trigger_source, 'on-demand') AS trigger_source
+                FROM ai_audit_log
+                WHERE trigger_source = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (trigger_source, limit, offset),
+            )
+        else:
+            cursor.execute("SELECT COUNT(*) FROM ai_audit_log")
+            total = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT id, timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text,
+                       COALESCE(tokens_in, 0) AS tokens_in,
+                       COALESCE(tokens_out, 0) AS tokens_out,
+                       COALESCE(tokens_thoughts, MAX(0, tokens_used - (COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)))) AS tokens_thoughts,
+                       tokens_used,
+                       system_prompt,
+                       COALESCE(trigger_source, 'on-demand') AS trigger_source
+                FROM ai_audit_log
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+
         rows = cursor.fetchall()
         items = []
         for r in rows:
@@ -346,6 +386,7 @@ async def list_ai_audit_logs(limit: int, offset: int) -> tuple[list[AiAuditItem]
                     tokens_thoughts=r["tokens_thoughts"],
                     tokens_used=r["tokens_used"],
                     system_prompt=r["system_prompt"] or DEFAULT_SYSTEM_PROMPT,
+                    trigger_source=r["trigger_source"],
                 )
             )
         return items, total
@@ -354,9 +395,10 @@ async def list_ai_audit_logs(limit: int, offset: int) -> tuple[list[AiAuditItem]
 
 
 async def delete_ai_audit_item(audit_id: int) -> bool:
-    """Delete a single AI audit log entry by ID."""
+    """Delete a single AI audit log entry and linked alert history by ID."""
     def _delete(conn: sqlite3.Connection) -> bool:
         cursor = conn.cursor()
+        cursor.execute("DELETE FROM alert_history WHERE ai_audit_id = ?", (audit_id,))
         cursor.execute("DELETE FROM ai_audit_log WHERE id = ?", (audit_id,))
         affected = cursor.rowcount
         conn.commit()
@@ -366,9 +408,10 @@ async def delete_ai_audit_item(audit_id: int) -> bool:
 
 
 async def clear_ai_audit_logs() -> int:
-    """Delete all AI audit log entries."""
+    """Delete all AI audit log entries and linked on-demand history."""
     def _clear(conn: sqlite3.Connection) -> int:
         cursor = conn.cursor()
+        cursor.execute("DELETE FROM alert_history WHERE rule_id IS NULL AND ai_audit_id IS NOT NULL")
         cursor.execute("DELETE FROM ai_audit_log")
         affected = cursor.rowcount
         conn.commit()

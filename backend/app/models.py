@@ -324,6 +324,10 @@ class AiAuditItem(BaseModel):
     tokens_thoughts: int = 0
     tokens_used: int
     system_prompt: Optional[str] = None
+    trigger_source: str = Field("on-demand", description="Trigger origin: 'on-demand' or 'alert'")
+
+
+AiAuditEntry = AiAuditItem
 
 
 class AiAuditListResponse(BaseModel):
@@ -663,7 +667,7 @@ class AlertPresetInstallRequest(BaseModel):
 
 
 class AlertHistoryItem(BaseModel):
-    """Alert firing event record."""
+    """Alert firing or analysis event record."""
     id: int
     rule_id: Optional[int] = None
     rule_name: str
@@ -673,7 +677,18 @@ class AlertHistoryItem(BaseModel):
     incident_summary: Optional[str] = None
     ai_enrichment: bool = False
     ai_model: Optional[str] = None
+    ai_audit_id: Optional[int] = None
     triggered_at: str
+    tokens_in: Optional[int] = None
+    tokens_out: Optional[int] = None
+    tokens_thoughts: Optional[int] = None
+    tokens_used: Optional[int] = None
+    prompt_sent: Optional[str] = None
+    system_prompt: Optional[str] = None
+    response_text: Optional[str] = None
+    source_alias: Optional[str] = None
+    app_name: Optional[str] = None
+    user_context: Optional[str] = None
 
 
 class AlertHistoryListResponse(BaseModel):

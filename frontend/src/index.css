@@ -41,6 +41,11 @@ body {
   background: #334155;
 }
 
+/* Prevent horizontal layout shifts when vertical scrollbars appear or disappear */
+main {
+  scrollbar-gutter: stable;
+}
+
 /* Virtualized list row transitions and hover */
 .log-row {
   transition: background-color 0.1s ease;

@@ -15,6 +15,7 @@ import {
   FilterX,
   Download,
   Upload,
+  Brain,
 } from 'lucide-react';
 import {
   AlertHistoryItem,
@@ -40,16 +41,16 @@ import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { downloadBlob, slugify } from '../../utils/formatters.ts';
+import { extractCleanSummary } from '../../utils/summary.ts';
 import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal } from './AlertRuleModal.tsx';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
-import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
 import { DropRulesCard } from '../settings/DropRulesCard.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
 
-export type AlertViewTab = 'rules' | 'history' | 'drop-rules';
+export type AlertViewTab = 'rules' | 'drop-rules' | 'history';
 
 export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
@@ -387,10 +388,10 @@ export const AlertsPanel: React.FC = () => {
       <div>
         <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
           <ShieldAlert className="w-5 h-5 text-accent-500" />
-          <span>Alerts and Rules</span>
+          <span>Alerts & History</span>
         </h2>
         <p className="text-xs text-slate-400 mt-0.5">
-          Configure real-time threshold and pattern alert rules, manage ingestion drop rules, deploy 1-click quick rules, and review past incidents.
+          Configure real-time threshold and pattern alert rules, manage ingestion drop rules, deploy 1-click quick rules, and review past incidents and analyses.
         </p>
       </div>
 
@@ -417,14 +418,14 @@ export const AlertsPanel: React.FC = () => {
       )}
 
       {/* Section Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-dark-700 pb-2 overflow-x-auto no-scrollbar">
+      <div className="flex flex-wrap items-center gap-2 border-b border-dark-700 pb-2">
         <button
           type="button"
           onClick={() => handleSubTabChange('rules')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'rules'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-transparent'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
           <Bell className="w-3.5 h-3.5 shrink-0" />
@@ -438,28 +439,11 @@ export const AlertsPanel: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => handleSubTabChange('history')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
-            activeSubTab === 'history'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-transparent'
-          }`}
-        >
-          <History className="w-3.5 h-3.5 shrink-0" />
-          <span>Alert History</span>
-          <SimpleCountBadge
-            count={historyTotal}
-            title={`${historyTotal} total incidents recorded`}
-          />
-        </button>
-
-        <button
-          type="button"
           onClick={() => handleSubTabChange('drop-rules')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'drop-rules'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border border-transparent'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
           <FilterX className="w-3.5 h-3.5 shrink-0" />
@@ -468,6 +452,23 @@ export const AlertsPanel: React.FC = () => {
             active={enabledDropRulesCount}
             total={dropRules.length}
             title={`${enabledDropRulesCount} of ${dropRules.length} drop rules active`}
+          />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('history')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
+            activeSubTab === 'history'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+          }`}
+        >
+          <History className="w-3.5 h-3.5 shrink-0" />
+          <span>History</span>
+          <SimpleCountBadge
+            count={historyTotal}
+            title={`${historyTotal} total history records`}
           />
         </button>
       </div>
@@ -708,17 +709,20 @@ export const AlertsPanel: React.FC = () => {
       </div>
     )}
 
-      {/* TAB 2: Alert History */}
+      {/* TAB 2: Ingestion Drop Rules */}
+      {activeSubTab === 'drop-rules' && <DropRulesCard onRulesChange={setDropRules} />}
+
+      {/* TAB 3: History */}
       {activeSubTab === 'history' && (
         <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
           <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
             <div>
               <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                 <History className="w-4 h-4 text-accent-500" />
-                <span>Alert Firing Log</span>
+                <span>History</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Audited record of recent alert triggers, log messages, and AI incident diagnoses.
+                Previous alerts and on-demand analyses
               </p>
             </div>
             {historyItems.length > 0 && (
@@ -736,49 +740,75 @@ export const AlertsPanel: React.FC = () => {
           {historyItems.length === 0 ? (
             <div className="p-10 text-center space-y-2">
               <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-              <p className="text-xs text-slate-300 font-medium">No alerts have fired yet.</p>
+              <p className="text-xs text-slate-300 font-medium">No history recorded yet.</p>
               <p className="text-xs text-slate-500">
-                When alert thresholds are exceeded, firing records and AI summaries will be logged here.
+                When alert rules trigger or AI analyses run, records will appear here.
               </p>
             </div>
           ) : isMobile ? (
             /* Mobile Card View */
             <div className="divide-y divide-dark-800">
               {historyItems.map((item) => {
+                const isOnDemand = !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
+                const isAiAlert = !isOnDemand && Boolean(item.ai_enrichment);
+                const displayTarget = isOnDemand
+                  ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand')
+                  : item.rule_name;
+                const summaryText = extractCleanSummary(item.incident_summary || item.sample_log || '');
+
                 return (
                   <div
                     key={item.id}
                     onClick={() => setSelectedHistoryItem(item)}
                     className="p-3.5 space-y-2 hover:bg-dark-800/40 transition cursor-pointer select-none"
                   >
-                    {/* Line 1: Rule Name & Timestamp */}
+                    {/* Line 1: Type Badge + Target & Timestamp */}
                     <div className="flex items-center justify-between text-xs gap-2">
-                      <div className="truncate font-sans font-semibold text-slate-100">
-                        {item.rule_name}
+                      <div className="flex items-center gap-1.5 truncate">
+                        {isOnDemand ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
+                            <Brain className="w-2.5 h-2.5 shrink-0" />
+                            On-Demand
+                          </span>
+                        ) : isAiAlert ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
+                            <Zap className="w-2.5 h-2.5 shrink-0" />
+                            AI Alert
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
+                            <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            Alert
+                          </span>
+                        )}
+                        <span className="truncate font-sans font-semibold text-slate-100">
+                          {displayTarget}
+                        </span>
                       </div>
                       <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                        {new Date(item.triggered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        {item.triggered_at.slice(0, 16).replace('T', ' ')}
                       </span>
                     </div>
 
-                    {/* Line 2: Log message */}
+                    {/* Line 2: Clean Summary */}
                     <div
-                      className="text-slate-300 font-mono text-[11px] line-clamp-2 leading-relaxed"
-                      title={item.sample_log || ''}
+                      className="text-slate-300 text-xs line-clamp-2 leading-relaxed font-sans"
+                      title={summaryText}
                     >
-                      {item.sample_log || '-'}
+                      {summaryText || '-'}
                     </div>
 
-                    {/* Line 3: Events count + AI status + Actions */}
+                    {/* Line 3: Model / Count + Actions */}
                     <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
                       <div className="flex items-center gap-2">
+                        {item.ai_model && (
+                          <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono truncate max-w-[140px]">
+                            {item.ai_model}
+                          </span>
+                        )}
                         <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono">
-                          {item.trigger_count} event{item.trigger_count === 1 ? '' : 's'}
+                          {item.trigger_count} {isOnDemand ? `log${item.trigger_count === 1 ? '' : 's'}` : `event${item.trigger_count === 1 ? '' : 's'}`}
                         </span>
-                        <IncidentStatusBadge
-                          aiEnrichment={item.ai_enrichment}
-                          incidentSummary={item.incident_summary}
-                        />
                       </div>
                       <div className="flex items-center gap-2 font-sans shrink-0" onClick={(e) => e.stopPropagation()}>
                         <button
@@ -792,7 +822,7 @@ export const AlertsPanel: React.FC = () => {
                           type="button"
                           onClick={() => setHistoryItemToDelete(item)}
                           className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded transition cursor-pointer"
-                          title="Delete incident record"
+                          title="Delete history record"
                           aria-label={`Delete record ${item.id}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -806,54 +836,64 @@ export const AlertsPanel: React.FC = () => {
           ) : (
             /* Desktop Table View */
             <div className="divide-y divide-dark-800 font-mono text-xs">
-              <div className="grid grid-cols-[135px_170px_65px_105px_1fr_95px] px-4 py-2 text-slate-400 font-medium text-xs font-sans bg-dark-950/60 border-b border-dark-700 select-none">
+              <div className="grid grid-cols-[135px_110px_200px_1fr_95px] px-4 py-2 text-slate-400 font-medium text-xs font-sans bg-dark-950/60 border-b border-dark-700 select-none">
                 <div>Time</div>
-                <div>Rule Name</div>
-                <div>Events</div>
-                <div>AI Diagnosis</div>
-                <div>
-                  <span>Log Message</span>
-                  <span className="sr-only">LOG MESSAGE</span>
-                </div>
+                <div>Type</div>
+                <div>Target / Rule</div>
+                <div>Summary</div>
                 <div className="text-right">Actions</div>
               </div>
 
               {historyItems.map((item) => {
+                const isOnDemand = !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
+                const isAiAlert = !isOnDemand && Boolean(item.ai_enrichment);
+                const displayTarget = isOnDemand
+                  ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand')
+                  : item.rule_name;
+                const summaryText = extractCleanSummary(item.incident_summary || item.sample_log || '');
+
                 return (
                   <div
                     key={item.id}
                     onClick={() => setSelectedHistoryItem(item)}
-                    className="grid grid-cols-[135px_170px_65px_105px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
+                    className="grid grid-cols-[135px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
                   >
-                    <div className="text-slate-400 group-hover:text-slate-300">
-                      {new Date(item.triggered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </div>
-                    <div className="font-medium text-slate-200 truncate pr-2 font-sans text-xs">
-                      {item.rule_name}
-                    </div>
-                    <div className="text-slate-300">
-                      <span className="px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800 text-[10px]">
-                        {item.trigger_count}
-                      </span>
+                    <div className="text-slate-400 group-hover:text-slate-300 font-mono">
+                      {item.triggered_at.slice(0, 16).replace('T', ' ')}
                     </div>
                     <div>
-                      <IncidentStatusBadge
-                        aiEnrichment={item.ai_enrichment}
-                        incidentSummary={item.incident_summary}
-                      />
+                      {isOnDemand ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60">
+                          <Brain className="w-2.5 h-2.5 shrink-0" />
+                          On-Demand
+                        </span>
+                      ) : isAiAlert ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60">
+                          <Zap className="w-2.5 h-2.5 shrink-0" />
+                          AI Alert
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650">
+                          <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                          Alert
+                        </span>
+                      )}
+                    </div>
+                    <div className="truncate pr-2 font-sans font-medium text-slate-200" title={displayTarget}>
+                      {displayTarget}
                     </div>
                     <div
-                      className="text-slate-300 truncate pr-2 group-hover:text-white"
-                      title={item.sample_log || ''}
+                      className="text-slate-300 truncate pr-2 group-hover:text-white font-sans text-xs"
+                      title={summaryText}
                     >
-                      {item.sample_log || '-'}
+                      {summaryText || '-'}
                     </div>
                     <div className="flex items-center justify-end gap-1.5 font-sans" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => setSelectedHistoryItem(item)}
                         className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded transition cursor-pointer"
-                        title="View incident details"
+                        title="View details"
                       >
                         View
                       </button>
@@ -861,7 +901,7 @@ export const AlertsPanel: React.FC = () => {
                         type="button"
                         onClick={() => setHistoryItemToDelete(item)}
                         className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded border border-transparent hover:border-red-900/50 transition cursor-pointer"
-                        title="Delete incident record"
+                        title="Delete history record"
                         aria-label={`Delete record ${item.id}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -874,9 +914,6 @@ export const AlertsPanel: React.FC = () => {
           )}
         </div>
       )}
-
-      {/* TAB 4: Ingestion Drop Rules */}
-      {activeSubTab === 'drop-rules' && <DropRulesCard onRulesChange={setDropRules} />}
 
       {/* CREATE / EDIT RULE MODAL */}
       <AlertRuleModal
@@ -991,7 +1028,7 @@ export const AlertsPanel: React.FC = () => {
         <Modal
           isOpen={!!selectedHistoryItem}
           onClose={() => setSelectedHistoryItem(null)}
-          title="Incident Analysis & Log Details"
+          title={!selectedHistoryItem.rule_id || selectedHistoryItem.rule_name === 'On-Demand Analysis' ? 'Historical AI Analysis' : 'Incident Alert Details'}
           maxWidth="max-w-3xl"
         >
           <IncidentHistoryDetail

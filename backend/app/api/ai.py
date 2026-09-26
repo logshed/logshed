@@ -427,12 +427,13 @@ async def diagnose_logs_stream(
 async def list_ai_audit(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    trigger_source: Optional[str] = Query(None, description="Filter by trigger origin ('on-demand' or 'alert')"),
     user: dict = Depends(get_current_user),
 ) -> AiAuditListResponse:
     """
     Retrieve historical AI analyses from ai_audit_log.
     """
-    items, total = await list_ai_audit_logs(limit=limit, offset=offset)
+    items, total = await list_ai_audit_logs(limit=limit, offset=offset, trigger_source=trigger_source)
     return AiAuditListResponse(items=items, total=total)
 
 

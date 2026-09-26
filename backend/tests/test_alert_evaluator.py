@@ -337,6 +337,20 @@ class TestAlertEvaluatorEngine:
         ai_prompt = captured_ai_kwargs.get("prompt_override", "")
         assert "App / Container: sshd" in ai_prompt
 
+        # Verify AI diagnosis was persisted to ai_audit_log with trigger_source='alert'
+        conn = get_connection(test_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT source_alias, app_name, log_count, user_context, model, trigger_source, tokens_used FROM ai_audit_log")
+        audit_row = cursor.fetchone()
+        conn.close()
+        assert audit_row is not None
+        assert audit_row[1] == "sshd"
+        assert audit_row[2] == 1
+        assert audit_row[3] == "Alert Rule: SSH Threat"
+        assert audit_row[4] == "gemini-2.5-flash"
+        assert audit_row[5] == "alert"
+        assert audit_row[6] == 150
+
     @pytest.mark.asyncio
     async def test_app_url_configured_includes_link_in_notification(self, test_db: Path, monkeypatch):
         """Verify that when APP_URL is configured, the notification includes the link to /alerts/history."""

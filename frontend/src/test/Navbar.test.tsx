@@ -141,7 +141,7 @@ describe('Navbar Component', () => {
     });
 
     const consoleBtn = screen.getByRole('button', { name: /Console View/i });
-    const alertsBtn = screen.getByRole('button', { name: /Alerts & Rules/i });
+    const alertsBtn = screen.getByRole('button', { name: /Alerts & History/i });
     const storageBtn = screen.getByRole('button', { name: /Storage/i });
     const settingsBtn = screen.getByRole('button', { name: /^Settings$/i });
 

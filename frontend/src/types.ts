@@ -144,6 +144,7 @@ export interface AiAuditEntry {
   tokens_thoughts?: number;
   tokens_used: number;
   system_prompt?: string | null;
+  trigger_source?: 'on-demand' | 'alert';
 }
 
 export interface AuthStatusResponse {
@@ -409,7 +410,18 @@ export interface AlertHistoryItem {
   incident_summary?: string | null;
   ai_enrichment: boolean;
   ai_model?: string | null;
+  ai_audit_id?: number | null;
   triggered_at: string;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  tokens_thoughts?: number | null;
+  tokens_used?: number | null;
+  prompt_sent?: string | null;
+  system_prompt?: string | null;
+  response_text?: string | null;
+  source_alias?: string | null;
+  app_name?: string | null;
+  user_context?: string | null;
 }
 
 export interface AlertHistoryResponse {

@@ -275,16 +275,25 @@ CREATE TABLE IF NOT EXISTS alert_history (
     incident_summary TEXT,
     ai_enrichment BOOLEAN DEFAULT 0,
     ai_model TEXT,
+    ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL,
     triggered_at DATETIME NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON alert_history(rule_id);
 CREATE INDEX IF NOT EXISTS idx_alert_history_rule_time ON alert_history(rule_id, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_audit_id);
+
+ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand';
 ''')
 
     try:
         conn.execute("ALTER TABLE alert_history ADD COLUMN ai_model TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE alert_history ADD COLUMN ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL")
     except sqlite3.OperationalError:
         pass
 
@@ -355,6 +364,52 @@ def run_migrations(db_path: Union[str, Path]) -> None:
                 "INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted) "
                 "VALUES ('retention_days', '14', datetime('now'), 0);"
             )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Ensure ai_audit_log has trigger_source column
+        try:
+            conn.execute(
+                "ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand';"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Ensure alert_history has ai_audit_id column
+        try:
+            conn.execute(
+                "ALTER TABLE alert_history ADD COLUMN ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL;"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Backfill on-demand ai_audit_log entries into alert_history
+        try:
+            conn.execute("""
+                INSERT INTO alert_history (
+                    rule_id, rule_name, channel_id, trigger_count, sample_log,
+                    incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at
+                )
+                SELECT
+                    NULL,
+                    'On-Demand Analysis',
+                    NULL,
+                    a.log_count,
+                    NULL,
+                    a.response_text,
+                    1,
+                    a.model,
+                    a.id,
+                    a.timestamp
+                FROM ai_audit_log a
+                WHERE (a.trigger_source = 'on-demand' OR a.trigger_source IS NULL)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM alert_history h WHERE h.ai_audit_id = a.id
+                  );
+            """)
             conn.commit()
         except sqlite3.OperationalError:
             pass

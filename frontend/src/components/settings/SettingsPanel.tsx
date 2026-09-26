@@ -463,10 +463,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <button
           type="button"
           onClick={() => handleSubTabChange('app')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer border ${
             activeSubTab === 'app'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border-dark-600'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
           <Settings className="w-3.5 h-3.5" />
@@ -476,10 +476,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <button
           type="button"
           onClick={() => handleSubTabChange('aliases')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer border ${
             activeSubTab === 'aliases'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border-dark-600'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
           <Server className="w-3.5 h-3.5" />
@@ -489,10 +489,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <button
           type="button"
           onClick={() => handleSubTabChange('advanced')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer border ${
             activeSubTab === 'advanced'
-              ? 'bg-dark-800 text-accent-400 border border-dark-650'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900'
+              ? 'bg-dark-800 text-accent-400 border-dark-600'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
           <Shield className="w-3.5 h-3.5" />

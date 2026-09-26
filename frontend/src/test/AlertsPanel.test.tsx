@@ -121,10 +121,10 @@ describe('AlertsPanel Component', () => {
     vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
   });
 
-  it('renders Alerts and Rules heading, subtitle with drop rules, and enabled drop rules tab count', async () => {
+  it('renders Alerts & History heading, subtitle with drop rules, and enabled drop rules tab count', async () => {
     render(<AlertsPanel />);
 
-    expect(screen.getByRole('heading', { level: 2, name: /Alerts and Rules/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /Alerts & History/i })).toBeInTheDocument();
     expect(
       screen.getByText(/Configure real-time threshold and pattern alert rules, manage ingestion drop rules/i)
     ).toBeInTheDocument();
@@ -194,13 +194,13 @@ describe('AlertsPanel Component', () => {
       expect(screen.queryByText('Alert Presets Catalog')).not.toBeInTheDocument();
     });
 
-    // Switch to Alert History tab
-    const historyTab = screen.getByRole('button', { name: /Alert History/i });
+    // Switch to History tab
+    const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
-      expect(screen.getByText('Alert Firing Log')).toBeInTheDocument();
-      expect(screen.getByText('Complete')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /^History/i })).toBeInTheDocument();
+      expect(screen.getByText('AI Alert')).toBeInTheDocument();
     });
 
     // Expand row to view diagnosis summary
@@ -208,7 +208,7 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(row);
 
     await waitFor(() => {
-      expect(screen.getByText('Brute-force attack from host 192.168.1.100 against root.')).toBeInTheDocument();
+      expect(screen.getAllByText('Brute-force attack from host 192.168.1.100 against root.').length).toBeGreaterThan(0);
     });
 
     // Switch to Drop Rules tab
@@ -354,12 +354,21 @@ describe('AlertsPanel Component', () => {
     const testBtn = screen.getByTitle('Test Rule');
     expect(testBtn).toBeInTheDocument();
 
-    // Switch to Alert History tab
-    const historyTab = screen.getByRole('button', { name: /Alert History/i });
+    // Switch to History tab
+    const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
+      expect(screen.getByText('AI Alert')).toBeInTheDocument();
+      expect(screen.getByText(/AI analysis failed/i)).toBeInTheDocument();
+    });
+
+    const viewBtn = screen.getByRole('button', { name: 'View' });
+    fireEvent.click(viewBtn);
+
+    await waitFor(() => {
       expect(screen.getByText('Failed')).toBeInTheDocument();
+      expect(screen.getByText('Failure Details')).toBeInTheDocument();
     });
   });
 
@@ -386,12 +395,12 @@ describe('AlertsPanel Component', () => {
 
     render(<AlertsPanel />);
 
-    const historyTab = screen.getByRole('button', { name: /Alert History/i });
+    const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
       expect(screen.getByText('Kernel Hardware Watchdog')).toBeInTheDocument();
-      expect(screen.getByText('Complete')).toBeInTheDocument();
+      expect(screen.getByText('AI Alert')).toBeInTheDocument();
       expect(screen.queryByText('Failed')).not.toBeInTheDocument();
     });
 
@@ -413,15 +422,15 @@ describe('AlertsPanel Component', () => {
 
     render(<AlertsPanel />);
 
-    // Switch to Alert History tab
-    const historyTab = screen.getByRole('button', { name: /Alert History/i });
+    // Switch to History tab
+    const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
     });
 
-    const deleteBtn = screen.getByTitle('Delete incident record');
+    const deleteBtn = screen.getByTitle('Delete history record');
     fireEvent.click(deleteBtn);
 
     // Confirmation modal should appear
@@ -465,29 +474,30 @@ describe('AlertsPanel Component', () => {
     });
   });
 
-  it('displays Log Message header and opens modal overlay on incident row click', async () => {
+  it('displays History table headers and opens modal overlay on incident row click', async () => {
     render(<AlertsPanel />);
 
     await waitFor(() => {
       expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
     });
 
-    const historyTab = screen.getByRole('button', { name: /Alert History/i });
+    const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
 
     await waitFor(() => {
-      expect(screen.getByText('LOG MESSAGE')).toBeInTheDocument();
+      expect(screen.getByText('Target / Rule')).toBeInTheDocument();
+      expect(screen.getByText('Summary')).toBeInTheDocument();
       expect(screen.queryByText('Sample Log')).toBeNull();
     });
 
-    // Click on the incident row
-    const row = await screen.findByText('Failed password for root from 192.168.1.100 port 22');
+    // Click on the incident row (matching rule name in Target / Rule column)
+    const row = await screen.findByText('SSH Brute-Force Detection');
     fireEvent.click(row);
 
-    // Verify modal overlay opens with Incident Analysis title
+    // Verify modal overlay opens with Incident Alert Details title
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Incident Analysis & Log Details' })).toBeInTheDocument();
-      expect(screen.getByText('Brute-force attack from host 192.168.1.100 against root.')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Incident Alert Details' })).toBeInTheDocument();
+      expect(screen.getByText('Failed password for root from 192.168.1.100 port 22')).toBeInTheDocument();
       expect(screen.getByText('Triggering Log Snippet')).toBeInTheDocument();
     });
 
@@ -496,7 +506,7 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(closeBtn);
 
     await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'Incident Analysis & Log Details' })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Incident Alert Details' })).toBeNull();
     });
   });
 
@@ -513,8 +523,8 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(dropRulesTab);
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/drop-rules');
 
-    // Click Alert History
-    const historyTab = screen.getByRole('button', { name: /Alert History/i });
+    // Click History
+    const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/history');
 
@@ -709,5 +719,90 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText(/Imported 2 rules \(0 skipped\)\./i)).toBeInTheDocument();
     });
   });
+
+  it('renders combined History table with on-demand and alert badges and opens details', async () => {
+    vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          rule_id: null,
+          rule_name: 'On-Demand Analysis',
+          channel_id: null,
+          trigger_count: 3,
+          sample_log: null,
+          incident_summary: '## Summary\nContainer memory leak detected.\n\n## Root Cause\nOOM.\n\n## Actionable Remediation\nRestart container.',
+          ai_enrichment: true,
+          ai_model: 'gemini-3.7-flash',
+          ai_audit_id: 101,
+          triggered_at: '2026-09-25T14:30:00Z',
+          source_alias: 'docker',
+          app_name: 'web-api',
+          tokens_used: 1250,
+          tokens_in: 900,
+          tokens_out: 350,
+        },
+        {
+          id: 2,
+          rule_id: 1,
+          rule_name: 'SSH Brute-Force Detection',
+          channel_id: 1,
+          trigger_count: 10,
+          sample_log: 'Failed password for root',
+          incident_summary: 'Brute-force password guessing attack.',
+          ai_enrichment: true,
+          ai_model: 'gemini-3.7-flash',
+          ai_audit_id: 102,
+          triggered_at: '2026-09-25T14:00:00Z',
+          tokens_used: 800,
+        },
+        {
+          id: 3,
+          rule_id: 2,
+          rule_name: 'Nginx Error Spike',
+          channel_id: null,
+          trigger_count: 50,
+          sample_log: '502 Bad Gateway',
+          incident_summary: null,
+          ai_enrichment: false,
+          triggered_at: '2026-09-25T13:00:00Z',
+        },
+      ],
+      total: 3,
+      limit: 50,
+      offset: 0,
+    });
+
+    render(<AlertsPanel />);
+
+    // Switch to History tab
+    const historyTab = screen.getByRole('button', { name: /^History/i });
+    fireEvent.click(historyTab);
+
+    await waitFor(() => {
+      expect(screen.getByText('On-Demand')).toBeInTheDocument();
+      expect(screen.getByText('AI Alert')).toBeInTheDocument();
+      expect(screen.getByText('Alert')).toBeInTheDocument();
+      expect(screen.getByText('docker • web-api')).toBeInTheDocument();
+      expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
+      expect(screen.getByText('Nginx Error Spike')).toBeInTheDocument();
+      // Clean summary should strip ## Summary
+      expect(screen.getByText('Container memory leak detected.')).toBeInTheDocument();
+    });
+
+    // Ensure no cross-link banner to Storage is displayed
+    expect(screen.queryByText(/Looking for AI token usage audits and raw prompt histories/i)).not.toBeInTheDocument();
+
+    // Click on On-Demand row to open Historical AI Analysis modal
+    const onDemandRow = screen.getByText('docker • web-api');
+    fireEvent.click(onDemandRow);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Historical AI Analysis' })).toBeInTheDocument();
+      expect(screen.getByText(/1,250/)).toBeInTheDocument();
+      expect(screen.getByText(/900 in/)).toBeInTheDocument();
+      expect(screen.getByText(/350 out/)).toBeInTheDocument();
+    });
+  });
 });
+
 

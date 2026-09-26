@@ -133,7 +133,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Bell className="w-3.5 h-3.5" />
-              <span>Alerts & Rules</span>
+              <span>Alerts & History</span>
             </button>
 
             <button
@@ -214,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <Bell className="w-4 h-4 mb-0.5" />
-            <span>Alerts & Rules</span>
+            <span>Alerts & History</span>
           </button>
 
           <button

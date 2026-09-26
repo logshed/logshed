@@ -10,6 +10,7 @@ import datetime
 import json
 import logging
 import re
+import sqlite3
 from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 
@@ -765,22 +766,27 @@ async def list_alert_history(
     rule_id: Optional[int] = Query(None, description="Optional rule ID filter"),
     user: dict = Depends(get_current_user),
 ) -> AlertHistoryListResponse:
-    """Retrieve historical alert firing events with pagination."""
+    """Retrieve historical alert and AI analysis firing events with pagination."""
     def _query(conn):
         cur = conn.cursor()
-        where_sql = "WHERE rule_id = ?" if rule_id is not None else ""
+        where_sql = "WHERE h.rule_id = ?" if rule_id is not None else ""
+        count_where = "WHERE rule_id = ?" if rule_id is not None else ""
         params = [rule_id] if rule_id is not None else []
 
-        cur.execute(f"SELECT COUNT(*) FROM alert_history {where_sql}", params)
+        cur.execute(f"SELECT COUNT(*) FROM alert_history {count_where}", params)
         total = cur.fetchone()[0]
 
         query_sql = f"""
-            SELECT id, rule_id, rule_name, channel_id, trigger_count,
-                   sample_log, incident_summary, ai_enrichment, triggered_at,
-                   ai_model
-            FROM alert_history
+            SELECT h.id, h.rule_id, h.rule_name, h.channel_id, h.trigger_count,
+                   h.sample_log, h.incident_summary, h.ai_enrichment, h.ai_model,
+                   h.ai_audit_id, h.triggered_at,
+                   a.tokens_in, a.tokens_out, a.tokens_thoughts, a.tokens_used,
+                   a.prompt_sent, a.system_prompt, a.response_text,
+                   a.source_alias, a.app_name, a.user_context
+            FROM alert_history h
+            LEFT JOIN ai_audit_log a ON h.ai_audit_id = a.id
             {where_sql}
-            ORDER BY triggered_at DESC, id DESC
+            ORDER BY h.triggered_at DESC, h.id DESC
             LIMIT ? OFFSET ?
         """
         cur.execute(query_sql, params + [limit, offset])
@@ -788,18 +794,40 @@ async def list_alert_history(
 
         items = []
         for r in rows:
+            p_sent = r["prompt_sent"]
+            if p_sent and not p_sent.startswith("### System Metadata") and not p_sent.startswith("### Redacted Log Stream") and not p_sent.startswith("### Security"):
+                from app.services.ai_engine import build_analysis_prompt
+                p_sent = build_analysis_prompt(
+                    source_alias=r["source_alias"] or "unknown",
+                    app_name=r["app_name"] or "unknown",
+                    redacted_logs=p_sent,
+                    log_count=r["trigger_count"] or 1,
+                    user_context=r["user_context"],
+                )
+
             items.append(
                 AlertHistoryItem(
-                    id=r[0],
-                    rule_id=r[1],
-                    rule_name=r[2],
-                    channel_id=r[3],
-                    trigger_count=r[4] or 1,
-                    sample_log=r[5],
-                    incident_summary=r[6],
-                    ai_enrichment=bool(r[7]),
-                    triggered_at=str(r[8]),
-                    ai_model=r[9] if len(r) > 9 else None,
+                    id=r["id"],
+                    rule_id=r["rule_id"],
+                    rule_name=r["rule_name"],
+                    channel_id=r["channel_id"],
+                    trigger_count=r["trigger_count"] or 1,
+                    sample_log=r["sample_log"],
+                    incident_summary=r["incident_summary"],
+                    ai_enrichment=bool(r["ai_enrichment"]),
+                    ai_model=r["ai_model"],
+                    ai_audit_id=r["ai_audit_id"],
+                    triggered_at=str(r["triggered_at"]),
+                    tokens_in=r["tokens_in"],
+                    tokens_out=r["tokens_out"],
+                    tokens_thoughts=r["tokens_thoughts"],
+                    tokens_used=r["tokens_used"],
+                    prompt_sent=p_sent,
+                    system_prompt=r["system_prompt"],
+                    response_text=r["response_text"],
+                    source_alias=r["source_alias"],
+                    app_name=r["app_name"],
+                    user_context=r["user_context"],
                 )
             )
         return items, total
@@ -813,11 +841,18 @@ async def delete_alert_history_item(
     history_id: int,
     user: dict = Depends(get_current_user),
 ) -> MessageResponse:
-    """Delete a single alert firing history record."""
+    """Delete a single alert firing history record and associated AI audit log if present."""
     def _delete(conn):
         cur = conn.cursor()
+        cur.execute("SELECT ai_audit_id FROM alert_history WHERE id = ?", (history_id,))
+        row = cur.fetchone()
+        if not row:
+            return 0
+        ai_audit_id = row["ai_audit_id"] if isinstance(row, sqlite3.Row) else row[0]
         cur.execute("DELETE FROM alert_history WHERE id = ?", (history_id,))
         count = cur.rowcount
+        if ai_audit_id:
+            cur.execute("DELETE FROM ai_audit_log WHERE id = ?", (ai_audit_id,))
         conn.commit()
         return count
 
@@ -836,11 +871,12 @@ async def delete_alert_history_item(
 
 @router.delete("/history", response_model=MessageResponse)
 async def clear_alert_history(user: dict = Depends(get_current_user)) -> MessageResponse:
-    """Clear all historical alert firing records."""
+    """Clear all historical alert firing records and AI audit logs."""
     def _clear(conn):
         cur = conn.cursor()
         cur.execute("DELETE FROM alert_history")
         count = cur.rowcount
+        cur.execute("DELETE FROM ai_audit_log")
         conn.commit()
         return count
 
