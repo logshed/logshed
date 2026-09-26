@@ -1314,6 +1314,206 @@ class TestQueueConsumerAlertIntegration:
         assert "logs/s" in captured_prompt
 
 
+class TestGlobalMaintenanceWindow:
+    """Tests for global maintenance window silencing notifications while recording alert history."""
+
+    @pytest.mark.asyncio
+    async def test_maintenance_window_silences_notifications_but_records_history(self, tmp_path, monkeypatch):
+        test_db = tmp_path / "test_maint.db"
+        run_migrations(test_db)
+
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        future_iso = (now_utc + timedelta(hours=2)).isoformat()
+
+        conn = sqlite3.connect(str(test_db))
+        cur = conn.cursor()
+        # Set global maintenance window
+        cur.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+            VALUES ('maintenance_until', ?, ?, 0)
+            """,
+            (future_iso, now_iso),
+        )
+        # Create alert rule
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            """,
+            ("Maint Test Rule", "threshold", 1, 60, 300, now_iso),
+        )
+        conn.commit()
+        conn.close()
+
+        notification_sent = False
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            nonlocal notification_sent
+            notification_sent = True
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        batch = [
+            {
+                "id": 1,
+                "app_name": "app",
+                "source_alias": "srv",
+                "message": "critical error",
+                "timestamp": now_iso,
+            }
+        ]
+        await evaluator.evaluate_batch(batch)
+        await asyncio.sleep(0.1)
+        await evaluator.stop()
+
+        # Notification should NOT have been sent
+        assert notification_sent is False
+
+        # Alert history SHOULD have been recorded
+        check_conn = sqlite3.connect(str(test_db))
+        history_rows = check_conn.execute("SELECT rule_name, trigger_count FROM alert_history").fetchall()
+        check_conn.close()
+        assert len(history_rows) == 1
+        assert history_rows[0][0] == "Maint Test Rule"
+
+    @pytest.mark.asyncio
+    async def test_expired_or_null_maintenance_window_dispatches_notification(self, tmp_path, monkeypatch):
+        test_db = tmp_path / "test_maint_expired.db"
+        run_migrations(test_db)
+
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        past_iso = (now_utc - timedelta(hours=1)).isoformat()
+
+        conn = sqlite3.connect(str(test_db))
+        cur = conn.cursor()
+        # Set expired maintenance window
+        cur.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+            VALUES ('maintenance_until', ?, ?, 0)
+            """,
+            (past_iso, now_iso),
+        )
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            """,
+            ("Expired Maint Rule", "threshold", 1, 60, 300, now_iso),
+        )
+        conn.commit()
+        conn.close()
+
+        notification_sent = False
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            nonlocal notification_sent
+            notification_sent = True
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        batch = [
+            {
+                "id": 1,
+                "app_name": "app",
+                "source_alias": "srv",
+                "message": "critical error",
+                "timestamp": now_iso,
+            }
+        ]
+        await evaluator.evaluate_batch(batch)
+        await asyncio.sleep(0.1)
+        await evaluator.stop()
+
+        # Notification SHOULD have been sent
+        assert notification_sent is True
+
+    @pytest.mark.asyncio
+    async def test_active_recurring_schedule_silences_notifications(self, tmp_path, monkeypatch):
+        import json
+        test_db = tmp_path / "test_maint_sched.db"
+        run_migrations(test_db)
+
+        now_local = datetime.now().astimezone()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        # Schedule window covering now (started 5 mins ago, duration 30 mins)
+        start_time_str = (now_local - timedelta(minutes=5)).strftime("%H:%M")
+
+        schedules = [
+            {
+                "id": "sched_active_now",
+                "name": "Active Daily Window",
+                "enabled": True,
+                "recurrence": "daily",
+                "start_time": start_time_str,
+                "duration_minutes": 30,
+            }
+        ]
+
+        conn = sqlite3.connect(str(test_db))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+            VALUES ('maintenance_schedules', ?, ?, 0)
+            """,
+            (json.dumps(schedules), now_iso),
+        )
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            """,
+            ("Scheduled Rule", "threshold", 1, 60, 300, now_iso),
+        )
+        conn.commit()
+        conn.close()
+
+        notification_sent = False
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            nonlocal notification_sent
+            notification_sent = True
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        batch = [
+            {
+                "id": 1,
+                "app_name": "app",
+                "source_alias": "srv",
+                "message": "critical error",
+                "timestamp": now_iso,
+            }
+        ]
+        await evaluator.evaluate_batch(batch)
+        await asyncio.sleep(0.1)
+        await evaluator.stop()
+
+        # Notification should NOT have been sent because recurring schedule is active
+        assert notification_sent is False
+
+        # Alert history SHOULD have been recorded
+        check_conn = sqlite3.connect(str(test_db))
+        history_rows = check_conn.execute("SELECT rule_name, trigger_count FROM alert_history").fetchall()
+        check_conn.close()
+        assert len(history_rows) == 1
+        assert history_rows[0][0] == "Scheduled Rule"
+
+
+
 
 
 

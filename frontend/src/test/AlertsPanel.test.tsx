@@ -119,6 +119,7 @@ describe('AlertsPanel Component', () => {
     vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
     vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue(mockChannels);
     vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
   });
 
   it('renders Alerts & History heading, subtitle with drop rules, and enabled drop rules tab count', async () => {
@@ -803,6 +804,227 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText(/350 out/)).toBeInTheDocument();
     });
   });
+
+  it('correctly maps maintenance sub-tab paths', () => {
+    expect(pathToAlertSubTab('/alerts/maintenance')).toBe('maintenance');
+    expect(alertSubTabToPath('maintenance')).toBe('/alerts/maintenance');
+  });
+
+  it('renders active maintenance banner on the main rules tab and switches to maintenance sub-tab via Manage Maintenance button', async () => {
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T15:00:00Z',
+      schedule_name: null,
+      on_demand_until: '2026-09-26T15:00:00Z',
+      schedules: [],
+    });
+
+    render(<AlertsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Maintenance Window Active')).toBeInTheDocument();
+      expect(screen.getByText('On-Demand')).toBeInTheDocument();
+      expect(screen.getByText(/Alert notifications are silenced/i)).toBeInTheDocument();
+    });
+
+    // Manage button switches to maintenance sub-tab
+    const manageBtn = screen.getByRole('button', { name: 'Manage Maintenance' });
+    fireEvent.click(manageBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('On-Demand Maintenance')).toBeInTheDocument();
+      expect(screen.getByText('Scheduled Maintenance Windows')).toBeInTheDocument();
+    });
+  });
+
+  it('clears on-demand maintenance directly from the main rules tab banner', async () => {
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T15:00:00Z',
+      schedule_name: null,
+      on_demand_until: '2026-09-26T15:00:00Z',
+      schedules: [],
+    });
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+      schedules: [],
+    });
+
+    render(<AlertsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Maintenance Window Active')).toBeInTheDocument();
+    });
+
+    const clearBtn = screen.getByRole('button', { name: 'Clear' });
+    fireEvent.click(clearBtn);
+
+    await waitFor(() => {
+      expect(setMaintSpy).toHaveBeenCalledWith(null);
+      expect(screen.queryByText('Maintenance Window Active')).toBeNull();
+    });
+  });
+
+  it('switches to maintenance sub-tab and renders on-demand controls and presets', async () => {
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T12:00:00Z',
+      on_demand_until: '2026-09-26T12:00:00Z',
+      schedules: [],
+    });
+
+    render(<AlertsPanel />);
+
+    // Switch to maintenance sub-tab
+    const maintTabBtn = screen.getByRole('button', { name: /Maintenance/i });
+    fireEvent.click(maintTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('On-Demand Maintenance')).toBeInTheDocument();
+      expect(screen.getByText('Scheduled Maintenance Windows')).toBeInTheDocument();
+      expect(screen.getByText('On-Demand Inactive')).toBeInTheDocument();
+    });
+
+    // Click +1h preset
+    const preset1hBtn = screen.getByRole('button', { name: '+1 Hour' });
+    fireEvent.click(preset1hBtn);
+
+    await waitFor(() => {
+      expect(setMaintSpy).toHaveBeenCalled();
+      expect(screen.getByText('On-Demand Active')).toBeInTheDocument();
+    });
+  });
+
+  it('submits custom datetime for on-demand maintenance on the maintenance sub-tab', async () => {
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T18:00:00Z',
+      on_demand_until: '2026-09-26T18:00:00Z',
+      schedules: [],
+    });
+
+    render(<AlertsPanel />);
+
+    const maintTabBtn = screen.getByRole('button', { name: /Maintenance/i });
+    fireEvent.click(maintTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('On-Demand Maintenance')).toBeInTheDocument();
+    });
+
+    const dateInput = screen.getByLabelText('Maintenance window end time');
+    fireEvent.change(dateInput, { target: { value: '2026-09-26T18:00' } });
+
+    const setWindowBtn = screen.getByRole('button', { name: 'Set Window' });
+    fireEvent.click(setWindowBtn);
+
+    await waitFor(() => {
+      expect(setMaintSpy).toHaveBeenCalled();
+      expect(screen.getByText('On-Demand Active')).toBeInTheDocument();
+    });
+  });
+
+  it('manages recurring maintenance schedules (add, toggle, delete)', async () => {
+    const mockSched = {
+      id: 'sched_1',
+      name: 'Sunday System Backup',
+      recurrence: 'weekly' as const,
+      start_time: '02:00',
+      duration_minutes: 60,
+      day_of_week: 0,
+      enabled: true,
+      is_active: false,
+    };
+
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+      schedules: [mockSched],
+    });
+
+    const updateSchedulesSpy = vi.spyOn(alertsApi, 'updateMaintenanceSchedules').mockResolvedValue({
+      active: false,
+      until: null,
+      schedules: [{ ...mockSched, enabled: false }],
+    });
+
+    render(<AlertsPanel />);
+
+    const maintTabBtn = screen.getByRole('button', { name: /Maintenance/i });
+    fireEvent.click(maintTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Sunday System Backup')).toBeInTheDocument();
+      expect(screen.getByText('Weekly on Sunday at 02:00')).toBeInTheDocument();
+      expect(screen.getByText('60 min')).toBeInTheDocument();
+    });
+
+    // Toggle enabled button
+    const toggleBtn = screen.getByRole('button', { name: 'Enabled' });
+    fireEvent.click(toggleBtn);
+
+    await waitFor(() => {
+      expect(updateSchedulesSpy).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'sched_1', enabled: false }),
+      ]);
+    });
+
+    // Add schedule modal
+    const addBtn = screen.getByRole('button', { name: 'Add Schedule' });
+    fireEvent.click(addBtn);
+
+    expect(screen.getByRole('heading', { name: 'Add Maintenance Schedule' })).toBeInTheDocument();
+
+    const nameInput = screen.getByLabelText('Schedule Name');
+    fireEvent.change(nameInput, { target: { value: 'Daily Patching' } });
+
+    const dailyBtn = screen.getByRole('button', { name: 'Daily' });
+    fireEvent.click(dailyBtn);
+
+    updateSchedulesSpy.mockResolvedValueOnce({
+      active: false,
+      until: null,
+      schedules: [
+        mockSched,
+        {
+          id: 'sched_2',
+          name: 'Daily Patching',
+          recurrence: 'daily',
+          start_time: '02:00',
+          duration_minutes: 60,
+          enabled: true,
+        },
+      ],
+    });
+
+    const saveBtn = screen.getByRole('button', { name: 'Create Schedule' });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateSchedulesSpy).toHaveBeenCalled();
+    });
+
+    // Delete schedule
+    const deleteBtn = screen.getByLabelText('Delete Sunday System Backup');
+    fireEvent.click(deleteBtn);
+
+    expect(screen.getByRole('heading', { name: 'Delete Maintenance Schedule' })).toBeInTheDocument();
+
+    updateSchedulesSpy.mockResolvedValueOnce({
+      active: false,
+      until: null,
+      schedules: [],
+    });
+
+    const confirmDeleteBtn = screen.getByRole('button', { name: 'Delete Schedule' });
+    fireEvent.click(confirmDeleteBtn);
+
+    await waitFor(() => {
+      expect(updateSchedulesSpy).toHaveBeenCalled();
+    });
+  });
 });
+
 
 

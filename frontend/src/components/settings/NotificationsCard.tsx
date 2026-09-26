@@ -4,8 +4,6 @@ import {
   Plus,
   Trash2,
   Edit2,
-  ChevronDown,
-  ChevronRight,
   RefreshCw,
   Send,
   AlertTriangle,
@@ -25,7 +23,6 @@ import { Modal } from '../common/Modal.tsx';
 
 export const NotificationsCard: React.FC = () => {
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [channelToEdit, setChannelToEdit] = useState<NotificationChannel | null>(null);
   const [channelToDelete, setChannelToDelete] = useState<NotificationChannel | null>(null);
@@ -131,6 +128,7 @@ export const NotificationsCard: React.FC = () => {
 
   const handleModalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!formName.trim()) {
       setFormError('Target name is required.');
       return;
@@ -187,20 +185,14 @@ export const NotificationsCard: React.FC = () => {
     <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
       {/* Header */}
       <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
-        <div
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="flex flex-wrap items-center gap-1.5 sm:gap-2 cursor-pointer select-none group min-w-0"
-        >
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            <div className="text-slate-400 group-hover:text-slate-200 transition shrink-0">
-              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </div>
             <Bell className="w-4 h-4 text-accent-500 shrink-0" />
             <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider truncate">
               Notification Targets
             </h3>
           </div>
-          <div className="flex items-center gap-1.5 pl-6 sm:pl-0 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-dark-800 border border-dark-700 text-slate-400 font-mono whitespace-nowrap">
               {channels.length} {channels.length === 1 ? 'target' : 'targets'}
             </span>
@@ -249,9 +241,8 @@ export const NotificationsCard: React.FC = () => {
         </div>
       )}
 
-      {/* Collapsible Content */}
-      {!isCollapsed && (
-        <div className="overflow-x-auto">
+      {/* Content Table */}
+      <div className="overflow-x-auto">
           {channels.length === 0 ? (
             <div className="text-center py-6 text-slate-400 text-xs italic bg-dark-950/40 rounded-lg border border-dark-800">
               No notification targets configured. Add a target to receive alerts on Discord, Gotify, Telegram, or other services.
@@ -334,7 +325,6 @@ export const NotificationsCard: React.FC = () => {
             </table>
           )}
         </div>
-      )}
 
       {/* Add / Edit Channel Modal */}
       <Modal

@@ -29,6 +29,10 @@ from app.models import (
     AlertRuleUpdate,
     AlertTestRequest,
     AlertTestResponse,
+    MaintenanceSchedule,
+    MaintenanceSchedulesUpdateRequest,
+    MaintenanceWindowRequest,
+    MaintenanceWindowResponse,
     MessageResponse,
     SecurityPresetResponse,
 )
@@ -62,6 +66,93 @@ def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
         suppress_until=str(r[14]) if r[14] else None,
         created_at=str(r[15]),
     )
+
+
+# ---------------------------------------------------------------------------
+# Global Maintenance Window Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/maintenance", response_model=MaintenanceWindowResponse)
+async def get_maintenance_window(
+    user: dict = Depends(get_current_user),
+) -> MaintenanceWindowResponse:
+    """Retrieve current maintenance window status including on-demand and recurring schedules."""
+    from app.services.maintenance_service import get_maintenance_status
+    return await run_db_query(get_maintenance_status)
+
+
+@router.post("/maintenance", response_model=MaintenanceWindowResponse)
+async def set_maintenance_window(
+    payload: MaintenanceWindowRequest,
+    user: dict = Depends(get_current_user),
+) -> MaintenanceWindowResponse:
+    """
+    Set or clear the on-demand alert maintenance window.
+    Pass { "until": "<ISO 8601 datetime>" } to activate or { "until": null } to clear.
+    """
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    now_iso = now_dt.isoformat()
+
+    if payload.until is None or not payload.until.strip():
+        def _clear(conn):
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+                VALUES ('maintenance_until', '', ?, 0)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (now_iso,),
+            )
+            conn.commit()
+
+        await run_db_query(_clear)
+    else:
+        clean_until = payload.until.strip()
+        try:
+            dt = datetime.datetime.fromisoformat(clean_until.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid ISO 8601 datetime format for maintenance_until: {e}",
+            )
+
+        stored_iso = dt.astimezone(datetime.timezone.utc).isoformat()
+
+        def _save(conn):
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+                VALUES ('maintenance_until', ?, ?, 0)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (stored_iso, now_iso),
+            )
+            conn.commit()
+
+        await run_db_query(_save)
+
+    from app.services.maintenance_service import get_maintenance_status
+    return await run_db_query(get_maintenance_status)
+
+
+@router.post("/maintenance/schedules", response_model=MaintenanceWindowResponse)
+@router.put("/maintenance/schedules", response_model=MaintenanceWindowResponse, include_in_schema=False)
+async def update_maintenance_schedules(
+    payload: MaintenanceSchedulesUpdateRequest,
+    user: dict = Depends(get_current_user),
+) -> MaintenanceWindowResponse:
+    """Save recurring maintenance schedules (daily, weekly, monthly)."""
+    from app.services.maintenance_service import get_maintenance_status, save_schedules
+
+    def _save_all(conn):
+        save_schedules(conn, payload.schedules)
+
+    await run_db_query(_save_all)
+    return await run_db_query(get_maintenance_status)
 
 
 # ---------------------------------------------------------------------------

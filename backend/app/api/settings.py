@@ -95,6 +95,18 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     if check_for_updates_raw is not None:
         check_for_updates = check_for_updates_raw.strip().lower() not in ("0", "false", "no", "off")
 
+    stored_until = stored.get("maintenance_until")
+    maintenance_until = None
+    if stored_until and stored_until.strip():
+        try:
+            dt = datetime.datetime.fromisoformat(stored_until.strip().replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            if datetime.datetime.now(datetime.timezone.utc) < dt:
+                maintenance_until = stored_until.strip()
+        except Exception:
+            maintenance_until = None
+
     return SettingsResponse(
         ai_provider=stored.get("ai_provider") or "gemini",
         ai_model=stored.get("ai_model") or DEFAULT_AI_MODEL,
@@ -108,6 +120,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         has_ai_api_key=bool(ai_api_key_val),
         internal_log_level=internal_log_level,
         check_for_updates=check_for_updates,
+        maintenance_until=maintenance_until,
     )
 
 
@@ -159,6 +172,22 @@ async def update_settings(
 
         if req.check_for_updates is not None:
             updates.append(("check_for_updates", "1" if req.check_for_updates else "0", 0))
+
+        if "maintenance_until" in req.model_fields_set:
+            if req.maintenance_until is None or req.maintenance_until.strip() == "":
+                updates.append(("maintenance_until", "", 0))
+            else:
+                try:
+                    dt = datetime.datetime.fromisoformat(req.maintenance_until.strip().replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=datetime.timezone.utc)
+                    stored_iso = dt.astimezone(datetime.timezone.utc).isoformat()
+                    updates.append(("maintenance_until", stored_iso, 0))
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Invalid ISO 8601 datetime format for maintenance_until: {e}",
+                    )
 
         # Handle sensitive fields
         for sensitive_key in ("ai_api_key",):

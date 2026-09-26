@@ -7,6 +7,8 @@ import {
   AlertRuleUpdate,
   AlertTestRequest,
   AlertTestResponse,
+  MaintenanceSchedule,
+  MaintenanceWindowResponse,
 } from '../types.ts';
 
 export async function fetchAlertRules(): Promise<AlertRule[]> {
@@ -98,3 +100,26 @@ export async function importAlertRules(
     body: JSON.stringify(data),
   });
 }
+
+export async function fetchMaintenanceWindow(): Promise<MaintenanceWindowResponse> {
+  return apiFetch<MaintenanceWindowResponse>('/api/alerts/maintenance');
+}
+
+export async function setMaintenanceWindow(
+  until: string | null
+): Promise<MaintenanceWindowResponse> {
+  return apiFetch<MaintenanceWindowResponse>('/api/alerts/maintenance', {
+    method: 'POST',
+    body: JSON.stringify({ until }),
+  });
+}
+
+export async function updateMaintenanceSchedules(
+  schedules: MaintenanceSchedule[]
+): Promise<MaintenanceWindowResponse> {
+  return apiFetch<MaintenanceWindowResponse>('/api/alerts/maintenance/schedules', {
+    method: 'POST',
+    body: JSON.stringify({ schedules }),
+  });
+}
+

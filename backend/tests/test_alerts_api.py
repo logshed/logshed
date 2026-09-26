@@ -395,3 +395,125 @@ class TestAlertsApi:
         data = res.json()
         assert data["matched"] is False
         assert "backtracking" in (data["error"] or "").lower()
+
+
+class TestMaintenanceWindowApi:
+    """Tests for GET and POST /api/v1/alerts/maintenance and /api/alerts/maintenance."""
+
+    @pytest.mark.asyncio
+    async def test_get_maintenance_initial_inactive(self, client: AsyncClient, auth_headers: dict):
+        res = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["active"] is False
+        assert data["until"] is None
+
+        # Verify dual route
+        res2 = await client.get("/api/alerts/maintenance", headers=auth_headers)
+        assert res2.status_code == 200
+        assert res2.json()["active"] is False
+
+    @pytest.mark.asyncio
+    async def test_set_and_clear_maintenance_window(self, client: AsyncClient, auth_headers: dict):
+        future_iso = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+        # Set maintenance window
+        res = await client.post(
+            "/api/v1/alerts/maintenance",
+            json={"until": future_iso},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["active"] is True
+        assert data["until"] is not None
+
+        # Verify GET returns active
+        get_res = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        assert get_res.status_code == 200
+        assert get_res.json()["active"] is True
+
+        # Verify settings GET reflects maintenance_until
+        settings_res = await client.get("/api/settings", headers=auth_headers)
+        assert settings_res.status_code == 200
+        assert settings_res.json()["maintenance_until"] is not None
+
+        # Clear maintenance window
+        clear_res = await client.post(
+            "/api/v1/alerts/maintenance",
+            json={"until": None},
+            headers=auth_headers,
+        )
+        assert clear_res.status_code == 200
+        clear_data = clear_res.json()
+        assert clear_data["active"] is False
+        assert clear_data["until"] is None
+
+        # Verify GET now returns inactive
+        get_res2 = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        assert get_res2.status_code == 200
+        assert get_res2.json()["active"] is False
+        assert get_res2.json()["until"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_maintenance_invalid_format(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/v1/alerts/maintenance",
+            json={"until": "not-a-datetime"},
+            headers=auth_headers,
+        )
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_maintenance_schedules_crud_and_evaluation(self, client: AsyncClient, auth_headers: dict):
+        schedules_payload = {
+            "schedules": [
+                {
+                    "id": "sched_daily",
+                    "name": "Daily Early Updates",
+                    "enabled": True,
+                    "recurrence": "daily",
+                    "start_time": "03:00",
+                    "duration_minutes": 60,
+                },
+                {
+                    "id": "sched_weekly",
+                    "name": "Sunday Night Scrub",
+                    "enabled": False,
+                    "recurrence": "weekly",
+                    "start_time": "02:00",
+                    "duration_minutes": 120,
+                    "day_of_week": 0,
+                },
+                {
+                    "id": "sched_monthly",
+                    "name": "First of Month Backup",
+                    "enabled": True,
+                    "recurrence": "monthly",
+                    "start_time": "04:00",
+                    "duration_minutes": 180,
+                    "day_of_month": 1,
+                },
+            ]
+        }
+
+        # Save schedules
+        save_res = await client.post(
+            "/api/v1/alerts/maintenance/schedules",
+            json=schedules_payload,
+            headers=auth_headers,
+        )
+        assert save_res.status_code == 200
+        data = save_res.json()
+        assert len(data["schedules"]) == 3
+        assert data["schedules"][0]["name"] == "Daily Early Updates"
+        assert data["schedules"][0]["next_run"] is not None
+
+        # Verify GET returns the saved schedules
+        get_res = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        assert get_res.status_code == 200
+        get_data = get_res.json()
+        assert len(get_data["schedules"]) == 3
+        assert get_data["server_time"] is not None
+        assert get_data["server_timezone"] is not None
+

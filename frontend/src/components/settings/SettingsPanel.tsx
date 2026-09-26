@@ -908,6 +908,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </section>
 
+        {/* Notification Channels & Webhooks Section */}
+        <NotificationsCard />
+
         {/* Version Updates Section */}
         <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1002,9 +1005,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </aside>
         )}
           </form>
-
-          {/* Notification Channels & Webhooks Section */}
-          <NotificationsCard />
         </div>
       )}
 

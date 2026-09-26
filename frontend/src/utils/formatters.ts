@@ -139,3 +139,23 @@ export function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Formats a maintenance window end timestamp into a clean, human-readable time string.
+ */
+export function formatMaintenanceTime(isoString?: string | null): string {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return isoString;
+  const now = new Date();
+  const isSameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isSameDay) {
+    return timeStr;
+  }
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${timeStr}`;
+}
+
+

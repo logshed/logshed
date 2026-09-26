@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell } from 'lucide-react';
+import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell, AlertTriangle } from 'lucide-react';
 import { LogShedLogo } from './LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
+import { fetchMaintenanceWindow, setMaintenanceWindow } from '../../api/alerts.ts';
 import { HealthResponse, AppTab, VersionInfo } from '../../types.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
+import { formatMaintenanceTime } from '../../utils/formatters.ts';
 
 interface NavbarProps {
   activeTab: AppTab;
@@ -24,6 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { logout } = useAuth();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  const [maintenance, setMaintenance] = useState<{ active: boolean; until: string | null } | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
 
   const loadHealth = async () => {
@@ -35,9 +38,33 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
+  const loadMaintenance = async () => {
+    try {
+      const res = await fetchMaintenanceWindow();
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+    } catch {
+      // Maintenance fetch fails silently
+    }
+  };
+
   useEffect(() => {
     loadHealth();
-    const interval = setInterval(loadHealth, 10000);
+    loadMaintenance();
+    const interval = setInterval(() => {
+      loadHealth();
+      loadMaintenance();
+    }, 10000);
+
+    const onMaintenanceUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<{ active: boolean; until: string | null }>;
+      if (customEvent.detail) {
+        setMaintenance(customEvent.detail);
+      } else {
+        loadMaintenance();
+      }
+    };
+    window.addEventListener('maintenance-updated', onMaintenanceUpdated);
 
     const loadVersion = async () => {
       try {
@@ -49,8 +76,21 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
     loadVersion();
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('maintenance-updated', onMaintenanceUpdated);
+    };
   }, []);
+
+  const handleClearMaintenance = async () => {
+    try {
+      const res = await setMaintenanceWindow(null);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+    } catch {
+      // Clear failure handled gracefully
+    }
+  };
 
   const handleLogoClick = () => {
     if (onSelectTab) {
@@ -186,6 +226,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       </header>
+
+      {/* Maintenance Window Amber Banner */}
+      {maintenance?.active && maintenance.until && (
+        <div className="bg-amber-950/80 border-b border-amber-800/80 text-amber-200 px-4 py-1.5 text-xs flex items-center justify-between select-none shrink-0 z-20">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>
+              Maintenance window active - alerts silenced until {formatMaintenanceTime(maintenance.until)}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleClearMaintenance}
+            className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Mobile Fixed Bottom Navigation Bar */}
       {isMobile && (

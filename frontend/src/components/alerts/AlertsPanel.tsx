@@ -16,6 +16,7 @@ import {
   Download,
   Upload,
   Brain,
+  Clock,
 } from 'lucide-react';
 import {
   AlertHistoryItem,
@@ -23,6 +24,8 @@ import {
   AlertRule,
   DropRule,
   NotificationChannel,
+  MaintenanceSchedule,
+  MaintenanceWindowResponse,
 } from '../../types.ts';
 import {
   fetchAlertRules,
@@ -36,11 +39,20 @@ import {
   exportAllAlertRules,
   exportSingleAlertRule,
   importAlertRules,
+  fetchMaintenanceWindow,
+  setMaintenanceWindow,
+  updateMaintenanceSchedules,
 } from '../../api/alerts.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
-import { downloadBlob, slugify } from '../../utils/formatters.ts';
+import {
+  downloadBlob,
+  slugify,
+  formatMaintenanceTime,
+  toLocalDatetimeInputString,
+  fromLocalDatetimeInputString,
+} from '../../utils/formatters.ts';
 import { extractCleanSummary } from '../../utils/summary.ts';
 import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
@@ -50,7 +62,7 @@ import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { DropRulesCard } from '../settings/DropRulesCard.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
 
-export type AlertViewTab = 'rules' | 'drop-rules' | 'history';
+export type AlertViewTab = 'rules' | 'drop-rules' | 'history' | 'maintenance';
 
 export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
@@ -59,6 +71,9 @@ export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   }
   if (clean === '/alerts/drop-rules' || clean === '/alerts/drop') {
     return 'drop-rules';
+  }
+  if (clean === '/alerts/maintenance') {
+    return 'maintenance';
   }
   return 'rules';
 };
@@ -69,6 +84,8 @@ export const alertSubTabToPath = (subTab: AlertViewTab): string => {
       return '/alerts/history';
     case 'drop-rules':
       return '/alerts/drop-rules';
+    case 'maintenance':
+      return '/alerts/maintenance';
     case 'rules':
     default:
       return '/alerts/rules';
@@ -97,6 +114,31 @@ const SimpleCountBadge: React.FC<{ count: number; title?: string }> = ({ count, 
   </span>
 );
 
+const DAYS_OF_WEEK = [
+  { value: 0, label: 'Sunday' },
+  { value: 1, label: 'Monday' },
+  { value: 2, label: 'Tuesday' },
+  { value: 3, label: 'Wednesday' },
+  { value: 4, label: 'Thursday' },
+  { value: 5, label: 'Friday' },
+  { value: 6, label: 'Saturday' },
+];
+
+const formatScheduleRecurrence = (s: MaintenanceSchedule): string => {
+  if (s.recurrence === 'daily') {
+    return `Daily at ${s.start_time}`;
+  }
+  if (s.recurrence === 'weekly') {
+    const day = DAYS_OF_WEEK.find((d) => d.value === (s.day_of_week ?? 0))?.label || 'Sunday';
+    return `Weekly on ${day} at ${s.start_time}`;
+  }
+  if (s.recurrence === 'monthly') {
+    const day = s.day_of_month ?? 1;
+    return `Monthly on day ${day} at ${s.start_time}`;
+  }
+  return `At ${s.start_time}`;
+};
+
 export const AlertsPanel: React.FC = () => {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [activeSubTab, setActiveSubTab] = useState<AlertViewTab>(() =>
@@ -110,6 +152,12 @@ export const AlertsPanel: React.FC = () => {
   const [dropRules, setDropRules] = useState<DropRule[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse>({
+    active: false,
+    until: null,
+    schedules: [],
+  });
+  const [customUntil, setCustomUntil] = useState<string>('');
 
   // Modals state
   const [isRuleModalOpen, setIsRuleModalOpen] = useState<boolean>(false);
@@ -120,6 +168,18 @@ export const AlertsPanel: React.FC = () => {
   const [ruleToTest, setRuleToTest] = useState<AlertRule | null>(null);
   const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState<boolean>(false);
   const [isPresetsModalOpen, setIsPresetsModalOpen] = useState<boolean>(false);
+
+  // Scheduled maintenance window state
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState<boolean>(false);
+  const [scheduleToEdit, setScheduleToEdit] = useState<MaintenanceSchedule | null>(null);
+  const [scheduleToDelete, setScheduleToDelete] = useState<MaintenanceSchedule | null>(null);
+  const [scheduleFormName, setScheduleFormName] = useState<string>('');
+  const [scheduleFormRecurrence, setScheduleFormRecurrence] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  const [scheduleFormStartTime, setScheduleFormStartTime] = useState<string>('02:00');
+  const [scheduleFormDuration, setScheduleFormDuration] = useState<number>(60);
+  const [scheduleFormDayOfWeek, setScheduleFormDayOfWeek] = useState<number>(0);
+  const [scheduleFormDayOfMonth, setScheduleFormDayOfMonth] = useState<number>(1);
+  const [scheduleFormEnabled, setScheduleFormEnabled] = useState<boolean>(true);
 
   // Presets installation state
   const [installingPresetId, setInstallingPresetId] = useState<string | null>(null);
@@ -147,11 +207,13 @@ export const AlertsPanel: React.FC = () => {
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, '', targetPath);
     }
+    fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
   };
 
   useEffect(() => {
     const handlePopState = () => {
       setActiveSubTab(pathToAlertSubTab(window.location.pathname));
+      fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -159,13 +221,14 @@ export const AlertsPanel: React.FC = () => {
 
   const loadAll = useCallback(async () => {
     try {
-      const [rulesData, channelsData, presetsData, historyData, facetsData, dropRulesData] = await Promise.all([
+      const [rulesData, channelsData, presetsData, historyData, facetsData, dropRulesData, maintData] = await Promise.all([
         fetchAlertRules(),
         fetchNotificationChannels(),
         fetchAlertPresets(),
         fetchAlertHistory(50, 0),
         fetchLogFacets().catch(() => ({ sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} })),
         fetchDropRules().catch(() => []),
+        fetchMaintenanceWindow().catch(() => ({ active: false, until: null, schedules: [] })),
       ]);
       setRules(rulesData);
       setChannels(channelsData);
@@ -173,6 +236,7 @@ export const AlertsPanel: React.FC = () => {
       setHistoryItems(historyData.items);
       setHistoryTotal(historyData.total);
       setDropRules(dropRulesData);
+      setMaintenance(maintData);
       if (facetsData?.apps) {
         setAvailableApps(facetsData.apps);
       }
@@ -184,6 +248,225 @@ export const AlertsPanel: React.FC = () => {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Periodic poll every 10 seconds to keep maintenance status synchronized
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Real-time timer to refresh state the exact second a window expires
+  useEffect(() => {
+    if (!maintenance.until) return;
+    const untilMs = new Date(maintenance.until).getTime();
+    if (isNaN(untilMs)) return;
+    const nowMs = Date.now();
+    const delay = untilMs - nowMs;
+    if (delay <= 0) {
+      fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetchMaintenanceWindow()
+        .then((res) => {
+          setMaintenance(res);
+          window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+        })
+        .catch(() => {});
+    }, delay + 250);
+    return () => clearTimeout(timer);
+  }, [maintenance.until]);
+
+  const isMaintenanceActiveNow = Boolean(maintenance.active);
+  const isOnDemandActiveNow = Boolean(maintenance.on_demand_until);
+
+  useEffect(() => {
+    const onMaintenanceUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<MaintenanceWindowResponse>;
+      if (customEvent.detail) {
+        setMaintenance(customEvent.detail);
+      } else {
+        fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
+      }
+    };
+    window.addEventListener('maintenance-updated', onMaintenanceUpdated);
+    return () => window.removeEventListener('maintenance-updated', onMaintenanceUpdated);
+  }, []);
+
+  const handleSetWindow = async (untilIso: string) => {
+    try {
+      const res = await setMaintenanceWindow(untilIso);
+      setMaintenance(res);
+      setCustomUntil('');
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      setFeedbackMsg({
+        text: `Maintenance window active until ${formatMaintenanceTime(res.until)}.`,
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to set maintenance window.',
+        isError: true,
+      });
+    }
+  };
+
+  const handleClearMaintenance = async () => {
+    try {
+      const res = await setMaintenanceWindow(null);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      setFeedbackMsg({
+        text: 'Maintenance window cleared.',
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to clear maintenance window.',
+        isError: true,
+      });
+    }
+  };
+
+  const handleSetPreset = async (hours: number) => {
+    const targetDate = new Date(Date.now() + hours * 3600 * 1000);
+    await handleSetWindow(targetDate.toISOString());
+  };
+
+  const handleApplyCustomWindow = async () => {
+    if (!customUntil) return;
+    const iso = fromLocalDatetimeInputString(customUntil);
+    if (!iso) {
+      setFeedbackMsg({ text: 'Please enter a valid future date and time.', isError: true });
+      return;
+    }
+    await handleSetWindow(iso);
+  };
+
+  const handleOpenAddScheduleModal = () => {
+    setScheduleToEdit(null);
+    setScheduleFormName('');
+    setScheduleFormRecurrence('weekly');
+    setScheduleFormStartTime('02:00');
+    setScheduleFormDuration(60);
+    setScheduleFormDayOfWeek(0);
+    setScheduleFormDayOfMonth(1);
+    setScheduleFormEnabled(true);
+    setIsScheduleModalOpen(true);
+  };
+
+  const handleOpenEditScheduleModal = (sched: MaintenanceSchedule) => {
+    setScheduleToEdit(sched);
+    setScheduleFormName(sched.name);
+    setScheduleFormRecurrence(sched.recurrence || 'weekly');
+    setScheduleFormStartTime(sched.start_time || '02:00');
+    setScheduleFormDuration(sched.duration_minutes || 60);
+    setScheduleFormDayOfWeek(sched.day_of_week ?? 0);
+    setScheduleFormDayOfMonth(sched.day_of_month ?? 1);
+    setScheduleFormEnabled(sched.enabled ?? true);
+    setIsScheduleModalOpen(true);
+  };
+
+  const handleSaveSchedule = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanName = scheduleFormName.trim();
+    if (!cleanName) {
+      setFeedbackMsg({ text: 'Schedule name is required.', isError: true });
+      return;
+    }
+    const currentList = maintenance.schedules || [];
+    let updatedList: MaintenanceSchedule[];
+
+    if (scheduleToEdit) {
+      updatedList = currentList.map((s) =>
+        s.id === scheduleToEdit.id
+          ? {
+              ...s,
+              name: cleanName,
+              recurrence: scheduleFormRecurrence,
+              start_time: scheduleFormStartTime,
+              duration_minutes: Number(scheduleFormDuration) || 60,
+              day_of_week: scheduleFormRecurrence === 'weekly' ? scheduleFormDayOfWeek : undefined,
+              day_of_month: scheduleFormRecurrence === 'monthly' ? scheduleFormDayOfMonth : undefined,
+              enabled: scheduleFormEnabled,
+            }
+          : s
+      );
+    } else {
+      const newSched: MaintenanceSchedule = {
+        id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: cleanName,
+        recurrence: scheduleFormRecurrence,
+        start_time: scheduleFormStartTime,
+        duration_minutes: Number(scheduleFormDuration) || 60,
+        day_of_week: scheduleFormRecurrence === 'weekly' ? scheduleFormDayOfWeek : undefined,
+        day_of_month: scheduleFormRecurrence === 'monthly' ? scheduleFormDayOfMonth : undefined,
+        enabled: scheduleFormEnabled,
+      };
+      updatedList = [...currentList, newSched];
+    }
+
+    try {
+      const res = await updateMaintenanceSchedules(updatedList);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      setIsScheduleModalOpen(false);
+      setFeedbackMsg({
+        text: `Schedule "${cleanName}" ${scheduleToEdit ? 'updated' : 'added'} successfully.`,
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to save maintenance schedule.',
+        isError: true,
+      });
+    }
+  };
+
+  const handleToggleScheduleEnabled = async (sched: MaintenanceSchedule) => {
+    const currentList = maintenance.schedules || [];
+    const updatedList = currentList.map((s) =>
+      s.id === sched.id ? { ...s, enabled: !s.enabled } : s
+    );
+    try {
+      const res = await updateMaintenanceSchedules(updatedList);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      setFeedbackMsg({
+        text: `Schedule "${sched.name}" ${!sched.enabled ? 'enabled' : 'disabled'}.`,
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to update schedule status.',
+        isError: true,
+      });
+    }
+  };
+
+  const handleConfirmDeleteSchedule = async () => {
+    if (!scheduleToDelete) return;
+    const currentList = maintenance.schedules || [];
+    const updatedList = currentList.filter((s) => s.id !== scheduleToDelete.id);
+    try {
+      const res = await updateMaintenanceSchedules(updatedList);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      const deletedName = scheduleToDelete.name;
+      setScheduleToDelete(null);
+      setFeedbackMsg({
+        text: `Schedule "${deletedName}" removed.`,
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to delete maintenance schedule.',
+        isError: true,
+      });
+    }
+  };
 
   // Open create modal
   const handleOpenCreateModal = () => {
@@ -471,12 +754,82 @@ export const AlertsPanel: React.FC = () => {
             title={`${historyTotal} total history records`}
           />
         </button>
-      </div>
 
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('maintenance')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
+            activeSubTab === 'maintenance'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 shrink-0" />
+          <span>Maintenance</span>
+          {isMaintenanceActiveNow ? (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+              Active
+            </span>
+          ) : (
+            <SimpleCountBadge
+              count={maintenance.schedules?.length || 0}
+              title={`${maintenance.schedules?.length || 0} recurring schedules`}
+            />
+          )}
+        </button>
+      </div>
 
       {/* TAB 1: Alert Rules */}
       {activeSubTab === 'rules' && (
         <div className="space-y-4">
+          {/* Active Maintenance Banner on Rules Tab */}
+          {isMaintenanceActiveNow && (
+            <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <span className="p-2 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
+                  <AlertTriangle className="w-4 h-4 animate-pulse" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-amber-200">Maintenance Window Active</span>
+                    {maintenance.schedule_name ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
+                        {maintenance.schedule_name}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
+                        On-Demand
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-slate-300 mt-0.5">
+                    Alert notifications are silenced
+                    {maintenance.until ? (
+                      <> until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until)}</span></>
+                    ) : null}. Rule evaluation and incident recording continue normally.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                {maintenance.on_demand_until && (
+                  <button
+                    type="button"
+                    onClick={handleClearMaintenance}
+                    className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-amber-300 hover:text-white border border-dark-600 rounded-lg transition cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleSubTabChange('maintenance')}
+                  className="px-3 py-1.5 text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-dark-950 rounded-lg transition cursor-pointer"
+                >
+                  Manage Maintenance
+                </button>
+              </div>
+            </div>
+          )}
           <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
           <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -915,6 +1268,250 @@ export const AlertsPanel: React.FC = () => {
         </div>
       )}
 
+      {/* TAB 4: Maintenance */}
+      {activeSubTab === 'maintenance' && (
+        <div className="space-y-6">
+          {/* Card 1: On-Demand Maintenance */}
+          <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
+            <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-accent-500" />
+                  <span>On-Demand Maintenance</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Instantly silence external notifications for ad-hoc maintenance or testing without changing alert rules.
+                </p>
+              </div>
+              <div>
+                {isOnDemandActiveNow ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                    On-Demand Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700">
+                    <span className="w-2 h-2 rounded-full bg-slate-600"></span>
+                    On-Demand Inactive
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {isOnDemandActiveNow ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-amber-950/20 border border-amber-800/40">
+                  <div>
+                    <p className="text-xs font-medium text-amber-200">
+                      Alert notifications are currently silenced
+                    </p>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      Active until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.on_demand_until)}</span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearMaintenance}
+                    className="px-4 py-2 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-amber-300 hover:text-white border border-dark-600 rounded-lg transition cursor-pointer self-start sm:self-auto"
+                  >
+                    Clear On-Demand Window
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-300">
+                  Select a preset duration or set a specific end time to immediately silence outgoing alert notifications.
+                </p>
+              )}
+
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
+                {/* Quick Presets */}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">Quick Duration Presets:</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset(1)}
+                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
+                    >
+                      +1 Hour
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset(4)}
+                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
+                    >
+                      +4 Hours
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset(8)}
+                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
+                    >
+                      +8 Hours
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset(24)}
+                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
+                    >
+                      +24 Hours
+                    </button>
+                  </div>
+                </div>
+
+                {/* Custom Time */}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">Specific End Time:</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="datetime-local"
+                      aria-label="Maintenance window end time"
+                      value={customUntil}
+                      onChange={(e) => setCustomUntil(e.target.value)}
+                      min={toLocalDatetimeInputString(new Date().toISOString())}
+                      className="bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 px-3 py-1.5 focus:border-accent-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyCustomWindow}
+                      disabled={!customUntil}
+                      className="px-3.5 py-1.5 text-xs font-medium bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      Set Window
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Recurring Scheduled Windows */}
+          <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
+            <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-accent-500" />
+                  <span>Scheduled Maintenance Windows</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Define daily, weekly, or monthly recurring windows to automatically silence alerts during planned maintenance.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenAddScheduleModal}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-dark-950 bg-accent-500 hover:bg-accent-400 transition cursor-pointer self-start sm:self-auto shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Schedule</span>
+              </button>
+            </div>
+
+            <div className="p-0">
+              {(!maintenance.schedules || maintenance.schedules.length === 0) ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  <Clock className="w-8 h-8 mx-auto text-slate-600 mb-2" />
+                  <p className="font-medium text-slate-300">No scheduled windows configured</p>
+                  <p className="text-slate-500 mt-1 max-w-sm mx-auto">
+                    Add recurring daily, weekly, or monthly schedules to automatically suppress notifications during routine maintenance.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddScheduleModal}
+                    className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 rounded-lg transition cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Create First Schedule</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="divide-y divide-dark-800 overflow-x-auto">
+                  {/* Table Header */}
+                  <div className="grid grid-cols-[1.2fr_1.5fr_90px_100px_70px] gap-x-4 min-w-[640px] px-5 py-2.5 bg-dark-950/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    <div>Schedule Name</div>
+                    <div>Recurrence</div>
+                    <div>Duration</div>
+                    <div>Status</div>
+                    <div className="text-right">Actions</div>
+                  </div>
+
+                  {maintenance.schedules.map((sched) => (
+                    <div
+                      key={sched.id}
+                      className="grid grid-cols-[1.2fr_1.5fr_90px_100px_70px] gap-x-4 min-w-[640px] px-5 py-3 items-center hover:bg-dark-850/50 transition text-xs"
+                    >
+                      <div className="pr-2 min-w-0">
+                        <div className="font-medium text-slate-200 truncate">{sched.name}</div>
+                        {sched.next_run && sched.enabled && !sched.is_active && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            Next: {formatMaintenanceTime(sched.next_run)}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-slate-300 text-xs min-w-0 truncate">
+                        {formatScheduleRecurrence(sched)}
+                      </div>
+
+                      <div className="text-slate-300 font-mono text-xs whitespace-nowrap">
+                        {sched.duration_minutes} min
+                      </div>
+
+                      <div>
+                        {sched.is_active ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                            Active Now
+                          </span>
+                        ) : sched.enabled ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleScheduleEnabled(sched)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/60 transition cursor-pointer"
+                            title="Click to disable"
+                          >
+                            Enabled
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleScheduleEnabled(sched)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:text-slate-300 transition cursor-pointer"
+                            title="Click to enable"
+                          >
+                            Disabled
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditScheduleModal(sched)}
+                          className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                          title="Edit schedule"
+                          aria-label={`Edit ${sched.name}`}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setScheduleToDelete(sched)}
+                          className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded transition cursor-pointer"
+                          title="Delete schedule"
+                          aria-label={`Delete ${sched.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CREATE / EDIT RULE MODAL */}
       <AlertRuleModal
         isOpen={isRuleModalOpen}
@@ -1050,6 +1647,215 @@ export const AlertsPanel: React.FC = () => {
         onInstallPreset={handleInstallPreset}
         installingPresetId={installingPresetId}
       />
+
+      {/* ADD / EDIT SCHEDULE MODAL */}
+      <Modal
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
+        title={scheduleToEdit ? 'Edit Maintenance Schedule' : 'Add Maintenance Schedule'}
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
+          {/* Name */}
+          <div>
+            <label className="block text-slate-300 font-medium mb-1">
+              Schedule Name <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              aria-label="Schedule Name"
+              value={scheduleFormName}
+              onChange={(e) => setScheduleFormName(e.target.value)}
+              placeholder="e.g. Weekly Server Maintenance"
+              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:border-accent-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Recurrence Selection */}
+          <div>
+            <label className="block text-slate-300 font-medium mb-1">Recurrence</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setScheduleFormRecurrence('daily')}
+                className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
+                  scheduleFormRecurrence === 'daily'
+                    ? 'bg-accent-600 text-white border-accent-500'
+                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                }`}
+              >
+                Daily
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleFormRecurrence('weekly')}
+                className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
+                  scheduleFormRecurrence === 'weekly'
+                    ? 'bg-accent-600 text-white border-accent-500'
+                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                }`}
+              >
+                Weekly
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleFormRecurrence('monthly')}
+                className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
+                  scheduleFormRecurrence === 'monthly'
+                    ? 'bg-accent-600 text-white border-accent-500'
+                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                }`}
+              >
+                Monthly
+              </button>
+            </div>
+          </div>
+
+          {/* Weekly Day of Week Picker */}
+          {scheduleFormRecurrence === 'weekly' && (
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Day of the Week</label>
+              <select
+                aria-label="Day of the Week"
+                value={scheduleFormDayOfWeek}
+                onChange={(e) => setScheduleFormDayOfWeek(Number(e.target.value))}
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              >
+                {DAYS_OF_WEEK.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Monthly Day of Month Picker */}
+          {scheduleFormRecurrence === 'monthly' && (
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Day of the Month (1 - 31)</label>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                aria-label="Day of the Month"
+                value={scheduleFormDayOfMonth}
+                onChange={(e) => setScheduleFormDayOfMonth(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              />
+            </div>
+          )}
+
+          {/* Start Time & Duration */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Start Time (24h)</label>
+              <input
+                type="time"
+                required
+                aria-label="Start Time"
+                value={scheduleFormStartTime}
+                onChange={(e) => setScheduleFormStartTime(e.target.value)}
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Duration (minutes)</label>
+              <input
+                type="number"
+                required
+                min="1"
+                max="1440"
+                aria-label="Duration in minutes"
+                value={scheduleFormDuration}
+                onChange={(e) => setScheduleFormDuration(Number(e.target.value))}
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Quick duration presets */}
+          <div className="flex items-center gap-1.5 pt-1">
+            <span className="text-[11px] text-slate-400">Presets:</span>
+            {[15, 30, 60, 120, 240].map((dur) => (
+              <button
+                key={dur}
+                type="button"
+                onClick={() => setScheduleFormDuration(dur)}
+                className={`px-2 py-0.5 text-[11px] rounded border transition cursor-pointer ${
+                  scheduleFormDuration === dur
+                    ? 'bg-accent-950 text-accent-300 border-accent-700'
+                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                }`}
+              >
+                {dur >= 60 ? `${dur / 60}h` : `${dur}m`}
+              </button>
+            ))}
+          </div>
+
+          {/* Enabled Switch */}
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              type="checkbox"
+              id="schedule-enabled-check"
+              checked={scheduleFormEnabled}
+              onChange={(e) => setScheduleFormEnabled(e.target.checked)}
+              className="rounded border-dark-700 bg-dark-950 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900"
+            />
+            <label htmlFor="schedule-enabled-check" className="text-slate-300 select-none cursor-pointer">
+              Enable this maintenance schedule
+            </label>
+          </div>
+
+          {/* Modal Actions */}
+          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsScheduleModalOpen(false)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
+            >
+              {scheduleToEdit ? 'Save Changes' : 'Create Schedule'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* DELETE SCHEDULE CONFIRMATION MODAL */}
+      <Modal
+        isOpen={scheduleToDelete !== null}
+        onClose={() => setScheduleToDelete(null)}
+        title="Delete Maintenance Schedule"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-300 leading-relaxed">
+            Are you sure you want to delete maintenance schedule <strong className="text-white">"{scheduleToDelete?.name}"</strong>?
+          </p>
+          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setScheduleToDelete(null)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDeleteSchedule}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
+            >
+              Delete Schedule
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

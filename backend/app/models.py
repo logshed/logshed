@@ -103,6 +103,7 @@ class SettingsResponse(BaseModel):
     has_ai_api_key: bool = False
     internal_log_level: str = "WARNING"
     check_for_updates: bool = True
+    maintenance_until: Optional[str] = None
 
     @model_validator(mode="after")
     def clamp_retention_days(self) -> "SettingsResponse":
@@ -136,6 +137,10 @@ class SettingsUpdateRequest(BaseModel):
     check_for_updates: Optional[bool] = Field(
         None,
         description="Whether to check GHCR periodically for new stable releases.",
+    )
+    maintenance_until: Optional[str] = Field(
+        None,
+        description="Global alert maintenance window end time (ISO 8601 datetime string or null/empty to clear).",
     )
 
     @field_validator("ai_base_url")
@@ -697,6 +702,42 @@ class AlertHistoryListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class MaintenanceWindowRequest(BaseModel):
+    """Payload for setting or clearing the on-demand alert maintenance window."""
+    until: Optional[str] = Field(None, description="End time in ISO 8601 format, or null to clear.")
+
+
+class MaintenanceSchedule(BaseModel):
+    """Configuration for a recurring alert maintenance window schedule."""
+    id: str = Field(default_factory=lambda: "")
+    name: str = Field(..., min_length=1, max_length=100, description="Schedule name")
+    enabled: bool = Field(True, description="Whether the schedule is enabled")
+    recurrence: str = Field("weekly", description="daily, weekly, or monthly")
+    start_time: str = Field("02:00", description="Start time in 24h HH:MM format")
+    duration_minutes: int = Field(60, ge=1, le=1440, description="Duration in minutes (1 to 1440)")
+    day_of_week: Optional[int] = Field(0, ge=0, le=6, description="0=Sunday, 1=Monday, ..., 6=Saturday")
+    day_of_month: Optional[int] = Field(1, ge=1, le=31, description="Day of month 1 to 31")
+    is_active: Optional[bool] = Field(False, description="Whether the schedule is active right now")
+    next_run: Optional[str] = Field(None, description="ISO timestamp of next scheduled window start")
+
+
+class MaintenanceSchedulesUpdateRequest(BaseModel):
+    """Payload for saving configured maintenance schedules."""
+    schedules: list[MaintenanceSchedule]
+
+
+class MaintenanceWindowResponse(BaseModel):
+    """Current status of the global alert maintenance window."""
+    active: bool
+    until: Optional[str] = None
+    reason: Optional[str] = None
+    schedule_name: Optional[str] = None
+    on_demand_until: Optional[str] = None
+    schedules: list[MaintenanceSchedule] = Field(default_factory=list)
+    server_time: Optional[str] = None
+    server_timezone: Optional[str] = None
 
 
 

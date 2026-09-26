@@ -35,6 +35,7 @@ export interface SystemSettings {
   retention_overridden?: boolean;
   internal_log_level?: string;
   check_for_updates?: boolean;
+  maintenance_until?: string | null;
 }
 
 export type AppTab = 'stream' | 'storage' | 'alerts' | 'settings';
@@ -429,4 +430,28 @@ export interface AlertHistoryResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface MaintenanceSchedule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  recurrence: 'daily' | 'weekly' | 'monthly';
+  start_time: string;
+  duration_minutes: number;
+  day_of_week?: number;
+  day_of_month?: number;
+  is_active?: boolean;
+  next_run?: string | null;
+}
+
+export interface MaintenanceWindowResponse {
+  active: boolean;
+  until: string | null;
+  reason?: string | null;
+  schedule_name?: string | null;
+  on_demand_until?: string | null;
+  schedules?: MaintenanceSchedule[];
+  server_time?: string | null;
+  server_timezone?: string | null;
 }

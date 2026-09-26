@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Navbar } from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
+import * as alertsApi from '../api/alerts.ts';
 
 vi.mock('../context/AuthContext.tsx', () => ({
   useAuth: () => ({
@@ -225,5 +226,97 @@ describe('Navbar Component', () => {
 
     expect(screen.queryByText('App update available')).not.toBeInTheDocument();
   });
+
+  it('renders amber maintenance banner when maintenance window is active', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /Clear/i })).toBeInTheDocument();
+  });
+
+  it('clears maintenance window when Clear button in banner is clicked', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+    });
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
+    });
+
+    const clearBtn = screen.getByRole('button', { name: /Clear/i });
+    fireEvent.click(clearBtn);
+
+    await waitFor(() => {
+      expect(setMaintSpy).toHaveBeenCalledWith(null);
+      expect(screen.queryByText(/Maintenance window active - alerts silenced until/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render maintenance banner when maintenance window is inactive', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(alertsApi.fetchMaintenanceWindow).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText(/Maintenance window active/i)).not.toBeInTheDocument();
+  });
 });
+
 

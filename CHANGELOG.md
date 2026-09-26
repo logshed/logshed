@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Global & Scheduled Maintenance Windows**: Added maintenance window management to silence outgoing alert notifications while continuing to evaluate alerts, record history, and ingest log streams. Supports on-demand windows with quick presets (+1h, +4h, +8h, +24h) or custom end dates, along with user-configured recurring schedules (daily, weekly, monthly) that account for midnight boundary crossings.
+- **Dedicated Maintenance Sub-Tab**: Added `/alerts/maintenance` deep-linked sub-tab under Alerts & History for managing on-demand maintenance windows and recurring maintenance schedules.
+- **Global Maintenance Banners**: Added top navigation and in-panel alert banners indicating active maintenance windows, showing expiration timestamps and 1-click deactivation or management actions.
 - **Unified AI and Alert History**: Combined alert triggers, AI incident diagnoses, and on-demand AI root-cause analyses into a single, unified "History" tab under "Alerts & History". Features distinct badges (`On-Demand`, `AI Alert`, `Alert`), a clean summary table, and a click-to-open detail modal displaying full diagnosis markdown, raw LLM prompts, model attribution, and token metrics.
 - **AI Audit Log Trigger Source Tracking**: Added `trigger_source` ('on-demand' vs 'alert') to `ai_audit_log` and `ai_audit_id` foreign key linkage to `alert_history` within `migrate_v2`, backfilling legacy records so all historical analyses appear in the unified history timeline.
 - **Responsive Sub-Tab Wrapping**: Flexible wrapping layout (`flex-wrap`) for sub-tabs in `AlertsPanel`, ensuring the History sub-tab and count badges remain fully visible and accessible on narrow mobile viewports.
@@ -48,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Notification Targets Card Layout**: Removed the collapse chevron from the Notification Targets card on the Application Settings tab to keep it permanently visible, and moved the card above Version Updates.
+- **Portaled Modal Mounting**: Mounted modal dialogs to `document.body` via `createPortal` to prevent nested form interference when cards containing modals are placed inside settings forms.
+- **Maintenance Table Layout**: Balanced column widths in the recurring maintenance schedule table for consistent alignment across viewports.
 - **Alerts & History Navigation Alignment**: Renamed the top-level navigation item and panel heading from "Alerts & Rules" to "Alerts & History" across desktop and mobile navigation bars.
 - **Storage Panel Streamlining**: Streamlined the Storage panel to focus solely on disk footprint metrics and retention policies, removing redundant AI audit log tables in place of the unified History view.
 - **Drop Rules Subtitle**: Simplified ingestion drop rules subtitle to "Discard repetitive syslog or container chatter".
@@ -74,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Processing Newest Logs First During Alias Updates**: Updated `_batch_update_log_aliases` to process rows ordered by `id DESC` so the most recent logs visible in the live stream reflect alias modifications first.
 
 ### Fixed
+- **Maintenance Banner Expiration Auto-Clear**: Automatically cleared expired maintenance window banners on the Maintenance sub-tab in real-time without requiring a page refresh.
 - **Storage Trend Graph Y-Axis Truncation**: Fixed Y-axis leading digit clipping in `StorageTrendChart` when log volumes exceed 1,000MB by resetting negative chart margins, allocating dedicated axis width, and formatting large values with localized thousands separators.
 - **Sub-Tab Layout Shift on Height Changes**: Eliminated horizontal content jumping when switching between short and tall sub-tabs by configuring `scrollbar-gutter: stable` on the main scroll container.
 - **Alert Processing Self-Referential Logging Loops**: Suppressed `app.services.alert_evaluator`, `app.services.notifier`, `app.services.ai_engine`, and `app.services.ai_service` in `InternalLogHandler.IGNORED_LOGGERS` to prevent alert processing logs from being ingested and triggering cascading alerts.

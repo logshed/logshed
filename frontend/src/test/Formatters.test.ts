@@ -6,6 +6,7 @@ import {
   fromLocalDatetimeInputString,
   slugify,
   downloadBlob,
+  formatMaintenanceTime,
 } from '../utils/formatters.ts';
 
 describe('stripAnsi', () => {
@@ -204,4 +205,23 @@ describe('downloadBlob', () => {
     URL.revokeObjectURL = originalRevoke;
   });
 });
+
+describe('formatMaintenanceTime', () => {
+  it('handles null, undefined, or empty string gracefully', () => {
+    expect(formatMaintenanceTime(null)).toBe('');
+    expect(formatMaintenanceTime(undefined)).toBe('');
+    expect(formatMaintenanceTime('')).toBe('');
+  });
+
+  it('formats valid ISO datetime string', () => {
+    const formatted = formatMaintenanceTime('2026-09-26T14:30:00Z');
+    expect(formatted).toBeTruthy();
+    expect(typeof formatted).toBe('string');
+  });
+
+  it('returns raw string if parsing fails', () => {
+    expect(formatMaintenanceTime('invalid-date')).toBe('invalid-date');
+  });
+});
+
 

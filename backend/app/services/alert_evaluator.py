@@ -378,6 +378,23 @@ class AlertEvaluator:
         except Exception as exc:
             logger.warning(f"Failed to persist trigger state for rule {rule.id}: {exc}")
 
+    def _is_maintenance_active(self) -> bool:
+        """Check if global maintenance window (on-demand or scheduled) is active in system_settings."""
+        from app.core.config import get_db_path
+        effective_db = self.db_path or get_db_path()
+        if not effective_db:
+            return False
+
+        try:
+            from app.api.deps import get_thread_read_connection
+            from app.services.maintenance_service import get_maintenance_status
+            conn = get_thread_read_connection(effective_db)
+            status = get_maintenance_status(conn)
+            return status.active
+        except Exception as exc:
+            logger.warning(f"Error checking maintenance window in alert evaluator: {exc}")
+            return False
+
     async def _dispatch_alert(
         self,
         rule: CompiledAlertRule,
@@ -658,6 +675,14 @@ class AlertEvaluator:
             await run_db_query(_execute_insert, custom_db_path=self.db_path)
         except Exception as db_err:
             logger.error(f"Failed to record alert history for rule {rule.id}: {db_err}")
+
+        # Check global maintenance window before dispatching external notification
+        in_maintenance = await asyncio.to_thread(self._is_maintenance_active)
+        if in_maintenance:
+            logger.info(
+                f"Global maintenance window active: skipping notification dispatch for alert rule '{rule.name}'"
+            )
+            return
 
         # Construct clean push notification payload with secrets redacted
         if rule.rule_type == "rate":
