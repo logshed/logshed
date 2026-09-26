@@ -212,7 +212,7 @@ export const NotificationsCard: React.FC = () => {
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-400">
+      <p className="text-xs text-slate-400 mt-0.5">
         Dispatch real-time alerts across 80+ platforms (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest.
       </p>
 

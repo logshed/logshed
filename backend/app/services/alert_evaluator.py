@@ -722,7 +722,8 @@ class AlertEvaluator:
                 redacted_error = str(redact(ai_error_note))
                 body_lines.append(f"AI Analysis: Unavailable ({redacted_error})")
 
-            app_url = (os.environ.get("APP_URL") or os.environ.get("app_url") or "").strip().rstrip("/")
+            from app.core.config import get_cached_setting
+            app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
             if app_url:
                 body_lines.append(f"Link: {app_url}/alerts/history")
 

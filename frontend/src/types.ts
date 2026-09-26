@@ -36,6 +36,20 @@ export interface SystemSettings {
   internal_log_level?: string;
   check_for_updates?: boolean;
   maintenance_until?: string | null;
+
+  // Advanced System Settings
+  ai_timeout?: number;
+  ai_thinking_budget?: number;
+  app_url?: string;
+  allow_private_notification_targets?: boolean;
+  enable_docker?: boolean;
+  docker_exclude_containers?: string;
+  docker_source_alias?: string;
+  trusted_proxies?: string;
+  trust_docker_proxies?: boolean;
+  cookie_secure?: boolean;
+  syslog_max_tcp_connections?: number;
+  syslog_tcp_inactivity_timeout?: number;
 }
 
 export type AppTab = 'stream' | 'storage' | 'alerts' | 'settings';

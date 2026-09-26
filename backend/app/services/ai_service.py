@@ -230,6 +230,10 @@ async def build_diagnosis_context(
     # Estimate token count (~3.5 characters per token including system prompt and framing overhead)
     estimated_tokens = max(1, int(len(full_prompt) // 3.5 + len(system_prompt) // 3.5 + 50))
 
+    from app.core.config import get_cached_setting, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET
+    ai_timeout = float(get_cached_setting("ai_timeout", DEFAULT_AI_TIMEOUT))
+    ai_thinking_budget = int(get_cached_setting("ai_thinking_budget", DEFAULT_AI_THINKING_BUDGET))
+
     return {
         "rows": rows,
         "source_alias": source_alias,
@@ -246,6 +250,8 @@ async def build_diagnosis_context(
         "redacted_prompt_override": redacted_prompt_override,
         "full_prompt": full_prompt,
         "estimated_tokens": estimated_tokens,
+        "ai_timeout": ai_timeout,
+        "ai_thinking_budget": ai_thinking_budget,
     }
 
 

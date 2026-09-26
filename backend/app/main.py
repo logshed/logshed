@@ -63,6 +63,16 @@ def get_internal_log_handler() -> Optional[InternalLogHandler]:
     return _internal_log_handler
 
 
+def get_syslog_server() -> Optional[SyslogServer]:
+    """Returns the active SyslogServer instance, or None if uninitialized or failed."""
+    return _syslog_server
+
+
+def get_docker_tailer() -> Optional[DockerTailer]:
+    """Returns the active DockerTailer instance, or None if uninitialized or failed."""
+    return _docker_tailer
+
+
 def configure_internal_log_handler(
     level: Optional[Union[int, str]],
     alias_cache: Optional[Any] = None,

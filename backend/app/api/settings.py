@@ -16,6 +16,9 @@ from app.core.config import (
     is_max_retention_days_overridden,
     get_internal_log_level,
     get_internal_log_level_name,
+    resolve_all_system_settings,
+    invalidate_settings_cache,
+    get_cached_setting,
 )
 from app.core.security import decrypt_value, encrypt_value, mask_secret
 
@@ -107,6 +110,8 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         except Exception:
             maintenance_until = None
 
+    resolved = resolve_all_system_settings(stored)
+
     return SettingsResponse(
         ai_provider=stored.get("ai_provider") or "gemini",
         ai_model=stored.get("ai_model") or DEFAULT_AI_MODEL,
@@ -121,6 +126,18 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         internal_log_level=internal_log_level,
         check_for_updates=check_for_updates,
         maintenance_until=maintenance_until,
+        ai_timeout=resolved["ai_timeout"],
+        ai_thinking_budget=resolved["ai_thinking_budget"],
+        app_url=resolved["app_url"],
+        allow_private_notification_targets=resolved["allow_private_notification_targets"],
+        enable_docker=resolved["enable_docker"],
+        docker_exclude_containers=resolved["docker_exclude_containers"],
+        docker_source_alias=resolved["docker_source_alias"],
+        trusted_proxies=resolved["trusted_proxies"],
+        trust_docker_proxies=resolved["trust_docker_proxies"],
+        cookie_secure=resolved["cookie_secure"],
+        syslog_max_tcp_connections=resolved["syslog_max_tcp_connections"],
+        syslog_tcp_inactivity_timeout=resolved["syslog_tcp_inactivity_timeout"],
     )
 
 
@@ -173,6 +190,43 @@ async def update_settings(
         if req.check_for_updates is not None:
             updates.append(("check_for_updates", "1" if req.check_for_updates else "0", 0))
 
+        # Advanced System Settings
+        if req.ai_timeout is not None:
+            updates.append(("ai_timeout", str(req.ai_timeout), 0))
+
+        if req.ai_thinking_budget is not None:
+            updates.append(("ai_thinking_budget", str(req.ai_thinking_budget), 0))
+
+        if req.app_url is not None:
+            updates.append(("app_url", req.app_url, 0))
+
+        if req.allow_private_notification_targets is not None:
+            updates.append(("allow_private_notification_targets", "1" if req.allow_private_notification_targets else "0", 0))
+
+        if req.enable_docker is not None:
+            updates.append(("enable_docker", "1" if req.enable_docker else "0", 0))
+
+        if req.docker_exclude_containers is not None:
+            updates.append(("docker_exclude_containers", req.docker_exclude_containers, 0))
+
+        if req.docker_source_alias is not None:
+            updates.append(("docker_source_alias", req.docker_source_alias, 0))
+
+        if req.trusted_proxies is not None:
+            updates.append(("trusted_proxies", req.trusted_proxies, 0))
+
+        if req.trust_docker_proxies is not None:
+            updates.append(("trust_docker_proxies", "1" if req.trust_docker_proxies else "0", 0))
+
+        if req.cookie_secure is not None:
+            updates.append(("cookie_secure", "1" if req.cookie_secure else "0", 0))
+
+        if req.syslog_max_tcp_connections is not None:
+            updates.append(("syslog_max_tcp_connections", str(req.syslog_max_tcp_connections), 0))
+
+        if req.syslog_tcp_inactivity_timeout is not None:
+            updates.append(("syslog_tcp_inactivity_timeout", str(req.syslog_tcp_inactivity_timeout), 0))
+
         if "maintenance_until" in req.model_fields_set:
             if req.maintenance_until is None or req.maintenance_until.strip() == "":
                 updates.append(("maintenance_until", "", 0))
@@ -220,6 +274,9 @@ async def update_settings(
 
     await run_db_query(_save_settings)
 
+    # Invalidate in-memory cached system settings
+    invalidate_settings_cache()
+
     if req.internal_log_level is not None:
         try:
             from app.main import configure_internal_log_handler
@@ -231,6 +288,38 @@ async def update_settings(
         try:
             from app.services.version_service import clear_version_cache
             clear_version_cache()
+        except Exception:
+            pass
+
+    # Dynamic worker dispatch
+    if req.syslog_max_tcp_connections is not None or req.syslog_tcp_inactivity_timeout is not None:
+        try:
+            from app.main import get_syslog_server
+            syslog_server = get_syslog_server()
+            if syslog_server is not None:
+                max_tcp = int(get_cached_setting("syslog_max_tcp_connections", 250))
+                inact_to = float(get_cached_setting("syslog_tcp_inactivity_timeout", 0.0))
+                syslog_server.update_limits(max_tcp, inact_to)
+        except Exception:
+            pass
+
+    if (
+        req.enable_docker is not None
+        or req.docker_exclude_containers is not None
+        or req.docker_source_alias is not None
+    ):
+        try:
+            from app.main import get_docker_tailer
+            docker_tailer = get_docker_tailer()
+            if docker_tailer is not None:
+                en_docker = bool(get_cached_setting("enable_docker", True))
+                excl = str(get_cached_setting("docker_exclude_containers", ""))
+                alias = str(get_cached_setting("docker_source_alias", "docker"))
+                await docker_tailer.update_settings(
+                    enable_docker=en_docker,
+                    exclude_containers=excl,
+                    source_alias=alias,
+                )
         except Exception:
             pass
 

@@ -8,27 +8,47 @@ Single Docker container running Python 3.12 (`asyncio`) + FastAPI backend servin
 - **Security & Privileges:** Container starts as root to allow `entrypoint.sh` to configure permissions. It reads `PUID` and `PGID` environment variables (defaulting to 1000:1000), maps the `appuser` to match, dynamically detects `/var/run/docker.sock` GID and adds the user to that group, changes ownership of `/data`, and drops privileges via `gosu appuser`.
 - **Docker Endpoint:** Connects via `DOCKER_HOST` environment variable (`unix:///var/run/docker.sock` or `tcp://proxy:2375` for `tecnativa/docker-socket-proxy`).
 
-### 1.1 Environment Variables vs. Runtime Settings
-The following environment variables are supplied at container start and never stored in the database:
-- `DOCKER_HOST` - Docker endpoint (socket path or `tcp://` proxy address, e.g. `unix:///var/run/docker.sock` or `tcp://192.168.1.50:2375`). Defaults to `unix:///var/run/docker.sock` if unset. Not exposed as an Unraid template `Config` entry (see §8.2) - the socket path is fixed by the `/var/run/docker.sock` volume mount; only set `DOCKER_HOST` explicitly when using a `tcp://` socket-proxy instead of a direct mount.
-- `DOCKER_SOURCE_ALIAS` - Source attribution alias for Docker logs ingested via `DOCKER_HOST` (defaults to `docker` if unset).
-- `DOCKER_EXCLUDE_CONTAINERS` - Optional comma-separated list of container names or IDs to exclude from log tailing (e.g. `logshed,custom_redis`).
-- `ENABLE_DOCKER` - Optional boolean (`true`/`false`, defaults to `true`) to enable or disable Docker log collection.
-- `TZ` - Container timezone.
-- `PORT` - Web/API port (defaults to `8080` if unset).
-- `SYSLOG_PORT` - Syslog listening port for UDP and TCP (defaults to `1514` if unset).
-- `SYSLOG_MAX_TCP_CONNECTIONS` - Optional maximum concurrent Syslog TCP connections (defaults to `250`).
-- `SYSLOG_TCP_INACTIVITY_TIMEOUT` - Optional Syslog TCP inactivity timeout in seconds (defaults to `0`, keeping connections open indefinitely for persistent log forwarders; set to a positive value, e.g. `60`, to disconnect idle clients).
-- `PUID` and `PGID` - User and group IDs for the application to run as (defaults to `1000` if unset).
-- `LOGSHED_SECRET_KEY` - Optional override for the Fernet master key; if unset, one is generated at `/data/.secret_key` on first boot.
-- `LOGSHED_INTERNAL_LOG_LEVEL` - Optional minimum severity level for LogShed internal diagnostic logs captured into SQLite (defaults to `WARNING`). Options: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `DISABLED`.
-- `COOKIE_SECURE` - Optional boolean (`true`/`false`, defaults to `false`). When `false` (the default), session cookies are issued without the `Secure` flag to allow direct HTTP access over local IP addresses in homelabs, or automatically detects HTTPS via `X-Forwarded-Proto` header or request scheme. Set to `true` when running behind an SSL-terminating reverse proxy that does not send `X-Forwarded-Proto`.
-- `TRUSTED_PROXIES` - Optional comma-separated list of trusted reverse proxy IPs or CIDR blocks (e.g. `172.16.0.0/12, 10.0.0.1`) used for client IP extraction and brute-force login rate limiting. `TRUST_DOCKER_PROXIES=true` can also be used to automatically trust standard Docker bridge subnets (`172.16.0.0/12`).
-- `MAX_RETENTION_DAYS` - Optional maximum log retention period in days (defaults to `30`, minimum `1`). Caps the retention period selectable in the UI. Advanced users can override this to retain logs for longer periods.
-- `LOGSHED_AI_TIMEOUT` - Optional outbound LLM API request timeout in seconds (defaults to `45.0`).
-- `LOGSHED_AI_THINKING_BUDGET` - Optional reasoning token budget for extended thinking models (defaults to `1024`).
+### 1.1 Configuration Architecture: Bootstrap Primitives vs. Runtime Settings
+LogShed separates configuration into **bootstrap primitives** (required before the SQLite database unlocks or privilege reduction occurs) and **runtime settings** (configurable through the Web UI and persisted in `system_settings`).
 
-All other configuration - AI provider, AI API key, AI base URL, AI model, AI fallback models, custom system prompt, and `retention_days` (default 14 days, up to `MAX_RETENTION_DAYS`) - is **runtime-configurable only**, entered via the Settings UI, encrypted with `cryptography.fernet`, and persisted in the `system_settings` table (see §5, §6). These values must never be read from environment variables or written to `.env.example`.
+#### Bootstrap Primitives (Container Environment Only)
+The following environment variables are supplied at container start and are strictly container-level primitives:
+- `PUID` and `PGID` - User and group IDs for the application to run as via `gosu` privilege reduction (defaults to `1000:1000`).
+- `TZ` - Container runtime timezone (defaults to `UTC`).
+- `PORT` - Web/API HTTP port (defaults to `8080`).
+- `SYSLOG_PORT` - Syslog listening port for UDP and TCP (defaults to `1514`).
+- `DATA_DIR` - Mount path for persistent SQLite database, master key, and presets (defaults to `/data`).
+- `LOGSHED_SECRET_KEY` - Optional 32-byte URL-safe base64 key for encrypting runtime settings at rest; if unset, auto-generated at `/data/.secret_key`.
+- `DOCKER_HOST` - Docker endpoint socket or proxy address (defaults to `unix:///var/run/docker.sock`).
+- `MAX_RETENTION_DAYS` - Hard ceiling in days for the log retention slider in the UI (defaults to `30`, minimum `1`).
+- `ENVIRONMENT` / `DEBUG` - Development origin and debug mode toggle (`production` / `false`).
+- `CORS_ORIGINS` - Comma-separated list of allowed cross-origin hosts (defaults to empty in production).
+
+*Storage Compatibility Note:* `DB_PATH` and `SECRET_KEY_PATH` remain supported as backward-compatible path overrides.
+
+#### Three-Tier Resolution Hierarchy
+Runtime operational settings follow a resilient three-tier resolution hierarchy:
+1. **Tier 1 (Highest Priority):** Value persisted in SQLite (`system_settings` table) via Web UI.
+2. **Tier 2 (Fallback):** Environment variable set on container (including silent legacy aliases).
+3. **Tier 3 (Default):** Built-in hardcoded constant.
+
+Settings updates apply dynamically to in-memory workers (`SyslogServer`, `DockerTailer`, `AlertEvaluator`, `NotifierService`, and `Auth`) without requiring container recreation. An in-memory thread-safe cache (`get_cached_system_settings` with 10-second TTL fallback) ensures high-throughput request evaluation without redundant SQLite I/O.
+
+The 12 runtime advanced settings are:
+- `ai_timeout`: Outbound AI request timeout in seconds (Env: `LOGSHED_AI_TIMEOUT`, default: `45.0`).
+- `ai_thinking_budget`: Reasoning token budget for extended thinking models (Env: `LOGSHED_AI_THINKING_BUDGET`, default: `1024`, 0 disables).
+- `app_url`: Public base instance URL for action links in push notifications (Env: `APP_URL`, legacy alias: `app_url`, default: `""`).
+- `allow_private_notification_targets`: Permit notification webhooks to target LAN/RFC1918 IPs and `.local`/`.internal`/`.lan` hosts (Env: `ALLOW_PRIVATE_NOTIFICATION_TARGETS`, default: `True`).
+- `enable_docker`: Toggle Docker log collector (Env: `ENABLE_DOCKER`, default: `True`).
+- `docker_exclude_containers`: Comma-separated container names/IDs to ignore (Env: `DOCKER_EXCLUDE_CONTAINERS`, default: `""`).
+- `docker_source_alias`: Source attribution alias for Docker logs (Env: `DOCKER_SOURCE_ALIAS`, default: `"docker"`).
+- `trusted_proxies`: Comma-separated proxy IPs or CIDR blocks for client IP resolution (Env: `TRUSTED_PROXIES`, default: `""`).
+- `trust_docker_proxies`: Automatically trust standard Docker bridge networks `172.16.0.0/12` (Env: `TRUST_DOCKER_PROXIES`, legacy aliases: `TRUST_DOCKER_NETWORKS`, `TRUST_DOCKER_GATEWAY`, default: `False`).
+- `cookie_secure`: Force `Secure` flag on session cookies behind SSL proxies stripping `X-Forwarded-Proto` (Env: `COOKIE_SECURE`, default: `False`).
+- `syslog_max_tcp_connections`: Maximum concurrent Syslog TCP connections (Env: `SYSLOG_MAX_TCP_CONNECTIONS`, default: `250`).
+- `syslog_tcp_inactivity_timeout`: Syslog TCP client inactivity timeout in seconds (Env: `SYSLOG_TCP_INACTIVITY_TIMEOUT`, default: `0.0` - disabled).
+
+Sensitive configuration - AI provider, AI API key (Fernet-encrypted), AI base URL, AI model, AI fallback models, custom system prompt, internal log level, version update check toggle, and active retention days - is managed through the primary Application Settings tab.
 
 
 ---

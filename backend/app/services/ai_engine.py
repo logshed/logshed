@@ -438,6 +438,7 @@ async def call_gemini(
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
     max_retries: int = 1,
+    thinking_budget: Optional[int] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Dispatch request to Google Gemini API via the google-genai SDK.
@@ -463,9 +464,10 @@ async def call_gemini(
             "temperature": 0.2,
             "automatic_function_calling": genai_types.AutomaticFunctionCallingConfig(disable=True),
         }
-        if supports_gemini_thinking(model) and DEFAULT_AI_THINKING_BUDGET is not None:
+        effective_budget = thinking_budget if thinking_budget is not None else DEFAULT_AI_THINKING_BUDGET
+        if supports_gemini_thinking(model) and effective_budget is not None:
             config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
-                thinking_budget=DEFAULT_AI_THINKING_BUDGET
+                thinking_budget=effective_budget
             )
 
         response = await asyncio.wait_for(
@@ -529,6 +531,7 @@ async def call_openai(
     base_url: Optional[str] = None,
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
+    thinking_budget: Optional[int] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Dispatch request to OpenAI or OpenAI-compatible endpoint (e.g. Ollama, vLLM, LocalAI)
@@ -640,6 +643,7 @@ async def execute_ai_analysis(
     timeout: float = DEFAULT_AI_TIMEOUT,
     fallback_models: Optional[list[str]] = None,
     on_progress: Optional[Callable[[dict], Any]] = None,
+    thinking_budget: Optional[int] = None,
 ) -> tuple[str, str, str, str, str, int, int, int, int, str, list[str]]:
     """
     Unified entrypoint to run on-demand AI analysis with automatic multi-model failover.
@@ -699,22 +703,56 @@ async def execute_ai_analysis(
                 await prog_res
 
         try:
+            import inspect
+
             if norm_provider == "gemini":
+                dispatch_kwargs = {
+                    "api_key": api_key,
+                    "model": current_model,
+                    "prompt": prompt,
+                    "system_prompt": system_prompt,
+                    "timeout": timeout,
+                }
+                if thinking_budget is not None:
+                    target_func = getattr(dispatch_gemini_request, "side_effect", None) or dispatch_gemini_request
+                    if not callable(target_func):
+                        target_func = dispatch_gemini_request
+                    try:
+                        sig = inspect.signature(target_func)
+                        if "thinking_budget" in sig.parameters:
+                            dispatch_kwargs["thinking_budget"] = thinking_budget
+                        elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) and not hasattr(dispatch_gemini_request, "side_effect"):
+                            dispatch_kwargs["thinking_budget"] = thinking_budget
+                    except Exception:
+                        dispatch_kwargs["thinking_budget"] = thinking_budget
+
                 raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_gemini_request(
-                    api_key=api_key,
-                    model=current_model,
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    timeout=timeout,
+                    **dispatch_kwargs
                 )
             elif norm_provider in ("openai", "openai_compatible"):
+                dispatch_kwargs = {
+                    "api_key": api_key,
+                    "model": current_model,
+                    "prompt": prompt,
+                    "base_url": base_url,
+                    "system_prompt": system_prompt,
+                    "timeout": timeout,
+                }
+                if thinking_budget is not None:
+                    target_func = getattr(dispatch_openai_request, "side_effect", None) or dispatch_openai_request
+                    if not callable(target_func):
+                        target_func = dispatch_openai_request
+                    try:
+                        sig = inspect.signature(target_func)
+                        if "thinking_budget" in sig.parameters:
+                            dispatch_kwargs["thinking_budget"] = thinking_budget
+                        elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) and not hasattr(dispatch_openai_request, "side_effect"):
+                            dispatch_kwargs["thinking_budget"] = thinking_budget
+                    except Exception:
+                        dispatch_kwargs["thinking_budget"] = thinking_budget
+
                 raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_openai_request(
-                    api_key=api_key,
-                    model=current_model,
-                    prompt=prompt,
-                    base_url=base_url,
-                    system_prompt=system_prompt,
-                    timeout=timeout,
+                    **dispatch_kwargs
                 )
             else:
                 raise ValueError(f"Unsupported AI provider: {provider}")

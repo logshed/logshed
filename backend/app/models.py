@@ -105,6 +105,20 @@ class SettingsResponse(BaseModel):
     check_for_updates: bool = True
     maintenance_until: Optional[str] = None
 
+    # Advanced System Settings
+    ai_timeout: float = 45.0
+    ai_thinking_budget: int = 1024
+    app_url: str = ""
+    allow_private_notification_targets: bool = True
+    enable_docker: bool = True
+    docker_exclude_containers: str = ""
+    docker_source_alias: str = "docker"
+    trusted_proxies: str = ""
+    trust_docker_proxies: bool = False
+    cookie_secure: bool = False
+    syslog_max_tcp_connections: int = 250
+    syslog_tcp_inactivity_timeout: float = 0.0
+
     @model_validator(mode="after")
     def clamp_retention_days(self) -> "SettingsResponse":
         if self.retention_overridden:
@@ -143,6 +157,56 @@ class SettingsUpdateRequest(BaseModel):
         description="Global alert maintenance window end time (ISO 8601 datetime string or null/empty to clear).",
     )
 
+    # Advanced System Settings
+    ai_timeout: Optional[float] = Field(
+        None,
+        description="AI completion request timeout in seconds (must be > 0.0).",
+    )
+    ai_thinking_budget: Optional[int] = Field(
+        None,
+        description="Thinking token budget for reasoning models (integer >= 0, 0 disables).",
+    )
+    app_url: Optional[str] = Field(
+        None,
+        description="Public instance URL used for notification incident links (HTTP/HTTPS URL or empty).",
+    )
+    allow_private_notification_targets: Optional[bool] = Field(
+        None,
+        description="Whether notification channels are permitted to target private LAN endpoints.",
+    )
+    enable_docker: Optional[bool] = Field(
+        None,
+        description="Enable container log tailing via Docker socket or proxy.",
+    )
+    docker_exclude_containers: Optional[str] = Field(
+        None,
+        description="Comma-separated container names or IDs to exclude from log ingestion.",
+    )
+    docker_source_alias: Optional[str] = Field(
+        None,
+        description="Source attribution alias assigned to logs ingested from Docker (1-64 characters).",
+    )
+    trusted_proxies: Optional[str] = Field(
+        None,
+        description="Comma-separated trusted reverse proxy IP addresses or CIDR ranges.",
+    )
+    trust_docker_proxies: Optional[bool] = Field(
+        None,
+        description="Whether to trust Docker bridge networks (172.16.0.0/12) as reverse proxies.",
+    )
+    cookie_secure: Optional[bool] = Field(
+        None,
+        description="Force the Secure attribute on HTTP session cookies.",
+    )
+    syslog_max_tcp_connections: Optional[int] = Field(
+        None,
+        description="Maximum concurrent Syslog TCP connections allowed (integer >= 1).",
+    )
+    syslog_tcp_inactivity_timeout: Optional[float] = Field(
+        None,
+        description="Syslog TCP client inactivity timeout in seconds (float >= 0.0, 0 disables).",
+    )
+
     @field_validator("ai_base_url")
     @classmethod
     def validate_ai_base_url(cls, v: Optional[str]) -> Optional[str]:
@@ -176,6 +240,81 @@ class SettingsUpdateRequest(BaseModel):
                 valid_keys = ", ".join(sorted(VALID_LOG_LEVELS.keys()))
                 raise ValueError(f"Invalid internal_log_level '{v}'. Must be one of: {valid_keys}")
             return to_canonical_log_level_name(v_clean)
+        return v
+
+    @field_validator("ai_timeout")
+    @classmethod
+    def validate_ai_timeout(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v <= 0.0:
+            raise ValueError("ai_timeout must be a float greater than 0.0")
+        return v
+
+    @field_validator("ai_thinking_budget")
+    @classmethod
+    def validate_ai_thinking_budget(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 0:
+            raise ValueError("ai_thinking_budget must be an integer greater than or equal to 0")
+        return v
+
+    @field_validator("app_url")
+    @classmethod
+    def validate_app_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            clean = v.strip()
+            if not clean:
+                return ""
+            from urllib.parse import urlparse
+            parsed = urlparse(clean)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("app_url must be a valid HTTP or HTTPS URL or empty")
+            return clean.rstrip("/")
+        return v
+
+    @field_validator("docker_source_alias")
+    @classmethod
+    def validate_docker_source_alias(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            clean = v.strip()
+            if not (1 <= len(clean) <= 64):
+                raise ValueError("docker_source_alias must be between 1 and 64 characters")
+            return clean
+        return v
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def validate_trusted_proxies(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            clean = v.strip()
+            if not clean:
+                return ""
+            for part in clean.split(","):
+                part_clean = part.strip()
+                if not part_clean:
+                    continue
+                if part_clean.startswith("[") and "]" in part_clean:
+                    bracket_end = part_clean.find("]")
+                    prefix = part_clean[1:bracket_end]
+                    remainder = part_clean[bracket_end + 1:]
+                    part_clean = prefix + remainder
+                try:
+                    ipaddress.ip_network(part_clean, strict=False)
+                except ValueError:
+                    raise ValueError(f"Invalid IP address or CIDR range in trusted_proxies: '{part.strip()}'")
+            return clean
+        return v
+
+    @field_validator("syslog_max_tcp_connections")
+    @classmethod
+    def validate_syslog_max_tcp_connections(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("syslog_max_tcp_connections must be an integer greater than or equal to 1")
+        return v
+
+    @field_validator("syslog_tcp_inactivity_timeout")
+    @classmethod
+    def validate_syslog_tcp_inactivity_timeout(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v < 0.0:
+            raise ValueError("syslog_tcp_inactivity_timeout must be a float greater than or equal to 0.0")
         return v
 
 

@@ -166,11 +166,6 @@ services:
      - PORT=8080
      - SYSLOG_PORT=1514
      - DOCKER_HOST=unix:///var/run/docker.sock
-     - DOCKER_SOURCE_ALIAS=docker
-      # - APP_URL=http://192.168.1.50:8080
-      # - ALLOW_PRIVATE_NOTIFICATION_TARGETS=true
-      # - DOCKER_EXCLUDE_CONTAINERS=logshed,noisy_container
-      # - LOGSHED_INTERNAL_LOG_LEVEL=WARNING
     volumes:
      - ./data:/data
      - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -227,7 +222,6 @@ docker run -d \
   -e PGID=1000 \
   -e TZ=UTC \
   -e DOCKER_HOST=unix:///var/run/docker.sock \
-  -e DOCKER_SOURCE_ALIAS=docker \
   -v /path/to/appdata:/data \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   ghcr.io/benhornertech/logshed:latest
@@ -253,54 +247,53 @@ docker exec -it logshed python -m app.cli reset-admin --password "your_new_secur
 
 ## Configuration Reference
 
-### Environment Variables
+### Environment Variables (Bootstrap Primitives)
 
-Environment variables are supplied at container startup and control networking, permissions, and process execution:
+Environment variables are strictly reserved for bootstrap primitives required before the SQLite database unlocks or privilege reduction occurs. Operational limits, collector exclusions, reverse proxy subnets, AI thinking budget/timeouts, and webhook URLs are configured directly within the web UI (**Settings > Advanced**) with instant live updates:
 
 | Variable | Description | Default | Required? |
 |---|---|---|:---:|
 | `PORT` | Listening HTTP port for the web dashboard and REST API. | `8080` | No |
 | `SYSLOG_PORT` | Listening port for both UDP and TCP syslog ingestion (1-65535). | `1514` | No |
-| `SYSLOG_MAX_TCP_CONNECTIONS` | Maximum concurrent Syslog TCP connections allowed. | `250` | No |
-| `SYSLOG_TCP_INACTIVITY_TIMEOUT` | Syslog TCP inactivity timeout in seconds (`0` disables timeout, keeping connections open indefinitely for persistent forwarders). | `0` | No |
-| `DOCKER_HOST` | Docker daemon endpoint (`unix:///var/run/docker.sock` or `tcp://host:port`). Set to `none` or `disabled` to skip Docker collection. | `unix:///var/run/docker.sock` | No |
-| `DOCKER_SOURCE_ALIAS` | Default source alias assigned to Docker logs in the UI and database. | `docker` | No |
-| `DOCKER_EXCLUDE_CONTAINERS` | Comma-separated list of container names or container IDs to exclude from log tailing. | *(empty)* | No |
-| `ENABLE_DOCKER` | Switch to enable or disable Docker log collection (`true` or `false`). | `true` | No |
+| `DATA_DIR` | Mount path for persistent SQLite database, master key, and storage. | `/data` | No |
 | `PUID` | User ID for internal non-root execution via `gosu`. | `1000` | No |
 | `PGID` | Group ID for internal non-root execution via `gosu`. | `1000` | No |
 | `TZ` | Container timezone (for example: `UTC`, `America/New_York`, `Europe/London`). | `UTC` | No |
+| `DOCKER_HOST` | Docker daemon endpoint (`unix:///var/run/docker.sock` or `tcp://host:port`). Set to `none` or `disabled` to skip Docker collection. | `unix:///var/run/docker.sock` | No |
 | `LOGSHED_SECRET_KEY` | Optional 32-byte URL-safe base64 key for encrypting runtime settings at rest. If unset, one is created at `/data/.secret_key`. | *(auto-generated)* | No |
-| `LOGSHED_INTERNAL_LOG_LEVEL` | Minimum severity for LogShed internal log records (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `DISABLED`). | `WARNING` | No |
-| `MAX_RETENTION_DAYS` | Maximum retention period in days for the slider in settings (minimum `1`). | `30` | No |
-| `COOKIE_SECURE` | Set to `true` to force the `Secure` flag on session cookies when behind an SSL proxy that strips `X-Forwarded-Proto`. | `false` | No |
-| `TRUSTED_PROXIES` | Comma-separated list of trusted reverse proxy IPs or CIDR blocks for client IP lookup. Can also set `TRUST_DOCKER_PROXIES=true` to automatically trust Docker bridge subnets (`172.16.0.0/12`). | *(empty)* | No |
-| `APP_URL` | Base URL of the LogShed instance (e.g. `http://192.168.1.50:8080` or `https://logshed.example.com`). Used in push notifications to generate direct clickable links to incident history details. | *(empty)* | No |
-| `ALLOW_PRIVATE_NOTIFICATION_TARGETS` | Permits notification webhooks to target local network / RFC 1918 private IPs and `.local`/`.internal`/`.lan` hosts (`true` or `false`). Set to `false` for stricter SSRF protection. | `true` | No |
-| `DATA_DIR` | Directory for persistent database files. | `/data` | No |
-| `DB_PATH` | Explicit path override for the SQLite database file. | `/data/logs.db` | No |
+| `MAX_RETENTION_DAYS` | Hard ceiling in days for the log retention slider in settings (minimum `1`). | `30` | No |
+| `ENVIRONMENT` / `DEBUG` | Development origin and debug mode toggle (`production` / `false`). | `production` / `false` | No |
 | `CORS_ORIGINS` | Comma-separated origins permitted for cross-origin requests (empty in production). | *(empty)* | No |
-| `LOGSHED_AI_TIMEOUT` | Outbound LLM API request timeout in seconds. | `45.0` | No |
-| `LOGSHED_AI_THINKING_BUDGET` | Reasoning token budget for extended thinking models. | `1024` | No |
+
+*Storage Compatibility Note:* `DB_PATH` and `SECRET_KEY_PATH` remain supported for backward compatibility, though standard deployments rely on `DATA_DIR`.
 
 ---
 
 ### Runtime Settings (Web UI)
 
-To protect credentials from leaking into environment dumps or process listings, sensitive runtime settings are **not** configured via environment variables. Instead, they are entered in the **Settings** panel within the web UI, encrypted at rest using **AES-128-CBC / HMAC-SHA256 (Fernet)**, and stored in the database:
+To protect credentials from leaking into environment dumps or process listings, sensitive runtime settings and operational limits are configured through the **Settings** view in the web interface. Credentials are encrypted at rest using **AES-128-CBC / HMAC-SHA256 (Fernet)**, and all settings resolve through a three-tier hierarchy (Web UI database setting > Container environment variable fallback > Hardcoded default).
 
+#### Application Settings (**Settings > Application**)
 - **AI Provider**: `Google Gemini` or `OpenAI / Custom OpenAI-Compatible`
 - **AI API Key**: Stored encrypted; masked in the UI
 - **AI Model**: e.g., `gemini-3.7-flash`, `gpt-4o`, or local model tag like `llama3.2`
 - **AI Fallback Models**: Comma-separated secondary models for automatic failover during rate limits or timeouts
 - **Custom AI Base URL**: Optional endpoint for self-hosted LLMs (e.g., `http://192.168.1.50:11434/v1` for Ollama or vLLM)
-- **AI System Prompt**: Editable instructions guiding root-cause analysis role and structure
+- **AI System Instructions**: Editable instructions guiding root-cause analysis role and structure
 - **Notification Channels**: Universal notification endpoints and webhooks via Apprise URL schemes, with live delivery testing, token masking, and encrypted URL storage
 - **Ingestion Drop Rules**: Filtering criteria (host, application, pattern) to discard noise before database persistence, with live drop counters and interactive test modal
 - **Active Log Retention**: Slider ranging from 1 to `MAX_RETENTION_DAYS` (default: 14 days)
 - **Internal Log Level**: Runtime dropdown to configure LogShed diagnostic log capture without restart
 - **Automated Update Checks**: Toggle to check GitHub Container Registry for new releases
-- **Host Aliases**: IP-to-name mappings to give readable names to homelab devices
+
+#### Advanced System Settings (**Settings > Advanced**)
+Located directly above the Change Admin Password section, these operational settings apply dynamically to in-memory workers without container recreation:
+- **AI Engine Limits**: Outbound AI request timeout (seconds) and reasoning token budget for extended thinking models.
+- **Notifications & Webhooks**: Public instance URL (`app_url`) used for direct incident history links in push alerts, and toggle for private / LAN webhook targets.
+- **Docker Collector**: Toggle container log tailing, specify excluded container names/IDs, and configure source attribution alias.
+- **Network & Reverse Proxy**: Comma-separated list of trusted proxy IPs/CIDRs, toggle to automatically trust Docker bridge networks (`172.16.0.0/12`), and toggle to force secure session cookies behind SSL proxies.
+- **Syslog TCP Limits**: Maximum concurrent TCP connections and client inactivity timeout (seconds).
+- **Host Aliases**: IP-to-name mappings to give readable names to homelab devices (managed in the **Host Aliases** tab).
 
 ---
 

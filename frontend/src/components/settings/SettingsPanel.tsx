@@ -28,6 +28,7 @@ import { useAuth } from '../../context/AuthContext.tsx';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
+import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
 
 export type { SettingsSubTab };
 
@@ -513,7 +514,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <FileText className="w-4 h-4 text-accent-500" />
                 <span>Internal Application Logging</span>
               </h3>
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-xs text-slate-400 mt-0.5">
                 Configure minimum severity level for LogShed operational diagnostics captured into its database and stream.
               </p>
             </div>
@@ -541,7 +542,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <option value="DISABLED">DISABLED (Do not ingest internal logs)</option>
               </select>
             </div>
-            <div className="flex items-center text-[11px] text-slate-400 sm:pt-4">
+            <div className="flex items-center text-xs text-slate-400 sm:pt-4">
               <span>
                 Logs at or above this level are captured into LogShed. Ingestion pipelines, database tasks, and SSE streams include recursion suppression to prevent loops.
               </span>
@@ -557,7 +558,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <Brain className="w-4 h-4 text-accent-500" />
                 <span>On-Demand AI Provider Configuration</span>
               </h3>
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-xs text-slate-400 mt-0.5">
                 Fernet encryption secures API keys against exposure in database exports, disk clones, and backups.
               </p>
             </div>
@@ -919,7 +920,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <ArrowUpCircle className="w-4 h-4 text-accent-500" />
                 <span>Version Updates</span>
               </h3>
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-xs text-slate-400 mt-0.5">
                 Periodically check GitHub Container Registry for new stable releases and display notification badges
               </p>
             </div>
@@ -936,7 +937,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               />
               <span className="font-medium">Check for new versions</span>
             </label>
-            <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
+            <p className="text-xs text-slate-400 mt-1 pl-6.5">
               When disabled, LogShed will not query external registries or display update notifications.
             </p>
           </div>
@@ -1019,6 +1020,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* Sub-tab 3: Advanced */}
       {activeSubTab === 'advanced' && (
         <div className="space-y-6">
+          {/* Advanced System Settings */}
+          <AdvancedSettingsCard settings={settings} onSettingsSaved={loadAllData} />
+
           {/* Admin Password Reset Section */}
           <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
             <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">

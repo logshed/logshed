@@ -222,6 +222,8 @@ async def diagnose_logs(
             prompt_override=ctx["redacted_prompt_override"],
             system_prompt=ctx["system_prompt"],
             fallback_models=ctx["fallback_models"],
+            timeout=ctx.get("ai_timeout", 45.0),
+            thinking_budget=ctx.get("ai_thinking_budget", 1024),
         )
 
         if len(ai_res) == 11:
@@ -344,6 +346,8 @@ async def diagnose_logs_stream(
                     system_prompt=ctx["system_prompt"],
                     fallback_models=ctx["fallback_models"],
                     on_progress=on_progress,
+                    timeout=ctx.get("ai_timeout", 45.0),
+                    thinking_budget=ctx.get("ai_thinking_budget", 1024),
                 )
 
                 if len(ai_res) == 11:

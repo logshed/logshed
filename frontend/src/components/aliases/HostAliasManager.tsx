@@ -134,7 +134,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
               <Server className="w-4 h-4 text-accent-500" />
               <span>Host Alias Manager</span>
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-slate-400 mt-0.5">
               {editingIp
                 ? `Editing host mapping for ${editingIp}.`
                 : 'Map incoming source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall).'}

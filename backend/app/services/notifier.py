@@ -201,9 +201,9 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
         if server_port in _BLOCKED_PORTS:
             return False, f"Port {server_port} is blocked to protect container control sockets."
 
-    # 5. Environment configuration for private notification targets
-    allow_private_env = os.environ.get("ALLOW_PRIVATE_NOTIFICATION_TARGETS", "true").strip().lower()
-    allow_private = allow_private_env not in ("false", "0", "no")
+    # 5. Dynamic configuration for private notification targets
+    from app.core.config import get_cached_setting
+    allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
 
     # 6. Verify destination IPs against blocked ranges
     if hostname:
