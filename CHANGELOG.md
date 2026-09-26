@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Comprehensive Configuration Guide**: Created `docs/CONFIGURATION.md` containing a full environment variable reference structured by section (Core Settings, Syslog Listener, Docker Log Tailing, Storage and Retention, AI Provider, Security, Advanced), details on the three-tier resolution hierarchy, and data persistence paths.
+- **Syslog & Docker Integration Guides**: Created `docs/SENDING_LOGS.md` with step-by-step forwarding configuration for OPNsense, Proxmox VE, Synology DSM, UniFi Network, pfSense, generic Linux (rsyslog and syslog-ng), and Docker container tailing.
 - **Global & Scheduled Maintenance Windows**: Added maintenance window management to silence outgoing alert notifications while continuing to evaluate alerts, record history, and ingest log streams. Supports on-demand windows with quick presets (+1h, +4h, +8h, +24h) or custom end dates, along with user-configured recurring schedules (daily, weekly, monthly) that account for midnight boundary crossings.
 - **Dedicated Maintenance Sub-Tab**: Added `/alerts/maintenance` deep-linked sub-tab under Alerts & History for managing on-demand maintenance windows and recurring maintenance schedules.
 - **Global Maintenance Banners**: Added top navigation and in-panel alert banners indicating active maintenance windows, showing expiration timestamps and 1-click deactivation or management actions.
@@ -51,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Streamlined README Documentation**: Slimmed down `README.md` to core project overview, feature highlights, quick-start commands, and a dedicated documentation table linking to specialized guides in `docs/`.
 - **Notification Targets Card Layout**: Removed the collapse chevron from the Notification Targets card on the Application Settings tab to keep it permanently visible, and moved the card above Version Updates.
 - **Portaled Modal Mounting**: Mounted modal dialogs to `document.body` via `createPortal` to prevent nested form interference when cards containing modals are placed inside settings forms.
 - **Maintenance Table Layout**: Balanced column widths in the recurring maintenance schedule table for consistent alignment across viewports.
