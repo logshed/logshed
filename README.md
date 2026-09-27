@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/BenHornerTech/logshed"><img src="https://img.shields.io/badge/version-1.2.0-blue?style=flat-square" alt="Version 1.2.0"></a>
+  <a href="https://github.com/logshed/logshed"><img src="https://img.shields.io/badge/version-1.2.0-blue?style=flat-square" alt="Version 1.2.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="MIT License"></a>
-  <a href="https://github.com/BenHornerTech/logshed/pkgs/container/logshed"><img src="https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white&style=flat-square" alt="GHCR Container"></a>
+  <a href="https://github.com/logshed/logshed/pkgs/container/logshed"><img src="https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white&style=flat-square" alt="GHCR Container"></a>
   <a href="#prerequisites--system-requirements"><img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blueviolet?style=flat-square" alt="Multi-Arch Support"></a>
   <a href="#built-with"><img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12"></a>
   <a href="#built-with"><img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
@@ -129,7 +129,7 @@ Save the following as `docker-compose.yml`:
 ```yaml
 services:
   logshed:
-    image: ghcr.io/benhornertech/logshed:latest
+    image: ghcr.io/logshed/logshed:latest
     container_name: logshed
     restart: unless-stopped
     ports:
@@ -173,7 +173,7 @@ docker run -d \
   -e DOCKER_HOST=unix:///var/run/docker.sock \
   -v /path/to/appdata:/data \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  ghcr.io/benhornertech/logshed:latest
+  ghcr.io/logshed/logshed:latest
 ```
 
 ---
@@ -228,7 +228,7 @@ Ensure you have **Python 3.12+** and **Node.js 20+** installed:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/BenHornerTech/logshed.git
+git clone https://github.com/logshed/logshed.git
 cd logshed
 
 # 2. Setup Python virtual environment & install backend dependencies

@@ -206,7 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center space-x-2">
           {versionInfo?.update_available && versionInfo?.check_enabled !== false && (
             <a
-              href="https://github.com/BenHornerTech/logshed/releases"
+              href="https://github.com/logshed/logshed/releases"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium text-amber-400 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/60 rounded transition cursor-pointer"

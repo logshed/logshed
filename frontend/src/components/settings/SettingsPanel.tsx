@@ -1128,7 +1128,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       App update available: <strong className="font-semibold font-mono">v{versionInfo.latest_version}</strong>
                     </span>
                     <a
-                      href="https://github.com/BenHornerTech/logshed/releases"
+                      href="https://github.com/logshed/logshed/releases"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="ml-1 inline-flex items-center gap-1 text-amber-400 hover:text-amber-200 underline text-[11px]"
@@ -1158,7 +1158,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             {/* Links */}
             <div className="flex flex-wrap items-center gap-4 text-xs pt-1 border-t border-dark-800">
               <a
-                href="https://github.com/BenHornerTech/logshed"
+                href="https://github.com/logshed/logshed"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
@@ -1167,7 +1167,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <ExternalLink className="w-3 h-3" />
               </a>
               <a
-                href="https://github.com/BenHornerTech/logshed/blob/main/CHANGELOG.md"
+                href="https://github.com/logshed/logshed/blob/main/CHANGELOG.md"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"

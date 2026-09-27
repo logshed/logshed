@@ -21,7 +21,7 @@ _cached_version_info: Optional[Dict[str, Any]] = None
 _cached_at: float = 0.0
 
 # Target GHCR repository (lowercase required for GHCR token service)
-DEFAULT_IMAGE_REPO = os.environ.get("LOGSHED_IMAGE_REPO", "benhornertech/logshed").lower()
+DEFAULT_IMAGE_REPO = os.environ.get("LOGSHED_IMAGE_REPO", "logshed/logshed").lower()
 
 
 def clear_version_cache() -> None:

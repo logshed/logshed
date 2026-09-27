@@ -37,7 +37,7 @@ Here is a typical `docker-compose.yml` showing the essential bootstrap variables
 ```yaml
 services:
   logshed:
-    image: ghcr.io/benhornertech/logshed:latest
+    image: ghcr.io/logshed/logshed:latest
     container_name: logshed
     restart: unless-stopped
     ports:
@@ -155,7 +155,7 @@ services:
 | `DEBUG` | `false` | Docker Compose only | Enable debug mode and development settings (`true` or `false`). | 1.0.0 |
 | `CORS_ORIGINS` | *(empty)* | Docker Compose only | Comma-separated list of permitted origins for cross-origin resource sharing requests. | 1.0.0 |
 | `LOGSHED_VERSION` | *(runtime build)* | Docker Compose only | Override the version string displayed in the web dashboard header. | 1.0.0 |
-| `LOGSHED_IMAGE_REPO` | `benhornertech/logshed` | Docker Compose only | Container image repository checked for version updates. | 1.1.0 |
+| `LOGSHED_IMAGE_REPO` | `logshed/logshed` | Docker Compose only | Container image repository checked for version updates. | 1.1.0 |
 
 ---
 

@@ -1,19 +1,19 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>logshed</Name>
-  <Repository>ghcr.io/benhornertech/logshed:latest</Repository>
-  <Registry>https://github.com/BenHornerTech/logshed/pkgs/container/logshed</Registry>
+  <Repository>ghcr.io/logshed/logshed:latest</Repository>
+  <Registry>https://github.com/logshed/logshed/pkgs/container/logshed</Registry>
   <Network>br0</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/BenHornerTech/logshed/issues</Support>
-  <Project>https://github.com/BenHornerTech/logshed</Project>
+  <Support>https://github.com/logshed/logshed/issues</Support>
+  <Project>https://github.com/logshed/logshed</Project>
   <Overview>LogShed is a lightweight, single-process syslog and Docker log aggregator featuring real-time virtualized streaming, SQLite FTS5 search, and user-initiated AI root-cause analysis.</Overview>
   <Category>Tools: System: Status: Network:Management</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/BenHornerTech/logshed/main/assets/logshed-logo.png</Icon>
+  <Icon>https://raw.githubusercontent.com/logshed/logshed/main/assets/logshed-logo.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>

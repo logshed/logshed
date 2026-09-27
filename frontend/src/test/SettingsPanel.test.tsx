@@ -555,11 +555,11 @@ describe('SettingsPanel Component', () => {
     expect(screen.getByText(/MIT License - Copyright \(c\) 2026 LogShed Contributors/)).toBeInTheDocument();
 
     const repoLink = screen.getByRole('link', { name: /GitHub Repository/i });
-    expect(repoLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed');
+    expect(repoLink).toHaveAttribute('href', 'https://github.com/logshed/logshed');
     expect(repoLink).toHaveAttribute('target', '_blank');
 
     const changelogLink = screen.getByRole('link', { name: /Changelog/i });
-    expect(changelogLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed/blob/main/CHANGELOG.md');
+    expect(changelogLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/blob/main/CHANGELOG.md');
     expect(changelogLink).toHaveAttribute('target', '_blank');
   });
 
@@ -582,7 +582,7 @@ describe('SettingsPanel Component', () => {
     expect(screen.getByText('v1.2.0')).toBeInTheDocument();
 
     const releaseNotesLink = screen.getByRole('link', { name: /Release Notes/i });
-    expect(releaseNotesLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed/releases');
+    expect(releaseNotesLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases');
   });
 
   it('renders Update checks are disabled in About section when check_enabled is false', async () => {

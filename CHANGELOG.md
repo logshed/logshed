@@ -180,6 +180,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native multi-architecture container images (`linux/amd64` and `linux/arm64`).
 - Unraid Community Applications template (`unraid-template.xml`) with cache-pool POSIX locking recommendations.
 
-[Unreleased]: https://github.com/BenHornerTech/logshed/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/BenHornerTech/logshed/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/BenHornerTech/logshed/releases/tag/v1.0.0
+[Unreleased]: https://github.com/logshed/logshed/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/logshed/logshed/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/logshed/logshed/releases/tag/v1.0.0

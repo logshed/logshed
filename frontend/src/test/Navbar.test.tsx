@@ -193,7 +193,7 @@ describe('Navbar Component', () => {
     });
 
     const updateLink = screen.getByRole('link', { name: /App update available/i });
-    expect(updateLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed/releases');
+    expect(updateLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases');
     expect(updateLink).toHaveAttribute('target', '_blank');
   });
 

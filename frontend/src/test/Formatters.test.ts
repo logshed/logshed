@@ -75,7 +75,7 @@ describe('cleanLogMessageForDisplay', () => {
 
   it('preserves message with application tag but no timestamp or level (Example 4)', () => {
     const input =
-      'logshed: Could not download icon https://raw.githubusercontent.com/BenHornerTech/logshed/main/assets/logshed-logo.png';
+      'logshed: Could not download icon https://raw.githubusercontent.com/logshed/logshed/main/assets/logshed-logo.png';
     expect(cleanLogMessageForDisplay(input)).toBe(input);
   });
 
