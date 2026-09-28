@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Alert Push Notification Formatting & Line Spacing**: Formatted alert push notification headings in bold Markdown (`**Host:**`, `**App:**`, `**Log:**`, `**Rate:**`, etc.), updated the title format to `LogShed: <Rule Name>`, converted HTML break tags into native newlines for tight single-line spacing in Pushover mobile clients without blank line gaps while preserving lock screen line breaks, and made the direct `/alerts/history` dashboard link available to all alert notifications whenever `app_url` is configured.
 - **Drop Rules Table Layout Alignment**: Redesigned the Ingestion Drop Rules table on desktop and mobile viewports to match the layout, typography, status indicators, and action column structure of the Alert Rules table. Rule patterns are neatly tucked into the detail modal, highlighting the rule name in the main list.
 - **AI Disabled Notice Restyling**: Updated the "AI Features Disabled" advisory notice in Settings to match the subtle dark card design of the notification channels advisory banner.
 - **Storage Panel Header Streamlining**: Removed the redundant duplicate "Storage & Retention" section subtitle preceding the Current Storage Footprint card on the Storage tab.

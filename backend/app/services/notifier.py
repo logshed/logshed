@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import ipaddress
 import logging
 import os
+import re
 import socket
 from typing import Optional, Tuple, Union
 import urllib.parse
@@ -243,18 +244,47 @@ def decrypt_channel_url(encrypted_url: str) -> str:
     return decrypt_value(encrypted_url)
 
 
+def _clean_pushover_message(msg: str) -> str:
+    """
+    Remove redundant HTML line break tags to ensure Pushover clients
+    render single-line spacing without blank newline gaps in the app,
+    while preserving newline characters so lock screen notifications retain line breaks.
+    """
+    if not msg:
+        return msg
+    # Replace <br />\n, <br>\n, or standalone <br />, <br> with \n
+    cleaned = re.sub(r"<br\s*/?>\s*\n*", "\n", msg)
+    # Strip wrapping <p>...</p> when it is a single enclosing paragraph
+    if cleaned.count("<p>") == 1 and cleaned.count("</p>") == 1:
+        cleaned = re.sub(r"^\s*<p>(.*?)</p>\s*$", r"\1", cleaned, flags=re.DOTALL)
+    return cleaned
+
+
 def _configure_apprise_servers(ap_obj: apprise.Apprise) -> None:
     """
     Ensure rich formatting (HTML/Markdown) is enabled on notification services
     that support it (such as Pushover, Discord, Gotify, Ntfy) when not explicitly set in the URL.
     For Pushover, enables HTML formatting so bold labels and paragraphs render natively
-    rather than showing unrendered raw markdown asterisks.
+    rather than showing unrendered raw markdown asterisks, and strips redundant newline gaps.
     """
     for server in ap_obj:
         cls_name = server.__class__.__name__
         if cls_name == "NotifyPushover":
             if server.notify_format == apprise.NotifyFormat.TEXT:
                 server.notify_format = apprise.NotifyFormat.HTML
+            orig_send = server._send
+
+            def _wrapped_pushover_send(payload, *args, _orig=orig_send, **kwargs):
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("html") == 1
+                    and not payload.get("encrypted")
+                    and "message" in payload
+                ):
+                    payload["message"] = _clean_pushover_message(payload["message"])
+                return _orig(payload, *args, **kwargs)
+
+            server._send = _wrapped_pushover_send
         elif cls_name in ("NotifyDiscord", "NotifyNtfy", "NotifyGotify"):
             if server.notify_format == apprise.NotifyFormat.TEXT:
                 server.notify_format = apprise.NotifyFormat.MARKDOWN

@@ -709,9 +709,9 @@ class AlertEvaluator:
 
         # Construct clean push notification payload with secrets redacted
         if rule.rule_type == "rate":
-            notification_title = str(redact(f"LogShed Alert: [Log Storm] {rule.name} ({measured_rate} logs/s)"))
+            notification_title = str(redact(f"LogShed: [Log Storm] {rule.name} ({measured_rate} logs/s)"))
         else:
-            notification_title = str(redact(f"LogShed Alert: {rule.name}"))
+            notification_title = str(redact(f"LogShed: {rule.name}"))
 
         redacted_sample_log = str(redact(sample_log)) if sample_log else ""
         truncated_log = format_sample_log_for_alert(redacted_sample_log)
@@ -719,19 +719,19 @@ class AlertEvaluator:
 
         if rule.rule_type == "rate":
             body_lines = [
-                f"Host: {culprit_host or extracted_host or 'Unknown'}",
-                f"App: {culprit_app or extracted_app or 'Unknown'}",
-                f"Rate: {measured_rate} logs/s (Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s)",
+                f"**Host:** {culprit_host or extracted_host or 'Unknown'}",
+                f"**App:** {culprit_app or extracted_app or 'Unknown'}",
+                f"**Rate:** {measured_rate} logs/s (Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s)",
             ]
             if culprit_msg:
-                body_lines.append(f"Top Pattern: {culprit_msg}")
+                body_lines.append(f"**Top Pattern:** {culprit_msg}")
             if clean_log:
-                body_lines.append(f"Sample Log: {clean_log}")
+                body_lines.append(f"**Sample Log:** {clean_log}")
         else:
             body_lines = [
-                f"Host: {extracted_host or 'Unknown'}",
-                f"App: {extracted_app or 'Unknown'}",
-                f"Log: {clean_log}",
+                f"**Host:** {extracted_host or 'Unknown'}",
+                f"**App:** {extracted_app or 'Unknown'}",
+                f"**Log:** {clean_log}",
             ]
 
         if rule.ai_enrichment and ai_enabled:
@@ -740,15 +740,15 @@ class AlertEvaluator:
                 clean_summary = strip_markdown(redacted_summary)
                 if len(clean_summary) > 200:
                     clean_summary = clean_summary[:197] + "..."
-                body_lines.append(f"AI Analysis: {clean_summary}")
+                body_lines.append(f"**AI Analysis:** {clean_summary}")
             elif ai_error_note:
                 redacted_error = str(redact(ai_error_note))
-                body_lines.append(f"AI Analysis: Unavailable ({redacted_error})")
+                body_lines.append(f"**AI Analysis:** Unavailable ({redacted_error})")
 
-            from app.core.config import get_cached_setting
-            app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
-            if app_url:
-                body_lines.append(f"Link: {app_url}/alerts/history")
+        from app.core.config import get_cached_setting
+        app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
+        if app_url:
+            body_lines.append(f"**Link:** {app_url}/alerts/history")
 
         notification_body = "\n".join(body_lines)
 

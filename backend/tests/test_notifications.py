@@ -419,6 +419,44 @@ class TestNotificationsApi:
             assert "<strong>Alert: Auth Spike</strong>" in payload.get("message")
             assert "**Alert:" not in payload.get("message")
 
+    def test_pushover_removes_newline_gaps_between_fields(self):
+        """Verify that Pushover targets have newline gaps removed between fields."""
+        from app.services.notifier import _sync_send_notification
+        import apprise
+
+        dispatched_payloads = []
+
+        def fake_send(payload):
+            dispatched_payloads.append(payload)
+            return True
+
+        body = (
+            "**Host:** homelab-host\n"
+            "**App:** testapp\n"
+            "**Log:** [ERROR] failed\n"
+            "**AI Analysis:** System recovery active\n"
+            "**Link:** http://10.0.0.1/alerts/history"
+        )
+
+        with patch("apprise.plugins.pushover.NotifyPushover._send", side_effect=fake_send):
+            success = _sync_send_notification(
+                urls=["pover://user@token"],
+                title="Error Alert",
+                body=body,
+                body_format=apprise.NotifyFormat.MARKDOWN,
+            )
+            assert success is True
+            assert len(dispatched_payloads) == 1
+            msg = dispatched_payloads[0].get("message")
+            assert dispatched_payloads[0].get("html") == 1
+            assert "<strong>Host:</strong> homelab-host\n<strong>App:</strong> testapp" in msg
+            assert "<br" not in msg
+            assert msg.startswith("<strong>Host:</strong>")
+            # Verify lock screen plain text retains clean line breaks
+            import re
+            plain_text = re.sub(r"<[^>]+>", "", msg)
+            assert "Host: homelab-host\nApp: testapp" in plain_text
+
     def test_notification_worker_pool_configuration(self):
         """Verify that the notification thread pool is configured with 4 workers and proper thread prefix."""
         import threading

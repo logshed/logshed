@@ -478,7 +478,7 @@ class TestSubsystemIntegrations:
         await evaluator.stop()
 
         assert len(sent_payloads) == 1
-        assert "Link: https://logshed.corp.lan/alerts/history" in sent_payloads[0]["body"]
+        assert "**Link:** https://logshed.corp.lan/alerts/history" in sent_payloads[0]["body"]
 
     def test_notifier_private_target_validation(self, tmp_path: Path):
         """validate_notification_url respects allow_private_notification_targets setting."""
