@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **On-Demand Database Compaction**: Added on-demand database compaction ("Compact Database") to reclaim host disk space from SQLite freelist pages after log retention pruning. Coordinates temporary ingestion write pauses while incoming syslog and container logs buffer in memory, executes safe WAL checkpoint truncation and VACUUM, and enforces a disk headroom check (database footprint plus 100 MB margin) before execution. Includes authenticated endpoint `POST /api/system/vacuum` and Storage tab UI controls with confirmation modals, live progress indicators, and reclaimed space summaries.
 - **Drop Rule Names**: Added user-defined `name` column to `drop_rules` in `migrate_v2`, supporting descriptive naming for drop rules across creation modals, detail views, and JSON export/import with pattern fallback.
 - **AI Feature Enablement Toggle**: Added `ai_enabled` system setting and toggle checkbox in Application Settings. Allows disabling AI enrichment entirely, gracefully skipping alert enrichment without missing API key errors and guiding unconfigured users to Settings from the log inspection modal.
 - **Unconfigured Notification Channels Advisory**: Added an informative banner at the bottom of Alert Rules when rules are defined but no notification channels are configured, letting operators know incidents are recorded in History while providing a direct link to configure channels in Settings.
