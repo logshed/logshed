@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Trash2, Clock, Check, RefreshCw, AlertCircle, Info, Lock } from 'lucide-react';
-import { triggerManualPrune } from '../../api/system.ts';
+import { Trash2, Clock, Check, RefreshCw, AlertCircle, Info, Lock, Database } from 'lucide-react';
+import { triggerManualPrune, triggerVacuum } from '../../api/system.ts';
 import { formatBytes } from './StorageCard.tsx';
-import { PruneResponse } from '../../types.ts';
+import { PruneResponse, VacuumResponse } from '../../types.ts';
+import { Modal } from '../common/Modal.tsx';
 
 interface RetentionSliderProps {
   retentionDays: number;
@@ -10,6 +11,7 @@ interface RetentionSliderProps {
   retentionOverridden?: boolean;
   onSaveRetention: (days: number) => Promise<void>;
   onPruneCompleted?: () => void;
+  onVacuumCompleted?: () => void;
 }
 
 export const RetentionSlider: React.FC<RetentionSliderProps> = ({
@@ -18,6 +20,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
   retentionOverridden = false,
   onSaveRetention,
   onPruneCompleted,
+  onVacuumCompleted,
 }) => {
   const min = 1;
   const max = Math.max(1, maxRetentionDays || 30);
@@ -30,6 +33,31 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
   const [isPruning, setIsPruning] = useState<boolean>(false);
   const [pruneResult, setPruneResult] = useState<PruneResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [isCompacting, setIsCompacting] = useState<boolean>(false);
+  const [isVacuumModalOpen, setIsVacuumModalOpen] = useState<boolean>(false);
+  const [vacuumResult, setVacuumResult] = useState<VacuumResponse | null>(null);
+  const [vacuumErrorMsg, setVacuumErrorMsg] = useState<string | null>(null);
+
+  const handleVacuumConfirm = async () => {
+    setIsVacuumModalOpen(false);
+    try {
+      setIsCompacting(true);
+      setVacuumErrorMsg(null);
+      setVacuumResult(null);
+      const res = await triggerVacuum();
+      setVacuumResult(res);
+      if (onVacuumCompleted) {
+        onVacuumCompleted();
+      } else if (onPruneCompleted) {
+        onPruneCompleted();
+      }
+    } catch (err: any) {
+      setVacuumErrorMsg(err.message || 'Database compaction failed.');
+    } finally {
+      setIsCompacting(false);
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -206,10 +234,29 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           <span>{saveSuccess ? 'Saved!' : 'Save Retention Policy'}</span>
         </button>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setIsVacuumModalOpen(true)}
+            disabled={isCompacting || isPruning}
+            title="Repack SQLite database file and return freelist space to host filesystem."
+            className="bg-accent-950/80 hover:bg-accent-900 text-accent-300 border border-accent-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
+          >
+            {isCompacting ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Compacting database... Ingestion writes temporarily paused</span>
+              </>
+            ) : (
+              <>
+                <Database className="w-3.5 h-3.5" />
+                <span>Compact Database</span>
+              </>
+            )}
+          </button>
+
           <button
             onClick={handlePruneNow}
-            disabled={isPruning}
+            disabled={isPruning || isCompacting}
             title="Immediately purge logs older than the configured retention policy, compact the search index, and checkpoint the SQLite WAL."
             className="bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
           >
@@ -227,7 +274,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           </button>
           <div
             className="text-slate-500 hover:text-slate-300 transition cursor-help p-0.5"
-            title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Click 'Purge Expired Logs Now' if you recently lowered your retention days and want to immediately purge older logs, compact the search index, and checkpoint the WAL."
+            title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Click 'Purge Expired Logs Now' if you recently lowered your retention days and want to immediately purge older logs, compact the search index, and checkpoint the WAL. Click 'Compact Database' to repack the database file and return freelist space to the host filesystem."
           >
             <Info className="w-4 h-4" />
           </div>
@@ -238,6 +285,34 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       <p className="text-[11px] text-slate-500 leading-relaxed">
         Old logs are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.
       </p>
+
+      {/* Active Vacuum Progress Banner */}
+      {isCompacting && (
+        <div className="p-3 bg-dark-950 border border-accent-800/60 rounded-lg text-xs text-accent-300 flex items-center gap-2 animate-pulse font-mono">
+          <RefreshCw className="w-4 h-4 animate-spin text-accent-400 shrink-0" />
+          <span>Compacting database... Ingestion writes temporarily paused</span>
+        </div>
+      )}
+
+      {/* Vacuum Error Banner */}
+      {vacuumErrorMsg && (
+        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
+          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+          <span>{vacuumErrorMsg}</span>
+        </div>
+      )}
+
+      {/* Vacuum Result Banner */}
+      {vacuumResult && (
+        <div className="p-3 bg-dark-950 border border-accent-900/60 rounded-lg text-xs font-mono text-slate-300 animate-in fade-in">
+          <span className="text-accent-400 font-semibold block mb-1">Database Compaction Completed Successfully:</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+            <div>Previous Footprint: <span className="text-slate-100">{formatBytes(vacuumResult.previous_size_bytes)}</span></div>
+            <div>New Footprint: <span className="text-slate-100">{formatBytes(vacuumResult.new_size_bytes)}</span></div>
+            <div>Reclaimed Space: <span className="text-emerald-400 font-semibold">{formatBytes(vacuumResult.reclaimed_bytes)}</span></div>
+          </div>
+        </div>
+      )}
 
       {/* Prune Result Banner */}
       {pruneResult && (
@@ -250,6 +325,49 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           </div>
         </div>
       )}
+
+      {/* Database Compaction Modal */}
+      <Modal
+        isOpen={isVacuumModalOpen}
+        onClose={() => !isCompacting && setIsVacuumModalOpen(false)}
+        title="Compact Database"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 text-xs text-slate-300">
+          <p className="leading-relaxed">
+            The database will be repacked to return unused space to the host filesystem.
+          </p>
+          <div className="space-y-2 bg-dark-950 border border-dark-800 rounded-lg p-3 text-[11px] text-slate-400">
+            <div className="flex items-start gap-2">
+              <span className="text-accent-400 font-bold">•</span>
+              <span>SQLite database writes will pause briefly during compaction (incoming logs will buffer in memory).</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-accent-400 font-bold">•</span>
+              <span>Requires temporary free disk space equal to the current database size.</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">
+            <button
+              type="button"
+              onClick={() => setIsVacuumModalOpen(false)}
+              disabled={isCompacting}
+              className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleVacuumConfirm}
+              disabled={isCompacting}
+              className="px-4 py-1.5 text-xs bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Confirm & Compact</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

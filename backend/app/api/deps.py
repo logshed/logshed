@@ -32,6 +32,8 @@ def invalidate_admin_auth_cache() -> None:
 
 
 _thread_local = threading.local()
+_all_connections: set[sqlite3.Connection] = set()
+_all_connections_lock = threading.Lock()
 
 
 def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
@@ -58,6 +60,8 @@ def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
         conn.execute("PRAGMA busy_timeout=5000;")
         conn.execute("PRAGMA foreign_keys=ON;")
         _thread_local.connections[resolved_key] = conn
+        with _all_connections_lock:
+            _all_connections.add(conn)
 
     return conn
 
@@ -74,6 +78,26 @@ def close_thread_local_connections() -> None:
             except Exception:
                 pass
         _thread_local.connections.clear()
+
+
+def reset_all_db_connections() -> None:
+    """
+    Close all open SQLite connections across all threads.
+    Thread-local caches will detect the closed connection and automatically reopen on next use.
+    """
+    with _all_connections_lock:
+        for conn in list(_all_connections):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _all_connections.clear()
+    close_thread_local_connections()
+
+
+async def reset_all_db_connections_async() -> None:
+    """Async wrapper to reset all database connections."""
+    await asyncio.to_thread(reset_all_db_connections)
 
 
 async def run_db_query(fn: Callable[[sqlite3.Connection], T], custom_db_path: Optional[Path] = None) -> T:

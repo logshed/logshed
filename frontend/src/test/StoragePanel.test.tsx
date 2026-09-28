@@ -66,4 +66,39 @@ describe('StoragePanel Component', () => {
       expect(screen.getByText(/Storage disk unreadable/i)).toBeInTheDocument();
     });
   });
+
+  it('triggers compaction from StoragePanel and refreshes metrics upon completion', async () => {
+    const fetchStorageSpy = vi.spyOn(systemApi, 'fetchStorageMetrics');
+    const vacuumSpy = vi.spyOn(systemApi, 'triggerVacuum').mockResolvedValue({
+      status: 'ok',
+      previous_size_bytes: 18247000000,
+      new_size_bytes: 12000000000,
+      reclaimed_bytes: 6247000000,
+      metrics: {
+        recorded_at: '2026-09-28T00:00:00Z',
+        db_size_bytes: 12000000000,
+        disk_free_bytes: 456000000000,
+        disk_total_bytes: 1000000000000,
+        total_logs_count: 50000,
+      },
+    });
+
+    render(<StoragePanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: /Storage & Retention/i })).toBeInTheDocument();
+    });
+
+    const compactBtn = screen.getByRole('button', { name: /Compact Database/i });
+    fireEvent.click(compactBtn);
+
+    const confirmBtn = screen.getByRole('button', { name: /Confirm & Compact/i });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(vacuumSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Database Compaction Completed Successfully:')).toBeInTheDocument();
+      expect(fetchStorageSpy).toHaveBeenCalledTimes(2);
+    });
+  });
 });

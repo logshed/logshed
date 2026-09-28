@@ -5,6 +5,7 @@ Tests for storage metrics, retention prune worker, healthcheck, settings encrypt
 import asyncio
 import datetime
 import os
+import shutil
 import stat
 from pathlib import Path
 import pytest
@@ -12,6 +13,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
+from app.core.pipeline import QueueConsumer
 from app.core.migrations import get_connection, run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
@@ -26,7 +28,13 @@ from app.cli import seed_logs
 from app.api.deps import run_db_query
 from app.collectors.docker_collector import DockerTailer, _tail_container_logs
 from app.main import _supervise_worker, create_app
-from app.services.retention import PruneWorker, execute_prune
+from app.services.retention import (
+    InsufficientDiskSpaceError,
+    PruneWorker,
+    check_vacuum_headroom,
+    execute_prune,
+    execute_vacuum,
+)
 from app.services.storage_metrics import (
     StorageMetricsWorker,
     prune_old_metrics,
@@ -1383,6 +1391,200 @@ class TestHostAliases:
             rows = c.fetchall()
             for r in rows:
                 assert r[1] == "target-alias"
+
+
+# ===================================================================
+# 6. Database Compaction (Vacuum)
+# ===================================================================
+
+class TestDatabaseVacuum:
+    """Tests for on-demand database vacuum compaction and headroom protection."""
+
+    @pytest.mark.asyncio
+    async def test_vacuum_requires_authentication(self, client: AsyncClient):
+        """Unauthenticated requests to /api/system/vacuum are rejected with 401."""
+        res = await client.post("/api/system/vacuum")
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_vacuum_insufficient_disk_space_guard(
+        self, client: AsyncClient, auth_cookie: dict, monkeypatch
+    ):
+        """Vacuum fails with 400 when free disk headroom is below database size plus safe margin."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        # Mock shutil.disk_usage to return a small amount of free bytes (e.g. 10 MB)
+        from collections import namedtuple
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+        monkeypatch.setattr(
+            "shutil.disk_usage",
+            lambda path: Usage(total=10**10, used=10**10 - 10 * 1024 * 1024, free=10 * 1024 * 1024),
+        )
+
+        res = await client.post("/api/system/vacuum")
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert "Insufficient temporary disk headroom" in detail
+
+    @pytest.mark.asyncio
+    async def test_vacuum_endpoint_success_and_metrics_update(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """Vacuum successfully repacks the database file and records fresh storage metrics."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        # Seed 1000 logs, then delete 900 of them to generate freelist pages
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        entries = [
+            {
+                "timestamp": now,
+                "received_at": now,
+                "source_ip": "192.168.1.100",
+                "source_alias": "test-host",
+                "app_name": "app",
+                "facility": 1,
+                "severity": 6,
+                "message": f"Log entry {i} padding " + ("x" * 500),
+                "raw": f"raw {i}",
+            }
+            for i in range(1000)
+        ]
+        _seed_logs(db_file, entries)
+
+        # Delete most logs to create empty freelist pages
+        with get_connection(db_file) as conn:
+            conn.execute("DELETE FROM logs WHERE id > 100")
+            conn.commit()
+
+        res = await client.post("/api/system/vacuum")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert data["previous_size_bytes"] > 0
+        assert data["new_size_bytes"] > 0
+        assert data["reclaimed_bytes"] >= 0
+        assert "metrics" in data
+        metrics = data["metrics"]
+        assert metrics["db_size_bytes"] == data["new_size_bytes"]
+        assert metrics["total_logs_count"] == 100
+
+    @pytest.mark.asyncio
+    async def test_vacuum_pauses_and_resumes_queue_consumer(self, tmp_path: Path):
+        """Vacuum pauses QueueConsumer writes while buffering incoming logs in memory."""
+        db_file = tmp_path / "logs.db"
+        consumer = QueueConsumer(db_file)
+        assert not consumer.is_paused
+
+        # Run consumer in background task
+        task = asyncio.create_task(consumer.run())
+        try:
+            # Pause writes
+            await consumer.pause_writes()
+            assert consumer.is_paused
+
+            # Put logs into queue while paused
+            queue = pipeline_mod.get_queue()
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            test_entry = {
+                "timestamp": now,
+                "received_at": now,
+                "source_ip": "10.0.0.1",
+                "source_alias": "buffered-host",
+                "app_name": "test-app",
+                "facility": 1,
+                "severity": 6,
+                "message": "Buffered message during vacuum",
+                "raw": "Buffered message during vacuum",
+            }
+            queue.put_nowait(test_entry)
+
+            # Check that log was NOT inserted into db while paused
+            await asyncio.sleep(0.1)
+            with get_connection(db_file) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
+                assert count == 0
+                assert queue.qsize() == 1
+
+            # Resume writes
+            consumer.resume_writes()
+            assert not consumer.is_paused
+
+            # Wait for consumer to drain buffered log to database
+            for _ in range(20):
+                await asyncio.sleep(0.05)
+                with get_connection(db_file) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
+                    if count == 1:
+                        break
+
+            with get_connection(db_file) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
+                assert count == 1
+        finally:
+            await consumer.stop()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_vacuum_conflict_when_already_running(
+        self, client: AsyncClient, auth_cookie: dict, monkeypatch
+    ):
+        """Concurrent vacuum requests return 409 Conflict."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        async def _delayed_vacuum(*args, **kwargs):
+            await asyncio.sleep(0.3)
+            return {
+                "status": "ok",
+                "previous_size_bytes": 1000,
+                "new_size_bytes": 800,
+                "reclaimed_bytes": 200,
+                "metrics": {
+                    "recorded_at": "2026-09-28T00:00:00Z",
+                    "db_size_bytes": 800,
+                    "disk_free_bytes": 1000000000,
+                    "disk_total_bytes": 2000000000,
+                    "total_logs_count": 0,
+                },
+            }
+
+        monkeypatch.setattr("app.api.system.execute_vacuum", _delayed_vacuum)
+
+        res1, res2 = await asyncio.gather(
+            client.post("/api/system/vacuum"),
+            client.post("/api/system/vacuum"),
+        )
+
+        statuses = {res1.status_code, res2.status_code}
+        assert 200 in statuses
+        assert 409 in statuses
+
+    def test_check_vacuum_headroom_helper(self, tmp_path: Path, monkeypatch):
+        """check_vacuum_headroom verifies disk headroom against safe margin."""
+        from collections import namedtuple
+        db_file = tmp_path / "logs.db"
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+
+        # Sufficient headroom
+        monkeypatch.setattr(
+            "shutil.disk_usage",
+            lambda p: Usage(total=10**10, used=10**9, free=9 * 10**9),
+        )
+        db_size, free, required = check_vacuum_headroom(db_file, safe_margin_bytes=100 * 1024 * 1024)
+        assert free >= required
+
+        # Insufficient headroom
+        monkeypatch.setattr(
+            "shutil.disk_usage",
+            lambda p: Usage(total=10**10, used=10**10 - 1000, free=1000),
+        )
+        with pytest.raises(InsufficientDiskSpaceError) as exc_info:
+            check_vacuum_headroom(db_file, safe_margin_bytes=100 * 1024 * 1024)
+        assert "Insufficient temporary disk headroom" in str(exc_info.value)
 
 
 

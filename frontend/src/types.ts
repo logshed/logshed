@@ -88,6 +88,14 @@ export interface PruneResponse {
   metrics: StorageMetricsSnapshot;
 }
 
+export interface VacuumResponse {
+  status: string;
+  previous_size_bytes: number;
+  new_size_bytes: number;
+  reclaimed_bytes: number;
+  metrics: StorageMetricsSnapshot;
+}
+
 export interface AiPreviewRequest {
   log_ids: number[];
   user_context?: string;

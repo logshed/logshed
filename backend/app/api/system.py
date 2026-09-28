@@ -3,16 +3,32 @@ System health, storage metrics, and retention maintenance API endpoints for LogS
 """
 
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.deps import get_current_user, get_optional_user, run_db_query
 from app.core.config import get_db_path, get_max_retention_days, is_max_retention_days_overridden
 from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
-from app.models import HealthResponse, PruneResponse, StorageMetricItem, StorageOverviewResponse, VersionResponse
-from app.services.retention import execute_prune_async, get_effective_retention_days
+from app.models import (
+    HealthResponse,
+    PruneResponse,
+    StorageMetricItem,
+    StorageOverviewResponse,
+    VacuumResponse,
+    VersionResponse,
+)
+from app.services.retention import (
+    InsufficientDiskSpaceError,
+    execute_prune_async,
+    execute_vacuum,
+    get_effective_retention_days,
+)
 from app.services.storage_metrics import sample_storage_metrics
 from app.services.version_service import check_for_updates
+
+logger = logging.getLogger(__name__)
+_vacuum_lock = asyncio.Lock()
 
 router = APIRouter(tags=["System & Maintenance"])
 
@@ -86,6 +102,53 @@ async def trigger_prune(user: dict = Depends(get_current_user)) -> PruneResponse
         deleted_metrics=result["deleted_metrics"],
         metrics=metric_item,
     )
+
+
+@router.post("/system/vacuum", response_model=VacuumResponse)
+async def trigger_vacuum(user: dict = Depends(get_current_user)) -> VacuumResponse:
+    """
+    On-demand database compaction (VACUUM) to reclaim host disk space from freelist pages.
+    Pauses SQLite writes while buffering incoming logs in memory, checkpoints WAL,
+    and runs VACUUM.
+    """
+    if _vacuum_lock.locked():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Database compaction is already in progress.",
+        )
+
+    async with _vacuum_lock:
+        db_path = get_db_path()
+        try:
+            result = await execute_vacuum(db_path)
+        except InsufficientDiskSpaceError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+        except Exception as e:
+            logger.error(f"Database compaction failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Database compaction failed: {e}",
+            )
+
+        metrics_raw = result["metrics"]
+        metric_item = StorageMetricItem(
+            recorded_at=str(metrics_raw["recorded_at"]),
+            db_size_bytes=metrics_raw["db_size_bytes"],
+            disk_free_bytes=metrics_raw["disk_free_bytes"],
+            disk_total_bytes=metrics_raw["disk_total_bytes"],
+            total_logs_count=metrics_raw["total_logs_count"],
+        )
+
+        return VacuumResponse(
+            status="ok",
+            previous_size_bytes=result["previous_size_bytes"],
+            new_size_bytes=result["new_size_bytes"],
+            reclaimed_bytes=result["reclaimed_bytes"],
+            metrics=metric_item,
+        )
 
 
 @router.get("/system/storage", response_model=StorageOverviewResponse)

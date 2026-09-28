@@ -621,6 +621,17 @@ class KeyedMultilineAssembler:
 
 _QUEUE_SENTINEL = object()
 
+_active_queue_consumer: Optional["QueueConsumer"] = None
+
+def get_queue_consumer() -> Optional["QueueConsumer"]:
+    """Returns the currently active QueueConsumer instance, if registered."""
+    return _active_queue_consumer
+
+def set_queue_consumer(consumer: Optional["QueueConsumer"]) -> None:
+    """Sets the active QueueConsumer instance."""
+    global _active_queue_consumer
+    _active_queue_consumer = consumer
+
 
 class QueueConsumer:
     """
@@ -645,6 +656,35 @@ class QueueConsumer:
         self._drain_lock = asyncio.Lock()
         self._conn: Optional[sqlite3.Connection] = None
         self._conn_lock = threading.Lock()
+        self._paused = False
+        self._resume_event = asyncio.Event()
+        self._resume_event.set()
+        self._write_lock = asyncio.Lock()
+        set_queue_consumer(self)
+
+    @property
+    def is_paused(self) -> bool:
+        """Returns True if database write execution is currently paused."""
+        return self._paused
+
+    async def pause_writes(self) -> None:
+        """
+        Temporarily pause QueueConsumer writes to SQLite.
+        Waits for any in-flight batch write to complete, closes the persistent SQLite connection,
+        and leaves incoming logs to buffer in _log_queue without dropping them.
+        """
+        self._paused = True
+        self._resume_event.clear()
+        async with self._write_lock:
+            await asyncio.to_thread(self._close_conn)
+
+    def resume_writes(self) -> None:
+        """
+        Resume QueueConsumer writes to SQLite.
+        Immediately signals the consumer to wake up and drain all buffered logs from _log_queue.
+        """
+        self._paused = False
+        self._resume_event.set()
 
     def set_fts_indexer(self, fts_indexer: Any) -> None:
         """Register FTSIndexWorker instance for immediate post-commit notification."""
@@ -689,55 +729,64 @@ class QueueConsumer:
 
         try:
             while self._running and not self._stopping:
-                # Wait for the first item
-                try:
-                    item = await asyncio.wait_for(queue.get(), timeout=0.5)
-                except asyncio.TimeoutError:
-                    continue
-                except asyncio.CancelledError:
-                    break
+                if self._paused:
+                    await self._resume_event.wait()
+                    if not self._running or self._stopping:
+                        break
 
-                if item is _QUEUE_SENTINEL:
-                    queue.task_done()
-                    break
-
-                batch = [item]
-                batch_start = time.monotonic()
-
-                # Drain up to 5000 items
-                while len(batch) < 5000 and self._running and not self._stopping:
-                    # First try immediate drain of available items
-                    try:
-                        next_item = queue.get_nowait()
-                        if next_item is _QUEUE_SENTINEL:
-                            queue.task_done()
-                            self._running = False
-                            break
-                        batch.append(next_item)
+                async with self._write_lock:
+                    if self._paused:
                         continue
-                    except asyncio.QueueEmpty:
-                        pass
 
-                    # If queue is empty, wait for next item up to remaining debounce window
-                    elapsed = time.monotonic() - batch_start
-                    remaining = self._debounce_seconds - elapsed
-                    if remaining <= 0:
-                        break
-
+                    # Wait for the first item
                     try:
-                        next_item = await asyncio.wait_for(queue.get(), timeout=remaining)
-                        if next_item is _QUEUE_SENTINEL:
-                            queue.task_done()
-                            self._running = False
-                            break
-                        batch.append(next_item)
-                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        item = await asyncio.wait_for(queue.get(), timeout=0.2)
+                    except asyncio.TimeoutError:
+                        continue
+                    except asyncio.CancelledError:
                         break
 
-                if batch:
-                    success = await self._flush_batch(batch, queue)
-                    if not success and (not self._running or self._stopping):
+                    if item is _QUEUE_SENTINEL:
+                        queue.task_done()
                         break
+
+                    batch = [item]
+                    batch_start = time.monotonic()
+
+                    # Drain up to 5000 items
+                    while len(batch) < 5000 and self._running and not self._stopping and not self._paused:
+                        # First try immediate drain of available items
+                        try:
+                            next_item = queue.get_nowait()
+                            if next_item is _QUEUE_SENTINEL:
+                                queue.task_done()
+                                self._running = False
+                                break
+                            batch.append(next_item)
+                            continue
+                        except asyncio.QueueEmpty:
+                            pass
+
+                        # If queue is empty, wait for next item up to remaining debounce window
+                        elapsed = time.monotonic() - batch_start
+                        remaining = self._debounce_seconds - elapsed
+                        if remaining <= 0:
+                            break
+
+                        try:
+                            next_item = await asyncio.wait_for(queue.get(), timeout=remaining)
+                            if next_item is _QUEUE_SENTINEL:
+                                queue.task_done()
+                                self._running = False
+                                break
+                            batch.append(next_item)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            break
+
+                    if batch:
+                        success = await self._flush_batch(batch, queue)
+                        if not success and (not self._running or self._stopping):
+                            break
         finally:
             self._running = False
             try:
@@ -852,6 +901,9 @@ class QueueConsumer:
         logger.info("QueueConsumer stopping: draining pending logs...")
         self._stopping = True
         self._stop_event.set()
+        self._resume_event.set()
+        if _active_queue_consumer is self:
+            set_queue_consumer(None)
         queue = get_queue()
 
         try:

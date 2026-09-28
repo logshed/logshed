@@ -4,9 +4,11 @@ Log retention pruning and database cleanup service for LogShed.
 
 import asyncio
 import logging
+import os
+import shutil
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
@@ -205,3 +207,129 @@ class PruneWorker:
         self._running = False
         self._stop_event.set()
         logger.info("PruneWorker stopping.")
+
+
+class InsufficientDiskSpaceError(Exception):
+    """Raised when available host disk space is insufficient for database compaction."""
+    pass
+
+
+def get_db_footprint_bytes(db_path: Union[str, Path]) -> int:
+    """Calculate the total size of SQLite database, WAL, and SHM files in bytes."""
+    db_path_obj = Path(db_path)
+    total_size = 0
+    for suffix in ["", "-wal", "-shm"]:
+        file_path = db_path_obj.with_name(f"{db_path_obj.name}{suffix}")
+        try:
+            total_size += os.path.getsize(file_path)
+        except FileNotFoundError:
+            pass
+    return total_size
+
+
+def check_vacuum_headroom(
+    db_path: Union[str, Path],
+    safe_margin_bytes: int = 100 * 1024 * 1024,
+) -> tuple[int, int, int]:
+    """
+    Verify that host disk has sufficient temporary space for compaction.
+    Returns (db_footprint, disk_free, required_headroom).
+    Raises InsufficientDiskSpaceError if disk_free < required_headroom.
+    """
+    db_path_obj = Path(db_path)
+    db_size = get_db_footprint_bytes(db_path_obj)
+
+    parent_dir = db_path_obj.parent
+    try:
+        usage = shutil.disk_usage(parent_dir)
+        disk_free = usage.free
+    except FileNotFoundError:
+        disk_free = 0
+
+    required_headroom = db_size + safe_margin_bytes
+    if disk_free < required_headroom:
+        raise InsufficientDiskSpaceError(
+            f"Insufficient temporary disk headroom available for database compaction. "
+            f"Compaction requires at least {required_headroom} bytes free ({db_size} bytes database size + "
+            f"{safe_margin_bytes} bytes safe margin), but only {disk_free} bytes are available."
+        )
+    return db_size, disk_free, required_headroom
+
+
+async def execute_vacuum(
+    db_path: Union[str, Path],
+    queue_consumer: Optional[Any] = None,
+    fts_worker: Optional[Any] = None,
+    safe_margin_bytes: int = 100 * 1024 * 1024,
+) -> dict:
+    """
+    Coordinates on-demand database compaction (VACUUM):
+    1. Checks host disk space against database footprint plus safe margin (100 MB).
+    2. Pauses QueueConsumer writes while incoming logs continue buffering in _log_queue.
+    3. Waits for in-flight writes and FTS indexing to finish, then resets open connections.
+    4. Executes PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM on a worker thread.
+    5. Resumes QueueConsumer to drain all buffered logs to the compacted database.
+    6. Records a fresh storage metrics snapshot and returns size and space reclaimed.
+    """
+    db_path_obj = Path(db_path)
+
+    # 1. Free Headroom Guard
+    previous_size, _, _ = check_vacuum_headroom(db_path_obj, safe_margin_bytes=safe_margin_bytes)
+
+    # Resolve workers if not passed
+    if queue_consumer is None:
+        from app.core.pipeline import get_queue_consumer
+        queue_consumer = get_queue_consumer()
+
+    if fts_worker is None:
+        from app.services.fts_indexer import get_fts_worker
+        fts_worker = get_fts_worker()
+
+    # 2. Pause Ingestion Writes & FTS Indexing
+    if queue_consumer is not None:
+        await queue_consumer.pause_writes()
+    if fts_worker is not None:
+        await fts_worker.pause_indexing()
+
+    try:
+        # 3. Drain & Flush connections
+        from app.api.deps import reset_all_db_connections_async
+        await reset_all_db_connections_async()
+
+        # 4. Execute Vacuum
+        def _vacuum_worker(path: Path) -> None:
+            conn = sqlite3.connect(str(path), timeout=60.0)
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                conn.execute("VACUUM;")
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_vacuum_worker, db_path_obj)
+    finally:
+        # 5. Resume Ingestion
+        if fts_worker is not None:
+            fts_worker.resume_indexing()
+        if queue_consumer is not None:
+            queue_consumer.resume_writes()
+
+    # 6. Record Metrics & calculate reclaimed space
+    new_size = get_db_footprint_bytes(db_path_obj)
+    reclaimed_bytes = max(0, previous_size - new_size)
+    metrics = await asyncio.to_thread(record_metrics, db_path_obj)
+
+    logger.info(
+        f"Database compaction complete: previous={previous_size} bytes, "
+        f"new={new_size} bytes, reclaimed={reclaimed_bytes} bytes."
+    )
+
+    return {
+        "status": "ok",
+        "previous_size_bytes": previous_size,
+        "new_size_bytes": new_size,
+        "reclaimed_bytes": reclaimed_bytes,
+        "metrics": metrics,
+    }
+
+
+coordinate_vacuum = execute_vacuum

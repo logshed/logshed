@@ -1,5 +1,5 @@
 import { apiFetch } from './client.ts';
-import { HealthResponse, PruneResponse, StorageMetricsResponse, VersionInfo } from '../types.ts';
+import { HealthResponse, PruneResponse, StorageMetricsResponse, VacuumResponse, VersionInfo } from '../types.ts';
 
 export async function fetchHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>('/api/health');
@@ -11,6 +11,12 @@ export async function fetchStorageMetrics(): Promise<StorageMetricsResponse> {
 
 export async function triggerManualPrune(): Promise<PruneResponse> {
   return apiFetch<PruneResponse>('/api/maintenance/prune', {
+    method: 'POST',
+  });
+}
+
+export async function triggerVacuum(): Promise<VacuumResponse> {
+  return apiFetch<VacuumResponse>('/api/system/vacuum', {
     method: 'POST',
   });
 }

@@ -394,6 +394,15 @@ class PruneResponse(BaseModel):
     metrics: StorageMetricItem
 
 
+class VacuumResponse(BaseModel):
+    """Response returned after database vacuum compaction."""
+    status: str = "ok"
+    previous_size_bytes: int
+    new_size_bytes: int
+    reclaimed_bytes: int
+    metrics: StorageMetricItem
+
+
 class VersionResponse(BaseModel):
     """Application version and GHCR update availability."""
     current_version: str

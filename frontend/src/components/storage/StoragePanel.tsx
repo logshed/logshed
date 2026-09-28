@@ -88,6 +88,7 @@ export const StoragePanel: React.FC = () => {
             retentionOverridden={retentionOverridden}
             onSaveRetention={handleSaveRetention}
             onPruneCompleted={loadAllData}
+            onVacuumCompleted={loadAllData}
           />
         )}
 

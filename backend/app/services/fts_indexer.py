@@ -75,6 +75,18 @@ def index_pending_logs(db_path: Union[str, Path], batch_size: int = 5000) -> int
         conn.close()
 
 
+_active_fts_worker: Optional["FTSIndexWorker"] = None
+
+def get_fts_worker() -> Optional["FTSIndexWorker"]:
+    """Returns the currently active FTSIndexWorker instance, if registered."""
+    return _active_fts_worker
+
+def set_fts_worker(worker: Optional["FTSIndexWorker"]) -> None:
+    """Sets the active FTSIndexWorker instance."""
+    global _active_fts_worker
+    _active_fts_worker = worker
+
+
 class FTSIndexWorker:
     """
     Supervised background worker that indexes unindexed logs from logs table into logs_fts.
@@ -94,7 +106,35 @@ class FTSIndexWorker:
         self._running = False
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
+        self._paused = False
+        self._resume_event = asyncio.Event()
+        self._resume_event.set()
+        self._index_lock = asyncio.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        set_fts_worker(self)
+
+    @property
+    def is_paused(self) -> bool:
+        """Returns True if indexing passes are currently paused."""
+        return self._paused
+
+    async def pause_indexing(self) -> None:
+        """
+        Temporarily pause FTS indexing passes.
+        Waits for any in-flight indexing batch to complete.
+        """
+        self._paused = True
+        self._resume_event.clear()
+        async with self._index_lock:
+            pass
+
+    def resume_indexing(self) -> None:
+        """
+        Resume FTS indexing passes.
+        """
+        self._paused = False
+        self._resume_event.set()
+        self._wake_event.set()
 
     def notify_new_logs(self) -> None:
         """Signal worker that new logs have been committed to the logs table."""
@@ -116,9 +156,18 @@ class FTSIndexWorker:
 
         while self._running:
             try:
-                indexed_count = await asyncio.to_thread(
-                    self._index_pending_chunk, self._batch_size
-                )
+                if self._paused:
+                    await self._resume_event.wait()
+                    if not self._running:
+                        break
+
+                async with self._index_lock:
+                    if self._paused:
+                        continue
+                    indexed_count = await asyncio.to_thread(
+                        self._index_pending_chunk, self._batch_size
+                    )
+
                 if indexed_count >= self._batch_size:
                     # Backlog exists: immediately process next chunk without sleeping
                     continue
@@ -153,7 +202,10 @@ class FTSIndexWorker:
         """Signal graceful shutdown and drain any pending unindexed logs."""
         self._running = False
         self._stop_event.set()
+        self._resume_event.set()
         self._wake_event.set()
+        if _active_fts_worker is self:
+            set_fts_worker(None)
         logger.info("FTSIndexWorker stopping: draining pending logs...")
         try:
             await asyncio.to_thread(index_pending_logs, self._db_path, self._batch_size)
