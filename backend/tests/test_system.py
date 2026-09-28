@@ -898,6 +898,70 @@ class TestSettingsEncryptionAndKeyManagement:
         # Automatically clamped from 60 down to 30, NOT reverting to the old 7 days
         assert data_reboot["retention_days"] == 30
 
+    @pytest.mark.asyncio
+    async def test_ai_enabled_setting_toggle_and_persistence(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        # Fresh install without API key should default ai_enabled to False
+        res_initial = await client.get("/api/settings")
+        assert res_initial.status_code == 200
+        assert res_initial.json()["ai_enabled"] is False
+
+        # Enable AI and configure an API key
+        res_enable = await client.post(
+            "/api/settings",
+            json={
+                "ai_enabled": True,
+                "ai_provider": "openai",
+                "ai_api_key": "sk-test-key-12345",
+            },
+        )
+        assert res_enable.status_code == 200
+
+        res_check = await client.get("/api/settings")
+        assert res_check.status_code == 200
+        assert res_check.json()["ai_enabled"] is True
+
+        # Disable AI
+        res_disable = await client.post(
+            "/api/settings",
+            json={"ai_enabled": False},
+        )
+        assert res_disable.status_code == 200
+
+        res_check_disabled = await client.get("/api/settings")
+        assert res_check_disabled.status_code == 200
+        assert res_check_disabled.json()["ai_enabled"] is False
+
+        # Verify DB value directly
+        db_file = tmp_path / "logs.db"
+        with get_connection(db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_enabled'")
+            row = cursor.fetchone()
+            assert row is not None
+            assert row[0] == "0"
+
+        # Re-enable AI
+        res_re_enable = await client.post(
+            "/api/settings",
+            json={"ai_enabled": True},
+        )
+        assert res_re_enable.status_code == 200
+
+        res_check_re_enabled = await client.get("/api/settings")
+        assert res_check_re_enabled.status_code == 200
+        assert res_check_re_enabled.json()["ai_enabled"] is True
+
+        with get_connection(db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_enabled'")
+            row = cursor.fetchone()
+            assert row is not None
+            assert row[0] == "1"
+
 
 
 # ===================================================================

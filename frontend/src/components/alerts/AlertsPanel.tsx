@@ -17,6 +17,7 @@ import {
   Upload,
   Brain,
   Clock,
+  ExternalLink,
 } from 'lucide-react';
 import {
   AlertHistoryItem,
@@ -46,6 +47,7 @@ import {
 import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
+import { fetchSettings } from '../../api/settings.ts';
 import {
   downloadBlob,
   slugify,
@@ -139,7 +141,11 @@ const formatScheduleRecurrence = (s: MaintenanceSchedule): string => {
   return `At ${s.start_time}`;
 };
 
-export const AlertsPanel: React.FC = () => {
+export interface AlertsPanelProps {
+  onNavigateToSettings?: () => void;
+}
+
+export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }) => {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [activeSubTab, setActiveSubTab] = useState<AlertViewTab>(() =>
     pathToAlertSubTab(window.location.pathname)
@@ -151,6 +157,7 @@ export const AlertsPanel: React.FC = () => {
   const [historyTotal, setHistoryTotal] = useState<number>(0);
   const [dropRules, setDropRules] = useState<DropRule[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
+  const [isAiConfigured, setIsAiConfigured] = useState<boolean>(true);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse>({
     active: false,
@@ -158,6 +165,15 @@ export const AlertsPanel: React.FC = () => {
     schedules: [],
   });
   const [customUntil, setCustomUntil] = useState<string>('');
+
+  const handleNavigateToSettings = () => {
+    if (onNavigateToSettings) {
+      onNavigateToSettings();
+    } else {
+      window.history.pushState(null, '', '/settings');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
 
   // Modals state
   const [isRuleModalOpen, setIsRuleModalOpen] = useState<boolean>(false);
@@ -221,7 +237,7 @@ export const AlertsPanel: React.FC = () => {
 
   const loadAll = useCallback(async () => {
     try {
-      const [rulesData, channelsData, presetsData, historyData, facetsData, dropRulesData, maintData] = await Promise.all([
+      const [rulesData, channelsData, presetsData, historyData, facetsData, dropRulesData, maintData, settingsData] = await Promise.all([
         fetchAlertRules(),
         fetchNotificationChannels(),
         fetchAlertPresets(),
@@ -229,6 +245,7 @@ export const AlertsPanel: React.FC = () => {
         fetchLogFacets().catch(() => ({ sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} })),
         fetchDropRules().catch(() => []),
         fetchMaintenanceWindow().catch(() => ({ active: false, until: null, schedules: [] })),
+        fetchSettings().catch(() => null),
       ]);
       setRules(rulesData);
       setChannels(channelsData);
@@ -239,6 +256,14 @@ export const AlertsPanel: React.FC = () => {
       setMaintenance(maintData);
       if (facetsData?.apps) {
         setAvailableApps(facetsData.apps);
+      }
+      if (settingsData) {
+        setIsAiConfigured(
+          Boolean(
+            settingsData.ai_enabled &&
+            (settingsData.has_ai_api_key || settingsData.ai_provider === 'openai_compatible')
+          )
+        );
       }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to load alert configuration.', isError: true });
@@ -1059,6 +1084,28 @@ export const AlertsPanel: React.FC = () => {
             </span>
           </div>
         )}
+
+        {rules.length > 0 && channels.length === 0 && (
+          <div className="p-3.5 bg-dark-900 border border-dark-700 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+            <div className="flex items-start gap-2.5">
+              <Bell className="w-4 h-4 text-accent-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-slate-200">No Notification Channels Configured</p>
+                <p className="text-slate-400 mt-0.5">
+                  Alert rules will record incidents in the History tab. To receive push notifications, configure a notification channel in Settings.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleNavigateToSettings}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-lg text-xs font-medium text-slate-200 hover:text-white transition cursor-pointer shrink-0 self-start sm:self-auto"
+            >
+              <span>Configure in Settings</span>
+              <ExternalLink className="w-3.5 h-3.5 text-accent-400" />
+            </button>
+          </div>
+        )}
       </div>
     )}
 
@@ -1518,6 +1565,8 @@ export const AlertsPanel: React.FC = () => {
         ruleToEdit={ruleToEdit}
         channels={channels}
         availableApps={availableApps}
+        isAiConfigured={isAiConfigured}
+        onNavigateToSettings={handleNavigateToSettings}
         onClose={() => setIsRuleModalOpen(false)}
         onSuccess={handleRuleSuccess}
       />

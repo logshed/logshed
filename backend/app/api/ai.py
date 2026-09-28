@@ -181,6 +181,8 @@ async def preview_ai_prompt(
         source_alias=ctx["source_alias"],
         app_name=ctx["app_name"],
         system_prompt=ctx["system_prompt"],
+        ai_enabled=ctx.get("ai_enabled", True),
+        has_ai_api_key=ctx.get("has_ai_api_key", True),
     )
 
 
@@ -207,6 +209,12 @@ async def diagnose_logs(
             model_override=req.model,
             fallback_models_override=req.fallback_models,
         )
+
+        if not ctx.get("ai_enabled", True):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
+            )
 
         ai_res = await execute_ai_analysis(
             provider=ctx["provider"],
@@ -314,6 +322,12 @@ async def diagnose_logs_stream(
         model_override=req.model,
         fallback_models_override=req.fallback_models,
     )
+
+    if not ctx.get("ai_enabled", True):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
+        )
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()

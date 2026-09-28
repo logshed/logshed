@@ -24,6 +24,7 @@ export interface HostAlias {
 }
 
 export interface SystemSettings {
+  ai_enabled?: boolean;
   ai_provider: 'gemini' | 'openai' | 'openai_compatible';
   ai_model: string;
   ai_fallback_models?: string;
@@ -103,6 +104,8 @@ export interface AiPreviewResponse {
   source_alias: string;
   app_name: string;
   system_prompt: string;
+  ai_enabled?: boolean;
+  has_ai_api_key?: boolean;
 }
 
 export interface AiDiagnosisStreamEvent {
@@ -214,6 +217,7 @@ export interface VersionInfo {
 
 export interface DropRule {
   id: number;
+  name?: string | null;
   source_pattern?: string | null;
   app_pattern?: string | null;
   message_pattern: string;
@@ -225,6 +229,7 @@ export interface DropRule {
 }
 
 export interface DropRuleCreate {
+  name?: string | null;
   source_pattern?: string | null;
   app_pattern?: string | null;
   message_pattern: string;
@@ -234,6 +239,7 @@ export interface DropRuleCreate {
 }
 
 export interface DropRuleUpdate {
+  name?: string | null;
   source_pattern?: string | null;
   app_pattern?: string | null;
   message_pattern?: string;

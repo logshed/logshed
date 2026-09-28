@@ -234,6 +234,13 @@ async def build_diagnosis_context(
     ai_timeout = float(get_cached_setting("ai_timeout", DEFAULT_AI_TIMEOUT))
     ai_thinking_budget = int(get_cached_setting("ai_thinking_budget", DEFAULT_AI_THINKING_BUDGET))
 
+    stored_ai_enabled = settings.get("ai_enabled")
+    if stored_ai_enabled is not None:
+        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        ai_enabled = bool(api_key.strip())
+    has_ai_api_key = bool(api_key.strip())
+
     return {
         "rows": rows,
         "source_alias": source_alias,
@@ -252,6 +259,8 @@ async def build_diagnosis_context(
         "estimated_tokens": estimated_tokens,
         "ai_timeout": ai_timeout,
         "ai_thinking_budget": ai_thinking_budget,
+        "ai_enabled": ai_enabled,
+        "has_ai_api_key": has_ai_api_key,
     }
 
 

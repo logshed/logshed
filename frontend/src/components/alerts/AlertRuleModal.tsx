@@ -10,6 +10,8 @@ export interface AlertRuleModalProps {
   ruleToEdit: AlertRule | null;
   channels: NotificationChannel[];
   availableApps: string[];
+  isAiConfigured?: boolean;
+  onNavigateToSettings?: () => void;
   onClose: () => void;
   onSuccess: (savedRule: AlertRule) => void;
 }
@@ -19,6 +21,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   ruleToEdit,
   channels,
   availableApps,
+  isAiConfigured = true,
+  onNavigateToSettings,
   onClose,
   onSuccess,
 }) => {
@@ -134,6 +138,18 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  const handleGoToSettings = () => {
+    onClose();
+    if (onNavigateToSettings) {
+      onNavigateToSettings();
+    } else {
+      window.history.pushState(null, '', '/settings');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
+
+  const isEnrichmentDisabled = !isAiConfigured && !ruleToEdit?.ai_enrichment;
 
   return (
     <Modal
@@ -369,12 +385,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* AI Enrichment & Enable */}
         <div className="pt-2 space-y-2">
-          <label className="flex items-center gap-2.5 cursor-pointer">
+          <label className={`flex items-center gap-2.5 ${isEnrichmentDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
             <input
               type="checkbox"
               checked={formAiEnrichment}
+              disabled={isEnrichmentDisabled}
               onChange={(e) => setFormAiEnrichment(e.target.checked)}
-              className="rounded border-dark-700 bg-dark-800 text-accent-500 focus:ring-0"
+              className="rounded border-dark-700 bg-dark-800 text-accent-500 focus:ring-0 disabled:cursor-not-allowed"
             />
             <span className="text-slate-200 font-medium flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-purple-400" />
@@ -384,6 +401,34 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           <p className="text-[11px] text-slate-400 pl-6">
             When an alert fires, redact triggering logs and query the configured LLM to append root cause and remediation insights.
           </p>
+
+          {isEnrichmentDisabled && (
+            <div className="ml-6 p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-300 font-mono">
+              <span>AI enrichment requires an active AI provider. Configure an AI provider in Settings to enable enrichment.</span>
+              <button
+                type="button"
+                onClick={handleGoToSettings}
+                className="text-accent-400 hover:text-accent-300 underline font-medium shrink-0 cursor-pointer inline-flex items-center gap-1 text-[11px] self-start sm:self-auto"
+              >
+                <span>Configure in Settings</span>
+                <ExternalLink className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {!isAiConfigured && ruleToEdit?.ai_enrichment && (
+            <div className="ml-6 p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-300 font-mono">
+              <span>AI provider is disabled or not configured. This rule will not be enriched until an AI provider is enabled in Settings.</span>
+              <button
+                type="button"
+                onClick={handleGoToSettings}
+                className="text-accent-400 hover:text-accent-300 underline font-medium shrink-0 cursor-pointer inline-flex items-center gap-1 text-[11px] self-start sm:self-auto"
+              >
+                <span>Configure in Settings</span>
+                <ExternalLink className="w-3 h-3" />
+              </button>
+            </div>
+          )}
 
           <label className="flex items-center gap-2.5 cursor-pointer pt-1">
             <input

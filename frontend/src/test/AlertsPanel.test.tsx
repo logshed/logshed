@@ -1024,6 +1024,27 @@ describe('AlertsPanel Component', () => {
       expect(updateSchedulesSpy).toHaveBeenCalled();
     });
   });
+
+  it('renders advisory banner when alert rules exist but no notification channels are configured', async () => {
+    vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue([]);
+    const onNavigateToSettings = vi.fn();
+
+    render(<AlertsPanel onNavigateToSettings={onNavigateToSettings} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No Notification Channels Configured')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(/Alert rules will record incidents in the History tab\. To receive push notifications, configure a notification channel in Settings\./i)
+    ).toBeInTheDocument();
+
+    const configureBtn = screen.getByRole('button', { name: /Configure in Settings/i });
+    expect(configureBtn).toBeInTheDocument();
+
+    fireEvent.click(configureBtn);
+    expect(onNavigateToSettings).toHaveBeenCalled();
+  });
 });
 
 

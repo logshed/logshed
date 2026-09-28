@@ -760,6 +760,81 @@ class TestQueueConsumerAlertIntegration:
         conn.close()
 
     @pytest.mark.asyncio
+    async def test_ai_enrichment_skipped_when_ai_disabled_in_settings(self, test_db: Path, monkeypatch):
+        """Verify that when AI is disabled in settings, rules with ai_enrichment trigger cleanly without calling LLM."""
+        conn = get_connection(test_db)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, filter_app, match_pattern, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+            """,
+            ("Disabled AI Test Rule", "threshold", "api", "500 Internal", 1, 60, 300, now_iso),
+        )
+        cur.execute(
+            "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_enabled', '0', datetime('now'), 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        import app.services.ai_engine as ai_engine
+
+        ai_called = False
+
+        async def mock_fail_if_called(**kwargs):
+            nonlocal ai_called
+            ai_called = True
+            raise RuntimeError("execute_ai_analysis should not be called when AI is disabled")
+
+        monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_fail_if_called)
+
+        sent_payloads = []
+
+        async def mock_send(self, title, body, channel_id=None):
+            sent_payloads.append({"title": title, "body": body})
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+
+        log_entry = {
+            "id": 201,
+            "app_name": "api",
+            "message": "500 Internal Server Error in payment endpoint",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        await evaluator.evaluate_batch([log_entry])
+        await asyncio.sleep(0.1)
+
+        # AI analysis was not called
+        assert not ai_called
+
+        # Notification was dispatched without AI errors or AI analysis note
+        assert len(sent_payloads) == 1
+        assert sent_payloads[0]["title"] == "LogShed Alert: Disabled AI Test Rule"
+        body = sent_payloads[0]["body"]
+        assert "App: api" in body
+        assert "Log: 500 Internal Server Error in payment endpoint" in body
+        assert "AI Analysis:" not in body
+        assert "Note: AI enrichment failed" not in body
+
+        # Verify incident history recorded clean summary and ai_enrichment=0
+        conn = get_connection(test_db)
+        cur = conn.cursor()
+        cur.execute("SELECT incident_summary, ai_enrichment, ai_model FROM alert_history ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        assert row is not None
+        assert "Alert triggered with 1 matching event(s)." in row[0]
+        assert row[1] == 0
+        assert row[2] is None
+        conn.close()
+
+
+    @pytest.mark.asyncio
     async def test_ai_enrichment_failover_to_fallback_model_on_503(self, test_db: Path, monkeypatch):
         """Verify that when primary model fails with 503 UNAVAILABLE, AI enrichment tries fallback model and succeeds."""
         conn = get_connection(test_db)

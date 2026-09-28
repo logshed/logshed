@@ -211,6 +211,7 @@ END;
 
 CREATE TABLE IF NOT EXISTS drop_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
     source_pattern TEXT,
     app_pattern TEXT,
     message_pattern TEXT NOT NULL,
@@ -286,6 +287,11 @@ CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_aud
 
 ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand';
 ''')
+
+    try:
+        conn.execute("ALTER TABLE drop_rules ADD COLUMN name TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     try:
         conn.execute("ALTER TABLE alert_history ADD COLUMN ai_model TEXT")
@@ -381,6 +387,22 @@ def run_migrations(db_path: Union[str, Path]) -> None:
         try:
             conn.execute(
                 "ALTER TABLE alert_history ADD COLUMN ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL;"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Ensure drop_rules has name column
+        try:
+            conn.execute("ALTER TABLE drop_rules ADD COLUMN name TEXT;")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Backfill drop_rules name if empty
+        try:
+            conn.execute(
+                "UPDATE drop_rules SET name = COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(app_pattern), ''), NULLIF(TRIM(source_pattern), ''), 'Drop Rule') WHERE name IS NULL OR TRIM(name) = '';"
             )
             conn.commit()
         except sqlite3.OperationalError:

@@ -8,6 +8,7 @@ describe('DropRulesCard Component', () => {
   const mockRules: DropRule[] = [
     {
       id: 1,
+      name: 'Drop DHCPACK',
       source_pattern: '192.168.1.*',
       app_pattern: 'dnsmasq',
       message_pattern: 'DHCPACK',
@@ -19,6 +20,7 @@ describe('DropRulesCard Component', () => {
     },
     {
       id: 2,
+      name: 'Drop Probe Requests',
       source_pattern: null,
       app_pattern: null,
       message_pattern: 'probe request',
@@ -40,16 +42,15 @@ describe('DropRulesCard Component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Ingestion Drop Rules')).toBeInTheDocument();
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
-      expect(screen.getByText('probe request')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop Probe Requests')).toBeInTheDocument();
       expect(screen.getByText('192.168.1.*')).toBeInTheDocument();
       expect(screen.getByText('dnsmasq')).toBeInTheDocument();
       expect(screen.getByText('Info and below')).toBeInTheDocument();
-      expect(screen.getByText('Any severity')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('42')).toBeInTheDocument();
-    expect(screen.getByText('10')).toBeInTheDocument();
+    expect(screen.getByText('42 dropped')).toBeInTheDocument();
+    expect(screen.getByText('10 dropped')).toBeInTheDocument();
   });
 
   it('toggles rule enabled/disabled status', async () => {
@@ -61,7 +62,7 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     const activeBtn = screen.getByText('Active');
@@ -84,7 +85,7 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     // Click pencil edit icon
@@ -93,6 +94,8 @@ describe('DropRulesCard Component', () => {
 
     // Verify modal is in edit mode
     expect(screen.getByText('Edit Ingestion Drop Rule')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Drop DHCPACK')).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue('DHCPACK').length).toBeGreaterThanOrEqual(1);
 
     // Verify reset counter button inside modal
     const resetCounterBtn = screen.getByRole('button', { name: /Reset counter to 0/i });
@@ -112,6 +115,7 @@ describe('DropRulesCard Component', () => {
 
     await waitFor(() => {
       expect(updateSpy).toHaveBeenCalledWith(1, expect.objectContaining({
+        name: 'Drop DHCPACK',
         message_pattern: 'DHCPACK-UPDATED',
       }));
       expect(screen.getByText('Drop rule updated successfully.')).toBeInTheDocument();
@@ -124,7 +128,7 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     const delBtn = screen.getByLabelText('Delete rule 1');
@@ -140,7 +144,7 @@ describe('DropRulesCard Component', () => {
     fireEvent.click(cancelBtn);
     expect(screen.queryByText('Delete this drop rule?')).not.toBeInTheDocument();
     expect(deleteSpy).not.toHaveBeenCalled();
-    expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+    expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
 
     // Open confirmation again and confirm
     fireEvent.click(delBtn);
@@ -151,7 +155,7 @@ describe('DropRulesCard Component', () => {
 
     expect(deleteSpy).toHaveBeenCalledWith(1);
     await waitFor(() => {
-      expect(screen.queryByText('DHCPACK')).not.toBeInTheDocument();
+      expect(screen.queryByText('Drop DHCPACK')).not.toBeInTheDocument();
     });
   });
 
@@ -162,6 +166,7 @@ describe('DropRulesCard Component', () => {
     });
     const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({
       id: 3,
+      name: 'Traefik Healthcheck',
       source_pattern: '10.0.0.*',
       app_pattern: 'traefik',
       message_pattern: 'healthcheck',
@@ -174,7 +179,7 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     // Open Modal
@@ -182,6 +187,9 @@ describe('DropRulesCard Component', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     // Fill form
+    const nameInput = screen.getByPlaceholderText(/e\.g\. CRON Chatter/i);
+    fireEvent.change(nameInput, { target: { value: 'Traefik Healthcheck' } });
+
     const msgInput = screen.getByPlaceholderText(/e\.g\. DHCPACK/i);
     fireEvent.change(msgInput, { target: { value: 'healthcheck' } });
 
@@ -202,21 +210,23 @@ describe('DropRulesCard Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(createSpy).toHaveBeenCalledWith({
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Traefik Healthcheck',
         message_pattern: 'healthcheck',
         is_regex: false,
         source_pattern: undefined,
         app_pattern: undefined,
         severity_threshold: undefined,
         is_enabled: true,
-      });
-      expect(screen.getByText('healthcheck')).toBeInTheDocument();
+      }));
+      expect(screen.getByText('Traefik Healthcheck')).toBeInTheDocument();
     });
   });
 
   it('allows selecting host/app from dropdown or entering custom wildcard', async () => {
     const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({
       id: 4,
+      name: 'Router Timeout Rule',
       source_pattern: 'router*',
       app_pattern: 'traefik',
       message_pattern: 'timeout',
@@ -229,11 +239,14 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('New Rule'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    const nameInput = screen.getByPlaceholderText(/e\.g\. CRON Chatter/i);
+    fireEvent.change(nameInput, { target: { value: 'Router Timeout Rule' } });
 
     const msgInput = screen.getByPlaceholderText(/e\.g\. DHCPACK/i);
     fireEvent.change(msgInput, { target: { value: 'timeout' } });
@@ -258,14 +271,15 @@ describe('DropRulesCard Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(createSpy).toHaveBeenCalledWith({
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Router Timeout Rule',
         message_pattern: 'timeout',
         is_regex: false,
         source_pattern: 'router*',
         app_pattern: 'traefik',
         severity_threshold: undefined,
         is_enabled: true,
-      });
+      }));
     });
   });
 
@@ -276,6 +290,7 @@ describe('DropRulesCard Component', () => {
     });
     const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({
       id: 5,
+      name: 'Drop All PveDaemon',
       source_pattern: null,
       app_pattern: 'pvedaemon',
       message_pattern: '*',
@@ -288,11 +303,14 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('New Rule'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    const nameInput = screen.getByPlaceholderText(/e\.g\. CRON Chatter/i);
+    fireEvent.change(nameInput, { target: { value: 'Drop All PveDaemon' } });
 
     // Select custom app: pvedaemon
     const appSelect = screen.getByLabelText(/Application or Container/i);
@@ -326,14 +344,15 @@ describe('DropRulesCard Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(createSpy).toHaveBeenCalledWith({
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Drop All PveDaemon',
         message_pattern: '*',
         is_regex: false,
         source_pattern: undefined,
         app_pattern: 'pvedaemon',
         severity_threshold: undefined,
         is_enabled: true,
-      });
+      }));
     });
   });
 
@@ -344,6 +363,7 @@ describe('DropRulesCard Component', () => {
     });
     const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({
       id: 6,
+      name: 'Drop Sshd Low Severity',
       source_pattern: null,
       app_pattern: 'sshd',
       message_pattern: '*',
@@ -357,11 +377,14 @@ describe('DropRulesCard Component', () => {
     render(<DropRulesCard />);
 
     await waitFor(() => {
-      expect(screen.getByText('DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('New Rule'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    const nameInput = screen.getByPlaceholderText(/e\.g\. CRON Chatter/i);
+    fireEvent.change(nameInput, { target: { value: 'Drop Sshd Low Severity' } });
 
     // Select severity threshold: Info (6) and below
     const sevSelect = screen.getByLabelText(/Drop if severity is\.\.\./i);
@@ -398,14 +421,15 @@ describe('DropRulesCard Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(createSpy).toHaveBeenCalledWith({
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Drop Sshd Low Severity',
         message_pattern: '*',
         is_regex: false,
         source_pattern: undefined,
         app_pattern: 'sshd',
         severity_threshold: 6,
         is_enabled: true,
-      });
+      }));
     });
   });
 
@@ -530,6 +554,33 @@ describe('DropRulesCard Component', () => {
       expect(importSpy).toHaveBeenCalled();
       expect(screen.getByText(/Imported 1 rule \(1 skipped\)\./i)).toBeInTheDocument();
     });
+  });
+
+  it('renders drop rules as responsive card list without table on mobile viewports', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('(max-width: 767px)'),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    render(<DropRulesCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Ingestion Drop Rules')).toBeInTheDocument();
+      expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
+      expect(screen.getByText('Drop Probe Requests')).toBeInTheDocument();
+    });
+
+    // Consistent responsive card layout: table is never rendered
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // Card elements are rendered with matching rule test IDs
+    expect(screen.getByTestId('drop-rule-row-1')).toBeInTheDocument();
+    expect(screen.getByTestId('drop-rule-row-2')).toBeInTheDocument();
   });
 });
 

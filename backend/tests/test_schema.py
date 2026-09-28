@@ -135,6 +135,7 @@ class TestSchemaIntegrity:
 
         expected = {
             "id",
+            "name",
             "source_pattern",
             "app_pattern",
             "message_pattern",

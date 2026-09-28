@@ -742,6 +742,68 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
 
     expect(fullPromptTextarea.value).toBe(editedLine1);
   });
+
+  it('displays advisory banner and disables run button when AI is disabled in settings', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+      ...samplePreview,
+      ai_enabled: false,
+      has_ai_api_key: true,
+    });
+    const onNavigateToSettings = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <AiAnalysisModal
+        isOpen={true}
+        onClose={onClose}
+        selectedLogs={sampleLogs}
+        onNavigateToSettings={onNavigateToSettings}
+      />
+    );
+
+    await screen.findByPlaceholderText('Redacted prompt...');
+
+    expect(screen.getByText('AI Provider Disabled')).toBeInTheDocument();
+    expect(
+      screen.getByText(/AI features are disabled in system configuration\. Enable an AI provider in Settings to inspect logs\./i)
+    ).toBeInTheDocument();
+
+    const configureBtn = screen.getByRole('button', { name: /Configure in Settings/i });
+    expect(configureBtn).toBeInTheDocument();
+
+    fireEvent.click(configureBtn);
+    expect(onClose).toHaveBeenCalled();
+    expect(onNavigateToSettings).toHaveBeenCalled();
+
+    const runBtn = screen.getByRole('button', { name: /Run AI Analysis/i });
+    expect(runBtn).toBeDisabled();
+  });
+
+  it('displays advisory banner and disables run button when API key is missing', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+      ...samplePreview,
+      ai_enabled: true,
+      has_ai_api_key: false,
+    });
+
+    render(
+      <AiAnalysisModal
+        isOpen={true}
+        onClose={vi.fn()}
+        selectedLogs={sampleLogs}
+      />
+    );
+
+    await screen.findByPlaceholderText('Redacted prompt...');
+
+    expect(screen.getByText('AI Provider Not Configured')).toBeInTheDocument();
+    expect(
+      screen.getByText(/An API key is required to query models\. Configure your AI provider in Settings to inspect logs\./i)
+    ).toBeInTheDocument();
+
+    const runBtn = screen.getByRole('button', { name: /Run AI Analysis/i });
+    expect(runBtn).toBeDisabled();
+  });
 });
 
 

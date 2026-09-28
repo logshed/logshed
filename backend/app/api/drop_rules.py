@@ -42,7 +42,7 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
     def _query(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at "
+            "SELECT id, name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at "
             "FROM drop_rules ORDER BY id ASC"
         )
         rows = cur.fetchall()
@@ -50,9 +50,11 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
         for r in rows:
             rule_id = r["id"]
             live_count = r["dropped_count"] + counts.get(rule_id, 0)
+            rule_name = r["name"] or r["app_pattern"] or r["source_pattern"] or (f"Drop {r['message_pattern']}" if r["message_pattern"] != "*" else "Drop Rule")
             results.append(
                 DropRuleResponse(
                     id=rule_id,
+                    name=rule_name,
                     source_pattern=r["source_pattern"],
                     app_pattern=r["app_pattern"],
                     message_pattern=r["message_pattern"],
@@ -74,12 +76,13 @@ async def export_drop_rules(user: dict = Depends(get_current_user)) -> Response:
     def _query(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
+            "SELECT name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
             "FROM drop_rules ORDER BY id ASC"
         )
         rows = cur.fetchall()
         return [
             DropRuleExportItem(
+                name=r["name"],
                 source_pattern=r["source_pattern"],
                 app_pattern=r["app_pattern"],
                 message_pattern=r["message_pattern"],
@@ -112,7 +115,7 @@ async def export_single_drop_rule(
     def _query(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
+            "SELECT name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
             "FROM drop_rules WHERE id = ?",
             (rule_id,),
         )
@@ -120,6 +123,7 @@ async def export_single_drop_rule(
         if not row:
             return None
         return DropRuleExportItem(
+            name=row["name"],
             source_pattern=row["source_pattern"],
             app_pattern=row["app_pattern"],
             message_pattern=row["message_pattern"],
@@ -252,6 +256,7 @@ async def import_drop_rules(
 
         existing_keys.add(dedup_key)
         to_insert.append({
+            "name": (raw_item.get("name") or "").strip() or None,
             "source_pattern": src,
             "app_pattern": app,
             "message_pattern": msg,
@@ -265,13 +270,20 @@ async def import_drop_rules(
         def _insert_all(conn):
             cur = conn.cursor()
             for rule in to_insert:
+                rule_name = (
+                    rule["name"]
+                    or rule["app_pattern"]
+                    or rule["source_pattern"]
+                    or (f"Drop {rule['message_pattern']}" if rule["message_pattern"] != "*" else "Drop Rule")
+                )
                 cur.execute(
                     """
                     INSERT INTO drop_rules (
-                        source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                        name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
                     """,
                     (
+                        rule_name,
                         rule["source_pattern"],
                         rule["app_pattern"],
                         rule["message_pattern"],
@@ -302,6 +314,11 @@ async def create_drop_rule(
     source = payload.source_pattern.strip() if payload.source_pattern else None
     app = payload.app_pattern.strip() if payload.app_pattern else None
     msg = payload.message_pattern.strip() if payload.message_pattern else "*"
+    name = (
+        payload.name.strip()
+        if payload.name and payload.name.strip()
+        else (app or source or (f"Drop {msg}" if msg != "*" else "Drop Rule"))
+    )
 
     if not source and not app and (not msg or msg == "*") and payload.severity_threshold is None:
         raise HTTPException(
@@ -320,10 +337,11 @@ async def create_drop_rule(
         cur.execute(
             """
             INSERT INTO drop_rules (
-                source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
             """,
             (
+                name,
                 source,
                 app,
                 msg,
@@ -337,6 +355,7 @@ async def create_drop_rule(
         rule_id = cur.lastrowid
         return DropRuleResponse(
             id=rule_id,
+            name=name,
             source_pattern=source,
             app_pattern=app,
             message_pattern=msg,
@@ -362,7 +381,7 @@ async def update_drop_rule(
     def _update(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at "
+            "SELECT id, name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at "
             "FROM drop_rules WHERE id = ?",
             (rule_id,),
         )
@@ -370,6 +389,11 @@ async def update_drop_rule(
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drop rule not found.")
 
+        new_name = (
+            payload.name.strip()
+            if payload.name is not None and payload.name.strip()
+            else (existing["name"] or "Drop Rule")
+        )
         new_source = (
             payload.source_pattern.strip()
             if payload.source_pattern is not None
@@ -421,6 +445,7 @@ async def update_drop_rule(
         cur.execute(
             """
             UPDATE drop_rules SET
+                name = ?,
                 source_pattern = ?,
                 app_pattern = ?,
                 message_pattern = ?,
@@ -430,6 +455,7 @@ async def update_drop_rule(
             WHERE id = ?
             """,
             (
+                new_name,
                 source_normalized,
                 app_normalized,
                 new_message,
@@ -449,6 +475,7 @@ async def update_drop_rule(
 
         return DropRuleResponse(
             id=rule_id,
+            name=new_name,
             source_pattern=source_normalized,
             app_pattern=app_normalized,
             message_pattern=new_message,
@@ -587,15 +614,18 @@ async def install_drop_preset(
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+    preset_name = preset.get("name") or "Drop Rule"
+
     def _insert(conn):
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO drop_rules (
-                source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
-            ) VALUES (?, ?, ?, ?, 1, ?, 0, ?)
+                name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, created_at
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?)
             """,
             (
+                preset_name,
                 preset.get("source_pattern"),
                 preset.get("app_pattern"),
                 msg,
@@ -613,6 +643,7 @@ async def install_drop_preset(
 
     return DropRuleResponse(
         id=rule_id,
+        name=preset_name,
         source_pattern=preset.get("source_pattern"),
         app_pattern=preset.get("app_pattern"),
         message_pattern=msg,

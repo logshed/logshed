@@ -11,6 +11,7 @@ interface CreateDropRuleModalProps {
   initialSource?: string;
   initialApp?: string;
   initialMessage?: string;
+  initialName?: string;
   availableSources?: string[];
   availableApps?: string[];
   ruleToEdit?: DropRule | null;
@@ -23,10 +24,12 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   initialSource = '',
   initialApp = '',
   initialMessage = '',
+  initialName = '',
   availableSources = [],
   availableApps = [],
   ruleToEdit = null,
 }) => {
+  const [ruleName, setRuleName] = useState<string>('');
   const [messagePattern, setMessagePattern] = useState<string>('');
   const [isRegex, setIsRegex] = useState<boolean>(false);
   const [sourcePattern, setSourcePattern] = useState<string>('');
@@ -52,6 +55,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
     if (isOpen) {
       setTestResult(null);
       if (ruleToEdit) {
+        setRuleName(ruleToEdit.name || ruleToEdit.app_pattern || ruleToEdit.source_pattern || '');
         setMessagePattern(ruleToEdit.message_pattern || '');
         setIsRegex(ruleToEdit.is_regex || false);
         setSeverityThreshold(ruleToEdit.severity_threshold ?? null);
@@ -79,6 +83,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setSampleApp(ruleToEdit.app_pattern || '');
         setSampleSeverity(ruleToEdit.severity_threshold != null ? String(ruleToEdit.severity_threshold) : '');
       } else {
+        setRuleName(initialName || (initialApp ? `Drop ${initialApp} Chatter` : (initialSource ? `Drop ${initialSource}` : '')));
         setMessagePattern(initialMessage);
         setIsRegex(false);
         setSeverityThreshold(null);
@@ -107,7 +112,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setSampleSeverity('');
       }
     }
-  }, [isOpen, ruleToEdit, initialSource, initialApp, initialMessage, availableSources, availableApps]);
+  }, [isOpen, ruleToEdit, initialName, initialSource, initialApp, initialMessage, availableSources, availableApps]);
 
   const hasFilterCriteria = Boolean(
     messagePattern.trim() || sourcePattern.trim() || appPattern.trim() || severityThreshold !== null
@@ -153,6 +158,10 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!ruleName.trim()) {
+      setTestResult({ error: 'Rule name is required.' });
+      return;
+    }
     if (!hasFilterCriteria) return;
 
     const effectivePattern = messagePattern.trim() || '*';
@@ -160,6 +169,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       setIsSubmitting(true);
       if (ruleToEdit) {
         const updated = await updateDropRule(ruleToEdit.id, {
+          name: ruleName.trim(),
           message_pattern: effectivePattern,
           is_regex: isRegex,
           source_pattern: sourcePattern.trim() || null,
@@ -170,6 +180,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         onSuccess?.(updated);
       } else {
         const created = await createDropRule({
+          name: ruleName.trim(),
           message_pattern: effectivePattern,
           is_regex: isRegex,
           source_pattern: sourcePattern.trim() || undefined,
@@ -199,6 +210,22 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       <form onSubmit={handleSubmit} className="space-y-4 text-xs font-sans">
         <div>
           <label className="block text-slate-300 font-medium mb-1">
+            Rule Name <span className="text-red-400">*</span>
+          </label>
+          <input
+            type="text"
+            value={ruleName}
+            onChange={(e) => setRuleName(e.target.value)}
+            placeholder="e.g. CRON Chatter or Docker Healthchecks"
+            maxLength={100}
+            required
+            autoFocus
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 focus:outline-hidden focus:border-accent-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-300 font-medium mb-1">
             Message Pattern <span className="text-slate-400 font-normal text-[11px]">(Optional if Host or App is selected)</span>
           </label>
           <input
@@ -207,7 +234,6 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             onChange={(e) => setMessagePattern(e.target.value)}
             placeholder="e.g. DHCPACK, query\s+from\b, probe, or * to match all messages"
             maxLength={500}
-            autoFocus
             className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono focus:outline-hidden focus:border-accent-500"
           />
           <span className="text-[11px] text-slate-400 mt-1 block">

@@ -22,7 +22,7 @@ import {
   importDropRules,
 } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
-import { downloadBlob } from '../../utils/formatters.ts';
+import { downloadBlob, slugify } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 import { getSeverityInfo } from '../common/SeverityBadge.tsx';
 import { CreateDropRuleModal } from './CreateDropRuleModal.tsx';
@@ -128,7 +128,8 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
   const handleExportSingle = async (rule: DropRule) => {
     try {
       const blob = await exportSingleDropRule(rule.id);
-      downloadBlob(blob, `drop-rule-${rule.id}.json`);
+      const filename = rule.name ? `${slugify(rule.name)}.json` : `drop-rule-${rule.id}.json`;
+      downloadBlob(blob, filename);
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to export drop rule.', isError: true });
     }
@@ -305,122 +306,109 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
           </div>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-dark-950/60 text-slate-400 font-medium text-[11px] border-b border-dark-700 select-none">
-              <tr>
-                <th className="py-2.5 pl-5 text-left">Host / IP</th>
-                <th className="py-2.5 px-3 text-left">Application</th>
-                <th className="py-2.5 px-3 text-left">Pattern</th>
-                <th className="py-2.5 px-3 text-left">Mode</th>
-                <th className="py-2.5 px-3 text-left">Severity</th>
-                <th className="py-2.5 px-3 text-right">Dropped</th>
-                <th className="py-2.5 pr-5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-dark-800">
-              {rules.map((rule) => (
-                <tr
-                  key={rule.id}
-                  data-testid={`drop-rule-row-${rule.id}`}
-                  className={`hover:bg-dark-800/40 transition group ${
-                    !rule.is_enabled ? 'opacity-60 bg-dark-950/20' : ''
-                  }`}
-                >
-                  <td className="py-3 pl-5 font-mono text-slate-300">
-                    {rule.source_pattern ? (
-                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800">
-                        {rule.source_pattern}
-                      </span>
-                    ) : (
-                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950/60 border border-dark-800/60 text-slate-400 italic">
-                        Any
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-slate-300">
-                    {rule.app_pattern ? (
-                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950 border border-dark-800">
-                        {rule.app_pattern}
-                      </span>
-                    ) : (
-                      <span className="inline-block px-1.5 py-0.5 rounded bg-dark-950/60 border border-dark-800/60 text-slate-400 italic">
-                        Any
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-slate-200 max-w-[200px] truncate" title={rule.message_pattern}>
-                    {rule.message_pattern}
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-dark-800 text-slate-300 border border-dark-700">
+        <div className="divide-y divide-dark-800">
+          {rules.map((rule) => {
+            const ruleDisplayName = rule.name || rule.app_pattern || rule.source_pattern || 'Drop Rule';
+            return (
+              <div
+                key={rule.id}
+                data-testid={`drop-rule-row-${rule.id}`}
+                className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                  rule.is_enabled ? 'hover:bg-dark-850/40' : 'opacity-60 bg-dark-950/20'
+                }`}
+              >
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-slate-200">{ruleDisplayName}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
                       {rule.is_regex ? 'Regex' : 'Substring'}
                     </span>
-                  </td>
-                  <td className="py-3 px-3">
-                    {rule.severity_threshold != null ? (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-950 text-slate-300 border border-dark-800 whitespace-nowrap">
-                        {getSeverityInfo(rule.severity_threshold).label} and below
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] text-slate-400 bg-dark-950 border border-dark-800/80 whitespace-nowrap">
-                        Any severity
+                    {(rule.dropped_count || 0) > 0 && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                        {(rule.dropped_count || 0).toLocaleString()} dropped
                       </span>
                     )}
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono text-slate-300">
-                    {(rule.dropped_count || 0).toLocaleString()}
-                  </td>
-                  <td className="py-3 pr-5 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatus(rule)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition cursor-pointer ${
-                          rule.is_enabled
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                            : 'bg-dark-800 text-slate-400 border border-dark-700'
-                        }`}
-                        title={rule.is_enabled ? 'Click to disable' : 'Click to enable'}
-                      >
-                        {rule.is_enabled ? 'Active' : 'Disabled'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleExportSingle(rule)}
-                        aria-label={`Export rule ${rule.id}`}
-                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-                        title="Export rule"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRuleToEdit(rule);
-                          setIsModalOpen(true);
-                        }}
-                        aria-label={`Edit rule ${rule.id}`}
-                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-                        title="Edit rule"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRuleToDelete(rule)}
-                        aria-label={`Delete rule ${rule.id}`}
-                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded transition cursor-pointer"
-                        title="Delete rule"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                    <span>
+                      Host:{' '}
+                      {rule.source_pattern ? (
+                        <span className="font-mono text-slate-300">{rule.source_pattern}</span>
+                      ) : (
+                        <span className="text-slate-400 italic">Any</span>
+                      )}
+                    </span>
+                    <span>
+                      App:{' '}
+                      {rule.app_pattern ? (
+                        <span className="font-mono text-slate-300">{rule.app_pattern}</span>
+                      ) : (
+                        <span className="text-slate-400 italic">Any</span>
+                      )}
+                    </span>
+                    <span>
+                      Severity:{' '}
+                      <span className="text-slate-300">
+                        {rule.severity_threshold != null
+                          ? `${getSeverityInfo(rule.severity_threshold).label} and below`
+                          : 'Any'}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleStatus(rule)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition cursor-pointer ${
+                      rule.is_enabled
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                        : 'bg-dark-800 text-slate-400 border border-dark-700'
+                    }`}
+                    title={rule.is_enabled ? 'Click to disable' : 'Click to enable'}
+                  >
+                    {rule.is_enabled ? 'Active' : 'Disabled'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleExportSingle(rule)}
+                    aria-label={`Export rule ${rule.id}`}
+                    className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                    title="Export rule"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRuleToEdit(rule);
+                      setIsModalOpen(true);
+                    }}
+                    aria-label={`Edit rule ${rule.id}`}
+                    className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                    title="Edit rule"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRuleToDelete(rule)}
+                    aria-label={`Delete rule ${rule.id}`}
+                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded transition cursor-pointer"
+                    title="Delete rule"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -443,6 +431,9 @@ export const DropRulesCard: React.FC<DropRulesCardProps> = ({ onRulesChange }) =
                   Incoming matching logs will no longer be discarded and will resume being stored in SQLite and indexed by FTS5.
                 </p>
                 <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+                  <div>
+                    <span className="text-slate-500">Name:</span> {ruleToDelete.name || ruleToDelete.app_pattern || ruleToDelete.source_pattern || 'Drop Rule'}
+                  </div>
                   {ruleToDelete.source_pattern && (
                     <div><span className="text-slate-500">Host:</span> {ruleToDelete.source_pattern}</div>
                   )}

@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  ExternalLink,
 } from 'lucide-react';
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels } from '../../api/ai.ts';
@@ -29,12 +30,14 @@ interface AiAnalysisModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedLogs: LogEntry[];
+  onNavigateToSettings?: () => void;
 }
 
 export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   isOpen,
   onClose,
   selectedLogs,
+  onNavigateToSettings,
 }) => {
   const [preview, setPreview] = useState<AiPreviewResponse | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
@@ -111,6 +114,20 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     preview && normalizePrompt(fullPromptText) !== normalizePrompt(defaultFullPrompt)
   );
   const isModified = promptViewMode === 'full' ? hasEditedFull : (hasEditedPrompt || hasEditedSystem);
+
+  const handleGoToSettings = () => {
+    onClose();
+    if (onNavigateToSettings) {
+      onNavigateToSettings();
+    } else {
+      window.history.pushState(null, '', '/settings');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
+
+  const isAiDisabled = preview?.ai_enabled === false;
+  const isAiMissingKey = preview ? (preview.has_ai_api_key === false && provider !== 'openai_compatible') : false;
+  const isAiUnavailable = Boolean(isAiDisabled || isAiMissingKey);
 
   useEffect(() => {
     if (isOpen && selectedLogs.length > 0) {
@@ -309,6 +326,15 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       return;
     }
 
+    if (isAiUnavailable) {
+      setAnalysisError(
+        isAiDisabled
+          ? 'AI features are disabled in Settings. Please enable an AI provider to inspect logs.'
+          : 'AI provider is not configured. Please configure an API key in Settings to inspect logs.'
+      );
+      return;
+    }
+
     const parsedFallbacks = fallbackModels
       .split(',')
       .map((m) => m.trim())
@@ -474,6 +500,33 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
         {preview && !analysisResult && (
           <div className="space-y-3">
+            {/* AI Disabled / Unconfigured Advisory Banner */}
+            {isAiUnavailable && (
+              <div className="p-3.5 bg-amber-950/40 border border-amber-800/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200 shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-amber-200">
+                      {isAiDisabled ? 'AI Provider Disabled' : 'AI Provider Not Configured'}
+                    </p>
+                    <p className="text-amber-300/80 text-[11px] mt-0.5">
+                      {isAiDisabled
+                        ? 'AI features are disabled in system configuration. Enable an AI provider in Settings to inspect logs.'
+                        : 'An API key is required to query models. Configure your AI provider in Settings to inspect logs.'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGoToSettings}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-900 hover:bg-dark-850 border border-amber-800/60 rounded-lg text-xs font-medium text-amber-200 hover:text-white transition cursor-pointer shrink-0 self-start sm:self-auto"
+                >
+                  <span>Configure in Settings</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-accent-400" />
+                </button>
+              </div>
+            )}
+
             {/* Redacted Preview & Prompt Editor Block */}
             <div>
               <div className="flex flex-wrap items-center justify-between mb-1.5 gap-2">
@@ -974,7 +1027,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             <div className="pt-2 flex justify-end">
               <button
                 onClick={handleRunAnalysis}
-                disabled={isDiagnosing}
+                disabled={isDiagnosing || isAiUnavailable}
                 className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
               >
                 {isDiagnosing ? (

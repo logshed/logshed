@@ -725,6 +725,85 @@ describe('SettingsPanel Component', () => {
       });
     });
   });
+
+  describe('AI Enablement Toggle and Section Visibility', () => {
+    it('hides AI configuration fields and displays advisory notice when ai_enabled is false', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: false,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: false,
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Enable AI Features/i)).toBeInTheDocument();
+      });
+
+      const aiCheckbox = screen.getByRole('checkbox', { name: /Enable AI Features/i });
+      expect(aiCheckbox).not.toBeChecked();
+
+      // Advisory notice is rendered
+      expect(screen.getByText(/AI Features Disabled/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Existing alert rules configured with AI enrichment will continue to trigger/i)
+      ).toBeInTheDocument();
+
+      // AI configuration fields should NOT be rendered
+      expect(screen.queryByText(/^AI Provider$/)).toBeNull();
+      expect(screen.queryByPlaceholderText('Enter system instructions...')).toBeNull();
+    });
+
+    it('toggles AI enablement, reveals fields when checked, and saves ai_enabled setting', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: false,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: false,
+      });
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('checkbox', { name: /Enable AI Features/i })).toBeInTheDocument();
+      });
+
+      const aiCheckbox = screen.getByRole('checkbox', { name: /Enable AI Features/i });
+      expect(aiCheckbox).not.toBeChecked();
+
+      // Check the box
+      fireEvent.click(aiCheckbox);
+      expect(aiCheckbox).toBeChecked();
+
+      // AI configuration fields should now appear
+      await waitFor(() => {
+        expect(screen.getByText('AI Provider')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Enter system instructions...')).toBeInTheDocument();
+      });
+
+      // Save changes
+      const saveBtn = screen.getByRole('button', { name: /Save Changes/i });
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ai_enabled: true,
+          })
+        );
+      });
+    });
+  });
 });
 
 

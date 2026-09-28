@@ -112,7 +112,14 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
 
     resolved = resolve_all_system_settings(stored)
 
+    stored_ai_enabled = stored.get("ai_enabled")
+    if stored_ai_enabled is not None:
+        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        ai_enabled = bool(ai_api_key_val)
+
     return SettingsResponse(
+        ai_enabled=ai_enabled,
         ai_provider=stored.get("ai_provider") or "gemini",
         ai_model=stored.get("ai_model") or DEFAULT_AI_MODEL,
         ai_fallback_models=stored.get("ai_fallback_models") or "",
@@ -165,6 +172,9 @@ async def update_settings(
         cursor = conn.cursor()
 
         updates: list[tuple[str, str, int]] = []
+
+        if req.ai_enabled is not None:
+            updates.append(("ai_enabled", "1" if req.ai_enabled else "0", 0))
 
         if req.ai_provider is not None:
             updates.append(("ai_provider", req.ai_provider, 0))

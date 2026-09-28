@@ -488,6 +488,7 @@ class AlertEvaluator:
         ai_error_note = None
         actual_ai_model = None
         saved_audit_id = None
+        ai_enabled = False
 
         # Perform AI enrichment if enabled on the rule
         if rule.ai_enrichment and triggering_logs:
@@ -500,131 +501,153 @@ class AlertEvaluator:
 
                 ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
 
-                ai_provider = (ai_settings.get("ai_provider") or "gemini").lower()
-                default_model = DEFAULT_AI_MODEL if ai_provider == "gemini" else ("gpt-4o" if ai_provider == "openai" else "llama3.2")
-                ai_model = ai_settings.get("ai_model") or default_model
-                ai_key = ai_settings.get("ai_api_key", "")
-                ai_base = ai_settings.get("ai_base_url")
-                fallback_str = ai_settings.get("ai_fallback_models") or ""
-                fallback_models = [m.strip() for m in fallback_str.split(",") if m.strip()]
-
-                # Format and redact log window
-                raw_lines = [
-                    f"[{l.get('timestamp')}] [{l.get('source_alias') or l.get('source_ip') or 'unknown'}] [{l.get('app_name') or 'unknown'}] {l.get('message', '')}"
-                    for l in triggering_logs[-50:]  # Cap at recent 50 logs
-                ]
-                redacted_lines = redact(raw_lines)
-                redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
-
-                if rule.rule_type == "rate":
-                    threshold_line = f"- Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s (Measured: {measured_rate} logs/s)"
-                    culprit_section = (
-                        f"### Primary Culprits\n"
-                        f"- Top Service / App: {culprit_app or 'Unknown'}\n"
-                        f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
-                        f"- Top Pattern: {culprit_msg or 'N/A'}\n\n"
-                    )
+                ai_enabled_raw = ai_settings.get("ai_enabled")
+                if ai_enabled_raw is not None:
+                    ai_enabled = ai_enabled_raw.strip().lower() not in ("0", "false", "no", "off")
                 else:
-                    threshold_line = f"- Threshold: {rule.threshold_count} matches in {rule.window_seconds}s"
-                    culprit_section = ""
+                    ai_enabled = True
 
-                prompt = (
-                    f"### Security / Operations Incident Alert\n"
-                    f"- Alert Rule: {rule.name}\n"
-                    f"- Rule Type: {rule.rule_type}\n"
-                    f"- Host / Source: {extracted_host or 'Unknown'}\n"
-                    f"- App / Container: {extracted_app or 'Unknown'}\n"
-                    f"{threshold_line}\n"
-                    f"- Offending IP: {extracted_ip or 'None detected'}\n\n"
-                    f"{culprit_section}"
-                    f"### Redacted Log Stream (Chronological)\n"
-                    f"```\n{redacted_text}\n```\n\n"
-                    f"Review this incident and provide structured Summary, Root Cause, and Actionable Remediation."
-                )
-
-                logger.info(
-                    f"Starting AI incident analysis for rule '{rule.name}' with primary model '{ai_model or 'default'}' "
-                    f"and fallback models {fallback_models}"
-                )
-
-                ai_res = await execute_ai_analysis(
-                    provider=ai_provider,
-                    model=ai_model,
-                    api_key=ai_key,
-                    base_url=ai_base,
-                    source_alias=triggering_logs[0].get("source_alias") or "alert",
-                    app_name=triggering_logs[0].get("app_name") or "alert",
-                    redacted_logs=redacted_text,
-                    log_count=len(triggering_logs),
-                    prompt_override=prompt,
-                    fallback_models=fallback_models,
-                )
-                if len(ai_res) == 11:
-                    summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res
-                else:
-                    summary, root_cause, remediation = ai_res[:3]
-                    raw_response = ""
-                    prompt_sent = prompt
-                    tokens_in = 0
-                    tokens_out = 0
-                    tokens_thoughts = 0
-                    tokens_used = 0
-                    actual_model = ai_model
-                    fallback_attempts = []
-
-                actual_ai_model = actual_model
-
-                if fallback_attempts:
+                if not ai_enabled:
                     logger.info(
-                        f"AI enrichment for alert '{rule.name}' succeeded via fallback model '{actual_model}' "
-                        f"after failovers: {fallback_attempts}"
+                        f"AI enrichment skipped for alert rule '{rule.name}' because AI features are disabled."
+                    )
+                    ai_success = False
+                    if rule.rule_type == "rate":
+                        incident_summary = (
+                            f"Log storm detected: {len(triggering_logs)} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
+                            f"### Primary Culprits\n"
+                            f"- Top Service / App: {culprit_app or 'Unknown'}\n"
+                            f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
+                            f"- Top Pattern: {culprit_msg or 'N/A'}"
+                        )
+                    else:
+                        incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
+                else:
+                    ai_provider = (ai_settings.get("ai_provider") or "gemini").lower()
+                    default_model = DEFAULT_AI_MODEL if ai_provider == "gemini" else ("gpt-4o" if ai_provider == "openai" else "llama3.2")
+                    ai_model = ai_settings.get("ai_model") or default_model
+                    ai_key = ai_settings.get("ai_api_key", "")
+                    ai_base = ai_settings.get("ai_base_url")
+                    fallback_str = ai_settings.get("ai_fallback_models") or ""
+                    fallback_models = [m.strip() for m in fallback_str.split(",") if m.strip()]
+
+                    # Format and redact log window
+                    raw_lines = [
+                        f"[{l.get('timestamp')}] [{l.get('source_alias') or l.get('source_ip') or 'unknown'}] [{l.get('app_name') or 'unknown'}] {l.get('message', '')}"
+                        for l in triggering_logs[-50:]  # Cap at recent 50 logs
+                    ]
+                    redacted_lines = redact(raw_lines)
+                    redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
+
+                    if rule.rule_type == "rate":
+                        threshold_line = f"- Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s (Measured: {measured_rate} logs/s)"
+                        culprit_section = (
+                            f"### Primary Culprits\n"
+                            f"- Top Service / App: {culprit_app or 'Unknown'}\n"
+                            f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
+                            f"- Top Pattern: {culprit_msg or 'N/A'}\n\n"
+                        )
+                    else:
+                        threshold_line = f"- Threshold: {rule.threshold_count} matches in {rule.window_seconds}s"
+                        culprit_section = ""
+
+                    prompt = (
+                        f"### Security / Operations Incident Alert\n"
+                        f"- Alert Rule: {rule.name}\n"
+                        f"- Rule Type: {rule.rule_type}\n"
+                        f"- Host / Source: {extracted_host or 'Unknown'}\n"
+                        f"- App / Container: {extracted_app or 'Unknown'}\n"
+                        f"{threshold_line}\n"
+                        f"- Offending IP: {extracted_ip or 'None detected'}\n\n"
+                        f"{culprit_section}"
+                        f"### Redacted Log Stream (Chronological)\n"
+                        f"```\n{redacted_text}\n```\n\n"
+                        f"Review this incident and provide structured Summary, Root Cause, and Actionable Remediation."
                     )
 
-                diag_parts = []
-                if summary and summary.strip():
-                    diag_parts.append(summary.strip())
-                if root_cause and root_cause.strip():
-                    diag_parts.append(f"### Root Cause\n{root_cause.strip()}")
-                if remediation and remediation.strip():
-                    diag_parts.append(f"### Remediation\n{remediation.strip()}")
-                incident_summary = "\n\n".join(diag_parts) if diag_parts else (summary or "Incident review complete.")
-                ai_success = True
+                    logger.info(
+                        f"Starting AI incident analysis for rule '{rule.name}' with primary model '{ai_model or 'default'}' "
+                        f"and fallback models {fallback_models}"
+                    )
 
-                from app.services.ai_service import save_diagnosis_audit
-
-                audit_source_alias = (
-                    extracted_host
-                    or (triggering_logs[0].get("source_alias") if triggering_logs else None)
-                    or (triggering_logs[0].get("source_ip") if triggering_logs else None)
-                    or "alert"
-                )
-                audit_app_name = (
-                    extracted_app
-                    or (triggering_logs[0].get("app_name") if triggering_logs else None)
-                    or "alert"
-                )
-
-                try:
-                    saved_audit_id = await save_diagnosis_audit(
-                        source_alias=audit_source_alias,
-                        app_name=audit_app_name,
+                    ai_res = await execute_ai_analysis(
+                        provider=ai_provider,
+                        model=ai_model,
+                        api_key=ai_key,
+                        base_url=ai_base,
+                        source_alias=triggering_logs[0].get("source_alias") or "alert",
+                        app_name=triggering_logs[0].get("app_name") or "alert",
+                        redacted_logs=redacted_text,
                         log_count=len(triggering_logs),
-                        user_context=f"Alert Rule: {rule.name}",
-                        actual_model=actual_ai_model,
-                        prompt_sent=prompt_sent or prompt,
-                        raw_response=incident_summary or raw_response,
-                        tokens_in=tokens_in or 0,
-                        tokens_out=tokens_out or 0,
-                        tokens_thoughts=tokens_thoughts or 0,
-                        tokens_used=tokens_used or 0,
-                        system_prompt=ai_settings.get("ai_system_prompt") or None,
-                        trigger_source="alert",
-                        custom_db_path=self.db_path,
+                        prompt_override=prompt,
+                        fallback_models=fallback_models,
                     )
-                except Exception as audit_err:
-                    logger.warning(
-                        f"Failed to record AI audit log for alert rule '{rule.name}': {audit_err}"
+                    if len(ai_res) == 11:
+                        summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res
+                    else:
+                        summary, root_cause, remediation = ai_res[:3]
+                        raw_response = ""
+                        prompt_sent = prompt
+                        tokens_in = 0
+                        tokens_out = 0
+                        tokens_thoughts = 0
+                        tokens_used = 0
+                        actual_model = ai_model
+                        fallback_attempts = []
+
+                    actual_ai_model = actual_model
+
+                    if fallback_attempts:
+                        logger.info(
+                            f"AI enrichment for alert '{rule.name}' succeeded via fallback model '{actual_model}' "
+                            f"after failovers: {fallback_attempts}"
+                        )
+
+                    diag_parts = []
+                    if summary and summary.strip():
+                        diag_parts.append(summary.strip())
+                    if root_cause and root_cause.strip():
+                        diag_parts.append(f"### Root Cause\n{root_cause.strip()}")
+                    if remediation and remediation.strip():
+                        diag_parts.append(f"### Remediation\n{remediation.strip()}")
+                    incident_summary = "\n\n".join(diag_parts) if diag_parts else (summary or "Incident review complete.")
+                    ai_success = True
+
+                    from app.services.ai_service import save_diagnosis_audit
+
+                    audit_source_alias = (
+                        extracted_host
+                        or (triggering_logs[0].get("source_alias") if triggering_logs else None)
+                        or (triggering_logs[0].get("source_ip") if triggering_logs else None)
+                        or "alert"
                     )
+                    audit_app_name = (
+                        extracted_app
+                        or (triggering_logs[0].get("app_name") if triggering_logs else None)
+                        or "alert"
+                    )
+
+                    try:
+                        saved_audit_id = await save_diagnosis_audit(
+                            source_alias=audit_source_alias,
+                            app_name=audit_app_name,
+                            log_count=len(triggering_logs),
+                            user_context=f"Alert Rule: {rule.name}",
+                            actual_model=actual_ai_model,
+                            prompt_sent=prompt_sent or prompt,
+                            raw_response=incident_summary or raw_response,
+                            tokens_in=tokens_in or 0,
+                            tokens_out=tokens_out or 0,
+                            tokens_thoughts=tokens_thoughts or 0,
+                            tokens_used=tokens_used or 0,
+                            system_prompt=ai_settings.get("ai_system_prompt") or None,
+                            trigger_source="alert",
+                            custom_db_path=self.db_path,
+                        )
+                    except Exception as audit_err:
+                        logger.warning(
+                            f"Failed to record AI audit log for alert rule '{rule.name}': {audit_err}"
+                        )
 
             except Exception as ai_err:
                 logger.warning(
@@ -663,7 +686,7 @@ class AlertEvaluator:
                     len(triggering_logs),
                     sample_log[:1000],
                     incident_summary,
-                    int(rule.ai_enrichment),
+                    int(rule.ai_enrichment and ai_enabled),
                     actual_ai_model,
                     saved_audit_id,
                     now_iso,
@@ -711,7 +734,7 @@ class AlertEvaluator:
                 f"Log: {clean_log}",
             ]
 
-        if rule.ai_enrichment:
+        if rule.ai_enrichment and ai_enabled:
             if ai_success and summary:
                 redacted_summary = str(redact(summary))
                 clean_summary = strip_markdown(redacted_summary)

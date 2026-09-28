@@ -157,4 +157,69 @@ describe('AlertRuleModal Component', () => {
     expect(screen.getByText('Rule name is required.')).toBeInTheDocument();
     expect(onSuccess).not.toHaveBeenCalled();
   });
+
+  it('disables AI enrichment checkbox and displays settings guidance when AI is not configured', async () => {
+    const onNavigateToSettings = vi.fn();
+
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={[]}
+        isAiConfigured={false}
+        onNavigateToSettings={onNavigateToSettings}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const enrichmentCheckbox = screen.getByRole('checkbox', {
+      name: /AI Root-Cause Incident Enrichment/i,
+    });
+    expect(enrichmentCheckbox).toBeDisabled();
+    expect(enrichmentCheckbox).not.toBeChecked();
+
+    expect(
+      screen.getByText(/AI enrichment requires an active AI provider/i)
+    ).toBeInTheDocument();
+
+    const configureBtn = screen.getByRole('button', { name: /Configure in Settings/i });
+    fireEvent.click(configureBtn);
+
+    expect(onClose).toHaveBeenCalled();
+    expect(onNavigateToSettings).toHaveBeenCalled();
+  });
+
+  it('displays warning when editing rule with enrichment enabled while AI is unconfigured', async () => {
+    const onNavigateToSettings = vi.fn();
+    const enrichedRule: AlertRule = {
+      ...mockRule,
+      ai_enrichment: true,
+    };
+
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={enrichedRule}
+        channels={mockChannels}
+        availableApps={[]}
+        isAiConfigured={false}
+        onNavigateToSettings={onNavigateToSettings}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const enrichmentCheckbox = screen.getByRole('checkbox', {
+      name: /AI Root-Cause Incident Enrichment/i,
+    });
+    // Checkbox is not disabled so user can uncheck it if desired
+    expect(enrichmentCheckbox).not.toBeDisabled();
+    expect(enrichmentCheckbox).toBeChecked();
+
+    expect(
+      screen.getByText(/AI provider is disabled or not configured/i)
+    ).toBeInTheDocument();
+  });
 });

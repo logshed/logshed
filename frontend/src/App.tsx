@@ -210,7 +210,11 @@ export const App: React.FC = () => {
 
         {activeTab === 'storage' && <StoragePanel />}
 
-        {activeTab === 'alerts' && <AlertsPanel />}
+        {activeTab === 'alerts' && (
+          <AlertsPanel
+            onNavigateToSettings={() => handleTabChange('settings')}
+          />
+        )}
 
         {activeTab === 'settings' && (
           <SettingsPanel
@@ -236,6 +240,7 @@ export const App: React.FC = () => {
           }
         }}
         selectedLogs={aiSelectedLogs}
+        onNavigateToSettings={() => handleTabChange('settings')}
       />
 
       {/* Unsaved Changes Confirmation Modal */}

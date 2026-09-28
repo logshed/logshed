@@ -523,6 +523,42 @@ class TestDropRulesApi:
         assert clear_res.json()["severity_threshold"] is None
         assert clear_res.json()["app_pattern"] == "sshd"
 
+    @pytest.mark.asyncio
+    async def test_drop_rule_name_crud_and_fallback(self, client: AsyncClient, auth_cookie: dict):
+        # 1. Create rule with explicit name
+        res = await client.post(
+            "/api/drop-rules",
+            cookies=auth_cookie,
+            json={
+                "name": "Drop Noisy Nginx Health",
+                "app_pattern": "nginx",
+                "message_pattern": "GET /health 200",
+            },
+        )
+        assert res.status_code == 201
+        data = res.json()
+        assert data["name"] == "Drop Noisy Nginx Health"
+        rule_id = data["id"]
+
+        # 2. Update name
+        up_res = await client.put(
+            f"/api/drop-rules/{rule_id}",
+            cookies=auth_cookie,
+            json={"name": "Renamed Filter Rule"},
+        )
+        assert up_res.status_code == 200
+        assert up_res.json()["name"] == "Renamed Filter Rule"
+
+        # 3. Verify in list
+        list_res = await client.get("/api/drop-rules", cookies=auth_cookie)
+        assert list_res.status_code == 200
+        matched = [r for r in list_res.json() if r["id"] == rule_id]
+        assert len(matched) == 1
+        assert matched[0]["name"] == "Renamed Filter Rule"
+
+        # 4. Clean up
+        await client.delete(f"/api/drop-rules/{rule_id}", cookies=auth_cookie)
+
 
 # ===================================================================
 # 3. Saved Views API Endpoints Tests

@@ -91,6 +91,7 @@ class LogFacetsResponse(BaseModel):
 
 class SettingsResponse(BaseModel):
     """Application runtime configuration response with masked secrets."""
+    ai_enabled: bool = False
     ai_provider: str = "gemini"
     ai_model: str = DEFAULT_AI_MODEL
     ai_fallback_models: str = ""
@@ -132,6 +133,7 @@ class SettingsResponse(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     """Payload for updating runtime settings."""
+    ai_enabled: Optional[bool] = None
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
     ai_fallback_models: Optional[str] = None
@@ -424,6 +426,8 @@ class AiPreviewResponse(BaseModel):
     source_alias: str
     app_name: str
     system_prompt: str = ""
+    ai_enabled: bool = True
+    has_ai_api_key: bool = True
 
 
 class AiDiagnosisRequest(BaseModel):
@@ -512,6 +516,7 @@ class AiModelsResponse(BaseModel):
 
 class DropRuleCreate(BaseModel):
     """Payload for creating an ingestion drop rule."""
+    name: Optional[str] = Field(None, max_length=100, description="Friendly drop rule name")
     source_pattern: Optional[str] = Field(None, max_length=255, description="Host IP or alias pattern (supports wildcards)")
     app_pattern: Optional[str] = Field(None, max_length=255, description="Container or application pattern (supports wildcards)")
     message_pattern: Optional[str] = Field("*", max_length=1000, description="Substring, wildcard, or regular expression match pattern")
@@ -522,6 +527,7 @@ class DropRuleCreate(BaseModel):
 
 class DropRuleUpdate(BaseModel):
     """Payload for updating an ingestion drop rule."""
+    name: Optional[str] = Field(None, max_length=100, description="Friendly drop rule name")
     source_pattern: Optional[str] = Field(None, max_length=255)
     app_pattern: Optional[str] = Field(None, max_length=255)
     message_pattern: Optional[str] = Field(None, max_length=1000)
@@ -534,6 +540,7 @@ class DropRuleUpdate(BaseModel):
 class DropRuleResponse(BaseModel):
     """Drop rule response representation."""
     id: int
+    name: Optional[str] = None
     source_pattern: Optional[str] = None
     app_pattern: Optional[str] = None
     message_pattern: str
@@ -579,6 +586,7 @@ class DropPresetResponse(BaseModel):
 class DropRuleExportItem(BaseModel):
     """Exportable drop rule definition."""
     model_config = ConfigDict(extra="ignore")
+    name: Optional[str] = None
     source_pattern: Optional[str] = None
     app_pattern: Optional[str] = None
     message_pattern: str = "*"

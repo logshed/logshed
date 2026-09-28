@@ -95,6 +95,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   // Form states
+  const [aiEnabled, setAiEnabled] = useState<boolean>(false);
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'openai_compatible'>('gemini');
   const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODEL);
   const [aiFallbackModels, setAiFallbackModels] = useState<string>('');
@@ -130,9 +131,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, []);
 
   // Track dirty state against loaded baseline settings
+  const baselineAiEnabled = settings
+    ? (settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key))
+    : false;
+
   const isDirty = Boolean(
     settings &&
-    (aiProvider !== settings.ai_provider ||
+    (aiEnabled !== baselineAiEnabled ||
+      aiProvider !== settings.ai_provider ||
       aiModel !== (settings.ai_model || DEFAULT_AI_MODEL) ||
       aiFallbackModels !== (settings.ai_fallback_models || '') ||
       aiApiKey !== (settings.ai_api_key || '') ||
@@ -224,6 +230,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setSettings(settRes);
 
       // Populate form
+      const initialAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
+      setAiEnabled(initialAiEnabled);
       setAiProvider(settRes.ai_provider);
       setAiModel(settRes.ai_model || DEFAULT_AI_MODEL);
       setAiFallbackModels(settRes.ai_fallback_models || '');
@@ -233,8 +241,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setInternalLogLevel(settRes.internal_log_level || 'WARNING');
       setCheckForUpdates(settRes.check_for_updates ?? true);
 
-      // Load models for provider
-      loadModels(settRes.ai_provider);
+      // Load models for provider if enabled
+      if (initialAiEnabled) {
+        loadModels(settRes.ai_provider);
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load system settings.');
     } finally {
@@ -305,6 +315,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleResetChanges = () => {
     if (!settings) return;
+    const resetAiEnabled = settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key);
+    setAiEnabled(resetAiEnabled);
     setAiProvider(settings.ai_provider);
     setAiModel(settings.ai_model || DEFAULT_AI_MODEL);
     setAiFallbackModels(settings.ai_fallback_models || '');
@@ -318,7 +330,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setCustomFallbackInput('');
     setShowCustomFallbackInput(false);
 
-    if (aiProvider !== settings.ai_provider) {
+    if (resetAiEnabled && aiProvider !== settings.ai_provider) {
       loadModels(settings.ai_provider);
     }
   };
@@ -333,6 +345,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setSaveInlineSuccess(false);
 
       await updateSettings({
+        ai_enabled: aiEnabled,
         ai_provider: aiProvider,
         ai_model: aiModel,
         ai_fallback_models: aiFallbackModels,
@@ -346,6 +359,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       // Reload updated settings as baseline
       const settRes = await fetchSettings();
       setSettings(settRes);
+      const savedAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
+      setAiEnabled(savedAiEnabled);
       setAiProvider(settRes.ai_provider);
       setAiModel(settRes.ai_model || DEFAULT_AI_MODEL);
       setAiFallbackModels(settRes.ai_fallback_models || '');
@@ -355,8 +370,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setInternalLogLevel(settRes.internal_log_level || 'WARNING');
       setCheckForUpdates(settRes.check_for_updates ?? true);
 
-      // Refresh model list with newly saved configuration
-      loadModels(settRes.ai_provider);
+      // Refresh model list with newly saved configuration if AI is enabled
+      if (savedAiEnabled) {
+        loadModels(settRes.ai_provider);
+      }
 
       // Refresh version info to reflect updated check_for_updates setting
       loadVersionData(true);
@@ -448,7 +465,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <span>System Configuration</span>
         </h2>
         <p className="text-xs text-slate-400 mt-0.5">
-          Configure application logging levels, on-demand AI root-cause analysis providers, and account security.
+          Configure application logging levels, on-demand AI root-cause diagnosis providers, and account security.
         </p>
       </div>
 
@@ -568,7 +585,43 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* AI Enablement Checkbox */}
+          <div className="p-3 bg-dark-950/80 border border-dark-800 rounded-lg flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="ai-enabled-checkbox"
+              checked={aiEnabled}
+              onChange={(e) => {
+                const nextVal = e.target.checked;
+                setAiEnabled(nextVal);
+                if (nextVal && availableModels.length === 0) {
+                  loadModels(aiProvider);
+                }
+              }}
+              className="mt-0.5 w-4 h-4 rounded border-dark-700 bg-dark-900 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
+            />
+            <div className="flex-1">
+              <label htmlFor="ai-enabled-checkbox" className="text-xs font-semibold text-slate-200 cursor-pointer select-none">
+                Enable AI Features
+              </label>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Enable log inspection, incident summaries, and alert enrichment via AI models.
+              </p>
+            </div>
+          </div>
+
+          {!aiEnabled ? (
+            <div className="p-3.5 bg-dark-900 border border-dark-700 rounded-xl flex items-start gap-2.5 text-xs shadow-xs">
+              <Info className="w-4 h-4 text-accent-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-slate-200">AI Features Disabled</p>
+                <p className="text-slate-400 mt-0.5">
+                  AI settings are hidden while disabled. Existing alert rules configured with AI enrichment will continue to trigger and dispatch notifications, but will not be enriched.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                 AI Provider
@@ -726,7 +779,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               )}
 
               <p className="text-[10px] text-slate-500 mt-1">
-                Queried first for all log analysis requests.
+                Queried first for all log inspection requests.
               </p>
             </div>
 
@@ -907,6 +960,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               />
             </div>
           </div>
+          )}
         </section>
 
         {/* Notification Channels & Webhooks Section */}

@@ -80,9 +80,6 @@ export const StoragePanel: React.FC = () => {
 
       {/* Storage & Retention Section */}
       <section className="space-y-4">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-          Storage & Retention
-        </h3>
         <StorageCard metrics={storageMetrics} />
         {retentionDays !== undefined && (
           <RetentionSlider
