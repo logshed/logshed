@@ -1,0 +1,28 @@
+name: Sync Legacy Images to Org
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Crane
+        uses: imjasonh/setup-crane@v0.3
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Copy 1.1.0 and latest tags
+        run: |
+          crane copy ghcr.io/benhornertech/logshed:1.1.0 ghcr.io/logshed/logshed:1.1.0
+          crane copy ghcr.io/benhornertech/logshed:1.1.0 ghcr.io/logshed/logshed:1.1
+          crane copy ghcr.io/benhornertech/logshed:1.1.0 ghcr.io/logshed/logshed:1
+          crane copy ghcr.io/benhornertech/logshed:1.1.0 ghcr.io/logshed/logshed:latest
+
+      - name: Copy 1.0.0 tags
+        run: |
+          crane copy ghcr.io/benhornertech/logshed:1.0.0 ghcr.io/logshed/logshed:1.0.0
+          crane copy ghcr.io/benhornertech/logshed:1.0.0 ghcr.io/logshed/logshed:1.0
