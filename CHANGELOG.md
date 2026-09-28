@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Processing Newest Logs First During Alias Updates**: Updated `_batch_update_log_aliases` to process rows ordered by `id DESC` so the most recent logs visible in the live stream reflect alias modifications first.
 
 ### Fixed
+- **Advanced Settings Targeted Updates & Worker No-Op Guards**: Updated the Advanced Settings form to send only modified settings rather than dumping all fields on every save, preventing unrelated settings (such as syslog connection limits) from being written and logged when toggling container tailing. Added no-op safeguards to `SyslogServer.update_limits` and `DockerTailer.update_settings` to prevent unnecessary connection timer resets, container re-scanning, and redundant log output when limits or settings remain unchanged.
 - **Maintenance Banner Expiration Auto-Clear**: Automatically cleared expired maintenance window banners on the Maintenance sub-tab in real-time without requiring a page refresh.
 - **Storage Trend Graph Y-Axis Truncation**: Fixed Y-axis leading digit clipping in `StorageTrendChart` when log volumes exceed 1,000MB by resetting negative chart margins, allocating dedicated axis width, and formatting large values with localized thousands separators.
 - **Sub-Tab Layout Shift on Height Changes**: Eliminated horizontal content jumping when switching between short and tall sub-tabs by configuring `scrollbar-gutter: stable` on the main scroll container.

@@ -307,9 +307,9 @@ async def update_settings(
             from app.main import get_syslog_server
             syslog_server = get_syslog_server()
             if syslog_server is not None:
-                max_tcp = int(get_cached_setting("syslog_max_tcp_connections", 250))
-                inact_to = float(get_cached_setting("syslog_tcp_inactivity_timeout", 0.0))
-                syslog_server.update_limits(max_tcp, inact_to)
+                max_tcp = int(get_cached_setting("syslog_max_tcp_connections", 250)) if req.syslog_max_tcp_connections is not None else None
+                inact_to = float(get_cached_setting("syslog_tcp_inactivity_timeout", 0.0)) if req.syslog_tcp_inactivity_timeout is not None else None
+                syslog_server.update_limits(max_connections=max_tcp, inactivity_timeout=inact_to)
         except Exception:
             pass
 
@@ -322,9 +322,9 @@ async def update_settings(
             from app.main import get_docker_tailer
             docker_tailer = get_docker_tailer()
             if docker_tailer is not None:
-                en_docker = bool(get_cached_setting("enable_docker", True))
-                excl = str(get_cached_setting("docker_exclude_containers", ""))
-                alias = str(get_cached_setting("docker_source_alias", "docker"))
+                en_docker = bool(get_cached_setting("enable_docker", True)) if req.enable_docker is not None else None
+                excl = str(get_cached_setting("docker_exclude_containers", "")) if req.docker_exclude_containers is not None else None
+                alias = str(get_cached_setting("docker_source_alias", "docker")) if req.docker_source_alias is not None else None
                 await docker_tailer.update_settings(
                     enable_docker=en_docker,
                     exclude_containers=excl,

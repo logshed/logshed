@@ -331,6 +331,31 @@ class TestSettingsApi:
         assert get_cached_setting("cookie_secure") is True
 
     @pytest.mark.asyncio
+    async def test_post_settings_partial_update_only_alters_specified_keys(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """POST /api/settings with partial payload only updates specified keys."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        # Update only enable_docker
+        res = await client.post("/api/settings", json={"enable_docker": False})
+        assert res.status_code == 200
+        assert res.json()["status"] == "ok"
+
+        # Verify only enable_docker was written to SQLite system_settings
+        with get_connection(db_file) as conn:
+            rows = dict(conn.execute("SELECT key, value FROM system_settings").fetchall())
+            assert "enable_docker" in rows
+            assert rows["enable_docker"] == "0"
+            assert "syslog_max_tcp_connections" not in rows
+            assert "syslog_tcp_inactivity_timeout" not in rows
+
+        # Verify cached setting updated
+        assert get_cached_setting("enable_docker") is False
+        assert get_cached_setting("syslog_max_tcp_connections") == 250
+
+    @pytest.mark.asyncio
     async def test_validation_errors(self, client: AsyncClient, auth_cookie: dict):
         """Invalid inputs return 422 Unprocessable Entity."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
@@ -544,3 +569,42 @@ class TestSubsystemIntegrations:
         assert tailer.enable_docker is False
         assert tailer.source_alias == "worker_node"
         assert tailer.exclude_containers == "nginx,redis"
+
+    def test_syslog_server_noop_update_skips_reset(self, tmp_path: Path):
+        """SyslogServer skips protocol resets and logging if limits are unchanged."""
+        server = SyslogServer(
+            assembler=KeyedMultilineAssembler(),
+            db_path=tmp_path / "logs.db",
+            port=1514,
+        )
+        # Calling with existing limits should be a no-op
+        server.update_limits(max_connections=250, inactivity_timeout=0.0)
+        assert server.max_tcp_connections == 250
+        assert server.tcp_inactivity_timeout == 0.0
+
+        # Partial update with only max_connections
+        server.update_limits(max_connections=400)
+        assert server.max_tcp_connections == 400
+        assert server.tcp_inactivity_timeout == 0.0
+
+        # Partial update with only inactivity_timeout
+        server.update_limits(inactivity_timeout=20.0)
+        assert server.max_tcp_connections == 400
+        assert server.tcp_inactivity_timeout == 20.0
+
+    @pytest.mark.asyncio
+    async def test_docker_tailer_noop_update(self, tmp_path: Path):
+        """DockerTailer skips re-attaching and log output if settings are unchanged."""
+        tailer = DockerTailer(
+            assembler=KeyedMultilineAssembler(),
+            db_path=tmp_path / "logs.db",
+        )
+        # Calling with existing values is a no-op
+        await tailer.update_settings(
+            enable_docker=True,
+            exclude_containers="",
+            source_alias="docker",
+        )
+        assert tailer.enable_docker is True
+        assert tailer.exclude_containers == ""
+        assert tailer.source_alias == "docker"

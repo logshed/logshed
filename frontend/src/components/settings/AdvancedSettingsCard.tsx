@@ -76,12 +76,12 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     settings && (
       aiTimeout !== (settings.ai_timeout ?? 45.0) ||
       aiThinkingBudget !== (settings.ai_thinking_budget ?? 1024) ||
-      appUrl !== (settings.app_url ?? '') ||
+      appUrl.trim() !== (settings.app_url ?? '') ||
       allowPrivate !== (settings.allow_private_notification_targets ?? true) ||
       enableDocker !== (settings.enable_docker ?? true) ||
-      dockerExcludeContainers !== (settings.docker_exclude_containers ?? '') ||
-      dockerSourceAlias !== (settings.docker_source_alias ?? 'docker') ||
-      trustedProxies !== (settings.trusted_proxies ?? '') ||
+      dockerExcludeContainers.trim() !== (settings.docker_exclude_containers ?? '') ||
+      (dockerSourceAlias.trim() || 'docker') !== (settings.docker_source_alias ?? 'docker') ||
+      trustedProxies.trim() !== (settings.trusted_proxies ?? '') ||
       trustDockerProxies !== (settings.trust_docker_proxies ?? false) ||
       cookieSecure !== (settings.cookie_secure ?? false) ||
       syslogMaxTcpConnections !== (settings.syslog_max_tcp_connections ?? 250) ||
@@ -113,6 +113,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!settings) return;
     setSaveInlineError(null);
     setSaveInlineSuccess(false);
 
@@ -134,22 +135,55 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       return;
     }
 
+    const updates: Partial<SystemSettings> = {};
+    if (aiTimeout !== (settings.ai_timeout ?? 45.0)) {
+      updates.ai_timeout = aiTimeout;
+    }
+    if (aiThinkingBudget !== (settings.ai_thinking_budget ?? 1024)) {
+      updates.ai_thinking_budget = aiThinkingBudget;
+    }
+    const trimmedAppUrl = appUrl.trim();
+    if (trimmedAppUrl !== (settings.app_url ?? '')) {
+      updates.app_url = trimmedAppUrl;
+    }
+    if (allowPrivate !== (settings.allow_private_notification_targets ?? true)) {
+      updates.allow_private_notification_targets = allowPrivate;
+    }
+    if (enableDocker !== (settings.enable_docker ?? true)) {
+      updates.enable_docker = enableDocker;
+    }
+    const trimmedExcludes = dockerExcludeContainers.trim();
+    if (trimmedExcludes !== (settings.docker_exclude_containers ?? '')) {
+      updates.docker_exclude_containers = trimmedExcludes;
+    }
+    const resolvedAlias = dockerSourceAlias.trim() || 'docker';
+    if (resolvedAlias !== (settings.docker_source_alias ?? 'docker')) {
+      updates.docker_source_alias = resolvedAlias;
+    }
+    const trimmedProxies = trustedProxies.trim();
+    if (trimmedProxies !== (settings.trusted_proxies ?? '')) {
+      updates.trusted_proxies = trimmedProxies;
+    }
+    if (trustDockerProxies !== (settings.trust_docker_proxies ?? false)) {
+      updates.trust_docker_proxies = trustDockerProxies;
+    }
+    if (cookieSecure !== (settings.cookie_secure ?? false)) {
+      updates.cookie_secure = cookieSecure;
+    }
+    if (syslogMaxTcpConnections !== (settings.syslog_max_tcp_connections ?? 250)) {
+      updates.syslog_max_tcp_connections = syslogMaxTcpConnections;
+    }
+    if (syslogTcpInactivityTimeout !== (settings.syslog_tcp_inactivity_timeout ?? 0.0)) {
+      updates.syslog_tcp_inactivity_timeout = syslogTcpInactivityTimeout;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return;
+    }
+
     try {
       setIsSaving(true);
-      await updateSettings({
-        ai_timeout: aiTimeout,
-        ai_thinking_budget: aiThinkingBudget,
-        app_url: appUrl.trim(),
-        allow_private_notification_targets: allowPrivate,
-        enable_docker: enableDocker,
-        docker_exclude_containers: dockerExcludeContainers.trim(),
-        docker_source_alias: dockerSourceAlias.trim() || 'docker',
-        trusted_proxies: trustedProxies.trim(),
-        trust_docker_proxies: trustDockerProxies,
-        cookie_secure: cookieSecure,
-        syslog_max_tcp_connections: syslogMaxTcpConnections,
-        syslog_tcp_inactivity_timeout: syslogTcpInactivityTimeout,
-      });
+      await updateSettings(updates);
 
       setSaveInlineSuccess(true);
       if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);

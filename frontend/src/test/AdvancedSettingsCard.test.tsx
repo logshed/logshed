@@ -126,4 +126,31 @@ describe('AdvancedSettingsCard Component', () => {
     expect(screen.getByDisplayValue('45')).toBeInTheDocument();
     expect(screen.queryByLabelText(/Unsaved changes bar/i)).not.toBeInTheDocument();
   });
+
+  it('only sends modified fields when toggling container tailing', async () => {
+    const onSaved = vi.fn();
+    vi.mocked(settingsApi.updateSettings).mockResolvedValueOnce({
+      status: 'ok',
+    });
+
+    render(
+      <AdvancedSettingsCard
+        settings={mockBaseSettings}
+        onSettingsSaved={onSaved}
+      />
+    );
+
+    const dockerCheckbox = screen.getByLabelText(/Enable Container Tailing/i);
+    fireEvent.click(dockerCheckbox);
+
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(settingsApi.updateSettings).toHaveBeenCalledWith({
+        enable_docker: false,
+      });
+      expect(onSaved).toHaveBeenCalled();
+    });
+  });
 });

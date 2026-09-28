@@ -742,7 +742,10 @@ class DockerTailer:
         Dynamically update Docker collector runtime configuration.
         Stops or attaches container tailers according to enable_docker and exclusions.
         """
-        if enable_docker is not None:
+        changed = False
+
+        if enable_docker is not None and enable_docker != self.enable_docker:
+            changed = True
             prev_enabled = self.enable_docker
             self.enable_docker = enable_docker
             if not enable_docker and prev_enabled:
@@ -757,7 +760,8 @@ class DockerTailer:
                     except Exception as e:
                         logger.warning(f"Error re-attaching containers on enable: {e}")
 
-        if exclude_containers is not None:
+        if exclude_containers is not None and exclude_containers != self.exclude_containers:
+            changed = True
             self.exclude_containers = exclude_containers
             for cid, (task, cancel) in list(self._tailers.items()):
                 cname = task.get_name().replace("docker-tail-", "")
@@ -770,13 +774,15 @@ class DockerTailer:
                 except Exception as e:
                     logger.debug(f"Error attaching newly included containers: {e}")
 
-        if source_alias is not None:
+        if source_alias is not None and source_alias != self.source_alias:
+            changed = True
             self.source_alias = source_alias
 
-        logger.info(
-            f"DockerTailer settings updated: enable_docker={self.enable_docker}, "
-            f"exclude_containers='{self.exclude_containers}', source_alias='{self.source_alias}'"
-        )
+        if changed:
+            logger.info(
+                f"DockerTailer settings updated: enable_docker={self.enable_docker}, "
+                f"exclude_containers='{self.exclude_containers}', source_alias='{self.source_alias}'"
+            )
 
     async def run(self) -> None:
         """

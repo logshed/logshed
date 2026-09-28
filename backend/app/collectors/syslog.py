@@ -12,7 +12,7 @@ import sqlite3
 import threading
 import weakref
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.core.migrations import get_connection
 from app.core.pipeline import (
@@ -770,21 +770,37 @@ class SyslogServer:
     def active_tcp_connections(self) -> int:
         return len(self.tcp_protocols)
 
-    def update_limits(self, max_connections: int, inactivity_timeout: float) -> None:
+    def update_limits(
+        self,
+        max_connections: Optional[int] = None,
+        inactivity_timeout: Optional[float] = None,
+    ) -> None:
         """
         Dynamically update concurrent TCP connection limit and client inactivity timeout.
         Live connections update their timers immediately; new connection ceilings apply
         to subsequent inbound sockets.
         """
-        self.max_tcp_connections = max(1, max_connections)
-        self.tcp_inactivity_timeout = max(0.0, inactivity_timeout)
-        for proto in list(self.tcp_protocols):
-            proto.inactivity_timeout = self.tcp_inactivity_timeout
-            proto._reset_inactivity_timer()
-        logger.info(
-            f"SyslogServer limits updated: max_tcp_connections={self.max_tcp_connections}, "
-            f"tcp_inactivity_timeout={self.tcp_inactivity_timeout}s"
-        )
+        changed = False
+        if max_connections is not None:
+            new_max = max(1, max_connections)
+            if new_max != self.max_tcp_connections:
+                self.max_tcp_connections = new_max
+                changed = True
+
+        if inactivity_timeout is not None:
+            new_timeout = max(0.0, inactivity_timeout)
+            if new_timeout != self.tcp_inactivity_timeout:
+                self.tcp_inactivity_timeout = new_timeout
+                for proto in list(self.tcp_protocols):
+                    proto.inactivity_timeout = self.tcp_inactivity_timeout
+                    proto._reset_inactivity_timer()
+                changed = True
+
+        if changed:
+            logger.info(
+                f"SyslogServer limits updated: max_tcp_connections={self.max_tcp_connections}, "
+                f"tcp_inactivity_timeout={self.tcp_inactivity_timeout}s"
+            )
 
     async def start(self) -> None:
         """Create and start alias cache refresh, then both UDP and TCP transports."""
