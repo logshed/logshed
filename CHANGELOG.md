@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Drop Rule Names**: Added user-defined `name` column to `drop_rules` in `migrate_v2`, supporting descriptive naming for drop rules across creation modals, detail views, and JSON export/import with pattern fallback.
+- **AI Feature Enablement Toggle**: Added `ai_enabled` system setting and toggle checkbox in Application Settings. Allows disabling AI enrichment entirely, gracefully skipping alert enrichment without missing API key errors and guiding unconfigured users to Settings from the log inspection modal.
+- **Unconfigured Notification Channels Advisory**: Added an informative banner at the bottom of Alert Rules when rules are defined but no notification channels are configured, letting operators know incidents are recorded in History while providing a direct link to configure channels in Settings.
 - **Comprehensive Configuration Guide**: Created `docs/CONFIGURATION.md` containing a full environment variable reference structured by section (Core Settings, Syslog Listener, Docker Log Tailing, Storage and Retention, AI Provider, Security, Advanced), details on the three-tier resolution hierarchy, and data persistence paths.
 - **Syslog & Docker Integration Guides**: Created `docs/SENDING_LOGS.md` with step-by-step forwarding configuration for OPNsense, Proxmox VE, Synology DSM, UniFi Network, pfSense, generic Linux (rsyslog and syslog-ng), and Docker container tailing.
 - **Global & Scheduled Maintenance Windows**: Added maintenance window management to silence outgoing alert notifications while continuing to evaluate alerts, record history, and ingest log streams. Supports on-demand windows with quick presets (+1h, +4h, +8h, +24h) or custom end dates, along with user-configured recurring schedules (daily, weekly, monthly) that account for midnight boundary crossings.
@@ -53,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Drop Rules Table Layout Alignment**: Redesigned the Ingestion Drop Rules table on desktop and mobile viewports to match the layout, typography, status indicators, and action column structure of the Alert Rules table. Rule patterns are neatly tucked into the detail modal, highlighting the rule name in the main list.
+- **AI Disabled Notice Restyling**: Updated the "AI Features Disabled" advisory notice in Settings to match the subtle dark card design of the notification channels advisory banner.
+- **Storage Panel Header Streamlining**: Removed the redundant duplicate "Storage & Retention" section subtitle preceding the Current Storage Footprint card on the Storage tab.
 - **Streamlined README Documentation**: Slimmed down `README.md` to core project overview, feature highlights, quick-start commands, and a dedicated documentation table linking to specialized guides in `docs/`.
 - **Notification Targets Card Layout**: Removed the collapse chevron from the Notification Targets card on the Application Settings tab to keep it permanently visible, and moved the card above Version Updates.
 - **Portaled Modal Mounting**: Mounted modal dialogs to `document.body` via `createPortal` to prevent nested form interference when cards containing modals are placed inside settings forms.
