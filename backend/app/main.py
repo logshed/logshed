@@ -35,6 +35,7 @@ from app.core.config import (
 from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
 from app.core.security import get_or_create_master_key
+from app.services.daily_digest import DailyDigestWorker
 from app.services.fts_indexer import FTSIndexWorker
 from app.services.retention import PruneWorker
 from app.services.storage_metrics import StorageMetricsWorker
@@ -50,12 +51,18 @@ _queue_consumer: Optional[QueueConsumer] = None
 _fts_worker: Optional[FTSIndexWorker] = None
 _metrics_worker: Optional[StorageMetricsWorker] = None
 _prune_worker: Optional[PruneWorker] = None
+_daily_digest_worker: Optional[DailyDigestWorker] = None
 _syslog_server: Optional[SyslogServer] = None
 _docker_tailer: Optional[DockerTailer] = None
 _assembler: Optional[KeyedMultilineAssembler] = None
 _internal_log_handler: Optional[InternalLogHandler] = None
 _alert_evaluator: Optional[Any] = None
 _background_tasks: list[asyncio.Task] = []
+
+
+def get_daily_digest_worker() -> Optional[DailyDigestWorker]:
+    """Returns the active DailyDigestWorker instance, or None if uninitialized."""
+    return _daily_digest_worker
 
 
 def get_internal_log_handler() -> Optional[InternalLogHandler]:
@@ -212,7 +219,7 @@ async def lifespan(app: FastAPI):
     Application lifespan manager.
     Sets up database schema, master encryption keys, and starts background workers.
     """
-    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _syslog_server, _docker_tailer, _assembler, _alert_evaluator, _background_tasks
+    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _assembler, _alert_evaluator, _background_tasks
 
     db_path = get_db_path()
     logger.info(f"Setting up LogShed database at {db_path}...")
@@ -252,7 +259,11 @@ async def lifespan(app: FastAPI):
     _prune_worker = PruneWorker(db_path)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_prune_worker.run, "PruneWorker")))
 
-    # 6. Start ModelRefreshWorker (periodically updates available AI models)
+    # 6. Start DailyDigestWorker (runs 24-hour analytical rollup digest)
+    _daily_digest_worker = DailyDigestWorker(db_path)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_daily_digest_worker.run, "DailyDigestWorker")))
+
+    # 7. Start ModelRefreshWorker (periodically updates available AI models)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_model_refresh_worker, "ModelRefreshWorker", db_path)))
 
     # 7. Start Syslog Server (optional / non-fatal in dev/test)
@@ -360,6 +371,11 @@ async def lifespan(app: FastAPI):
             await _alert_evaluator.stop()
         except Exception as e:
             logger.warning(f"Error stopping AlertEvaluator: {e}")
+    if _daily_digest_worker:
+        try:
+            await _daily_digest_worker.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping DailyDigestWorker: {e}")
 
     try:
         from app.services.notifier import shutdown_notifier_executor

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.models import (
+    DailyDigestRunResponse,
     MessageResponse,
     NotificationChannelCreate,
     NotificationChannelResponse,
@@ -253,3 +254,18 @@ async def test_notification(
 
     success, message = await notifier.test_channel(target_url)
     return NotificationTestResponse(success=success, message=message)
+
+
+@router.post("/digest/send", response_model=DailyDigestRunResponse)
+async def send_daily_digest(
+    user: dict = Depends(get_current_user),
+) -> DailyDigestRunResponse:
+    """
+    Manually trigger generation and delivery of the 24-hour daily digest.
+    """
+    from app.services.daily_digest import run_daily_digest
+    from app.core.config import get_db_path
+
+    db_path = get_db_path()
+    res = await run_daily_digest(db_path, force=True)
+    return DailyDigestRunResponse(**res)

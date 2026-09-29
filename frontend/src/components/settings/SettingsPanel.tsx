@@ -964,7 +964,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </section>
 
         {/* Notification Channels & Webhooks Section */}
-        <NotificationsCard />
+        <NotificationsCard settings={settings} onSettingsSaved={loadAllData} />
 
         {/* Version Updates Section */}
         <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">

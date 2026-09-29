@@ -118,6 +118,22 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     else:
         ai_enabled = bool(ai_api_key_val)
 
+    daily_digest_enabled_raw = stored.get("daily_digest_enabled")
+    daily_digest_enabled = False
+    if daily_digest_enabled_raw is not None:
+        daily_digest_enabled = daily_digest_enabled_raw.strip().lower() in ("1", "true", "yes", "on")
+
+    daily_digest_channel_id_raw = stored.get("daily_digest_channel_id")
+    daily_digest_channel_id = None
+    if daily_digest_channel_id_raw and daily_digest_channel_id_raw.strip():
+        try:
+            daily_digest_channel_id = int(daily_digest_channel_id_raw.strip())
+        except ValueError:
+            daily_digest_channel_id = None
+
+    daily_digest_schedule_time = stored.get("daily_digest_schedule_time") or "09:00"
+    daily_digest_last_run = stored.get("daily_digest_last_run") or None
+
     return SettingsResponse(
         ai_enabled=ai_enabled,
         ai_provider=stored.get("ai_provider") or "gemini",
@@ -145,6 +161,10 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         cookie_secure=resolved["cookie_secure"],
         syslog_max_tcp_connections=resolved["syslog_max_tcp_connections"],
         syslog_tcp_inactivity_timeout=resolved["syslog_tcp_inactivity_timeout"],
+        daily_digest_enabled=daily_digest_enabled,
+        daily_digest_channel_id=daily_digest_channel_id,
+        daily_digest_schedule_time=daily_digest_schedule_time,
+        daily_digest_last_run=daily_digest_last_run,
     )
 
 
@@ -236,6 +256,16 @@ async def update_settings(
 
         if req.syslog_tcp_inactivity_timeout is not None:
             updates.append(("syslog_tcp_inactivity_timeout", str(req.syslog_tcp_inactivity_timeout), 0))
+
+        if req.daily_digest_enabled is not None:
+            updates.append(("daily_digest_enabled", "1" if req.daily_digest_enabled else "0", 0))
+
+        if "daily_digest_channel_id" in req.model_fields_set:
+            val = "" if req.daily_digest_channel_id is None else str(req.daily_digest_channel_id)
+            updates.append(("daily_digest_channel_id", val, 0))
+
+        if req.daily_digest_schedule_time is not None:
+            updates.append(("daily_digest_schedule_time", req.daily_digest_schedule_time.strip(), 0))
 
         if "maintenance_until" in req.model_fields_set:
             if req.maintenance_until is None or req.maintenance_until.strip() == "":

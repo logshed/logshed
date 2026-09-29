@@ -120,6 +120,12 @@ class SettingsResponse(BaseModel):
     syslog_max_tcp_connections: int = 250
     syslog_tcp_inactivity_timeout: float = 0.0
 
+    # Daily Digest Settings
+    daily_digest_enabled: bool = False
+    daily_digest_channel_id: Optional[int] = None
+    daily_digest_schedule_time: str = "09:00"
+    daily_digest_last_run: Optional[str] = None
+
     @model_validator(mode="after")
     def clamp_retention_days(self) -> "SettingsResponse":
         if self.retention_overridden:
@@ -208,6 +214,36 @@ class SettingsUpdateRequest(BaseModel):
         None,
         description="Syslog TCP client inactivity timeout in seconds (float >= 0.0, 0 disables).",
     )
+    daily_digest_enabled: Optional[bool] = Field(
+        None,
+        description="Enable automated 24-hour daily digest notification.",
+    )
+    daily_digest_channel_id: Optional[int] = Field(
+        None,
+        description="Target notification channel ID for daily digest (null sends to all enabled channels).",
+    )
+    daily_digest_schedule_time: Optional[str] = Field(
+        None,
+        description="Local time of day (HH:MM) to dispatch the daily digest.",
+    )
+
+    @field_validator("daily_digest_schedule_time")
+    @classmethod
+    def validate_daily_digest_schedule_time(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v_clean = v.strip()
+            parts = v_clean.split(":")
+            if len(parts) != 2:
+                raise ValueError("daily_digest_schedule_time must be in HH:MM format")
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+            except ValueError:
+                raise ValueError("daily_digest_schedule_time must contain numeric hour and minute")
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError("daily_digest_schedule_time hour must be 00-23 and minute 00-59")
+            return f"{hour:02d}:{minute:02d}"
+        return v
 
     @field_validator("ai_base_url")
     @classmethod
@@ -691,6 +727,20 @@ class NotificationTestResponse(BaseModel):
     """Result of testing a notification target."""
     success: bool
     message: str
+
+
+class DailyDigestRunResponse(BaseModel):
+    """Result of running or testing the 24-hour daily digest."""
+    status: str = "ok"
+    history_id: Optional[int] = None
+    total_logs: int = 0
+    error_count: int = 0
+    top_errors: list[dict[str, Any]] = Field(default_factory=list)
+    top_services: list[dict[str, Any]] = Field(default_factory=list)
+    storage_delta: str = "0 B"
+    channel_id: Optional[int] = None
+    notification_sent: bool = False
+    triggered_at: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
