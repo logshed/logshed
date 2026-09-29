@@ -60,6 +60,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
   const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
   const [digestScheduleTime, setDigestScheduleTime] = useState<string>('09:00');
+  const [scheduleTimeError, setScheduleTimeError] = useState<string | null>(null);
   const [digestLastRun, setDigestLastRun] = useState<string | null>(null);
   const [isSavingDigest, setIsSavingDigest] = useState<boolean>(false);
   const [isSendingDigest, setIsSendingDigest] = useState<boolean>(false);
@@ -444,7 +445,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               <span>Daily Digest Rollup</span>
             </h4>
             <p className="text-xs text-slate-400 mt-0.5">
-              Automated 24-hour analytical summary covering log volume, top error sources, noisy services, and database storage delta.
+              Automated 24-hour analytical summary covering log volume, top error sources, top logging services, and database storage delta.
             </p>
           </div>
 
@@ -486,7 +487,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
 
           {/* Configuration options */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <div className="space-y-1">
+            <div className="space-y-1 min-w-0">
               <label htmlFor="digest-target-channel" className="block text-[11px] font-semibold text-slate-400 uppercase">
                 Target Channel
               </label>
@@ -510,27 +511,49 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               </select>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1 min-w-0">
               <label htmlFor="digest-schedule-time" className="block text-[11px] font-semibold text-slate-400 uppercase">
                 Schedule Time (Local)
               </label>
               <input
-                type="time"
+                type="text"
                 id="digest-schedule-time"
                 aria-label="Schedule Time"
                 value={digestScheduleTime}
+                placeholder="HH:MM"
+                maxLength={5}
                 disabled={!digestEnabled || !hasActiveChannel || isSavingDigest}
                 onChange={(e) => {
                   setDigestScheduleTime(e.target.value);
+                  setScheduleTimeError(null);
                 }}
                 onBlur={() => {
-                  if (digestScheduleTime && /^([01]\d|2[0-3]):([0-5]\d)$/.test(digestScheduleTime)) {
-                    handleSaveDigest({ daily_digest_schedule_time: digestScheduleTime });
+                  const val = digestScheduleTime;
+                  if (!val || val.trim() === '') {
+                    setScheduleTimeError(null);
+                    return;
+                  }
+                  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(val)) {
+                    setScheduleTimeError('Enter a valid 24-hour time, e.g. 09:00 or 23:30.');
+                    return;
+                  }
+                  setScheduleTimeError(null);
+                  const serverTime = effectiveSettings?.daily_digest_schedule_time || '09:00';
+                  if (val !== serverTime) {
+                    handleSaveDigest({ daily_digest_schedule_time: val });
                   }
                 }}
-                className="w-full bg-dark-900 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 disabled:opacity-50"
+                className={`w-full bg-dark-900 border rounded px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-hidden disabled:opacity-50 font-mono ${
+                  scheduleTimeError
+                    ? 'border-red-500 focus:border-red-400'
+                    : 'border-dark-700 focus:border-accent-500'
+                }`}
               />
-              <p className="text-[11px] text-slate-500">Local server time when the daily rollup is generated and dispatched.</p>
+              {scheduleTimeError ? (
+                <p className="text-[11px] text-red-400">{scheduleTimeError}</p>
+              ) : (
+                <p className="text-[11px] text-slate-500">24-hour format (e.g. 09:00). Saved when you leave this field.</p>
+              )}
             </div>
           </div>
 

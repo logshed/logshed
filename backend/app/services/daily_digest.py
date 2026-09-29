@@ -209,24 +209,32 @@ def format_digest_body(
             if crit_sum > 0:
                 parts = []
                 if item.get("emerg_count"):
-                    parts.append(f"{item['emerg_count']:,} emerg")
+                    n = item['emerg_count']
+                    parts.append(f"{n:,} {'emerg' if n == 1 else 'emergs'}")
                 if item.get("alert_count"):
-                    parts.append(f"{item['alert_count']:,} alert")
+                    n = item['alert_count']
+                    parts.append(f"{n:,} {'alert' if n == 1 else 'alerts'}")
                 if item.get("crit_count"):
-                    parts.append(f"{item['crit_count']:,} crit")
+                    n = item['crit_count']
+                    parts.append(f"{n:,} {'crit' if n == 1 else 'crits'}")
                 if item.get("err_count"):
-                    parts.append(f"{item['err_count']:,} err")
+                    n = item['err_count']
+                    parts.append(f"{n:,} {'error' if n == 1 else 'errors'}")
                 breakdown = f" ({', '.join(parts)})" if parts else ""
-                error_lines.append(f"- **{item['entity']}**: {cnt:,} event(s){breakdown}")
+                event_word = "event" if cnt == 1 else "events"
+                error_lines.append(f"- **{item['entity']}**: {cnt:,} {event_word}{breakdown}")
             else:
-                error_lines.append(f"- **{item['entity']}**: {cnt:,} error(s)")
+                error_word = "error" if cnt == 1 else "errors"
+                error_lines.append(f"- **{item['entity']}**: {cnt:,} {error_word}")
     else:
         error_lines.append("- No errors or critical events recorded in the last 24 hours.")
 
     service_lines = []
     if top_services:
         for item in top_services:
-            service_lines.append(f"- **{item['service']}**: {item['log_count']:,} log(s)")
+            lc = item['log_count']
+            log_word = "log" if lc == 1 else "logs"
+            service_lines.append(f"- **{item['service']}**: {lc:,} {log_word}")
     else:
         service_lines.append("- No log activity recorded.")
 
@@ -235,10 +243,10 @@ def format_digest_body(
         f"- **Total Logs Ingested:** {total_logs:,}",
         f"- **System Storage Delta:** {storage_delta_str}",
         "",
-        "### Top Containers / Hosts by Error & Critical Events (Severity <= 3)",
+        "### Top Apps / Hosts with Errors or Above",
         "\n".join(error_lines),
         "",
-        "### Top Noisy Services",
+        "### Top Logging Services",
         "\n".join(service_lines),
     ]
 

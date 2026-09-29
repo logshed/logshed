@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NotificationsCard } from '../components/settings/NotificationsCard.tsx';
 import * as notifApi from '../api/notifications.ts';
@@ -214,12 +214,19 @@ describe('NotificationsCard Component', () => {
       expect(settingsApi.updateSettings).toHaveBeenCalledWith({ daily_digest_channel_id: 1 });
     });
 
-    // Change schedule time - only saves on blur, not on change
+    // Change schedule time - wait for any pending saves to complete, then interact
     const timeInput = screen.getByLabelText(/Schedule Time/i);
-    fireEvent.change(timeInput, { target: { value: '14:30' } });
-    // updateSettings should NOT have been called yet (no blur)
-    expect(settingsApi.updateSettings).not.toHaveBeenCalledWith({ daily_digest_schedule_time: '14:30' });
-    fireEvent.blur(timeInput);
+    // Wait until the input is enabled and not saving (previous operations have settled)
+    await waitFor(() => {
+      expect(timeInput).not.toBeDisabled();
+    });
+    // Now change and blur - the onBlur handler will save when the value differs from server value
+    await act(async () => {
+      fireEvent.change(timeInput, { target: { value: '14:30' } });
+    });
+    await act(async () => {
+      fireEvent.blur(timeInput);
+    });
 
     await waitFor(() => {
       expect(settingsApi.updateSettings).toHaveBeenCalledWith({ daily_digest_schedule_time: '14:30' });

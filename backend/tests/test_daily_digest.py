@@ -222,7 +222,10 @@ def test_format_digest_body_no_em_dashes():
     assert "24-Hour Analytical Rollup" in body
     assert "5,000" in body
     assert "api-service" in body
-    assert "42 event(s) (2 emerg, 10 crit, 30 err)" in body
+    # 42 events with breakdown (2 emergs, 10 crits, 30 errors)
+    assert "42 events (2 emergs, 10 crits, 30 errors)" in body
+    assert "Top Apps / Hosts with Errors or Above" in body
+    assert "Top Logging Services" in body
     assert "Executive Summary" not in body
     assert "http://localhost:8000" in body
 
