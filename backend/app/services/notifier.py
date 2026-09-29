@@ -246,18 +246,29 @@ def decrypt_channel_url(encrypted_url: str) -> str:
 
 def _clean_pushover_message(msg: str) -> str:
     """
-    Remove redundant HTML line break tags to ensure Pushover clients
-    render single-line spacing without blank newline gaps in the app,
+    Remove unsupported container tags and redundant line break tags to ensure Pushover
+    clients render single-line spacing without blank newline gaps in the app,
     while preserving newline characters so lock screen notifications retain line breaks.
     """
     if not msg:
         return msg
+
+    # Convert headers <h1..6>...</h1..6> to <b>...</b>
+    cleaned = re.sub(r"<h[1-6]>(.*?)</h[1-6]>", r"<b>\1</b>\n", msg)
+
+    # Convert <li> to bullet points with single newline
+    cleaned = re.sub(r"\s*<li>(.*?)</li>\s*", r"• \1\n", cleaned)
+
+    # Remove container block tags: <ul>, </ul>, <ol>, </ol>, <p>, </p>
+    cleaned = re.sub(r"</?(?:ul|ol|p)[^>]*>", "", cleaned)
+
     # Replace <br />\n, <br>\n, or standalone <br />, <br> with \n
-    cleaned = re.sub(r"<br\s*/?>\s*\n*", "\n", msg)
-    # Strip wrapping <p>...</p> when it is a single enclosing paragraph
-    if cleaned.count("<p>") == 1 and cleaned.count("</p>") == 1:
-        cleaned = re.sub(r"^\s*<p>(.*?)</p>\s*$", r"\1", cleaned, flags=re.DOTALL)
-    return cleaned
+    cleaned = re.sub(r"<br\s*/?>\s*", "\n", cleaned)
+
+    # Collapse 3 or more consecutive newlines down to 2
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+    return cleaned.strip()
 
 
 def _configure_apprise_servers(ap_obj: apprise.Apprise) -> None:

@@ -5,6 +5,7 @@ import {
   NotificationChannelUpdate,
   NotificationTestRequest,
   NotificationTestResponse,
+  DailyDigestRunResponse,
 } from '../types.ts';
 
 export async function fetchNotificationChannels(): Promise<NotificationChannel[]> {
@@ -42,5 +43,11 @@ export async function testNotificationTarget(
   return apiFetch<NotificationTestResponse>('/api/notifications/test', {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export async function sendDailyDigest(): Promise<DailyDigestRunResponse> {
+  return apiFetch<DailyDigestRunResponse>('/api/notifications/digest/send', {
+    method: 'POST',
   });
 }

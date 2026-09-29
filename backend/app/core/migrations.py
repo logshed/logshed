@@ -283,7 +283,13 @@ CREATE TABLE IF NOT EXISTS alert_history (
 CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON alert_history(rule_id);
 CREATE INDEX IF NOT EXISTS idx_alert_history_rule_time ON alert_history(rule_id, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_audit_id);
+
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('daily_digest_enabled', '0', datetime('now'), 0);
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('daily_digest_schedule_time', '09:00', datetime('now'), 0);
 
 ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand';
 ''')
@@ -374,6 +380,25 @@ def run_migrations(db_path: Union[str, Path]) -> None:
         except sqlite3.OperationalError:
             pass
 
+        # Ensure default daily_digest settings exist
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted) "
+                "VALUES ('daily_digest_enabled', '0', datetime('now'), 0);"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Ensure idx_alert_history_rule_name exists
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Ensure ai_audit_log has trigger_source column
         try:
             conn.execute(
@@ -395,6 +420,16 @@ def run_migrations(db_path: Union[str, Path]) -> None:
         # Ensure drop_rules has name column
         try:
             conn.execute("ALTER TABLE drop_rules ADD COLUMN name TEXT;")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Ensure system_settings has daily_digest_schedule_time
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+                VALUES ('daily_digest_schedule_time', '09:00', datetime('now'), 0);
+            """)
             conn.commit()
         except sqlite3.OperationalError:
             pass

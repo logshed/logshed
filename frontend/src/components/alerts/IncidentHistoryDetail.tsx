@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Info,
+  Calendar,
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../types.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
@@ -31,8 +32,9 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
   const [showPromptDetails, setShowPromptDetails] = useState<boolean>(false);
   const [promptViewMode, setPromptViewMode] = useState<'analysis' | 'full'>('analysis');
 
-  const isOnDemand = !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
-  const isAiAlert = !isOnDemand && Boolean(item.ai_enrichment);
+  const isDigest = item.rule_name === 'Daily Digest';
+  const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
+  const isAiAlert = !isOnDemand && !isDigest && Boolean(item.ai_enrichment);
   const isFailed = Boolean(
     item.ai_enrichment &&
       (!item.incident_summary ||
@@ -40,11 +42,15 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
         item.incident_summary.startsWith('AI enrichment failed:'))
   );
 
-  const displayTarget = isOnDemand
+  const displayTarget = isDigest
+    ? 'Daily Digest'
+    : isOnDemand
     ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand Analysis')
     : item.rule_name;
 
-  const countLabel = isOnDemand
+  const countLabel = isDigest
+    ? `${item.trigger_count.toLocaleString()} logs analyzed`
+    : isOnDemand
     ? `${item.trigger_count} log${item.trigger_count === 1 ? '' : 's'}`
     : `${item.trigger_count} matching event${item.trigger_count === 1 ? '' : 's'}`;
 
@@ -69,7 +75,9 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
         {/* Row 1: Target / Title, Type Badge & Timestamp */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            {isOnDemand ? (
+            {isDigest ? (
+              <Calendar className="w-4 h-4 text-purple-400 shrink-0" />
+            ) : isOnDemand ? (
               <Brain className="w-4 h-4 text-accent-400 shrink-0" />
             ) : isAiAlert ? (
               <Zap className="w-4 h-4 text-amber-400 shrink-0" />
@@ -82,7 +90,12 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
             <span className="text-slate-400 text-[11px] shrink-0 font-mono">
               ({countLabel})
             </span>
-            {isOnDemand ? (
+            {isDigest ? (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
+                <Calendar className="w-2.5 h-2.5 text-purple-400 shrink-0" />
+                Daily Digest
+              </span>
+            ) : isOnDemand ? (
               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-sans font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
                 On-Demand
               </span>
@@ -117,7 +130,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                 <span className="text-slate-200 font-medium">{channelName}</span>
               </div>
             )}
-            {!isOnDemand && (item.source_alias || item.app_name) && (
+            {!isOnDemand && !isDigest && (item.source_alias || item.app_name) && (
               <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
                 <span className="text-slate-400 text-[10px] uppercase font-semibold">Source:</span>
                 <span className="text-slate-200 font-medium">
@@ -197,6 +210,11 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               <>
                 <AlertCircle className="w-3.5 h-3.5 text-red-400" />
                 Failure Details
+              </>
+            ) : isDigest ? (
+              <>
+                <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                Daily Digest Rollup Report
               </>
             ) : (
               <>

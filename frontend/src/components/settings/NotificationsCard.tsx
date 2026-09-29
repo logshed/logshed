@@ -10,18 +10,29 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
+  Calendar,
 } from 'lucide-react';
-import { NotificationChannel } from '../../types.ts';
+import { NotificationChannel, SystemSettings } from '../../types.ts';
 import {
   fetchNotificationChannels,
   createNotificationChannel,
   updateNotificationChannel,
   deleteNotificationChannel,
   testNotificationTarget,
+  sendDailyDigest,
 } from '../../api/notifications.ts';
+import { fetchSettings, updateSettings } from '../../api/settings.ts';
 import { Modal } from '../common/Modal.tsx';
 
-export const NotificationsCard: React.FC = () => {
+export interface NotificationsCardProps {
+  settings?: SystemSettings | null;
+  onSettingsSaved?: () => Promise<void> | void;
+}
+
+export const NotificationsCard: React.FC<NotificationsCardProps> = ({
+  settings: externalSettings,
+  onSettingsSaved,
+}) => {
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [channelToEdit, setChannelToEdit] = useState<NotificationChannel | null>(null);
@@ -41,6 +52,104 @@ export const NotificationsCard: React.FC = () => {
 
   // Quick testing state from the table row
   const [testingChannelId, setTestingChannelId] = useState<number | null>(null);
+
+  // Daily Digest states
+  const [internalSettings, setInternalSettings] = useState<SystemSettings | null>(null);
+  const effectiveSettings = externalSettings !== undefined ? externalSettings : internalSettings;
+
+  const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
+  const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
+  const [digestScheduleTime, setDigestScheduleTime] = useState<string>('09:00');
+  const [digestLastRun, setDigestLastRun] = useState<string | null>(null);
+  const [isSavingDigest, setIsSavingDigest] = useState<boolean>(false);
+  const [isSendingDigest, setIsSendingDigest] = useState<boolean>(false);
+
+  const loadInternalSettings = useCallback(async () => {
+    try {
+      const res = await fetchSettings();
+      setInternalSettings(res);
+    } catch {
+      // Graceful fallback for test/offline environments
+    }
+  }, []);
+
+  useEffect(() => {
+    if (externalSettings === undefined) {
+      loadInternalSettings();
+    }
+  }, [externalSettings, loadInternalSettings]);
+
+  useEffect(() => {
+    if (effectiveSettings) {
+      setDigestEnabled(Boolean(effectiveSettings.daily_digest_enabled));
+      setDigestChannelId(effectiveSettings.daily_digest_channel_id ?? null);
+      setDigestScheduleTime(effectiveSettings.daily_digest_schedule_time || '09:00');
+      setDigestLastRun(effectiveSettings.daily_digest_last_run ?? null);
+    }
+  }, [effectiveSettings]);
+
+  const hasActiveChannel = channels.some((c) => c.is_enabled);
+
+  const handleSaveDigest = async (updates: {
+    daily_digest_enabled?: boolean;
+    daily_digest_channel_id?: number | null;
+    daily_digest_schedule_time?: string;
+  }) => {
+    try {
+      setIsSavingDigest(true);
+      await updateSettings(updates);
+      if (updates.daily_digest_enabled !== undefined) {
+        setDigestEnabled(updates.daily_digest_enabled);
+      }
+      if (updates.daily_digest_channel_id !== undefined) {
+        setDigestChannelId(updates.daily_digest_channel_id);
+      }
+      if (updates.daily_digest_schedule_time !== undefined) {
+        setDigestScheduleTime(updates.daily_digest_schedule_time);
+      }
+      setInternalSettings((prev) => (prev ? { ...prev, ...updates } : null));
+      if (onSettingsSaved) {
+        await onSettingsSaved();
+      }
+      setFeedbackMsg({ text: 'Daily digest settings saved successfully.', isError: false });
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to save daily digest settings.', isError: true });
+    } finally {
+      setIsSavingDigest(false);
+    }
+  };
+
+  const handleSendDigestNow = async () => {
+    try {
+      setIsSendingDigest(true);
+      setFeedbackMsg(null);
+      const res = await sendDailyDigest();
+      if (res.status === 'ok') {
+        const channelLabel = res.channel_id
+          ? (channels.find((c) => c.id === res.channel_id)?.name || `Channel #${res.channel_id}`)
+          : 'All Enabled Channels';
+        setFeedbackMsg({
+          text: `Daily digest dispatched successfully to ${channelLabel} (${res.total_logs.toLocaleString()} logs analyzed).`,
+          isError: false,
+        });
+        if (res.triggered_at) {
+          setDigestLastRun(res.triggered_at);
+        }
+      } else {
+        setFeedbackMsg({
+          text: 'Failed to dispatch daily digest.',
+          isError: true,
+        });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to dispatch daily digest.',
+        isError: true,
+      });
+    } finally {
+      setIsSendingDigest(false);
+    }
+  };
 
   const loadChannels = useCallback(async () => {
     try {
@@ -325,6 +434,114 @@ export const NotificationsCard: React.FC = () => {
             </table>
           )}
         </div>
+
+      {/* Daily Digest Section */}
+      <div className="pt-4 border-t border-dark-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <Calendar className="w-3.5 h-3.5 text-accent-500" />
+              <span>Daily Digest Rollup</span>
+            </h4>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Automated 24-hour analytical summary covering log volume, top error sources, noisy services, and database storage delta.
+            </p>
+          </div>
+
+          {hasActiveChannel && (
+            <button
+              type="button"
+              onClick={handleSendDigestNow}
+              disabled={isSendingDigest || isSavingDigest}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
+              title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
+            >
+              <Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />
+              <span>{isSendingDigest ? 'Sending...' : 'Send Digest Now'}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="p-3.5 bg-dark-950/60 rounded-lg border border-dark-800 space-y-3">
+          {/* Enable checkbox */}
+          <div>
+            <label className={`flex items-start gap-2 text-xs select-none ${hasActiveChannel ? 'cursor-pointer text-slate-200' : 'cursor-not-allowed text-slate-500'}`}>
+              <input
+                type="checkbox"
+                checked={digestEnabled}
+                disabled={!hasActiveChannel || isSavingDigest}
+                onChange={(e) => handleSaveDigest({ daily_digest_enabled: e.target.checked })}
+                className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer mt-0.5 disabled:opacity-50"
+              />
+              <div>
+                <span className="font-medium">Enable 24-hour daily digest rollup</span>
+                {!hasActiveChannel && (
+                  <p className="text-[11px] text-amber-400/80 mt-0.5">
+                    Requires at least one active notification target configured above.
+                  </p>
+                )}
+              </div>
+            </label>
+          </div>
+
+          {/* Configuration options */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div className="space-y-1">
+              <label htmlFor="digest-target-channel" className="block text-[11px] font-semibold text-slate-400 uppercase">
+                Target Channel
+              </label>
+              <select
+                id="digest-target-channel"
+                aria-label="Target Channel"
+                value={digestChannelId ?? ''}
+                disabled={!digestEnabled || !hasActiveChannel || isSavingDigest}
+                onChange={(e) => {
+                  const val = e.target.value ? Number(e.target.value) : null;
+                  handleSaveDigest({ daily_digest_channel_id: val });
+                }}
+                className="w-full bg-dark-900 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 disabled:opacity-50"
+              >
+                <option value="">All Enabled Channels</option>
+                {channels.map((ch) => (
+                  <option key={ch.id} value={ch.id}>
+                    Channel: {ch.name}{ch.is_enabled ? '' : ' (Disabled)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="digest-schedule-time" className="block text-[11px] font-semibold text-slate-400 uppercase">
+                Schedule Time (Local)
+              </label>
+              <input
+                type="time"
+                id="digest-schedule-time"
+                aria-label="Schedule Time"
+                value={digestScheduleTime}
+                disabled={!digestEnabled || !hasActiveChannel || isSavingDigest}
+                onChange={(e) => {
+                  setDigestScheduleTime(e.target.value);
+                }}
+                onBlur={() => {
+                  if (digestScheduleTime && /^([01]\d|2[0-3]):([0-5]\d)$/.test(digestScheduleTime)) {
+                    handleSaveDigest({ daily_digest_schedule_time: digestScheduleTime });
+                  }
+                }}
+                className="w-full bg-dark-900 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 disabled:opacity-50"
+              />
+              <p className="text-[11px] text-slate-500">Local server time when the daily rollup is generated and dispatched.</p>
+            </div>
+          </div>
+
+          {digestLastRun && (
+            <div className="text-[11px] text-slate-500 pt-1 font-mono flex items-center gap-1.5">
+              <span>Last scheduled run:</span>
+              <span className="text-slate-400">{new Date(digestLastRun).toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Add / Edit Channel Modal */}
       <Modal

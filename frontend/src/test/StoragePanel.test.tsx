@@ -50,6 +50,9 @@ describe('StoragePanel Component', () => {
     fireEvent.change(slider, { target: { value: '21' } });
 
     const saveBtn = screen.getByRole('button', { name: /Save Retention/i });
+    await waitFor(() => {
+      expect(saveBtn).not.toBeDisabled();
+    });
     fireEvent.click(saveBtn);
 
     await waitFor(() => {

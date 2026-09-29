@@ -29,6 +29,7 @@ export interface SystemSettings {
   ai_model: string;
   ai_fallback_models?: string;
   ai_api_key?: string;
+  has_ai_api_key?: boolean;
   ai_base_url?: string | null;
   ai_system_prompt?: string;
   retention_days: number;
@@ -51,6 +52,12 @@ export interface SystemSettings {
   cookie_secure?: boolean;
   syslog_max_tcp_connections?: number;
   syslog_tcp_inactivity_timeout?: number;
+
+  // Daily Digest Settings
+  daily_digest_enabled?: boolean;
+  daily_digest_channel_id?: number | null;
+  daily_digest_schedule_time?: string;
+  daily_digest_last_run?: string | null;
 }
 
 export type AppTab = 'stream' | 'storage' | 'alerts' | 'settings';
@@ -333,6 +340,20 @@ export interface NotificationTestRequest {
 export interface NotificationTestResponse {
   success: boolean;
   message: string;
+}
+
+export interface DailyDigestRunResponse {
+  status: string;
+  history_id?: number | null;
+  total_logs: number;
+  error_count: number;
+  top_errors: Array<{ entity: string; error_count: number }>;
+  top_services: Array<{ service: string; log_count: number }>;
+  storage_delta: string;
+  ai_summary?: string | null;
+  channel_id?: number | null;
+  notification_sent: boolean;
+  triggered_at?: string | null;
 }
 
 export interface AlertRule {
