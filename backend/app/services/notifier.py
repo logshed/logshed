@@ -19,6 +19,9 @@ import urllib.parse
 
 import apprise
 
+import requests
+import requests.sessions
+
 from app.core.security import decrypt_value, encrypt_value
 
 logger = logging.getLogger(__name__)
@@ -65,6 +68,7 @@ _PRIVATE_NETWORKS = [
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("fc00::/7"),
 ]
+_IPV4_COMPATIBLE_NETWORK = ipaddress.ip_network("::/96")
 _BLOCKED_PORTS = {2375, 2376}
 _DANGEROUS_SCHEMES = {"file", "attach"}
 
@@ -77,6 +81,13 @@ def _check_ip_address_safety(
     # Unwrap IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
     if isinstance(ip_addr, ipaddress.IPv6Address) and ip_addr.ipv4_mapped:
         ip_addr = ip_addr.ipv4_mapped
+
+    # Check for IPv4-compatible IPv6 addresses (e.g., ::127.0.0.1, ::169.254.169.254)
+    if isinstance(ip_addr, ipaddress.IPv6Address) and ip_addr in _IPV4_COMPATIBLE_NETWORK:
+        unwrapped_v4 = ipaddress.IPv4Address(ip_addr.packed[-4:])
+        is_safe, err = _check_ip_address_safety(unwrapped_v4, allow_private)
+        if not is_safe:
+            return False, err
 
     # 1. Cloud instance metadata
     for net in _METADATA_NETWORKS:
@@ -207,29 +218,62 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
     allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
 
     # 6. Verify destination IPs against blocked ranges
-    if hostname:
+    hosts_to_verify = set()
+    for server in ap_obj:
+        # If the plugin uses a fixed public cloud endpoint, verify that endpoint host
+        cloud_url = getattr(server, "notify_url", None)
+        if (
+            isinstance(cloud_url, str)
+            and (cloud_url.startswith("http://") or cloud_url.startswith("https://"))
+            and "{host}" not in cloud_url
+        ):
+            cloud_host = urllib.parse.urlsplit(cloud_url).hostname
+            if cloud_host:
+                hosts_to_verify.add(cloud_host)
+            continue
+
+        shost = getattr(server, "host", None)
+        if shost:
+            hosts_to_verify.add(shost)
+
+    if not hosts_to_verify and hostname:
+        hosts_to_verify.add(hostname)
+    elif hostname:
+        clean_ip_str = hostname.strip("[]")
         try:
-            ip_obj = ipaddress.ip_address(hostname)
+            ipaddress.ip_address(clean_ip_str)
+            hosts_to_verify.add(hostname)
+        except ValueError:
+            pass
+
+    for host_target in hosts_to_verify:
+        clean_target = host_target.lower().rstrip(".").strip("[]")
+        if clean_target == "localhost" or clean_target.endswith(".localhost"):
+            return False, f"Container loopback target '{host_target}' is not allowed."
+
+        try:
+            ip_obj = ipaddress.ip_address(clean_target)
             is_safe, err = _check_ip_address_safety(ip_obj, allow_private)
             if not is_safe:
                 return False, err
         except ValueError:
             # Hostname is not an IP literal; resolve via socket.getaddrinfo
             try:
-                addr_info = socket.getaddrinfo(hostname, None)
+                addr_info = socket.getaddrinfo(clean_target, None)
+                if not addr_info:
+                    return False, f"Unable to resolve destination hostname '{host_target}'"
                 for addr in addr_info:
                     resolved_ip_str = addr[4][0]
                     try:
-                        resolved_ip = ipaddress.ip_address(resolved_ip_str)
+                        resolved_ip = ipaddress.ip_address(resolved_ip_str.strip("[]"))
                         is_safe, err = _check_ip_address_safety(resolved_ip, allow_private)
                         if not is_safe:
                             return False, err
                     except ValueError:
                         continue
-            except (socket.gaierror, socket.herror, OSError) as dns_err:
-                logger.debug(f"Could not resolve host '{hostname}' during validation: {dns_err}")
-                if not allow_private and (clean_host.endswith(".local") or clean_host.endswith(".internal") or clean_host.endswith(".lan")):
-                    return False, f"Local host '{hostname}' is not permitted when private targets are disabled."
+            except (socket.gaierror, socket.herror, OSError, Exception) as dns_err:
+                logger.debug(f"Could not resolve host '{host_target}' during validation: {dns_err}")
+                return False, f"Unable to resolve destination hostname '{host_target}'"
 
     return True, None
 
@@ -301,6 +345,83 @@ def _configure_apprise_servers(ap_obj: apprise.Apprise) -> None:
                 server.notify_format = apprise.NotifyFormat.MARKDOWN
 
 
+def _validate_redirect_url(redirect_url: str) -> Tuple[bool, Optional[str]]:
+    """
+    Validate that an HTTP redirect target URL adheres to SSRF protection policies.
+    Blocks redirects to loopback, private, or cloud metadata addresses.
+    """
+    if not redirect_url:
+        return False, "Redirect destination URL cannot be empty."
+
+    try:
+        parsed = urllib.parse.urlsplit(redirect_url.strip())
+    except Exception as exc:
+        return False, f"Invalid redirect destination URL syntax: {exc}"
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return False, f"Redirect to scheme '{scheme}' is forbidden."
+
+    if parsed.port in _BLOCKED_PORTS:
+        return False, f"Redirect destination port {parsed.port} is blocked."
+
+    hostname = (parsed.hostname or "").strip()
+    if not hostname:
+        return False, "Redirect destination URL is missing a hostname."
+
+    clean_host = hostname.lower().rstrip(".").strip("[]")
+    if clean_host == "localhost" or clean_host.endswith(".localhost"):
+        return False, f"Redirect to loopback target '{hostname}' is not permitted."
+
+    from app.core.config import get_cached_setting
+    allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
+
+    try:
+        ip_obj = ipaddress.ip_address(clean_host)
+        is_safe, err = _check_ip_address_safety(ip_obj, allow_private)
+        if not is_safe:
+            return False, err
+    except ValueError:
+        try:
+            addr_info = socket.getaddrinfo(clean_host, None)
+            if not addr_info:
+                return False, f"Unable to resolve redirect destination hostname '{hostname}'"
+            for addr in addr_info:
+                resolved_ip_str = addr[4][0]
+                try:
+                    resolved_ip = ipaddress.ip_address(resolved_ip_str.strip("[]"))
+                    is_safe, err = _check_ip_address_safety(resolved_ip, allow_private)
+                    if not is_safe:
+                        return False, err
+                except ValueError:
+                    continue
+        except (socket.gaierror, socket.herror, OSError, Exception) as dns_err:
+            return False, f"Unable to resolve redirect destination hostname '{hostname}': {dns_err}"
+
+    return True, None
+
+
+_orig_get_redirect_target = requests.sessions.SessionRedirectMixin.get_redirect_target
+
+
+def _safe_get_redirect_target(self, resp):
+    location = _orig_get_redirect_target(self, resp)
+    if location is None:
+        return None
+
+    resolved_target = urllib.parse.urljoin(resp.url, location)
+    is_safe, err = _validate_redirect_url(resolved_target)
+    if not is_safe:
+        raise requests.exceptions.InvalidURL(
+            f"Redirect to blocked or private destination '{resolved_target}' is forbidden: {err}"
+        )
+    return location
+
+
+# Patch SessionRedirectMixin.get_redirect_target to prevent unsafe outbound redirects
+requests.sessions.SessionRedirectMixin.get_redirect_target = _safe_get_redirect_target
+
+
 def _sync_send_notification(
     urls: list[str],
     title: str,
@@ -316,9 +437,24 @@ def _sync_send_notification(
         logger.debug("No notification URLs provided to dispatch.")
         return False
 
+    # Enforce current security policies at dispatch time
+    safe_urls: list[str] = []
+    for u in urls:
+        is_valid, err = validate_notification_url(u)
+        if is_valid:
+            safe_urls.append(u)
+        else:
+            logger.warning(
+                f"Skipping notification URL '{mask_notification_url(u)}' at dispatch time: {err}"
+            )
+
+    if not safe_urls:
+        logger.warning("No notification URLs passed security validation at dispatch time.")
+        return False
+
     try:
         ap_obj = apprise.Apprise()
-        for u in urls:
+        for u in safe_urls:
             ap_obj.add(u)
         _configure_apprise_servers(ap_obj)
 
@@ -342,6 +478,11 @@ def _sync_test_channel(
     """
     Synchronously test a single notification URL via Apprise in a worker thread.
     """
+    # Enforce current security policies at dispatch time
+    is_valid, err = validate_notification_url(url)
+    if not is_valid:
+        return False, err or "Invalid or disallowed notification URL."
+
     try:
         ap_obj = apprise.Apprise()
         added = ap_obj.add(url.strip())

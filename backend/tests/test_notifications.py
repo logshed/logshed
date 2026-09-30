@@ -86,7 +86,8 @@ def auth_headers():
 
 class TestNotifierUnit:
 
-    def test_validate_notification_url_valid(self):
+    @patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 0))])
+    def test_validate_notification_url_valid(self, mock_dns):
         valid, err = validate_notification_url("discord://123456789/abcdefghij")
         assert valid is True
         assert err is None
@@ -149,6 +150,10 @@ class TestNotifierUnit:
         assert valid is False
         assert "metadata" in (err or "").lower()
 
+        valid, err = validate_notification_url("json://[::169.254.169.254]/hook")
+        assert valid is False
+        assert "metadata" in (err or "").lower()
+
     def test_validate_ssrf_loopback_targets_rejected(self):
         valid, err = validate_notification_url("json://127.0.0.1:8080/hook")
         assert valid is False
@@ -161,6 +166,33 @@ class TestNotifierUnit:
         valid, err = validate_notification_url("json://[::1]:8080/hook")
         assert valid is False
         assert "loopback" in (err or "").lower()
+
+        valid, err = validate_notification_url("json://[::127.0.0.1]:8080/hook")
+        assert valid is False
+        assert "loopback" in (err or "").lower()
+
+    def test_validate_unresolvable_domains_rejected(self):
+        valid, err = validate_notification_url("gotify://unresolvable-domain-987654321.invalid/token")
+        assert valid is False
+        assert "unable to resolve destination hostname" in (err or "").lower()
+
+    def test_redirect_to_blocked_ips_rejected(self):
+        from app.services.notifier import _validate_redirect_url
+        is_safe, err = _validate_redirect_url("http://169.254.169.254/latest/meta-data")
+        assert is_safe is False
+        assert "metadata" in (err or "").lower()
+
+        is_safe, err = _validate_redirect_url("http://127.0.0.1:8080/admin")
+        assert is_safe is False
+        assert "loopback" in (err or "").lower()
+
+        is_safe, err = _validate_redirect_url("http://[::127.0.0.1]:8080/admin")
+        assert is_safe is False
+        assert "loopback" in (err or "").lower()
+
+        is_safe, err = _validate_redirect_url("http://[::169.254.169.254]/meta")
+        assert is_safe is False
+        assert "metadata" in (err or "").lower()
 
     def test_validate_ssrf_docker_ports_rejected(self):
         valid, err = validate_notification_url("json://192.168.1.50:2375/v1.41/containers/json")

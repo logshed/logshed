@@ -205,6 +205,31 @@ class TestDropFilterUnit:
         conn.close()
         assert row[0] == 8  # 5 initial + 3 flushed
 
+    def test_init_drop_filter_preserves_in_memory_counters(self, tmp_path):
+        from app.services.drop_filter import init_drop_filter
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at)
+            VALUES (NULL, NULL, 'dropme', 0, 1, 0, datetime('now'))
+            """
+        )
+        rule_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        flt1 = init_drop_filter(db_file)
+        matched = flt1.should_drop("srv", "127.0.0.1", "app", "dropme now")
+        assert matched == rule_id
+        assert flt1.get_pending_count(rule_id) == 1
+
+        # Re-initializing drop filter with init_drop_filter preserves active in-memory counters
+        flt2 = init_drop_filter(db_file)
+        assert flt2 is flt1
+        assert flt2.get_pending_count(rule_id) == 1
+
 
 # ===================================================================
 # 2. Drop Rules API Endpoints Tests
@@ -292,6 +317,26 @@ class TestDropRulesApi:
         )
         assert res.status_code == 400
         assert "Invalid regular expression" in res.json()["detail"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("redos_pattern", [
+        "(a|aa)+",
+        "([a-z]|[a-z][a-z])+",
+        "((a)+)+",
+        "(a+)+",
+        "([a-z]+)*",
+    ])
+    async def test_catastrophic_backtracking_rejected(self, client: AsyncClient, auth_cookie: dict, redos_pattern: str):
+        res = await client.post(
+            "/api/drop-rules",
+            cookies=auth_cookie,
+            json={
+                "message_pattern": redos_pattern,
+                "is_regex": True,
+            },
+        )
+        assert res.status_code == 400
+        assert "catastrophic backtracking" in res.json()["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_dry_run_test_endpoint(self, client: AsyncClient, auth_cookie: dict):

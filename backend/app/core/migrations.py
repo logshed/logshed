@@ -18,17 +18,18 @@ from typing import Union
 
 logger = logging.getLogger(__name__)
 
-def get_connection(db_path: Union[str, Path]) -> sqlite3.Connection:
+def get_connection(db_path: Union[str, Path], check_same_thread: bool = False) -> sqlite3.Connection:
     """
     Open a SQLite database connection and configure WAL mode pragmas.
 
     Args:
         db_path: Path to the SQLite database file.
+        check_same_thread: If False, allow SQLite connection reuse across threads.
 
     Returns:
         A configured sqlite3.Connection instance.
     """
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=5000;")

@@ -5,6 +5,7 @@ Provides endpoints to create, list, update, delete, and test
 notification channels configured with universal Apprise URLs.
 """
 
+import asyncio
 import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -79,7 +80,7 @@ async def create_notification_channel(
 ) -> NotificationChannelResponse:
     """Validate URL, encrypt it at rest, and register a new notification channel."""
     # Validate Apprise URL schema
-    valid, err_msg = validate_notification_url(channel_in.url)
+    valid, err_msg = await asyncio.to_thread(validate_notification_url, channel_in.url)
     if not valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -152,7 +153,7 @@ async def update_notification_channel(
 
     # Determine whether URL is being updated
     if channel_in.url is not None and channel_in.url.strip() and channel_in.url.strip() != "********":
-        valid, err_msg = validate_notification_url(channel_in.url)
+        valid, err_msg = await asyncio.to_thread(validate_notification_url, channel_in.url)
         if not valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

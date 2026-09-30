@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
+from app.core.config import get_db_path
+from app.core.regex_validator import compile_safe_regex, safe_regex_search
 from app.core.utils import match_wildcard
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,30 @@ class CompiledDropRule:
     is_enabled: bool
     severity_threshold: Optional[int] = None
     compiled_regex: Optional[re.Pattern] = None
+
+    def match_message(self, message: str) -> bool:
+        """
+        Evaluate if candidate message matches this rule's message pattern.
+        Ensures regular expression matching handles candidate strings safely
+        without hanging the asyncio event loop thread.
+        """
+        if not self.message_pattern or self.message_pattern.strip() == "*":
+            return True
+
+        if self.is_regex:
+            if self.compiled_regex is None:
+                return False
+            return safe_regex_search(self.compiled_regex, message)
+        else:
+            pattern = self.message_pattern.strip()
+            if "*" in pattern or "?" in pattern:
+                wildcard_pat = pattern.lower()
+                if not wildcard_pat.startswith("*"):
+                    wildcard_pat = f"*{wildcard_pat}"
+                if not wildcard_pat.endswith("*"):
+                    wildcard_pat = f"{wildcard_pat}*"
+                return fnmatch.fnmatchcase(message.lower(), wildcard_pat)
+            return pattern.lower() in message.lower()
 
     def matches(
         self,
@@ -59,24 +85,8 @@ class CompiledDropRule:
                 return False
 
         # 3. Message pattern matching
-        if self.message_pattern and self.message_pattern.strip() != "*":
-            if self.is_regex:
-                if self.compiled_regex is None:
-                    return False
-                if not self.compiled_regex.search(message):
-                    return False
-            else:
-                pattern = self.message_pattern.strip()
-                if "*" in pattern or "?" in pattern:
-                    wildcard_pat = pattern.lower()
-                    if not wildcard_pat.startswith("*"):
-                        wildcard_pat = f"*{wildcard_pat}"
-                    if not wildcard_pat.endswith("*"):
-                        wildcard_pat = f"{wildcard_pat}*"
-                    if not fnmatch.fnmatchcase(message.lower(), wildcard_pat):
-                        return False
-                elif pattern.lower() not in message.lower():
-                    return False
+        if not self.match_message(message):
+            return False
 
         # 4. Severity threshold check
         if self.severity_threshold is not None and severity is not None:
@@ -84,6 +94,36 @@ class CompiledDropRule:
                 return False  # log is more critical than threshold - keep it
 
         return True
+
+
+def match_message(
+    candidate: Union[CompiledDropRule, str],
+    message: Optional[str] = None,
+    pattern: Optional[str] = None,
+    is_regex: bool = False,
+    compiled_regex: Optional[re.Pattern] = None,
+) -> bool:
+    """
+    Safely evaluate a message against a CompiledDropRule or pattern string.
+    Ensures regex matching cannot hang caller threads.
+    """
+    if isinstance(candidate, CompiledDropRule):
+        return candidate.match_message(message or "")
+    if compiled_regex is not None:
+        return safe_regex_search(compiled_regex, candidate)
+    if is_regex and pattern:
+        return safe_regex_search(pattern, candidate)
+    if pattern:
+        rule = CompiledDropRule(
+            id=0,
+            source_pattern=None,
+            app_pattern=None,
+            message_pattern=pattern,
+            is_regex=is_regex,
+            is_enabled=True,
+        )
+        return rule.match_message(candidate)
+    return True
 
 
 class DropFilter:
@@ -154,7 +194,8 @@ class DropFilter:
             self._pending_counts = {}
 
         total_flushed = sum(to_flush.values())
-        if not self.db_path and conn is None:
+        effective_db = self.db_path or get_db_path()
+        if not effective_db and conn is None:
             return total_flushed
 
         def _do_update(c: sqlite3.Connection):
@@ -167,8 +208,8 @@ class DropFilter:
 
         if conn is not None:
             _do_update(conn)
-        elif self.db_path:
-            c = sqlite3.connect(str(self.db_path), timeout=5.0)
+        elif effective_db:
+            c = sqlite3.connect(str(effective_db), timeout=5.0)
             try:
                 _do_update(c)
             finally:
@@ -176,11 +217,19 @@ class DropFilter:
 
         return total_flushed
 
+    def _flush_pending_counts(self, conn: Optional[sqlite3.Connection] = None) -> int:
+        """
+        Flush accumulated in-memory drop counts to SQLite.
+        Falls back to get_db_path() if self.db_path is not explicitly configured.
+        """
+        return self.flush_counts(conn=conn)
+
     def reload_rules(self, conn: Optional[sqlite3.Connection] = None) -> None:
         """
         Reload active drop rules from SQLite and compile regex patterns.
         """
-        if not self.db_path and conn is None:
+        effective_db = self.db_path or get_db_path()
+        if not effective_db and conn is None:
             return
 
         def _load(c: sqlite3.Connection):
@@ -193,8 +242,8 @@ class DropFilter:
 
         if conn is not None:
             rows = _load(conn)
-        elif self.db_path:
-            c = sqlite3.connect(str(self.db_path), timeout=5.0)
+        elif effective_db:
+            c = sqlite3.connect(str(effective_db), timeout=5.0)
             try:
                 rows = _load(c)
             finally:
@@ -215,8 +264,8 @@ class DropFilter:
             compiled_re = None
             if is_regex:
                 try:
-                    compiled_re = re.compile(msg_pat, re.IGNORECASE)
-                except re.error as e:
+                    compiled_re = compile_safe_regex(msg_pat, re.IGNORECASE)
+                except Exception as e:
                     logger.warning(f"Drop rule {rule_id} has invalid regex '{msg_pat}': {e}")
                     continue
 
@@ -243,17 +292,21 @@ _filter_lock = threading.Lock()
 
 
 def get_drop_filter() -> DropFilter:
-    """Return the global DropFilter singleton instance."""
+    """Return the global DropFilter singleton instance, lazily instantiated with get_db_path()."""
     global _drop_filter
     with _filter_lock:
         if _drop_filter is None:
-            _drop_filter = DropFilter()
+            _drop_filter = DropFilter(get_db_path())
         return _drop_filter
 
 
 def init_drop_filter(db_path: Union[str, Path]) -> DropFilter:
-    """Initialize or update the global DropFilter singleton with database path."""
+    """Initialize or update the global DropFilter singleton with database path, preserving counters."""
     global _drop_filter
     with _filter_lock:
+        if _drop_filter is not None:
+            _drop_filter.db_path = Path(db_path)
+            _drop_filter.reload_rules()
+            return _drop_filter
         _drop_filter = DropFilter(db_path)
         return _drop_filter

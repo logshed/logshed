@@ -8,6 +8,7 @@ a background worker that indexes newly inserted rows into logs_fts in bulk batch
 import asyncio
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Optional, Union
 
@@ -111,7 +112,26 @@ class FTSIndexWorker:
         self._resume_event.set()
         self._index_lock = asyncio.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._conn: Optional[sqlite3.Connection] = None
+        self._conn_lock = threading.Lock()
         set_fts_worker(self)
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Returns or opens a persistent connection configured with WAL and performance PRAGMAs."""
+        with self._conn_lock:
+            if self._conn is None:
+                self._conn = get_connection(self._db_path)
+            return self._conn
+
+    def close(self) -> None:
+        """Cleanly close the persistent SQLite connection."""
+        with self._conn_lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
 
     @property
     def is_paused(self) -> bool:
@@ -121,12 +141,13 @@ class FTSIndexWorker:
     async def pause_indexing(self) -> None:
         """
         Temporarily pause FTS indexing passes.
-        Waits for any in-flight indexing batch to complete.
+        Waits for any in-flight indexing batch to complete and closes the persistent connection
+        for database maintenance.
         """
         self._paused = True
         self._resume_event.clear()
         async with self._index_lock:
-            pass
+            await asyncio.to_thread(self.close)
 
     def resume_indexing(self) -> None:
         """
@@ -191,15 +212,12 @@ class FTSIndexWorker:
         logger.info("FTSIndexWorker stopped.")
 
     def _index_pending_chunk(self, batch_size: int) -> int:
-        """Synchronously index one batch chunk using a dedicated connection."""
-        conn = get_connection(self._db_path)
-        try:
-            return index_pending_batch(conn, batch_size=batch_size)
-        finally:
-            conn.close()
+        """Synchronously index one batch chunk using the persistent worker connection."""
+        conn = self._get_connection()
+        return index_pending_batch(conn, batch_size=batch_size)
 
     async def stop(self) -> None:
-        """Signal graceful shutdown and drain any pending unindexed logs."""
+        """Signal graceful shutdown, drain pending unindexed logs, and close connection."""
         self._running = False
         self._stop_event.set()
         self._resume_event.set()
@@ -211,4 +229,6 @@ class FTSIndexWorker:
             await asyncio.to_thread(index_pending_logs, self._db_path, self._batch_size)
         except Exception as e:
             logger.warning(f"Error draining FTS index on shutdown: {e}")
+        finally:
+            await asyncio.to_thread(self.close)
         logger.info("FTSIndexWorker drain complete.")

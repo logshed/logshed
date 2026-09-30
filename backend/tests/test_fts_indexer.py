@@ -358,3 +358,50 @@ class TestRetentionPruningCoordination:
 
         assert count_after == 0
         assert fts_after == 0
+
+
+class TestFTSIndexWorkerPersistentConnection:
+
+    @pytest.mark.asyncio
+    async def test_worker_reuses_persistent_connection_without_descriptor_leaks(self, db_path: Path):
+        """Verify that FTSIndexWorker reuses persistent connection across iterations and cleans up on pause/close."""
+        conn = get_connection(db_path)
+        with conn:
+            for i in range(1, 11):
+                conn.execute(
+                    """INSERT INTO logs (id, timestamp, received_at, source_ip, source_alias, app_name, message, raw)
+                       VALUES (?, '2026-09-01T12:00:00+00:00', '2026-09-01T12:00:00+00:00', '10.0.0.1', 'h1', 'app', ?, ?)""",
+                    (i, f"message {i}", f"raw {i}"),
+                )
+        conn.close()
+
+        worker = FTSIndexWorker(db_path, batch_size=5)
+        assert worker._conn is None
+
+        # First chunk
+        c1 = worker._index_pending_chunk(5)
+        assert c1 == 5
+        conn1 = worker._conn
+        assert conn1 is not None
+
+        # Second chunk reuses the exact same persistent connection instance
+        c2 = worker._index_pending_chunk(5)
+        assert c2 == 5
+        conn2 = worker._conn
+        assert conn2 is conn1
+
+        # Pausing indexing closes and clears the persistent connection for database maintenance
+        await worker.pause_indexing()
+        assert worker._conn is None
+
+        # Resuming and indexing next chunk re-opens connection lazily
+        worker.resume_indexing()
+        c3 = worker._index_pending_chunk(5)
+        assert c3 == 0
+        conn3 = worker._conn
+        assert conn3 is not None
+        assert conn3 is not conn1
+
+        # Stop closes connection cleanly without descriptor leaks
+        await worker.stop()
+        assert worker._conn is None
