@@ -17,6 +17,7 @@ from app.services.version_service import (
     _extract_latest_stable_version,
     check_for_updates,
     clear_version_cache,
+    is_deprecated_image_repo,
 )
 from app.main import create_app
 
@@ -167,6 +168,23 @@ class TestGHCRVersionService:
                 assert res["check_enabled"] is False
                 assert res["update_available"] is False
                 assert res["latest_version"] is None
+                assert res["repo_deprecated"] is False
+
+    def test_is_deprecated_image_repo(self):
+        assert is_deprecated_image_repo("benhornertech/logshed") is True
+        assert is_deprecated_image_repo("BenHornerTech/logshed") is True
+        assert is_deprecated_image_repo("logshed/logshed") is False
+        assert is_deprecated_image_repo("other/logshed") is False
+
+    @pytest.mark.asyncio
+    async def test_check_for_updates_detects_deprecated_repo_and_queries_logshed(self):
+        clear_version_cache()
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = ["1.0.0", "1.2.0"]
+            res = await check_for_updates(force_refresh=True, image_repo="benhornertech/logshed")
+            assert res["repo_deprecated"] is True
+            # Ensures query falls back to official logshed/logshed repository
+            mock_fetch.assert_called_once_with(image_repo="logshed/logshed")
 
 
 
@@ -183,6 +201,7 @@ class TestVersionEndpoint:
                 "latest_version": "1.2.0",
                 "update_available": True,
                 "checked_at": 1700000000.0,
+                "repo_deprecated": True,
             }
 
             response = client.get("/api/system/version")
@@ -191,3 +210,4 @@ class TestVersionEndpoint:
             assert data["current_version"] == "1.1.0-beta.3"
             assert data["latest_version"] == "1.2.0"
             assert data["update_available"] is True
+            assert data["repo_deprecated"] is True

@@ -227,6 +227,42 @@ describe('Navbar Component', () => {
     expect(screen.queryByText('App update available')).not.toBeInTheDocument();
   });
 
+  it('renders repository migration notice banner when repo_deprecated is true', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+      current_version: '1.2.0',
+      latest_version: '1.2.0',
+      update_available: false,
+      check_enabled: true,
+      checked_at: 1700000000.0,
+      repo_deprecated: true,
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Repository Moved:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/ghcr\.io\/benhornertech\/logshed/i)).toBeInTheDocument();
+    expect(screen.getByText(/ghcr\.io\/logshed\/logshed/i)).toBeInTheDocument();
+
+    const dismissBtn = screen.getByRole('button', { name: /Dismiss/i });
+    fireEvent.click(dismissBtn);
+    expect(screen.queryByText('Repository Moved:')).not.toBeInTheDocument();
+  });
+
   it('renders amber maintenance banner when maintenance window is active', async () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
       status: 'ok',

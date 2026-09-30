@@ -18,6 +18,7 @@ import {
   ArrowUpCircle,
   Server,
   Shield,
+  AlertTriangle,
 } from 'lucide-react';
 import { AiModelInfo, VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
@@ -1213,6 +1214,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             {/* Version & Update Status */}
             {versionInfo && (
               <div className="flex flex-wrap items-center gap-2 text-xs">
+                {versionInfo.repo_deprecated && (
+                  <div className="w-full flex items-start gap-2.5 p-3 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-semibold text-amber-300">
+                        Container Repository Moved
+                      </div>
+                      <p className="text-slate-300 text-xs">
+                        This instance is running from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/logshed/logshed</code> to continue receiving future releases.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {versionInfo.update_available && versionInfo.check_enabled !== false && checkForUpdates ? (
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-300">
                     <ArrowUpCircle className="w-4 h-4 text-amber-400 shrink-0" />

@@ -473,6 +473,8 @@ class VersionResponse(BaseModel):
     update_available: bool = False
     check_enabled: bool = True
     checked_at: Optional[float] = None
+    repo_deprecated: bool = False
+
 
 
 

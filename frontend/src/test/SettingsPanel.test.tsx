@@ -587,6 +587,26 @@ describe('SettingsPanel Component', () => {
     expect(releaseNotesLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases');
   });
 
+  it('renders Container Repository Moved warning in About section when repo_deprecated is true', async () => {
+    vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+      current_version: '1.2.0',
+      latest_version: '1.2.0',
+      update_available: false,
+      check_enabled: true,
+      checked_at: 1700000000.0,
+      repo_deprecated: true,
+    });
+
+    render(<SettingsPanel initialSubTab="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Container Repository Moved')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/ghcr\.io\/benhornertech\/logshed/i)).toBeInTheDocument();
+    expect(screen.getByText(/ghcr\.io\/logshed\/logshed/i)).toBeInTheDocument();
+  });
+
   it('renders Update checks are disabled in About section when check_enabled is false', async () => {
     vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
       current_version: '1.1.0-beta.3',

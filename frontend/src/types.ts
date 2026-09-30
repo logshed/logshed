@@ -250,6 +250,7 @@ export interface VersionInfo {
   update_available: boolean;
   check_enabled?: boolean;
   checked_at?: number | null;
+  repo_deprecated?: boolean;
 }
 
 export interface DropRule {

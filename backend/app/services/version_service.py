@@ -24,6 +24,19 @@ _cached_at: float = 0.0
 DEFAULT_IMAGE_REPO = os.environ.get("LOGSHED_IMAGE_REPO", "logshed/logshed").lower()
 
 
+def is_deprecated_image_repo(repo: str = DEFAULT_IMAGE_REPO) -> bool:
+    """Return True if image repository points to deprecated personal namespace."""
+    return repo.lower().startswith("benhornertech/")
+
+
+if is_deprecated_image_repo(DEFAULT_IMAGE_REPO):
+    logger.warning(
+        "LogShed container repository 'ghcr.io/%s' is deprecated. "
+        "Please update your container configuration to 'ghcr.io/logshed/logshed'.",
+        DEFAULT_IMAGE_REPO,
+    )
+
+
 def clear_version_cache() -> None:
     """Clear in-memory cached version check data (useful in testing or manual invalidation)."""
     global _cached_version_info, _cached_at
@@ -100,6 +113,7 @@ async def check_for_updates(
     global _cached_version_info, _cached_at
 
     now = time.time()
+    repo_deprecated = is_deprecated_image_repo(image_repo)
 
     is_enabled = True
     try:
@@ -115,13 +129,16 @@ async def check_for_updates(
             "update_available": False,
             "check_enabled": False,
             "checked_at": now,
+            "repo_deprecated": repo_deprecated,
         }
 
     if not force_refresh and _cached_version_info and (now - _cached_at < _CACHE_TTL_SECONDS):
         return _cached_version_info
 
     try:
-        tags = await fetch_ghcr_tags(image_repo=image_repo)
+        # If the container repo is deprecated, query the official logshed/logshed repository for releases
+        query_repo = "logshed/logshed" if repo_deprecated else image_repo
+        tags = await fetch_ghcr_tags(image_repo=query_repo)
         latest_stable = _extract_latest_stable_version(tags)
 
         update_available = False
@@ -134,6 +151,7 @@ async def check_for_updates(
             "update_available": update_available,
             "check_enabled": True,
             "checked_at": now,
+            "repo_deprecated": repo_deprecated,
         }
 
         _cached_version_info = result
@@ -153,5 +171,6 @@ async def check_for_updates(
             "update_available": False,
             "check_enabled": True,
             "checked_at": now,
+            "repo_deprecated": repo_deprecated,
         }
 

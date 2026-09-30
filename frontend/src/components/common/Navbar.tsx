@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell, AlertTriangle } from 'lucide-react';
+import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell, AlertTriangle, ExternalLink } from 'lucide-react';
 import { LogShedLogo } from './LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
@@ -27,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [maintenance, setMaintenance] = useState<{ active: boolean; until: string | null } | null>(null);
+  const [migrationBannerDismissed, setMigrationBannerDismissed] = useState(false);
   const isMobile = useMediaQuery('(max-width: 767px)');
 
   const loadHealth = async () => {
@@ -226,6 +227,36 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       </header>
+
+      {/* Repository Migration Warning Banner */}
+      {versionInfo?.repo_deprecated && !migrationBannerDismissed && (
+        <div className="bg-amber-950/90 border-b border-amber-800 text-amber-200 px-4 py-2 text-xs flex items-center justify-between select-none shrink-0 z-20">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Repository Moved:</strong> You are running an image from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/logshed/logshed</code> to receive future updates.
+            </span>
+          </div>
+          <div className="flex items-center space-x-3 ml-4 shrink-0">
+            <a
+              href="https://github.com/logshed/logshed/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-300 hover:text-white underline font-medium text-xs inline-flex items-center gap-1 cursor-pointer"
+            >
+              <span>Release Notes</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              type="button"
+              onClick={() => setMigrationBannerDismissed(true)}
+              className="text-amber-400 hover:text-amber-200 cursor-pointer font-medium text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Maintenance Window Amber Banner */}
       {maintenance?.active && maintenance.until && (
