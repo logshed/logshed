@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX } from 'lucide-react';
+import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
-import { fetchLogContext } from '../../api/logs.ts';
+import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { useClipboard } from '../../utils/hooks.ts';
@@ -16,6 +16,7 @@ interface LogDetailModalProps {
   onAddAlias?: (ip: string) => void;
   isHostAliased?: boolean;
   onCreateDropRule?: (log: LogEntry) => void;
+  onDeleteLog?: (log: LogEntry) => void;
 }
 
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
@@ -27,6 +28,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   onAddAlias,
   isHostAliased,
   onCreateDropRule,
+  onDeleteLog,
 }) => {
   const hostIsAliased = Boolean(
     isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip)
@@ -37,6 +39,34 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   const [isLoadingContext, setIsLoadingContext] = useState(false);
   const [showContext, setShowContext] = useState(false);
   const [sameAppOnly, setSameAppOnly] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setShowDeleteConfirm(false);
+      setIsDeleting(false);
+      setDeleteError(null);
+    }
+  }, [isOpen]);
+
+  const handleConfirmDelete = async () => {
+    if (!log) return;
+    try {
+      setIsDeleting(true);
+      setDeleteError(null);
+      await deleteSingleLog(log.id);
+      if (onDeleteLog) {
+        onDeleteLog(log);
+      }
+      onClose();
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete log entry.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && log && showContext) {
@@ -148,6 +178,17 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               </button>
             )}
 
+            {onDeleteLog && (
+              <button
+                onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-red-950 text-slate-300 hover:text-red-300 border border-dark-600 hover:border-red-800 rounded transition font-medium cursor-pointer"
+                title="Delete this log record permanently"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                <span>Delete</span>
+              </button>
+            )}
+
             <button
               onClick={() => onExplainWithAi(log)}
               className="flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-600 hover:bg-accent-500 text-white rounded font-medium transition shadow-xs"
@@ -157,6 +198,43 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Delete Confirmation Banner */}
+        {showDeleteConfirm && (
+          <div className="p-3 bg-red-950/70 border border-red-800 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-red-200 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>Permanently delete log record #{log.id}? This action cannot be reversed.</span>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded transition flex items-center gap-1 cursor-pointer"
+              >
+                {isDeleting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                <span>Confirm Delete</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {deleteError && (
+          <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <span>{deleteError}</span>
+          </div>
+        )}
+
 
         {/* Structured Metadata Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">

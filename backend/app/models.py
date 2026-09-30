@@ -85,6 +85,33 @@ class LogFacetsResponse(BaseModel):
     app_to_hosts: dict[str, list[str]]
 
 
+class LogDeleteRequest(BaseModel):
+    """Payload specifying criteria or IDs for log deletion."""
+    log_ids: Optional[list[int]] = Field(None, description="Specific log IDs to delete")
+    sources: Optional[list[str]] = Field(None, description="Filter by source_alias or source_ip (multi-value supported)")
+    apps: Optional[list[str]] = Field(None, description="Filter by app_name (multi-value supported)")
+    severity_max: Optional[int] = Field(None, ge=0, le=7, description="Max severity (0-7, lower is more severe)")
+    from_: Optional[str] = Field(None, alias="from", description="ISO datetime start filter")
+    to: Optional[str] = Field(None, description="ISO datetime end filter")
+    query: Optional[str] = Field(None, description="FTS5 search query to filter deletions")
+    delete_all: bool = Field(False, description="Explicit confirmation flag required if deleting without filters")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class LogDeleteResponse(BaseModel):
+    """Result of log deletion operation."""
+    status: str = "ok"
+    deleted_count: int
+    message: str
+
+
+class LogDeletePreviewResponse(BaseModel):
+    """Preview count of logs matching deletion criteria."""
+    matched_count: int
+
+
+
 # ---------------------------------------------------------------------------
 # Settings Models
 # ---------------------------------------------------------------------------

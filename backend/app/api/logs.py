@@ -12,8 +12,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, run_db_query
+from app.core.config import get_db_path
 from app.core.sse import sse_manager
-from app.models import LogContextResponse, LogEntry, LogFacetsResponse, LogListResponse
+from app.models import (
+    LogContextResponse,
+    LogDeletePreviewResponse,
+    LogDeleteRequest,
+    LogDeleteResponse,
+    LogEntry,
+    LogFacetsResponse,
+    LogListResponse,
+)
+from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 
 import sqlite3
 
@@ -670,3 +680,62 @@ async def get_log_context(
         )
 
     return LogContextResponse(target_id=id, logs=logs)
+
+
+@router.delete("/{id}", response_model=LogDeleteResponse)
+async def delete_single_log(
+    id: int,
+    user: dict = Depends(get_current_user),
+) -> LogDeleteResponse:
+    """
+    Delete a single log entry by its primary key ID.
+    """
+    db_path = get_db_path()
+    req = LogDeleteRequest(log_ids=[id])
+    result = await execute_delete_logs_async(db_path, req)
+    if result["deleted_count"] == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log entry {id} not found.",
+        )
+    return LogDeleteResponse(**result)
+
+
+@router.post("/delete", response_model=LogDeleteResponse)
+async def delete_logs_batch(
+    request: LogDeleteRequest,
+    user: dict = Depends(get_current_user),
+) -> LogDeleteResponse:
+    """
+    Delete logs matching criteria or specific IDs.
+    Guards against unconstrained requests unless delete_all=True.
+    """
+    db_path = get_db_path()
+    try:
+        result = await execute_delete_logs_async(db_path, request)
+        return LogDeleteResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/delete/preview", response_model=LogDeletePreviewResponse)
+async def preview_delete_logs(
+    request: LogDeleteRequest,
+    user: dict = Depends(get_current_user),
+) -> LogDeletePreviewResponse:
+    """
+    Calculate count of logs matching deletion criteria without deleting them.
+    """
+    db_path = get_db_path()
+    try:
+        matched = await count_matching_logs_async(db_path, request)
+        return LogDeletePreviewResponse(matched_count=matched)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+

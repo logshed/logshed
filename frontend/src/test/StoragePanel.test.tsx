@@ -3,10 +3,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StoragePanel } from '../components/storage/StoragePanel.tsx';
 import * as settingsApi from '../api/settings.ts';
 import * as systemApi from '../api/system.ts';
+import * as logsApi from '../api/logs.ts';
 
 describe('StoragePanel Component', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({
+      sources: ['host-1'],
+      apps: ['app-1'],
+      host_to_apps: {},
+      app_to_hosts: {},
+    });
+    vi.spyOn(logsApi, 'previewDeleteLogs').mockResolvedValue({
+      matched_count: 0,
+    });
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
       ai_provider: 'gemini',
       ai_model: 'gemini-3.7-flash',
@@ -35,6 +45,7 @@ describe('StoragePanel Component', () => {
     expect(screen.getByTestId('db-size-display')).toHaveTextContent('16.99 GB');
     expect(screen.getByTestId('disk-free-display')).toHaveTextContent('419.1 GB');
     expect(screen.getByText(/Log Retention Policy/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: /Targeted Log Deletion/i })).toBeInTheDocument();
   });
 
   it('updates retention policy through RetentionSlider', async () => {
