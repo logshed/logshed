@@ -112,9 +112,17 @@ export async function clearAiAuditLog(): Promise<{ status: string; deleted_count
 export async function getAiModels(provider?: string, refresh: boolean = false): Promise<AiModelsResponse> {
   const params = new URLSearchParams();
   if (provider) params.set('provider', provider);
-  if (refresh) params.set('refresh', 'true');
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const res = await apiFetch<AiModelsResponse>(`/api/ai/models${qs}`);
+
+  let res: AiModelsResponse;
+  if (refresh) {
+    res = await apiFetch<AiModelsResponse>(`/api/ai/models/refresh${qs}`, {
+      method: 'POST',
+    });
+  } else {
+    res = await apiFetch<AiModelsResponse>(`/api/ai/models${qs}`);
+  }
+
   if (res && Array.isArray(res.models)) {
     res.models = res.models.filter((m) => isTextModel(m.id));
   }

@@ -520,7 +520,7 @@ async def reset_drop_rule_counter(
     def _reset(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, created_at "
+            "SELECT id, name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, created_at "
             "FROM drop_rules WHERE id = ?",
             (rule_id,),
         )
@@ -531,6 +531,7 @@ async def reset_drop_rule_counter(
         conn.commit()
         return DropRuleResponse(
             id=row["id"],
+            name=row["name"],
             source_pattern=row["source_pattern"],
             app_pattern=row["app_pattern"],
             message_pattern=row["message_pattern"],

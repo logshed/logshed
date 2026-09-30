@@ -61,13 +61,69 @@ def _check_ai_rate_limit(request: Request, user: dict) -> None:
 @router.get("/models", response_model=AiModelsResponse)
 async def list_available_models(
     provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'openai_compatible')"),
-    refresh: bool = Query(False, description="Force live refresh from provider API"),
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
     """
-    Retrieve active text models for the specified or configured provider.
-    Models are cached in SQLite with a 24-hour TTL and refreshed on demand or periodically.
+    Retrieve active text models for the specified or configured provider from SQLite cache.
+    Strictly read-only; does not query external providers or perform database writes.
     If no API key is configured, returns has_api_key=False with an empty list.
+    """
+    stored_settings, updated_map = await run_db_query(read_ai_settings)
+    clean_provider = (provider or stored_settings.get("ai_provider") or "gemini").lower()
+    api_key = stored_settings.get("ai_api_key", "").strip()
+
+    # If the provider requires an API key and none is set, prompt user
+    if clean_provider in ("gemini", "openai") and not api_key:
+        provider_name = "Google Gemini" if clean_provider == "gemini" else "OpenAI"
+        return AiModelsResponse(
+            provider=clean_provider,
+            models=[],
+            has_api_key=False,
+            is_live=False,
+            error=f"No API key configured for {provider_name}. Please configure your API key in Settings to view available models.",
+        )
+
+    cache_key = f"ai_models_cache_{clean_provider}"
+    cached_json = stored_settings.get(cache_key)
+    cached_updated_at = updated_map.get(cache_key)
+
+    if cached_json:
+        try:
+            cached_items = json.loads(cached_json)
+            clean_items = [
+                item for item in cached_items
+                if is_text_generation_model(item.get("id", ""), item.get("description", ""))
+            ]
+            return AiModelsResponse(
+                provider=clean_provider,
+                models=[AiModelInfo(**item) for item in clean_items],
+                has_api_key=True,
+                cached_at=str(cached_updated_at) if cached_updated_at else None,
+                is_live=False,
+                error=None,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse cached models for {clean_provider}: {e}")
+
+    return AiModelsResponse(
+        provider=clean_provider,
+        models=[],
+        has_api_key=True,
+        cached_at=None,
+        is_live=False,
+        error=None,
+    )
+
+
+@router.post("/models/refresh", response_model=AiModelsResponse)
+async def refresh_available_models(
+    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'openai_compatible')"),
+    user: dict = Depends(get_current_user),
+) -> AiModelsResponse:
+    """
+    Force live refresh of available models from external provider API.
+    Updates the cache in system_settings and returns discovered models.
+    Requires authentication and CSRF header.
     """
     stored_settings, updated_map = await run_db_query(read_ai_settings)
     clean_provider = (provider or stored_settings.get("ai_provider") or "gemini").lower()
@@ -88,25 +144,6 @@ async def list_available_models(
     cache_key = f"ai_models_cache_{clean_provider}"
     cached_json = stored_settings.get(cache_key)
     cached_updated_at = updated_map.get(cache_key)
-
-    # Return cached models if fresh and refresh not forced
-    if not refresh and cached_json and is_cache_fresh(cached_updated_at):
-        try:
-            cached_items = json.loads(cached_json)
-            clean_items = [
-                item for item in cached_items
-                if is_text_generation_model(item.get("id", ""), item.get("description", ""))
-            ]
-            return AiModelsResponse(
-                provider=clean_provider,
-                models=[AiModelInfo(**item) for item in clean_items],
-                has_api_key=True,
-                cached_at=str(cached_updated_at),
-                is_live=False,
-                error=None,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to parse cached models for {clean_provider}: {e}")
 
     # Query provider live
     try:
@@ -139,7 +176,7 @@ async def list_available_models(
                     provider=clean_provider,
                     models=[AiModelInfo(**item) for item in clean_stale],
                     has_api_key=True,
-                    cached_at=str(cached_updated_at),
+                    cached_at=str(cached_updated_at) if cached_updated_at else None,
                     is_live=False,
                     error=f"Could not refresh models from {clean_provider}: {exc}. Displaying cached list.",
                 )

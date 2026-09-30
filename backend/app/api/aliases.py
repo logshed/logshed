@@ -4,8 +4,11 @@ Host aliases API endpoints for IP to Hostname mapping management.
 
 import asyncio
 import datetime
+import logging
 import time
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
@@ -96,7 +99,10 @@ async def create_or_update_alias(
     await asyncio.to_thread(reload_active_alias_caches)
 
     def _run_batch(conn):
-        _batch_update_log_aliases(conn, clean_ip, clean_alias, batch_size=1000)
+        try:
+            _batch_update_log_aliases(conn, clean_ip, clean_alias, batch_size=1000)
+        except Exception as exc:
+            logger.error(f"Background retroactive alias update failed for {clean_ip} -> {clean_alias}: {exc}")
 
     background_tasks.add_task(run_db_query, _run_batch)
     return res
@@ -126,7 +132,10 @@ async def delete_alias(
     await asyncio.to_thread(reload_active_alias_caches)
 
     def _run_batch_delete(conn):
-        _batch_update_log_aliases(conn, ip, ip, batch_size=1000)
+        try:
+            _batch_update_log_aliases(conn, ip, ip, batch_size=1000)
+        except Exception as exc:
+            logger.error(f"Background retroactive alias reversion failed for {ip}: {exc}")
 
     background_tasks.add_task(run_db_query, _run_batch_delete)
     return MessageResponse(status="ok")

@@ -195,11 +195,16 @@ async def get_storage_overview(user: dict = Depends(get_current_user)) -> Storag
 @router.get("/system/version", response_model=VersionResponse)
 async def get_version_info(
     refresh: bool = False,
-    user: dict = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
 ) -> VersionResponse:
     """
     Returns current application version and checks GHCR for stable updates.
     """
+    if refresh and not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+        )
     info = await check_for_updates(force_refresh=refresh)
     return VersionResponse(**info)
 

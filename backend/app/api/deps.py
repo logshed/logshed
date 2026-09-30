@@ -156,11 +156,7 @@ async def _is_session_revoked(payload: dict[str, Any]) -> bool:
 
     if updated_at_epoch is not None:
         iat_val = float(iat)
-        is_revoked = (
-            int(iat_val) < int(updated_at_epoch)
-            if (isinstance(iat, int) or iat_val.is_integer())
-            else iat_val < updated_at_epoch
-        )
+        is_revoked = iat_val < updated_at_epoch
         return is_revoked
 
     return False

@@ -144,7 +144,17 @@ def _is_secure_cookie(request: Request) -> bool:
         return True
     if cookie_secure_env in ("false", "0", "no"):
         return False
-    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    if request.url.scheme == "https":
+        return True
+
+    if request.headers.get("x-forwarded-proto", "").lower() == "https":
+        if request.client and request.client.host:
+            peer_ip = _clean_ip(request.client.host)
+            trusted_networks = _get_trusted_networks()
+            if _is_trusted_proxy(peer_ip, trusted_networks):
+                return True
+
+    return False
 
 
 @router.post("/setup", response_model=MessageResponse)

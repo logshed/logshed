@@ -311,7 +311,7 @@ class TestAuthentication:
             res3 = await clean_client.get("/api/auth/status")
             assert res3.json() == {"setup_required": False, "authenticated": False}
 
-            clean_client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+            clean_client.cookies.set(SESSION_COOKIE_NAME, create_session_token(user_id=1))
             res4 = await clean_client.get("/api/auth/status")
             assert res4.json() == {"setup_required": False, "authenticated": True}
 
@@ -361,6 +361,22 @@ class TestAuthentication:
             set_cookie_https = res_https.headers.get("set-cookie", "").lower()
             cookie_parts_https = [p.strip() for p in set_cookie_https.split(";")]
             assert "secure" in cookie_parts_https
+
+        # Untrusted peer IP sending x-forwarded-proto: https -> secure=False
+        untrusted_transport = ASGITransport(app=app, client=("198.51.100.5", 50000))
+        async with AsyncClient(
+            transport=untrusted_transport,
+            base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as untrusted_client:
+            res_untrusted = await untrusted_client.post(
+                "/api/auth/login",
+                json={"password": "secure_pwd_123"},
+                headers={"x-forwarded-proto": "https"},
+            )
+            assert res_untrusted.status_code == 200
+            set_cookie_untrusted = res_untrusted.headers.get("set-cookie", "").lower()
+            assert "secure" not in [p.strip() for p in set_cookie_untrusted.split(";")]
 
         # COOKIE_SECURE environment variable override
         monkeypatch.setenv("COOKIE_SECURE", "true")
@@ -506,6 +522,46 @@ class TestAdminPasswordChange:
             assert login_res.status_code == 200
             res_new_session = await new_client.get("/api/settings")
             assert res_new_session.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_session_tokens_created_in_same_second_as_password_change_properly_revoked(self, client: AsyncClient):
+        """Tokens created in the same second before password change are properly revoked due to subsecond precision."""
+        await client.post("/api/auth/setup", json={"password": "InitialSecurePass123!"})
+        initial_token = client.cookies.get(SESSION_COOKIE_NAME)
+        assert initial_token is not None
+
+        # Verify initial session works
+        res_before = await client.get("/api/settings")
+        assert res_before.status_code == 200
+
+        # Subsecond sleep to stay strictly within the same second
+        import asyncio
+        from app.api.deps import invalidate_admin_auth_cache
+        invalidate_admin_auth_cache()
+        await asyncio.sleep(0.05)
+
+        # Change password while authenticated within the same second
+        change_res = await client.post(
+            "/api/auth/password",
+            json={
+                "current_password": "InitialSecurePass123!",
+                "new_password": "UpdatedPassword456!",
+            },
+        )
+        assert change_res.status_code == 200
+        invalidate_admin_auth_cache()
+
+        # Token issued earlier in that same second must now be rejected
+        transport = ASGITransport(app=create_app())
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as old_client:
+            old_client.cookies.set(SESSION_COOKIE_NAME, initial_token)
+            res_after = await old_client.get("/api/settings")
+            assert res_after.status_code == 401
+            assert "Session expired due to password change" in res_after.json()["detail"]
 
 
 # ===================================================================

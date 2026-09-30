@@ -456,9 +456,10 @@ class TestDropRulesApi:
         create_res = await client.post(
             "/api/drop-rules",
             cookies=auth_cookie,
-            json={"message_pattern": "count_reset_test"},
+            json={"name": "Custom Drop Rule", "message_pattern": "count_reset_test"},
         )
         rule_id = create_res.json()["id"]
+        assert create_res.json()["name"] == "Custom Drop Rule"
 
         # Simulate dropped logs
         flt = get_drop_filter()
@@ -469,6 +470,7 @@ class TestDropRulesApi:
         reset_res = await client.post(f"/api/drop-rules/{rule_id}/reset", cookies=auth_cookie)
         assert reset_res.status_code == 200
         assert reset_res.json()["dropped_count"] == 0
+        assert reset_res.json()["name"] == "Custom Drop Rule"
 
     @pytest.mark.asyncio
     async def test_update_rule_resets_counter_on_criteria_change(self, client: AsyncClient, auth_cookie: dict):

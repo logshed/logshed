@@ -176,7 +176,7 @@ def create_session_token(
     """
     Creates a signed, encrypted session token containing user id and expiration.
     """
-    now = int(time.time())
+    now = time.time()
     payload = {
         "user_id": user_id,
         "iat": now,

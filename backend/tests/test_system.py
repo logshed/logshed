@@ -1392,6 +1392,39 @@ class TestHostAliases:
             for r in rows:
                 assert r[1] == "target-alias"
 
+    @pytest.mark.asyncio
+    async def test_background_alias_update_logs_cleanly_on_db_error(self, client: AsyncClient, auth_cookie: dict, caplog):
+        from unittest.mock import patch
+        import logging
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        with patch("app.api.aliases._batch_update_log_aliases", side_effect=Exception("Simulated SQLite lock error")):
+            with caplog.at_level(logging.ERROR):
+                create_res = await client.post(
+                    "/api/aliases",
+                    json={"ip": "192.168.1.100", "alias": "failing-alias", "notes": "Test fail"},
+                )
+                assert create_res.status_code == 200
+                assert "Background retroactive alias update failed for 192.168.1.100 -> failing-alias: Simulated SQLite lock error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_background_alias_delete_logs_cleanly_on_db_error(self, client: AsyncClient, auth_cookie: dict, caplog):
+        from unittest.mock import patch
+        import logging
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        create_res = await client.post(
+            "/api/aliases",
+            json={"ip": "192.168.1.101", "alias": "delete-fail-alias"},
+        )
+        assert create_res.status_code == 200
+
+        with patch("app.api.aliases._batch_update_log_aliases", side_effect=Exception("Simulated disk I/O failure")):
+            with caplog.at_level(logging.ERROR):
+                del_res = await client.delete("/api/aliases/192.168.1.101")
+                assert del_res.status_code == 200
+                assert "Background retroactive alias reversion failed for 192.168.1.101: Simulated disk I/O failure" in caplog.text
+
 
 # ===================================================================
 # 6. Database Compaction (Vacuum)
