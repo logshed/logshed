@@ -104,6 +104,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [aiSystemPrompt, setAiSystemPrompt] = useState<string>(DEFAULT_SYSTEM_PROMPT);
   const [internalLogLevel, setInternalLogLevel] = useState<string>('WARNING');
   const [checkForUpdates, setCheckForUpdates] = useState<boolean>(true);
+  const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
+  const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
+  const [digestScheduleTime, setDigestScheduleTime] = useState<string>('09:00');
 
   // Model discovery states
   const [availableModels, setAvailableModels] = useState<AiModelInfo[]>([]);
@@ -134,6 +137,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const baselineAiEnabled = settings
     ? (settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key))
     : false;
+  const baselineDigestEnabled = settings ? Boolean(settings.daily_digest_enabled) : false;
+  const baselineDigestChannelId = settings ? (settings.daily_digest_channel_id ?? null) : null;
+  const baselineDigestScheduleTime = settings ? (settings.daily_digest_schedule_time || '09:00') : '09:00';
 
   const isDirty = Boolean(
     settings &&
@@ -145,7 +151,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       aiBaseUrl !== (settings.ai_base_url || '') ||
       normalizePrompt(aiSystemPrompt) !== normalizePrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT) ||
       internalLogLevel !== (settings.internal_log_level || 'WARNING') ||
-      checkForUpdates !== (settings.check_for_updates ?? true))
+      checkForUpdates !== (settings.check_for_updates ?? true) ||
+      digestEnabled !== baselineDigestEnabled ||
+      digestChannelId !== baselineDigestChannelId ||
+      digestScheduleTime !== baselineDigestScheduleTime)
   );
 
   // Track if AI system instructions differ from system default
@@ -240,6 +249,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setAiSystemPrompt(settRes.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
       setInternalLogLevel(settRes.internal_log_level || 'WARNING');
       setCheckForUpdates(settRes.check_for_updates ?? true);
+      setDigestEnabled(Boolean(settRes.daily_digest_enabled));
+      setDigestChannelId(settRes.daily_digest_channel_id ?? null);
+      setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
 
       // Load models for provider if enabled
       if (initialAiEnabled) {
@@ -325,6 +337,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setAiSystemPrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
     setInternalLogLevel(settings.internal_log_level || 'WARNING');
     setCheckForUpdates(settings.check_for_updates ?? true);
+    setDigestEnabled(Boolean(settings.daily_digest_enabled));
+    setDigestChannelId(settings.daily_digest_channel_id ?? null);
+    setDigestScheduleTime(settings.daily_digest_schedule_time || '09:00');
     setIsCustomModel(false);
     setSelectedFallbackToAdd('');
     setCustomFallbackInput('');
@@ -344,6 +359,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setSaveInlineError(null);
       setSaveInlineSuccess(false);
 
+      if (digestEnabled && digestScheduleTime && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(digestScheduleTime.trim())) {
+        const msg = 'Enter a valid 24-hour time for the daily digest schedule, e.g. 09:00 or 23:30.';
+        setErrorMsg(msg);
+        setSaveInlineError(msg);
+        return false;
+      }
+
       await updateSettings({
         ai_enabled: aiEnabled,
         ai_provider: aiProvider,
@@ -354,6 +376,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ai_system_prompt: aiSystemPrompt,
         internal_log_level: internalLogLevel,
         check_for_updates: checkForUpdates,
+        daily_digest_enabled: digestEnabled,
+        daily_digest_channel_id: digestChannelId,
+        daily_digest_schedule_time: digestScheduleTime ? digestScheduleTime.trim() : '09:00',
       });
 
       // Reload updated settings as baseline
@@ -369,6 +394,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setAiSystemPrompt(settRes.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
       setInternalLogLevel(settRes.internal_log_level || 'WARNING');
       setCheckForUpdates(settRes.check_for_updates ?? true);
+      setDigestEnabled(Boolean(settRes.daily_digest_enabled));
+      setDigestChannelId(settRes.daily_digest_channel_id ?? null);
+      setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
 
       // Refresh model list with newly saved configuration if AI is enabled
       if (savedAiEnabled) {
@@ -964,7 +992,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </section>
 
         {/* Notification Channels & Webhooks Section */}
-        <NotificationsCard settings={settings} onSettingsSaved={loadAllData} />
+        <NotificationsCard
+          settings={settings}
+          onSettingsSaved={loadAllData}
+          digestEnabled={digestEnabled}
+          onDigestEnabledChange={setDigestEnabled}
+          digestChannelId={digestChannelId}
+          onDigestChannelIdChange={setDigestChannelId}
+          digestScheduleTime={digestScheduleTime}
+          onDigestScheduleTimeChange={setDigestScheduleTime}
+          isSavingSettings={isSavingSettings}
+        />
 
         {/* Version Updates Section */}
         <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">

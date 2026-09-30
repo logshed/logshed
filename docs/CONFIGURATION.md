@@ -169,9 +169,9 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 | **Notification Targets** | **Settings > Application** | Add Apprise webhook URLs (Discord, Pushover, Gotify, Telegram, Slack, Email). URLs with sensitive tokens are masked and stored encrypted. |
 | **Active Retention Slider** | **Settings > Application** | Adjust retained log window (1 to `MAX_RETENTION_DAYS`, default 14 days). |
 | **Host Aliases** | **Settings > Host Aliases** | Map IP addresses (e.g. `192.168.1.1`) to friendly names (`router`). Applies dynamically to log streams. |
-| **Alert Rules & Presets** | **Alerts & History > Alert Rules** | Define threshold, pattern, or rate spike detection rules and link them to notification channels. |
-| **Ingestion Drop Rules** | **Alerts & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |
-| **Maintenance Windows** | **Alerts & History > Maintenance** | Set on-demand or recurring schedules to silence notifications during planned downtime. |
+| **Alert Rules & Presets** | **Rules & History > Alert Rules** | Define threshold, pattern, or rate spike detection rules and link them to notification channels. |
+| **Ingestion Drop Rules** | **Rules & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |
+| **Maintenance Windows** | **Rules & History > Maintenance** | Set on-demand or recurring schedules to silence notifications during planned downtime. |
 
 ---
 

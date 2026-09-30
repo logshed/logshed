@@ -60,7 +60,7 @@ export interface SystemSettings {
   daily_digest_last_run?: string | null;
 }
 
-export type AppTab = 'stream' | 'storage' | 'alerts' | 'settings';
+export type AppTab = 'stream' | 'storage' | 'rules' | 'settings';
 export type SettingsSubTab = 'app' | 'aliases' | 'advanced';
 
 export interface StorageMetricsSnapshot {

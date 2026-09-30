@@ -1245,6 +1245,69 @@ describe('LiveLogStream Component', () => {
     expect(within(row).getByText('Local')).toBeInTheDocument();
     expect(within(row).queryByText('logshed')).toBeNull();
   });
+
+  it('preserves user modifications in Create Drop Rule modal when a new log arrives', async () => {
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+
+    // Click log to open LogDetailModal
+    const messageCell = screen.getByText('Nginx upstream connection timeout');
+    fireEvent.click(messageCell);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Log Record #101/i)).toBeInTheDocument();
+    });
+
+    // Click Create Drop Rule button
+    const dropRuleBtn = screen.getByRole('button', { name: /Create Drop Rule/i });
+    fireEvent.click(dropRuleBtn);
+
+    // Drop rule modal opens
+    await waitFor(() => {
+      expect(screen.getByText('Create Ingestion Drop Rule')).toBeInTheDocument();
+    });
+
+    const ruleNameInput = screen.getByPlaceholderText(/e.g. CRON Chatter or Docker Healthchecks/i);
+    fireEvent.change(ruleNameInput, { target: { value: 'Custom Drop Rule Name' } });
+    expect(ruleNameInput).toHaveValue('Custom Drop Rule Name');
+
+    // Also toggle regex checkbox
+    const regexCheckbox = screen.getByRole('checkbox', { name: /Interpret message pattern as Regular Expression/i });
+    fireEvent.click(regexCheckbox);
+    expect(regexCheckbox).toBeChecked();
+
+    // Now emit a new incoming SSE log
+    const es = MockEventSource.instances[0];
+    const newEntry: LogEntry = {
+      id: 999,
+      timestamp: '2026-09-03T14:45:00.000Z',
+      received_at: '2026-09-03T14:45:00.010Z',
+      source_ip: '192.168.1.50',
+      source_alias: 'homelab-host',
+      app_name: 'postfix',
+      facility: 2,
+      severity: 6,
+      message: 'Incoming background mail log',
+      raw: 'raw incoming mail log',
+    };
+
+    act(() => {
+      es.emit('log', newEntry);
+    });
+
+    // Stream updates with the new log
+    await waitFor(() => {
+      expect(screen.getByText('Incoming background mail log')).toBeInTheDocument();
+    });
+
+    // The modal must still be open and user modifications must NOT be wiped
+    expect(screen.getByText('Create Ingestion Drop Rule')).toBeInTheDocument();
+    expect(ruleNameInput).toHaveValue('Custom Drop Rule Name');
+    expect(regexCheckbox).toBeChecked();
+  });
 });
 
 describe('matchesSearchQuery Helper Function', () => {

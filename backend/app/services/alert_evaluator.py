@@ -748,7 +748,7 @@ class AlertEvaluator:
         from app.core.config import get_cached_setting
         app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
         if app_url:
-            body_lines.append(f"**Link:** {app_url}/alerts/history")
+            body_lines.append(f"**Link:** {app_url}/rules/history")
 
         notification_body = "\n".join(body_lines)
 

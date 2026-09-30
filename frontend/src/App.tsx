@@ -21,7 +21,7 @@ export const pathToTab = (pathname: string): AppTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
   if (clean === '/aliases' || clean.startsWith('/aliases/')) return 'settings';
   if (clean === '/storage' || clean.startsWith('/storage/')) return 'storage';
-  if (clean === '/alerts' || clean.startsWith('/alerts/')) return 'alerts';
+  if (clean === '/rules' || clean.startsWith('/rules/')) return 'rules';
   if (clean === '/settings' || clean.startsWith('/settings/')) return 'settings';
   return 'stream';
 };
@@ -30,8 +30,8 @@ export const tabToPath = (tab: AppTab): string => {
   switch (tab) {
     case 'storage':
       return '/storage';
-    case 'alerts':
-      return '/alerts';
+    case 'rules':
+      return '/rules';
     case 'settings':
       return '/settings';
     case 'stream':
@@ -210,7 +210,7 @@ export const App: React.FC = () => {
 
         {activeTab === 'storage' && <StoragePanel />}
 
-        {activeTab === 'alerts' && (
+        {activeTab === 'rules' && (
           <AlertsPanel
             onNavigateToSettings={() => handleTabChange('settings')}
           />

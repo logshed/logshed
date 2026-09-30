@@ -69,13 +69,13 @@ export type AlertViewTab = 'rules' | 'drop-rules' | 'history' | 'maintenance';
 
 export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
-  if (clean === '/alerts/history') {
+  if (clean === '/rules/history') {
     return 'history';
   }
-  if (clean === '/alerts/drop-rules' || clean === '/alerts/drop') {
+  if (clean === '/rules/drop-rules' || clean === '/rules/drop') {
     return 'drop-rules';
   }
-  if (clean === '/alerts/maintenance') {
+  if (clean === '/rules/maintenance') {
     return 'maintenance';
   }
   return 'rules';
@@ -84,14 +84,14 @@ export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
 export const alertSubTabToPath = (subTab: AlertViewTab): string => {
   switch (subTab) {
     case 'history':
-      return '/alerts/history';
+      return '/rules/history';
     case 'drop-rules':
-      return '/alerts/drop-rules';
+      return '/rules/drop-rules';
     case 'maintenance':
-      return '/alerts/maintenance';
+      return '/rules/maintenance';
     case 'rules':
     default:
-      return '/alerts/rules';
+      return '/rules/rules';
   }
 };
 
@@ -697,7 +697,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       <div>
         <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
           <ShieldAlert className="w-5 h-5 text-accent-500" />
-          <span>Alerts & History</span>
+          <span>Rules & History</span>
         </h2>
         <p className="text-xs text-slate-400 mt-0.5">
           Configure real-time threshold and pattern alert rules, manage ingestion drop rules, deploy 1-click quick rules, and review past incidents and analyses.
