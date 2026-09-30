@@ -142,18 +142,18 @@ describe('Navbar Component', () => {
     });
 
     const consoleBtn = screen.getByRole('button', { name: /Console View/i });
-    const alertsBtn = screen.getByRole('button', { name: /Alerts & History/i });
+    const rulesBtn = screen.getByRole('button', { name: /Rules & History/i });
     const storageBtn = screen.getByRole('button', { name: /Storage/i });
     const settingsBtn = screen.getByRole('button', { name: /^Settings$/i });
 
     expect(consoleBtn).toBeInTheDocument();
-    expect(alertsBtn).toBeInTheDocument();
+    expect(rulesBtn).toBeInTheDocument();
     expect(storageBtn).toBeInTheDocument();
     expect(settingsBtn).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Host Aliases/i })).toBeNull();
 
-    fireEvent.click(alertsBtn);
-    expect(onTabChange).toHaveBeenCalledWith('alerts');
+    fireEvent.click(rulesBtn);
+    expect(onTabChange).toHaveBeenCalledWith('rules');
 
     fireEvent.click(storageBtn);
     expect(onTabChange).toHaveBeenCalledWith('storage');

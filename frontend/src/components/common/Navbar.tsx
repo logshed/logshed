@@ -165,15 +165,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => onTabChange('alerts')}
+              onClick={() => onTabChange('rules')}
               className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                activeTab === 'alerts'
+                activeTab === 'rules'
                   ? 'bg-dark-700 text-slate-100 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
               }`}
             >
               <Bell className="w-3.5 h-3.5" />
-              <span>Alerts & History</span>
+              <span>Rules & History</span>
             </button>
 
             <button
@@ -265,15 +265,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           <button
-            onClick={() => onTabChange('alerts')}
+            onClick={() => onTabChange('rules')}
             className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
-              activeTab === 'alerts'
+              activeTab === 'rules'
                 ? 'text-accent-400 font-semibold bg-dark-800/80'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Bell className="w-4 h-4 mb-0.5" />
-            <span>Alerts & History</span>
+            <span>Rules & History</span>
           </button>
 
           <button

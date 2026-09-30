@@ -254,7 +254,7 @@ def format_digest_body(
         clean_url = app_url.strip().rstrip("/")
         body_parts.extend([
             "",
-            f"**Link:** {clean_url}/alerts/history",
+            f"**Link:** {clean_url}/rules/history",
         ])
 
     return "\n".join(body_parts)

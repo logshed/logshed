@@ -5,6 +5,7 @@ import * as settingsApi from '../api/settings.ts';
 import * as aiApi from '../api/ai.ts';
 import * as authApi from '../api/auth.ts';
 import * as systemApi from '../api/system.ts';
+import * as notifApi from '../api/notifications.ts';
 import { DEFAULT_SYSTEM_PROMPT } from '../utils/aiPrompt.ts';
 
 const mockLogout = vi.fn();
@@ -50,6 +51,7 @@ describe('SettingsPanel Component', () => {
       cached_at: null,
       is_live: true,
     });
+    vi.spyOn(notifApi, 'fetchNotificationChannels').mockResolvedValue([]);
   });
 
   it('renders AI System Instructions card, allows editing and saving ai_system_prompt', async () => {
@@ -799,6 +801,67 @@ describe('SettingsPanel Component', () => {
         expect(updateSpy).toHaveBeenCalledWith(
           expect.objectContaining({
             ai_enabled: true,
+          })
+        );
+      });
+    });
+
+    it('allows editing daily digest settings and saving via the sticky Save Changes button', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+        daily_digest_enabled: false,
+        daily_digest_channel_id: null,
+        daily_digest_schedule_time: '09:00',
+      });
+      vi.spyOn(notifApi, 'fetchNotificationChannels').mockResolvedValue([
+        {
+          id: 1,
+          name: 'Homelab Discord',
+          url: 'discord://1...9/a...f',
+          is_enabled: true,
+          created_at: '2026-09-18T12:00:00Z',
+          updated_at: '2026-09-18T12:00:00Z',
+        },
+      ]);
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Daily Digest Rollup')).toBeInTheDocument();
+      });
+
+      // No unsaved changes initially
+      expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
+
+      // Check daily digest checkbox
+      const digestCheckbox = screen.getByLabelText(/Enable 24-hour daily digest rollup/i);
+      fireEvent.click(digestCheckbox);
+      expect(digestCheckbox).toBeChecked();
+
+      // Save button should now be visible in sticky action bar
+      const saveBtn = await screen.findByRole('button', { name: /Save Changes/i });
+      expect(saveBtn).toBeInTheDocument();
+
+      // Change schedule time
+      const timeInput = screen.getByLabelText(/Schedule Time/i);
+      fireEvent.change(timeInput, { target: { value: '18:30' } });
+
+      // Click Save Changes
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            daily_digest_enabled: true,
+            daily_digest_schedule_time: '18:30',
           })
         );
       });

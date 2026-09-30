@@ -435,7 +435,7 @@ class TestNotificationsApi:
             "**App:** testapp\n"
             "**Log:** [ERROR] failed\n"
             "**AI Analysis:** System recovery active\n"
-            "**Link:** http://10.0.0.1/alerts/history"
+            "**Link:** http://10.0.0.1/rules/history"
         )
 
         with patch("apprise.plugins.pushover.NotifyPushover._send", side_effect=fake_send):

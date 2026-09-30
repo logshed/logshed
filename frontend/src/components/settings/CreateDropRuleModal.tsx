@@ -50,9 +50,21 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [testResult, setTestResult] = useState<{ matched?: boolean; error?: string | null } | null>(null);
   const [isTesting, setIsTesting] = useState<boolean>(false);
 
-  // Initialize form state on open or when target rule / initial values change
+  const prevIsOpenRef = React.useRef<boolean>(false);
+  const prevTargetKeyRef = React.useRef<string>('');
+
+  const currentTargetKey = ruleToEdit
+    ? `rule:${ruleToEdit.id}`
+    : `create:${initialSource}:${initialApp}:${initialMessage}:${initialName}`;
+
+  // Initialize form state only on open or when target rule / initial values change
   useEffect(() => {
-    if (isOpen) {
+    const wasOpen = prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+    const targetChanged = prevTargetKeyRef.current !== currentTargetKey;
+
+    if (isOpen && (!wasOpen || targetChanged)) {
+      prevTargetKeyRef.current = currentTargetKey;
       setTestResult(null);
       if (ruleToEdit) {
         setRuleName(ruleToEdit.name || ruleToEdit.app_pattern || ruleToEdit.source_pattern || '');
@@ -111,8 +123,10 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setSampleApp(initialApp);
         setSampleSeverity('');
       }
+    } else if (!isOpen) {
+      prevTargetKeyRef.current = '';
     }
-  }, [isOpen, ruleToEdit, initialName, initialSource, initialApp, initialMessage, availableSources, availableApps]);
+  }, [isOpen, currentTargetKey]);
 
   const hasFilterCriteria = Boolean(
     messagePattern.trim() || sourcePattern.trim() || appPattern.trim() || severityThreshold !== null

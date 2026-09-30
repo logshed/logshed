@@ -113,7 +113,7 @@ const mockDropRules = [
 describe('AlertsPanel Component', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    window.history.pushState(null, '', '/alerts');
+    window.history.pushState(null, '', '/rules');
     vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(mockRules);
     vi.spyOn(alertsApi, 'fetchAlertPresets').mockResolvedValue(mockPresets);
     vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
@@ -122,10 +122,10 @@ describe('AlertsPanel Component', () => {
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
   });
 
-  it('renders Alerts & History heading, subtitle with drop rules, and enabled drop rules tab count', async () => {
+  it('renders Rules & History heading, subtitle with drop rules, and enabled drop rules tab count', async () => {
     render(<AlertsPanel />);
 
-    expect(screen.getByRole('heading', { level: 2, name: /Alerts & History/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /Rules & History/i })).toBeInTheDocument();
     expect(
       screen.getByText(/Configure real-time threshold and pattern alert rules, manage ingestion drop rules/i)
     ).toBeInTheDocument();
@@ -155,17 +155,17 @@ describe('AlertsPanel Component', () => {
   });
 
   it('maps pathname to corresponding AlertViewTab and vice versa', () => {
-    expect(pathToAlertSubTab('/alerts')).toBe('rules');
-    expect(pathToAlertSubTab('/alerts/rules')).toBe('rules');
-    expect(pathToAlertSubTab('/alerts/presets')).toBe('rules');
-    expect(pathToAlertSubTab('/alerts/quick-rules')).toBe('rules');
-    expect(pathToAlertSubTab('/alerts/history')).toBe('history');
-    expect(pathToAlertSubTab('/alerts/drop-rules')).toBe('drop-rules');
-    expect(pathToAlertSubTab('/alerts/drop')).toBe('drop-rules');
+    expect(pathToAlertSubTab('/rules')).toBe('rules');
+    expect(pathToAlertSubTab('/rules/rules')).toBe('rules');
+    expect(pathToAlertSubTab('/rules/presets')).toBe('rules');
+    expect(pathToAlertSubTab('/rules/quick-rules')).toBe('rules');
+    expect(pathToAlertSubTab('/rules/history')).toBe('history');
+    expect(pathToAlertSubTab('/rules/drop-rules')).toBe('drop-rules');
+    expect(pathToAlertSubTab('/rules/drop')).toBe('drop-rules');
 
-    expect(alertSubTabToPath('rules')).toBe('/alerts/rules');
-    expect(alertSubTabToPath('history')).toBe('/alerts/history');
-    expect(alertSubTabToPath('drop-rules')).toBe('/alerts/drop-rules');
+    expect(alertSubTabToPath('rules')).toBe('/rules/rules');
+    expect(alertSubTabToPath('history')).toBe('/rules/history');
+    expect(alertSubTabToPath('drop-rules')).toBe('/rules/drop-rules');
   });
 
   it('renders alert rules and switches between tabs, and opens Presets modal', async () => {
@@ -522,17 +522,17 @@ describe('AlertsPanel Component', () => {
     // Click Drop Rules
     const dropRulesTab = screen.getByRole('button', { name: /Drop Rules/i });
     fireEvent.click(dropRulesTab);
-    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/drop-rules');
+    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules/drop-rules');
 
     // Click History
     const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
-    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/history');
+    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules/history');
 
     // Click Alert Rules
     const rulesTab = screen.getByRole('button', { name: /Alert Rules/i });
     fireEvent.click(rulesTab);
-    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts/rules');
+    expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules/rules');
   });
 
   it('installs alert preset from presets modal with target channel', async () => {
@@ -806,8 +806,8 @@ describe('AlertsPanel Component', () => {
   });
 
   it('correctly maps maintenance sub-tab paths', () => {
-    expect(pathToAlertSubTab('/alerts/maintenance')).toBe('maintenance');
-    expect(alertSubTabToPath('maintenance')).toBe('/alerts/maintenance');
+    expect(pathToAlertSubTab('/rules/maintenance')).toBe('maintenance');
+    expect(alertSubTabToPath('maintenance')).toBe('/rules/maintenance');
   });
 
   it('renders active maintenance banner on the main rules tab and switches to maintenance sub-tab via Manage Maintenance button', async () => {

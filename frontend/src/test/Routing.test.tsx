@@ -77,11 +77,11 @@ describe('URL Routing and History API Synchronization', () => {
       expect(pathToTab('/aliases')).toBe('settings');
       expect(pathToTab('/aliases/')).toBe('settings');
       expect(pathToTab('/storage')).toBe('storage');
-      expect(pathToTab('/alerts')).toBe('alerts');
-      expect(pathToTab('/alerts/rules')).toBe('alerts');
-      expect(pathToTab('/alerts/presets')).toBe('alerts');
-      expect(pathToTab('/alerts/quick-rules')).toBe('alerts');
-      expect(pathToTab('/alerts/history')).toBe('alerts');
+      expect(pathToTab('/rules')).toBe('rules');
+      expect(pathToTab('/rules/rules')).toBe('rules');
+      expect(pathToTab('/rules/presets')).toBe('rules');
+      expect(pathToTab('/rules/quick-rules')).toBe('rules');
+      expect(pathToTab('/rules/history')).toBe('rules');
       expect(pathToTab('/settings')).toBe('settings');
       expect(pathToTab('/settings/app')).toBe('settings');
       expect(pathToTab('/settings/aliases')).toBe('settings');
@@ -92,7 +92,7 @@ describe('URL Routing and History API Synchronization', () => {
     it('maps AppTab to canonical URL path', () => {
       expect(tabToPath('stream')).toBe('/');
       expect(tabToPath('storage')).toBe('/storage');
-      expect(tabToPath('alerts')).toBe('/alerts');
+      expect(tabToPath('rules')).toBe('/rules');
       expect(tabToPath('settings')).toBe('/settings');
     });
   });
@@ -126,8 +126,8 @@ describe('URL Routing and History API Synchronization', () => {
       });
     });
 
-    it('initializes on alerts tab when URL pathname is /alerts or /alerts/history', async () => {
-      window.history.pushState(null, '', '/alerts/history');
+    it('initializes on rules tab when URL pathname is /rules or /rules/history', async () => {
+      window.history.pushState(null, '', '/rules/history');
       render(<App />);
 
       await waitFor(() => {
@@ -142,13 +142,13 @@ describe('URL Routing and History API Synchronization', () => {
       render(<App />);
       expect(screen.getByTestId('live-log-stream')).toBeInTheDocument();
 
-      // Click Alerts & History tab
-      const alertsBtn = screen.getByRole('button', { name: /^Alerts & History$/i });
+      // Click Rules & History tab
+      const rulesBtn = screen.getByRole('button', { name: /^Rules & History$/i });
       await act(async () => {
-        fireEvent.click(alertsBtn);
+        fireEvent.click(rulesBtn);
       });
 
-      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/alerts');
+      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules');
       expect(screen.getByTestId('alerts-panel')).toBeInTheDocument();
 
       // Click Storage tab
