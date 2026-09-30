@@ -2105,4 +2105,50 @@ class TestDockerHostAliases:
         await tailer2.stop()
 
 
+class TestDockerContainerMemoryPruning:
+    @pytest.mark.asyncio
+    async def test_dockertailer_pruning_removes_exited_container_keys(self):
+        """DockerTailer discovery purges exited container IDs from _container_last_seen and _container_last_messages."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        assembler = KeyedMultilineAssembler()
+        tailer = DockerTailer(assembler)
+
+        # Seed tracking state with running and exited containers
+        tailer._container_last_seen = {
+            "running_container_1": "2026-09-30T12:00:00Z",
+            "exited_container_2": "2026-09-30T11:59:00Z",
+            "stopped_container_3": "2026-09-30T11:58:00Z",
+        }
+        tailer._container_last_messages = {
+            "running_container_1": {"msg1", "msg2"},
+            "exited_container_2": {"old_msg"},
+            "stopped_container_3": {"dead_msg"},
+        }
+
+        # Mock client returning only running_container_1
+        mock_containers = [
+            {"Id": "running_container_1", "Names": ["/running_container_1"]},
+        ]
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_containers
+        mock_resp.raise_for_status.return_value = None
+        mock_client.get.return_value = mock_resp
+
+        discovered = await tailer._discover_containers(mock_client)
+        assert len(discovered) == 1
+
+        # Verify running container tracking state is retained
+        assert "running_container_1" in tailer._container_last_seen
+        assert "running_container_1" in tailer._container_last_messages
+
+        # Verify exited containers are purged
+        assert "exited_container_2" not in tailer._container_last_seen
+        assert "stopped_container_3" not in tailer._container_last_seen
+        assert "exited_container_2" not in tailer._container_last_messages
+        assert "stopped_container_3" not in tailer._container_last_messages
+
+
 

@@ -418,6 +418,7 @@ def resolve_all_system_settings(db_settings: dict[str, str]) -> dict[str, Any]:
 
 
 _cached_db_settings: Optional[dict[str, str]] = None
+_cached_resolved_settings: Optional[dict[str, Any]] = None
 _cache_timestamp: float = 0.0
 _cache_lock = threading.Lock()
 SETTINGS_CACHE_TTL = 10.0
@@ -425,9 +426,10 @@ SETTINGS_CACHE_TTL = 10.0
 
 def invalidate_settings_cache() -> None:
     """Clear cached system settings, forcing reload on next access."""
-    global _cached_db_settings, _cache_timestamp
+    global _cached_db_settings, _cached_resolved_settings, _cache_timestamp
     with _cache_lock:
         _cached_db_settings = None
+        _cached_resolved_settings = None
         _cache_timestamp = 0.0
 
 
@@ -457,18 +459,21 @@ def _load_db_settings_sync() -> dict[str, str]:
 def get_cached_system_settings() -> dict[str, Any]:
     """
     Returns the cached dictionary of effective system settings.
-    Refreshes database settings if expired (TTL 10s) or explicitly invalidated,
-    then evaluates effective settings against environment variables and defaults.
+    Refreshes database settings and resolves settings if expired (TTL 10s)
+    or explicitly invalidated, returning the cached resolved dictionary.
     """
-    global _cached_db_settings, _cache_timestamp
+    global _cached_db_settings, _cached_resolved_settings, _cache_timestamp
     now = time.monotonic()
     with _cache_lock:
-        if _cached_db_settings is None or (now - _cache_timestamp) >= SETTINGS_CACHE_TTL:
+        if (
+            _cached_resolved_settings is None
+            or _cached_db_settings is None
+            or (now - _cache_timestamp) >= SETTINGS_CACHE_TTL
+        ):
             _cached_db_settings = _load_db_settings_sync()
+            _cached_resolved_settings = resolve_all_system_settings(_cached_db_settings)
             _cache_timestamp = now
-        db_snapshot = dict(_cached_db_settings)
-
-    return resolve_all_system_settings(db_snapshot)
+        return dict(_cached_resolved_settings)
 
 
 def get_cached_setting(key: str, default: Any = None) -> Any:

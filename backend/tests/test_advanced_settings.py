@@ -241,6 +241,35 @@ class TestSettingsCache:
         # Cache now yields new value
         assert get_cached_setting("ai_timeout") == 120.0
 
+    def test_settings_cache_returns_cached_resolved_dict_without_recomputing(self):
+        """Settings cache returns cached resolved dictionary without calling resolve_all_system_settings on each access."""
+        from unittest.mock import patch
+        import app.core.config as config_mod
+
+        config_mod.invalidate_settings_cache()
+
+        with patch("app.core.config.resolve_all_system_settings", wraps=config_mod.resolve_all_system_settings) as mock_resolve:
+            # First access should compute and cache resolved dictionary
+            settings_1 = config_mod.get_cached_system_settings()
+            assert mock_resolve.call_count == 1
+            assert isinstance(settings_1, dict)
+
+            # Subsequent accesses within TTL should return cached dictionary without re-calling resolve_all_system_settings
+            settings_2 = config_mod.get_cached_system_settings()
+            assert mock_resolve.call_count == 1
+            assert settings_2 == settings_1
+
+            setting_val = config_mod.get_cached_setting("ai_timeout")
+            assert mock_resolve.call_count == 1
+            assert setting_val == 45.0
+
+            # Invalidation forces re-resolution
+            config_mod.invalidate_settings_cache()
+            settings_3 = config_mod.get_cached_system_settings()
+            assert mock_resolve.call_count == 2
+            assert settings_3 == settings_1
+
+
 
 # ===================================================================
 # 3. Settings API Endpoints

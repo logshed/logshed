@@ -249,11 +249,41 @@ class AlertEvaluator:
                 if rule.id not in self._windows:
                     self._windows[rule.id] = deque()
 
+    def prune_expired_windows(self, now_epoch: float) -> None:
+        """
+        Iterate through all rule windows in self._windows and pop left entries
+        where entry_epoch < (now_epoch - rule.window_seconds).
+        """
+        with self._lock:
+            self._prune_expired_windows_locked(now_epoch)
+
+    def _prune_expired_windows_locked(self, now_epoch: float) -> None:
+        """Prune expired window entries while holding self._lock."""
+        rules_by_id = {rule.id: rule for rule in self._rules}
+        for rule_id, window in self._windows.items():
+            rule = rules_by_id.get(rule_id)
+            if not rule:
+                continue
+            window_cutoff = now_epoch - rule.window_seconds
+            while window:
+                first = window[0]
+                entry_epoch = first[0] if isinstance(first, (tuple, list)) else first
+                if entry_epoch < window_cutoff:
+                    window.popleft()
+                else:
+                    break
+
     async def evaluate_batch(self, batch: list[dict[str, Any]]) -> None:
         """
         Evaluate an ingested batch of logs against active alert rules.
         Schedules background alert dispatch tasks when thresholds are reached.
         """
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_epoch = now_utc.timestamp()
+
+        # Prune expired window entries for all rules (PERF-04)
+        self.prune_expired_windows(now_epoch)
+
         if not batch:
             return
 
@@ -263,8 +293,6 @@ class AlertEvaluator:
         if not rules:
             return
 
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
-        now_epoch = now_utc.timestamp()
         now_iso = now_utc.isoformat()
         min_epoch = now_epoch - 86400.0
         max_epoch = now_epoch + 300.0
@@ -298,22 +326,40 @@ class AlertEvaluator:
                         entry_epoch = entry.get("_epoch_ts", now_epoch)
 
                         # Evict expired entries outside the sliding window
-                        while window and window[0][0] < window_cutoff:
-                            window.popleft()
+                        while window:
+                            first = window[0]
+                            first_epoch = first[0] if isinstance(first, (tuple, list)) else first
+                            if first_epoch < window_cutoff:
+                                window.popleft()
+                            else:
+                                break
 
                         # Skip entries that fall outside the active sliding window
                         if entry_epoch < window_cutoff:
                             continue
 
+                        if rule.rule_type == "rate":
+                            # For rate rules that only track log counts, store lightweight records
+                            # rather than holding entire log payload dictionaries in memory.
+                            payload = {
+                                "timestamp": entry.get("timestamp"),
+                                "app_name": entry.get("app_name"),
+                                "source_alias": entry.get("source_alias"),
+                                "source_ip": entry.get("source_ip"),
+                                "message": str(entry.get("message") or entry.get("raw") or "")[:200],
+                            }
+                        else:
+                            payload = entry
+
                         # Append entry preserving chronological order under timestamp jitter (PERF-02)
-                        if not window or entry_epoch >= window[-1][0]:
-                            window.append((entry_epoch, entry))
+                        if not window or entry_epoch >= (window[-1][0] if isinstance(window[-1], (tuple, list)) else window[-1]):
+                            window.append((entry_epoch, payload))
                         else:
                             # Backwards linear search for insertion index to avoid full deque sorting
                             idx = len(window)
-                            while idx > 0 and window[idx - 1][0] > entry_epoch:
+                            while idx > 0 and (window[idx - 1][0] if isinstance(window[idx - 1], (tuple, list)) else window[idx - 1]) > entry_epoch:
                                 idx -= 1
-                            window.insert(idx, (entry_epoch, entry))
+                            window.insert(idx, (entry_epoch, payload))
 
                         # Bound maximum deque size
                         while len(window) > max_window_size:
@@ -421,8 +467,11 @@ class AlertEvaluator:
         extracted_app = None
         if triggering_logs:
             sample_entry = triggering_logs[-1]
-            sample_log = str(sample_entry.get("message") or sample_entry.get("raw") or "")
+            if isinstance(sample_entry, dict):
+                sample_log = str(sample_entry.get("message") or sample_entry.get("raw") or "")
             for log_entry in reversed(triggering_logs):
+                if not isinstance(log_entry, dict):
+                    continue
                 if not extracted_ip:
                     msg = str(log_entry.get("message") or "")
                     cand_ip = extract_ip_from_message(msg)
@@ -450,6 +499,8 @@ class AlertEvaluator:
             msg_counter: Counter[str] = Counter()
 
             for log_entry in triggering_logs:
+                if not isinstance(log_entry, dict):
+                    continue
                 app_val = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
                 host_val = log_entry.get("source_alias") or log_entry.get("source_ip") or log_entry.get("host") or "unknown"
                 msg_val = str(log_entry.get("message") or log_entry.get("raw") or "")[:150].strip()
@@ -466,6 +517,8 @@ class AlertEvaluator:
                 if rule.rule_type == "rate":
                     extracted_app = top_app
                     for log_entry in reversed(triggering_logs):
+                        if not isinstance(log_entry, dict):
+                            continue
                         cand_app = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
                         if str(cand_app) == str(top_app):
                             sample_log = str(log_entry.get("message") or log_entry.get("raw") or "")

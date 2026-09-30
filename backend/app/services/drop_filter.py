@@ -208,7 +208,7 @@ class DropFilter:
 
         if conn is not None:
             _do_update(conn)
-        elif effective_db:
+        elif effective_db and Path(effective_db).exists():
             c = sqlite3.connect(str(effective_db), timeout=5.0)
             try:
                 _do_update(c)
@@ -242,7 +242,7 @@ class DropFilter:
 
         if conn is not None:
             rows = _load(conn)
-        elif effective_db:
+        elif effective_db and Path(effective_db).exists():
             c = sqlite3.connect(str(effective_db), timeout=5.0)
             try:
                 rows = _load(c)

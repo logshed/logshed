@@ -74,6 +74,13 @@ if "DOCKER_SOCKET_POLL_MAX" in os.environ:
     except ValueError:
         pass
 
+DEFAULT_DOCKER_DISCOVERY_INTERVAL: float = 60.0
+if "DOCKER_DISCOVERY_INTERVAL" in os.environ:
+    try:
+        DEFAULT_DOCKER_DISCOVERY_INTERVAL = float(os.environ["DOCKER_DISCOVERY_INTERVAL"])
+    except ValueError:
+        pass
+
 MAX_TTY_BUFFER = 65536  # 64 KB limit to prevent unbounded memory growth in TTY mode
 
 
@@ -684,6 +691,7 @@ class DockerTailer:
         enable_docker: Optional[bool] = None,
         exclude_containers: Optional[str] = None,
         source_alias: Optional[str] = None,
+        discovery_interval: Optional[float] = None,
     ):
         self._assembler = assembler
         self._running = False
@@ -704,6 +712,11 @@ class DockerTailer:
             socket_poll_max
             if socket_poll_max is not None
             else DEFAULT_DOCKER_SOCKET_POLL_MAX
+        )
+        self._discovery_interval = (
+            discovery_interval
+            if discovery_interval is not None
+            else DEFAULT_DOCKER_DISCOVERY_INTERVAL
         )
         self._db_path = Path(db_path) if db_path else None
         if alias_cache is not None:
@@ -909,9 +922,40 @@ class DockerTailer:
             await self.alias_cache.stop()
         logger.info("Docker tailer stopped")
 
+    async def _discover_containers(
+        self, client: Optional[httpx.AsyncClient] = None
+    ) -> list[dict]:
+        """
+        Enumerate running containers and purge tracking state for containers
+        that are no longer running or discovered.
+        """
+        target_client = client or self._current_client
+        if target_client is None:
+            return []
+
+        containers = await _get_running_containers(target_client)
+        active_ids: set[str] = set()
+        for c in containers:
+            cid = c.get("Id", "")
+            if cid:
+                active_ids.add(cid)
+                if len(cid) >= 12:
+                    active_ids.add(cid[:12])
+
+        # Purge removed container IDs from tracking dictionaries
+        for cid in list(self._container_last_seen.keys()):
+            if cid not in active_ids:
+                self._container_last_seen.pop(cid, None)
+
+        for cid in list(self._container_last_messages.keys()):
+            if cid not in active_ids:
+                self._container_last_messages.pop(cid, None)
+
+        return containers
+
     async def _attach_running_containers(self, client: httpx.AsyncClient) -> None:
         """Enumerate running containers and start a log tailer for each, skipping excluded containers."""
-        containers = await _get_running_containers(client)
+        containers = await self._discover_containers(client)
         for c in containers:
             cid = c.get("Id", "")
             names = c.get("Names", [])
@@ -1050,6 +1094,22 @@ class DockerTailer:
                             events_task.cancel()
                             return
 
+            async def _periodic_discovery() -> None:
+                if self._discovery_interval <= 0:
+                    return
+                while not self._cancel_event.is_set():
+                    try:
+                        await asyncio.sleep(self._discovery_interval)
+                    except asyncio.CancelledError:
+                        return
+                    try:
+                        await self._discover_containers(client)
+                    except asyncio.CancelledError:
+                        return
+                    except Exception as e:
+                        logger.debug(f"Periodic container discovery error: {e}")
+
+            discovery_task = asyncio.create_task(_periodic_discovery())
             monitor_task = asyncio.create_task(_events_heartbeat())
             cancel_task = asyncio.create_task(self._cancel_event.wait())
             try:
@@ -1081,6 +1141,12 @@ class DockerTailer:
                     events_task.cancel()
                     try:
                         await events_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                if not discovery_task.done():
+                    discovery_task.cancel()
+                    try:
+                        await discovery_task
                     except (asyncio.CancelledError, Exception):
                         pass
                 monitor_task.cancel()

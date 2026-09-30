@@ -1631,6 +1631,103 @@ class TestGlobalMaintenanceWindow:
         assert history_rows[0][0] == "Scheduled Rule"
 
 
+class TestAlertEvaluatorWindowPruningAndLightweightRecords:
+    @pytest.fixture
+    def test_db(self, tmp_path: Path):
+        db_path = tmp_path / "test_alerts_pruning.db"
+        run_migrations(db_path)
+        return db_path
+
+    @pytest.mark.asyncio
+    async def test_sliding_window_purges_expired_logs_during_idle_traffic(self, test_db: Path):
+        """AlertEvaluator sliding window purges expired logs during periods of idle traffic."""
+        from datetime import datetime, timezone, timedelta
+
+        conn = get_connection(test_db)
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            """,
+            ("Idle Pruning Rule", "threshold", 10, 5, 300, now_iso),
+        )
+        rule_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        evaluator = AlertEvaluator(test_db)
+        now_epoch = now_utc.timestamp()
+
+        # Ingest a burst of logs below threshold
+        burst = [
+            {
+                "id": i,
+                "app_name": "worker",
+                "message": f"burst log {i}",
+                "timestamp": (now_utc - timedelta(seconds=2)).isoformat(),
+            }
+            for i in range(5)
+        ]
+        await evaluator.evaluate_batch(burst)
+
+        # Window should contain 5 entries
+        assert len(evaluator._windows[rule_id]) == 5
+
+        # Simulate idle traffic 10 seconds later: evaluate_batch with empty or future epoch
+        future_epoch = now_epoch + 15.0
+        evaluator.prune_expired_windows(future_epoch)
+
+        # Window should have pruned all expired entries
+        assert len(evaluator._windows[rule_id]) == 0
+
+    @pytest.mark.asyncio
+    async def test_rate_rule_stores_lightweight_records_not_full_payload(self, test_db: Path):
+        """Rate rules store lightweight records instead of retaining full log payload dictionaries."""
+        from datetime import datetime, timezone
+
+        conn = get_connection(test_db)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            """,
+            ("Rate Lightweight Rule", "rate", 10, 5, 300, now_iso),
+        )
+        rule_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        evaluator = AlertEvaluator(test_db)
+        heavy_log = {
+            "id": 123,
+            "app_name": "bulk-service",
+            "source_alias": "node-1",
+            "source_ip": "10.0.0.1",
+            "message": "warning message",
+            "raw": "HUGE RAW LOG" * 1000,
+            "arbitrary_heavy_metadata": "X" * 100000,
+            "timestamp": now_iso,
+        }
+        await evaluator.evaluate_batch([heavy_log])
+
+        window = evaluator._windows[rule_id]
+        assert len(window) == 1
+        stored_ts, stored_entry = window[0]
+        assert isinstance(stored_entry, dict)
+        assert "arbitrary_heavy_metadata" not in stored_entry
+        assert "raw" not in stored_entry
+        assert stored_entry["app_name"] == "bulk-service"
+        assert stored_entry["message"] == "warning message"
+
+
+
 
 
 
