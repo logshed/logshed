@@ -6,11 +6,13 @@
 - Run frontend tests: `cd frontend && npm test`
 - Build frontend: `cd frontend && npm run build`
 - Python Environment: Always execute Python tools using `.venv/bin/python` or `.venv/bin/pytest` (or prefix shell commands with `source .venv/bin/activate && ...`). Never use the global system Python.
-- Command Execution & Tooling Guidelines: Avoid running dynamic inline code with `python -c '...'` or complex subshell evaluations, as these trigger interactive security confirmation prompts. Instead:
-  * For package/module inspection: use static commands like `.venv/bin/pip show <pkg>` or `.venv/bin/python -m <module> --help`.
-  * For code exploration and symbol inspection: use file reading and search tools (`view_file`, `grep_search`) rather than executing runtime Python snippets.
-  * If dynamic execution is strictly required, write a temporary script into the agent scratch directory rather than running inline strings in the shell.
-
+- **CLI & Standard Tools First (Strictly No Ad-Hoc Scripting):**
+  * **STRICT PROHIBITION on `python -c '...'` or Ad-Hoc Scripts:** Never write or execute ad-hoc scripts (inline `python -c`, Node, or temporary Python scripts in scratch/workspace) for tasks solvable with standard CLI utilities (`grep`, `git`, `find`, `sed`, `head`, `tail`, `wc`, `jq`) or agent read tools (`view_file`).
+  * **File & Text Inspection:** Always use standard CLI tools or file tools:
+    - Text/pattern/Unicode checks: `grep -rn <pattern>` or `git grep <pattern>` (e.g. for em dashes: `grep -rn $'\u2014' backend/ frontend/src/`).
+    - Repository state: `git status`, `git diff`, `git log`.
+    - Package inspection: `.venv/bin/pip show <pkg>` or `.venv/bin/pip list`.
+  * **Python Execution Scope:** Python execution is strictly reserved for running existing project test suites (`.venv/bin/pytest`) and starting the project application.
 
 ## Architecture & Code Standards
 - **Runtime:** Python 3.12 (`asyncio`) + FastAPI + SQLite (WAL mode + FTS5).
