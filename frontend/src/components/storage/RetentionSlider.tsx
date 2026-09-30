@@ -99,8 +99,12 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
   // Sync internal state if prop updates
   React.useEffect(() => {
-    setDays((prev) => clampDays(retentionDays || prev));
-  }, [retentionDays, max, min]);
+    setDays(clampDays(retentionDays));
+  }, [retentionDays]);
+
+  React.useEffect(() => {
+    setDays((prev) => clampDays(prev));
+  }, [max, min]);
 
   return (
     <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-md space-y-4">
@@ -371,3 +375,4 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
     </div>
   );
 };
+

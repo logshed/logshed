@@ -16,13 +16,14 @@ import {
 import { LogEntry, LogFilterParams } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
 import { LogDetailModal } from './LogDetailModal.tsx';
-import { fetchLogs, fetchLogFacets } from '../../api/logs.ts';
+import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { LogRow, ProcessedLogEntry, areLogRowPropsEqual } from './LogRow.tsx';
 import { CreateDropRuleModal } from '../settings/CreateDropRuleModal.tsx';
+import { Modal } from '../common/Modal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 
 export function parseFiltersFromUrl(): LogFilterParams {
@@ -321,6 +322,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const historicalOffsetRef = useRef<number>(0);
   const isLoadingMoreRef = useRef<boolean>(false);
   const [filters, setFilters] = useState<LogFilterParams>(() => parseFiltersFromUrl());
+  const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] = useState<boolean>(false);
+  const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
+  const [deleteSelectedError, setDeleteSelectedError] = useState<string | null>(null);
   const [activeAliasesMap, setActiveAliasesMap] = useState<Record<string, string>>({});
   const { aliasVersion } = useAlias();
 
@@ -1179,6 +1183,26 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedLogs.length === 0) return;
+    try {
+      setIsDeletingSelected(true);
+      setDeleteSelectedError(null);
+      const targetIds = Array.from(selectedLogIds);
+      await deleteLogs({ log_ids: targetIds });
+      const targetSet = new Set(targetIds);
+      setLogs((prev) => prev.filter((l) => !targetSet.has(l.id)));
+      setSelectedLogIds(new Set());
+      setLastSelectedLogIndex(null);
+      setShowDeleteSelectedConfirm(false);
+    } catch (err: any) {
+      setDeleteSelectedError(err.message || 'Failed to delete selected logs.');
+    } finally {
+      setIsDeletingSelected(false);
+    }
+  };
+
+
   const clearLogsBuffer = () => {
     fetchRequestIdRef.current += 1;
     if (flushTimerRef.current !== null) {
@@ -1497,6 +1521,14 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             </button>
 
             <button
+              onClick={() => setShowDeleteSelectedConfirm(true)}
+              className="text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer bg-red-600 hover:bg-red-500"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete ({selectedLogs.length})</span>
+            </button>
+
+            <button
               onClick={handleLaunchAiAnalysis}
               className={`text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer ${
                 selectedLogs.length > 200
@@ -1558,6 +1590,14 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           setActiveLogDetail(null);
           setDropRuleTargetLog(targetLog);
         }}
+        onDeleteLog={(deletedLog) => {
+          setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));
+          setSelectedLogIds((prev) => {
+            const next = new Set(prev);
+            next.delete(deletedLog.id);
+            return next;
+          });
+        }}
       />
 
       {/* Create Drop Rule Modal */}
@@ -1571,6 +1611,56 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           availableSources={availableSourcesForSelectedApps}
           availableApps={availableAppsForSelectedHosts}
         />
+      )}
+
+      {/* Delete Selected Confirmation Modal */}
+      {showDeleteSelectedConfirm && (
+        <Modal
+          isOpen={showDeleteSelectedConfirm}
+          onClose={() => !isDeletingSelected && setShowDeleteSelectedConfirm(false)}
+          title="Delete Selected Logs"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4 text-xs text-slate-200">
+            <p className="leading-relaxed">
+              Permanently delete <span className="font-mono font-bold text-red-400">{selectedLogs.length}</span> selected log record{selectedLogs.length === 1 ? '' : 's'}? This action cannot be reversed.
+            </p>
+            {deleteSelectedError && (
+              <div className="p-2.5 bg-red-950/60 border border-red-800 rounded text-xs text-red-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{deleteSelectedError}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">
+              <button
+                type="button"
+                onClick={() => setShowDeleteSelectedConfirm(false)}
+                disabled={isDeletingSelected}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                disabled={isDeletingSelected}
+                className="px-4 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isDeletingSelected ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

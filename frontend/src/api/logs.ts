@@ -1,5 +1,12 @@
 import { apiFetch } from './client.ts';
-import { LogEntry, LogFilterParams, LogContextResponse } from '../types.ts';
+import {
+  LogEntry,
+  LogFilterParams,
+  LogContextResponse,
+  LogDeleteParams,
+  LogDeleteResponse,
+  LogDeletePreviewResponse,
+} from '../types.ts';
 
 export interface LogListResult {
   logs: LogEntry[];
@@ -51,3 +58,24 @@ export async function fetchLogContext(
 export async function fetchLogFacets(): Promise<import('../types.ts').LogFacetsResponse> {
   return apiFetch<import('../types.ts').LogFacetsResponse>('/api/logs/facets');
 }
+
+export async function deleteSingleLog(id: number): Promise<LogDeleteResponse> {
+  return apiFetch<LogDeleteResponse>(`/api/logs/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function deleteLogs(params: LogDeleteParams): Promise<LogDeleteResponse> {
+  return apiFetch<LogDeleteResponse>('/api/logs/delete', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function previewDeleteLogs(params: LogDeleteParams): Promise<LogDeletePreviewResponse> {
+  return apiFetch<LogDeletePreviewResponse>('/api/logs/delete/preview', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+

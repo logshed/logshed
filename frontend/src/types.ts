@@ -16,6 +16,28 @@ export interface LogContextResponse {
   logs: LogEntry[];
 }
 
+export interface LogDeleteParams {
+  log_ids?: number[];
+  sources?: string[];
+  apps?: string[];
+  severity_max?: number;
+  from?: string;
+  to?: string;
+  query?: string;
+  delete_all?: boolean;
+}
+
+export interface LogDeleteResponse {
+  status: string;
+  deleted_count: number;
+  message: string;
+}
+
+export interface LogDeletePreviewResponse {
+  matched_count: number;
+}
+
+
 export interface HostAlias {
   ip: string;
   alias: string;

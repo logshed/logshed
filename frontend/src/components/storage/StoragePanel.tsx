@@ -10,11 +10,12 @@ import { fetchStorageMetrics } from '../../api/system.ts';
 import { StorageCard } from './StorageCard.tsx';
 import { RetentionSlider } from './RetentionSlider.tsx';
 import { StorageTrendChart } from './StorageTrendChart.tsx';
+import { DeleteLogsCard } from './DeleteLogsCard.tsx';
 
 export const StoragePanel: React.FC = () => {
   const [storageMetrics, setStorageMetrics] = useState<StorageMetricsResponse | null>(null);
   const [retentionDays, setRetentionDays] = useState<number>(14);
-  const [maxRetentionDays, setMaxRetentionDays] = useState<number | undefined>(undefined);
+  const [maxRetentionDays, setMaxRetentionDays] = useState<number | undefined>(30);
   const [retentionOverridden, setRetentionOverridden] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -93,6 +94,8 @@ export const StoragePanel: React.FC = () => {
         )}
 
         <StorageTrendChart history={storageMetrics?.history || []} />
+
+        <DeleteLogsCard onLogsDeleted={loadAllData} />
       </section>
     </div>
   );
