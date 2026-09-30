@@ -23,198 +23,14 @@ from app.models import (
     LogFacetsResponse,
     LogListResponse,
 )
+from app.core.utils import escape_fts_tokens, format_fts_query, parse_multi_values
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 
 import sqlite3
 
 logger = logging.getLogger(__name__)
 
-import re
-
 router = APIRouter(prefix="/logs", tags=["Logs"])
-
-# Reserved FTS5 syntax operators
-_FTS_OPERATORS = {"AND", "OR", "NOT", "NEAR"}
-# Strict allowlist of searchable columns in logs_fts virtual table
-_FTS_ALLOWED_COLUMNS = {"app_name", "source_alias", "message"}
-
-
-def _escape_fts_tokens(query_str: str) -> str:
-    """
-    Fallback token cleaner that wraps words in quotes with wildcard suffix
-    to handle malformed user input without causing FTS5 syntax errors.
-    """
-    q = query_str.strip()
-    if not q:
-        return ""
-    words = q.split()
-    tokens = []
-    for w in words:
-        clean = w.replace('"', '').replace("'", '').replace('*', '').replace('\x00', '').strip()
-        if clean:
-            tokens.append(f'"{clean}"*')
-    return " ".join(tokens)
-
-
-def _format_fts_query(query_str: str) -> str:
-    """
-    Format user query for FTS5 search with prefix matching.
-    - Strict allowlist for valid column prefixes (app_name, source_alias, message) and operators.
-    - If search query contains unbalanced quotes or syntax errors, fall back cleanly
-      to escaped token prefix queries so queries never trigger an unhandled OperationalError.
-    - If user entered quoted phrases (e.g. "exact phrase"), preserve them.
-    - If terms do not end in '*' and are not boolean operators (AND, OR, NOT, NEAR),
-      automatically append '*' for search-as-you-type prefix matching.
-    - If column filters are used (e.g. app_name:nginx), apply wildcard to the value.
-    """
-    q = query_str.strip()
-    if not q:
-        return ""
-
-    # Special FTS5 query syntax: queries starting with '*' trigger unknown special query errors
-    if q.startswith("*"):
-        return _escape_fts_tokens(q)
-
-    # Check for unbalanced double or single quotes
-    if q.count('"') % 2 != 0 or q.count("'") % 2 != 0:
-        return _escape_fts_tokens(q)
-
-    # Check for unbalanced or malformed parentheses
-    depth = 0
-    for char in q:
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth < 0:
-                return _escape_fts_tokens(q)
-    if depth != 0:
-        return _escape_fts_tokens(q)
-
-    pattern = re.compile(r'("[^"]*"|\'[^\']*\'|[a-zA-Z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)')
-    tokens = pattern.findall(q)
-    if not tokens:
-        return _escape_fts_tokens(q)
-
-    formatted_tokens = []
-    for token in tokens:
-        token = token.strip()
-        if not token:
-            continue
-
-        if token.startswith(('"', "'")) or token in ("(", ")"):
-            formatted_tokens.append(token)
-            continue
-
-        if token.upper() in _FTS_OPERATORS:
-            formatted_tokens.append(token.upper())
-            continue
-
-        if ":" in token:
-            col, val = token.split(":", 1)
-            col_lower = col.lower()
-            if col_lower in _FTS_ALLOWED_COLUMNS:
-                if not val or val == "*":
-                    # Incomplete column filter while user is typing (e.g. "app_name:" or "app_name:*")
-                    # Fall back cleanly to escaped token search to prevent FTS5 syntax errors
-                    return _escape_fts_tokens(q)
-                if val.startswith(('"', "'")):
-                    formatted_tokens.append(f"{col_lower}:{val}")
-                elif val.startswith("*"):
-                    clean_val = val.replace('"', '""')
-                    formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
-                elif val.endswith("*"):
-                    core = val[:-1]
-                    clean_core = core.replace('"', '""')
-                    if "." in clean_core:
-                        formatted_tokens.append(f'{col_lower}:"{clean_core}"*')
-                    else:
-                        formatted_tokens.append(f"{col_lower}:{clean_core}*")
-                else:
-                    clean_val = val.replace('"', '""')
-                    if "." in clean_val:
-                        formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
-                    else:
-                        formatted_tokens.append(f"{col_lower}:{clean_val}*")
-                continue
-            else:
-                # Column is not allowlisted - treat as literal token wrapped in quotes
-                clean_token = token.replace('"', '""')
-                if clean_token.endswith("*") and not clean_token.startswith("*"):
-                    formatted_tokens.append(f'"{clean_token[:-1]}"*')
-                else:
-                    formatted_tokens.append(f'"{clean_token}"*')
-                continue
-
-        if token.startswith("*"):
-            clean_token = token.replace('"', '""')
-            formatted_tokens.append(f'"{clean_token}"*')
-        elif token.endswith("*"):
-            core = token[:-1]
-            clean_core = core.replace('"', '""')
-            if "." in clean_core:
-                formatted_tokens.append(f'"{clean_core}"*')
-            else:
-                formatted_tokens.append(f"{clean_core}*")
-        else:
-            clean_token = token.replace('"', '""')
-            if "." in clean_token:
-                formatted_tokens.append(f'"{clean_token}"*')
-            else:
-                formatted_tokens.append(f"{clean_token}*")
-
-    if not formatted_tokens:
-        return _escape_fts_tokens(q)
-
-    # Validate token sequence for FTS5 syntax correctness
-    non_parens = [t for t in formatted_tokens if t not in ("(", ")")]
-    if not non_parens:
-        return _escape_fts_tokens(q)
-
-    # First and last non-paren tokens cannot be operators
-    if non_parens[0] in _FTS_OPERATORS or non_parens[-1] in _FTS_OPERATORS:
-        return _escape_fts_tokens(q)
-
-    for i in range(len(formatted_tokens) - 1):
-        t1, t2 = formatted_tokens[i], formatted_tokens[i + 1]
-        # Consecutive operators
-        if t1 in _FTS_OPERATORS and t2 in _FTS_OPERATORS:
-            return _escape_fts_tokens(q)
-        # Operator immediately after '('
-        if t1 == "(" and t2 in _FTS_OPERATORS:
-            return _escape_fts_tokens(q)
-        # Operator immediately before ')'
-        if t1 in _FTS_OPERATORS and t2 == ")":
-            return _escape_fts_tokens(q)
-        # Empty parens
-        if t1 == "(" and t2 == ")":
-            return _escape_fts_tokens(q)
-        # Term directly before '(' without operator
-        if t1 not in _FTS_OPERATORS and t1 != "(" and t2 == "(":
-            return _escape_fts_tokens(q)
-        # Term directly after ')' without operator
-        if t1 == ")" and t2 not in _FTS_OPERATORS and t2 != ")":
-            return _escape_fts_tokens(q)
-
-    return " ".join(formatted_tokens)
-
-
-def _parse_multi_values(values: Optional[list[str]]) -> list[str]:
-    """
-    Parse query parameters that may be passed repeatedly or comma-separated.
-    e.g. ['pve1,pve2', 'pve3'] -> ['pve1', 'pve2', 'pve3']
-    """
-    if not values:
-        return []
-    result: list[str] = []
-    for item in values:
-        if not item:
-            continue
-        for part in item.split(","):
-            part = part.strip()
-            if part and part not in result:
-                result.append(part)
-    return result
 
 
 @router.get("", response_model=LogListResponse)
@@ -260,7 +76,7 @@ async def list_logs(
         from_table = "logs"
 
         if is_fts:
-            fts_term = _format_fts_query(query)
+            fts_term = format_fts_query(query)
             if not fts_term.strip():
                 where_clauses.append("0")
             else:
@@ -268,14 +84,14 @@ async def list_logs(
                 where_clauses.append("logs_fts MATCH :fts_term")
                 params["fts_term"] = fts_term
 
-        parsed_sources = _parse_multi_values(source)
+        parsed_sources = parse_multi_values(source)
         if parsed_sources:
             src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
             where_clauses.append(f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))")
             for i, s in enumerate(parsed_sources):
                 params[f"src_{i}"] = s
 
-        parsed_apps = _parse_multi_values(app_name)
+        parsed_apps = parse_multi_values(app_name)
         if parsed_apps:
             app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
             where_clauses.append(f"logs.app_name IN ({app_placeholders})")
@@ -319,7 +135,7 @@ async def list_logs(
         except sqlite3.OperationalError as e:
             if is_fts:
                 logger.info(f"FTS5 query '{params.get('fts_term')}' failed ({e}), falling back to escaped token search.")
-                fallback_term = _escape_fts_tokens(query)
+                fallback_term = escape_fts_tokens(query)
                 if not fallback_term.strip():
                     total = 0
                     rows = []
@@ -370,8 +186,8 @@ async def stream_logs(
     """
     Server-Sent Events (SSE) endpoint to stream real-time incoming logs to the browser.
     """
-    parsed_sources = set(_parse_multi_values(source))
-    parsed_apps = set(_parse_multi_values(app_name))
+    parsed_sources = set(parse_multi_values(source))
+    parsed_apps = set(parse_multi_values(app_name))
 
     queue = await sse_manager.subscribe()
 

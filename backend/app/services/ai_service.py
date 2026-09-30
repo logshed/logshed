@@ -18,6 +18,7 @@ from app.api.deps import run_db_query
 from app.core.config import DEFAULT_AI_MODEL, get_all_system_settings
 from app.core.redactor import redact
 from app.core.security import decrypt_value
+from app.core.utils import parse_iso_to_utc_datetime
 from app.models import AiAuditItem
 from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
@@ -109,16 +110,11 @@ def read_ai_settings(conn: sqlite3.Connection) -> tuple[dict[str, str], dict[str
 
 def is_cache_fresh(updated_at_str: Optional[str], max_age_seconds: int = 86400) -> bool:
     """Check if cached models or settings are within the specified TTL (default 24h)."""
-    if not updated_at_str:
+    dt = parse_iso_to_utc_datetime(updated_at_str)
+    if dt is None:
         return False
-    try:
-        dt = datetime.datetime.fromisoformat(updated_at_str)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.timezone.utc)
-        now = datetime.datetime.now(datetime.timezone.utc)
-        return (now - dt).total_seconds() < max_age_seconds
-    except Exception:
-        return False
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return (now - dt).total_seconds() < max_age_seconds
 
 
 def save_models_cache(conn: sqlite3.Connection, cache_key: str, models_data: list[dict[str, Any]]) -> str:

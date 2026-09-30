@@ -24,30 +24,41 @@ def match_wildcard(pattern: Optional[str], text: Optional[str]) -> bool:
     return p == t
 
 
+def parse_iso_to_utc_datetime(val: Any) -> Optional[datetime.datetime]:
+    """Parse ISO-8601 string or numeric timestamp to timezone-aware UTC datetime."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        try:
+            return datetime.datetime.fromtimestamp(float(val), tz=datetime.timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
+    if isinstance(val, datetime.datetime):
+        if val.tzinfo is None:
+            return val.replace(tzinfo=datetime.timezone.utc)
+        return val.astimezone(datetime.timezone.utc)
+    try:
+        clean_str = str(val).strip().replace("Z", "+00:00")
+        if not clean_str:
+            return None
+        dt = datetime.datetime.fromisoformat(clean_str)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc)
+    except Exception:
+        return None
+
+
 def parse_iso_to_epoch(ts_val: Any, fallback: Optional[float] = None) -> float:
     """
     Parse an ISO-8601 timestamp string or datetime object into a UTC epoch timestamp.
     Returns fallback (defaulting to 0.0 if None) when parsing fails or input is empty.
     """
     default_fallback = 0.0 if fallback is None else fallback
-    if ts_val is None:
-        return default_fallback
-    if isinstance(ts_val, (int, float)):
-        return float(ts_val)
-    if isinstance(ts_val, datetime.datetime):
-        if ts_val.tzinfo is None:
-            ts_val = ts_val.replace(tzinfo=datetime.timezone.utc)
-        return ts_val.timestamp()
-    try:
-        clean_ts = str(ts_val).strip().replace("Z", "+00:00")
-        if not clean_ts:
-            return default_fallback
-        dt = datetime.datetime.fromisoformat(clean_ts)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.timezone.utc)
+    dt = parse_iso_to_utc_datetime(ts_val)
+    if dt is not None:
         return dt.timestamp()
-    except Exception:
-        return default_fallback
+    return default_fallback
 
 
 def parse_multi_values(values: Optional[list[str]]) -> list[str]:
@@ -236,8 +247,4 @@ def format_fts_query(query_str: str) -> str:
     return " ".join(formatted_tokens)
 
 
-# Aliases for backward compatibility
-_escape_fts_tokens = escape_fts_tokens
-_format_fts_query = format_fts_query
-_parse_multi_values = parse_multi_values
 

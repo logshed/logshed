@@ -91,8 +91,6 @@ export async function diagnoseLogs(
   });
 }
 
-export const diagnoseLogsStream = diagnoseLogs;
-
 export async function fetchAiAudit(limit: number = 50, offset: number = 0): Promise<{ items: AiAuditEntry[]; total: number }> {
   return apiFetch<{ items: AiAuditEntry[]; total: number }>(`/api/ai/audit?limit=${limit}&offset=${offset}`);
 }

@@ -14,6 +14,7 @@ import sqlite3
 import uuid
 from typing import Any, Optional
 
+from app.core.utils import parse_iso_to_utc_datetime
 from app.models import MaintenanceSchedule, MaintenanceWindowResponse
 
 logger = logging.getLogger(__name__)
@@ -227,15 +228,10 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
     on_demand_until_dt: Optional[datetime.datetime] = None
 
     if raw_on_demand:
-        try:
-            dt = datetime.datetime.fromisoformat(raw_on_demand.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            if now_utc < dt:
-                on_demand_active = True
-                on_demand_until_dt = dt
-        except Exception:
-            pass
+        dt = parse_iso_to_utc_datetime(raw_on_demand)
+        if dt and now_utc < dt:
+            on_demand_active = True
+            on_demand_until_dt = dt
 
     # 2. Check scheduled maintenance windows
     schedules = load_schedules(conn)

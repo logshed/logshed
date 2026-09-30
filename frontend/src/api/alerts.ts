@@ -56,9 +56,6 @@ export async function installAlertPreset(
   });
 }
 
-export const fetchSecurityPresets = fetchAlertPresets;
-export const installSecurityPreset = installAlertPreset;
-
 
 export async function fetchAlertHistory(
   limit: number = 50,

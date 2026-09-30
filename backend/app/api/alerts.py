@@ -34,12 +34,11 @@ from app.models import (
     MaintenanceWindowRequest,
     MaintenanceWindowResponse,
     MessageResponse,
-    SecurityPresetResponse,
 )
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.core.regex_validator import check_regex_safety, validate_regex_pattern
-from app.core.utils import match_wildcard, parse_iso_to_epoch
+from app.core.utils import parse_iso_to_epoch, parse_iso_to_utc_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -108,18 +107,14 @@ async def set_maintenance_window(
 
         await run_db_query(_clear)
     else:
-        clean_until = payload.until.strip()
-        try:
-            dt = datetime.datetime.fromisoformat(clean_until.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-        except Exception as e:
+        dt = parse_iso_to_utc_datetime(payload.until)
+        if dt is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid ISO 8601 datetime format for maintenance_until: {e}",
+                detail=f"Invalid ISO 8601 datetime format for maintenance_until: {payload.until}",
             )
 
-        stored_iso = dt.astimezone(datetime.timezone.utc).isoformat()
+        stored_iso = dt.isoformat()
 
         def _save(conn):
             cur = conn.cursor()
@@ -763,9 +758,6 @@ async def list_alert_presets(user: dict = Depends(get_current_user)) -> list[Ale
     """Retrieve all available 1-click alert presets."""
     presets = get_alert_presets()
     return [AlertPresetResponse(**p) for p in presets]
-
-
-list_security_presets = list_alert_presets
 
 
 @router.post("/presets/{preset_id}/install", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)

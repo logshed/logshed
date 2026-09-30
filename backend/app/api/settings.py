@@ -21,6 +21,7 @@ from app.core.config import (
     get_cached_setting,
 )
 from app.core.security import decrypt_value, encrypt_value, mask_secret
+from app.core.utils import parse_iso_to_utc_datetime
 
 from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
@@ -101,14 +102,9 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     stored_until = stored.get("maintenance_until")
     maintenance_until = None
     if stored_until and stored_until.strip():
-        try:
-            dt = datetime.datetime.fromisoformat(stored_until.strip().replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            if datetime.datetime.now(datetime.timezone.utc) < dt:
-                maintenance_until = stored_until.strip()
-        except Exception:
-            maintenance_until = None
+        dt = parse_iso_to_utc_datetime(stored_until)
+        if dt and datetime.datetime.now(datetime.timezone.utc) < dt:
+            maintenance_until = stored_until.strip()
 
     resolved = resolve_all_system_settings(stored)
 
@@ -271,17 +267,14 @@ async def update_settings(
             if req.maintenance_until is None or req.maintenance_until.strip() == "":
                 updates.append(("maintenance_until", "", 0))
             else:
-                try:
-                    dt = datetime.datetime.fromisoformat(req.maintenance_until.strip().replace("Z", "+00:00"))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=datetime.timezone.utc)
-                    stored_iso = dt.astimezone(datetime.timezone.utc).isoformat()
-                    updates.append(("maintenance_until", stored_iso, 0))
-                except Exception as e:
+                dt = parse_iso_to_utc_datetime(req.maintenance_until)
+                if dt is None:
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=f"Invalid ISO 8601 datetime format for maintenance_until: {e}",
+                        detail=f"Invalid ISO 8601 datetime format for maintenance_until: {req.maintenance_until}",
                     )
+                stored_iso = dt.isoformat()
+                updates.append(("maintenance_until", stored_iso, 0))
 
         # Handle sensitive fields
         for sensitive_key in ("ai_api_key",):

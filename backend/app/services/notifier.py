@@ -218,7 +218,15 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
     allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
 
     # 6. Verify destination IPs against blocked ranges
-    hosts_to_verify = set()
+    hosts_to_verify: list[str] = []
+    if hostname:
+        clean_ip_str = hostname.strip("[]")
+        try:
+            ipaddress.ip_address(clean_ip_str)
+            hosts_to_verify.append(hostname)
+        except ValueError:
+            pass
+
     for server in ap_obj:
         # If the plugin uses a fixed public cloud endpoint, verify that endpoint host
         cloud_url = getattr(server, "notify_url", None)
@@ -228,23 +236,16 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
             and "{host}" not in cloud_url
         ):
             cloud_host = urllib.parse.urlsplit(cloud_url).hostname
-            if cloud_host:
-                hosts_to_verify.add(cloud_host)
+            if cloud_host and cloud_host not in hosts_to_verify:
+                hosts_to_verify.append(cloud_host)
             continue
 
         shost = getattr(server, "host", None)
-        if shost:
-            hosts_to_verify.add(shost)
+        if shost and shost not in hosts_to_verify:
+            hosts_to_verify.append(shost)
 
     if not hosts_to_verify and hostname:
-        hosts_to_verify.add(hostname)
-    elif hostname:
-        clean_ip_str = hostname.strip("[]")
-        try:
-            ipaddress.ip_address(clean_ip_str)
-            hosts_to_verify.add(hostname)
-        except ValueError:
-            pass
+        hosts_to_verify.append(hostname)
 
     for host_target in hosts_to_verify:
         clean_target = host_target.lower().rstrip(".").strip("[]")

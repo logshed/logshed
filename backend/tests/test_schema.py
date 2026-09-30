@@ -359,7 +359,7 @@ class TestMigrationRunner:
         conn.close()
 
     def test_migration_from_v1_to_v2(self, tmp_path: Path):
-        """Upgrading an existing v1 database to v2 drops logs_ai and initializes fts_index_state to MAX(id)."""
+        """Upgrading an existing v1 database to v2 drops logs_ai, initializes fts_index_state to MAX(id), and applies v2 schema."""
         p = tmp_path / "v1_to_v2.db"
         conn = get_connection(p)
         from app.core.migrations import migrate_v1, set_user_version
@@ -371,6 +371,11 @@ class TestMigrationRunner:
             "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, message, raw) "
             "VALUES ('2024-01-01T00:00:00', '2024-01-01T00:00:00', '10.0.0.1', 'srv1', 'app1', 'msg in v1', 'raw1')"
         )
+        # Insert on-demand ai_audit_log entry to test backfill into alert_history
+        conn.execute(
+            "INSERT INTO ai_audit_log (timestamp, source_alias, app_name, log_count, model, prompt_sent, response_text) "
+            "VALUES ('2026-01-01T00:00:00', 'srv1', 'app1', 5, 'gemini', 'p', 'analysis result')"
+        )
         conn.commit()
         # Verify it was indexed by logs_ai
         fts_rows = conn.execute("SELECT rowid FROM logs_fts WHERE logs_fts MATCH 'msg'").fetchall()
@@ -379,7 +384,7 @@ class TestMigrationRunner:
         assert max_id >= 1
         conn.close()
 
-        # Run migration runner to upgrade to v2
+        # Run migration runner to upgrade through all pending migrations to v2
         run_migrations(p)
 
         conn = get_connection(p)
@@ -397,6 +402,25 @@ class TestMigrationRunner:
         # Verify previous FTS records are still searchable
         fts_after = conn.execute("SELECT rowid FROM logs_fts WHERE logs_fts MATCH 'msg'").fetchall()
         assert len(fts_after) == 1
+
+        # Verify covering index idx_logs_source_app_ip exists
+        indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        assert "idx_logs_source_app_ip" in indexes
+        assert "idx_alert_history_rule_name" in indexes
+
+        # Verify settings
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = 'retention_days'")
+        assert cur.fetchone()[0] == "14"
+        cur.execute("SELECT value FROM system_settings WHERE key = 'daily_digest_enabled'")
+        assert cur.fetchone()[0] == "0"
+        cur.execute("SELECT value FROM system_settings WHERE key = 'daily_digest_schedule_time'")
+        assert cur.fetchone()[0] == "09:00"
+
+        # Verify alert_history backfill
+        history = conn.execute("SELECT rule_name, incident_summary FROM alert_history WHERE rule_name = 'On-Demand Analysis'").fetchone()
+        assert history is not None
+        assert history[1] == "analysis result"
         conn.close()
 
 
@@ -566,9 +590,13 @@ class TestFTS5Sync:
         assert "updated postedit" in rows[0][2]
 
     def test_startup_sanitization_clamps_future_timestamps(self, tmp_path: Path):
-        """run_migrations should sanitize any future-dated timestamps without touching past logs."""
+        """migrate_v2 should sanitize any future-dated timestamps without touching past logs."""
         db_file = tmp_path / "sanitize_test.db"
-        run_migrations(db_file)
+        from app.core.migrations import migrate_v1, set_user_version
+        with get_connection(db_file) as conn:
+            migrate_v1(conn)
+            set_user_version(conn, 1)
+            conn.commit()
 
         future_ts = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)).isoformat()
         now_rec = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -590,7 +618,7 @@ class TestFTS5Sync:
             )
             conn.commit()
 
-        # Rerun run_migrations as happens on container restart
+        # Run migration runner to upgrade to v2
         run_migrations(db_file)
 
         with get_connection(db_file) as conn:

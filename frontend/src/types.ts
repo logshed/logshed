@@ -458,8 +458,6 @@ export interface AlertPreset {
   is_custom?: boolean;
 }
 
-export type SecurityPreset = AlertPreset;
-
 export interface DropPreset {
   id: string;
   name: string;

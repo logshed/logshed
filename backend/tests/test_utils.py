@@ -5,7 +5,7 @@ Unit tests for shared core utility functions.
 import datetime
 import pytest
 
-from app.core.utils import match_wildcard, parse_iso_to_epoch
+from app.core.utils import match_wildcard, parse_iso_to_epoch, parse_iso_to_utc_datetime
 
 
 class TestMatchWildcard:
@@ -70,3 +70,48 @@ class TestParseIsoToEpoch:
     def test_invalid_string_uses_fallback(self):
         assert parse_iso_to_epoch("invalid-timestamp") == 0.0
         assert parse_iso_to_epoch("invalid-timestamp", fallback=55.5) == 55.5
+
+
+class TestParseIsoToUtcDatetime:
+    """Tests for parse_iso_to_utc_datetime helper function."""
+
+    def test_valid_iso_utc_string(self):
+        ts_str = "2026-09-19T12:00:00Z"
+        expected = datetime.datetime(2026, 9, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        assert parse_iso_to_utc_datetime(ts_str) == expected
+
+    def test_valid_iso_offset_string(self):
+        ts_str = "2026-09-19T13:00:00+01:00"
+        expected = datetime.datetime(2026, 9, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        assert parse_iso_to_utc_datetime(ts_str) == expected
+
+    def test_valid_naive_iso_string(self):
+        ts_str = "2026-09-19T12:00:00"
+        expected = datetime.datetime(2026, 9, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        assert parse_iso_to_utc_datetime(ts_str) == expected
+
+    def test_datetime_object_input_naive(self):
+        dt = datetime.datetime(2026, 9, 19, 12, 0, 0)
+        expected = datetime.datetime(2026, 9, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        assert parse_iso_to_utc_datetime(dt) == expected
+
+    def test_datetime_object_input_aware(self):
+        tz = datetime.timezone(datetime.timedelta(hours=2))
+        dt = datetime.datetime(2026, 9, 19, 14, 0, 0, tzinfo=tz)
+        expected = datetime.datetime(2026, 9, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        assert parse_iso_to_utc_datetime(dt) == expected
+
+    def test_numeric_epoch_input(self):
+        expected = datetime.datetime(2024, 9, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        assert parse_iso_to_utc_datetime(1726747200) == expected
+        assert parse_iso_to_utc_datetime(1726747200.0) == expected
+
+    def test_none_and_empty_input(self):
+        assert parse_iso_to_utc_datetime(None) is None
+        assert parse_iso_to_utc_datetime("") is None
+        assert parse_iso_to_utc_datetime("   ") is None
+
+    def test_invalid_string(self):
+        assert parse_iso_to_utc_datetime("not-a-date") is None
+        assert parse_iso_to_utc_datetime("2026-99-99T99:99:99") is None
+

@@ -11,7 +11,7 @@ import pytest
 
 from app.core.migrations import run_migrations, get_connection
 from app.services.alert_evaluator import AlertEvaluator, CompiledAlertRule
-from app.services.security_presets import extract_ip_from_message, get_security_presets
+from app.services.alert_presets import extract_ip_from_message, get_security_presets
 
 
 class TestCompiledAlertRule:
@@ -647,7 +647,7 @@ class TestQueueConsumerAlertIntegration:
 
     def test_proxy_and_oom_presets_filter_false_positives(self):
         """Verify proxy 401/403 and OOM presets don't trigger on benign text containing 401/403 or generic kill."""
-        from app.services.security_presets import get_security_preset_by_id
+        from app.services.alert_presets import get_security_preset_by_id
         import re
 
         proxy_preset = get_security_preset_by_id("proxy_auth_flood")

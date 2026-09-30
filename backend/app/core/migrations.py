@@ -291,9 +291,16 @@ INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
 VALUES ('daily_digest_enabled', '0', datetime('now'), 0);
 INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
 VALUES ('daily_digest_schedule_time', '09:00', datetime('now'), 0);
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('retention_days', '14', datetime('now'), 0);
 
-ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand';
+CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);
 ''')
+
+    try:
+        conn.execute("ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand'")
+    except sqlite3.OperationalError:
+        pass
 
     try:
         conn.execute("ALTER TABLE drop_rules ADD COLUMN name TEXT")
@@ -307,6 +314,51 @@ ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-dem
 
     try:
         conn.execute("ALTER TABLE alert_history ADD COLUMN ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL")
+    except sqlite3.OperationalError:
+        pass
+
+    # Defensively clamp future-dated timestamps using indexed timestamp bounds
+    # to avoid expensive full-table scans across historical logs on boot.
+    try:
+        conn.execute(
+            "UPDATE logs SET timestamp = received_at "
+            "WHERE timestamp > strftime('%Y-%m-%dT%H:%M:%S', 'now', '+1 minute') AND timestamp > received_at;"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # Backfill drop_rules name if empty
+    try:
+        conn.execute(
+            "UPDATE drop_rules SET name = COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(app_pattern), ''), NULLIF(TRIM(source_pattern), ''), 'Drop Rule') WHERE name IS NULL OR TRIM(name) = '';"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # Backfill on-demand ai_audit_log entries into alert_history
+    try:
+        conn.execute("""
+            INSERT INTO alert_history (
+                rule_id, rule_name, channel_id, trigger_count, sample_log,
+                incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at
+            )
+            SELECT
+                NULL,
+                'On-Demand Analysis',
+                NULL,
+                a.log_count,
+                NULL,
+                a.response_text,
+                1,
+                a.model,
+                a.id,
+                a.timestamp
+            FROM ai_audit_log a
+            WHERE (a.trigger_source = 'on-demand' OR a.trigger_source IS NULL)
+              AND NOT EXISTS (
+                  SELECT 1 FROM alert_history h WHERE h.ai_audit_id = a.id
+              );
+        """)
     except sqlite3.OperationalError:
         pass
 
@@ -350,127 +402,6 @@ def run_migrations(db_path: Union[str, Path]) -> None:
                     raise
             else:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
-
-        # Startup sanitization: defensively clamp future-dated timestamps using indexed timestamp bounds
-        # to avoid expensive full-table scans across historical logs on boot.
-        try:
-            conn.execute(
-                "UPDATE logs SET timestamp = received_at "
-                "WHERE timestamp > strftime('%Y-%m-%dT%H:%M:%S', 'now', '+1 minute') AND timestamp > received_at;"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure covering index for facets loose index skip-scan exists
-        try:
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure default retention_days setting exists
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted) "
-                "VALUES ('retention_days', '14', datetime('now'), 0);"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure default daily_digest settings exist
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted) "
-                "VALUES ('daily_digest_enabled', '0', datetime('now'), 0);"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure idx_alert_history_rule_name exists
-        try:
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure ai_audit_log has trigger_source column
-        try:
-            conn.execute(
-                "ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand';"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure alert_history has ai_audit_id column
-        try:
-            conn.execute(
-                "ALTER TABLE alert_history ADD COLUMN ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL;"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure drop_rules has name column
-        try:
-            conn.execute("ALTER TABLE drop_rules ADD COLUMN name TEXT;")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure system_settings has daily_digest_schedule_time
-        try:
-            conn.execute("""
-                INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
-                VALUES ('daily_digest_schedule_time', '09:00', datetime('now'), 0);
-            """)
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Backfill drop_rules name if empty
-        try:
-            conn.execute(
-                "UPDATE drop_rules SET name = COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(app_pattern), ''), NULLIF(TRIM(source_pattern), ''), 'Drop Rule') WHERE name IS NULL OR TRIM(name) = '';"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Backfill on-demand ai_audit_log entries into alert_history
-        try:
-            conn.execute("""
-                INSERT INTO alert_history (
-                    rule_id, rule_name, channel_id, trigger_count, sample_log,
-                    incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at
-                )
-                SELECT
-                    NULL,
-                    'On-Demand Analysis',
-                    NULL,
-                    a.log_count,
-                    NULL,
-                    a.response_text,
-                    1,
-                    a.model,
-                    a.id,
-                    a.timestamp
-                FROM ai_audit_log a
-                WHERE (a.trigger_source = 'on-demand' OR a.trigger_source IS NULL)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM alert_history h WHERE h.ai_audit_id = a.id
-                  );
-            """)
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
     finally:
         conn.close()
 
