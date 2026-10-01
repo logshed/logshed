@@ -336,6 +336,25 @@ describe('LiveLogStream Component', () => {
     await waitFor(() => {
       expect(screen.getByText(/Log Record #101/i)).toBeInTheDocument();
     });
+
+    // Test next/previous navigation in modal adhering to filtered stream (chronological order)
+    const prevBtn = screen.getByRole('button', { name: /Previous log/i });
+    const nextBtn = screen.getByRole('button', { name: /Next log/i });
+    expect(nextBtn).toBeDisabled(); // Row 0 is the newest log
+    expect(prevBtn).toBeEnabled();
+
+    // Click Previous -> moves back in time to earlier log in row 1 (Log Record #102)
+    fireEvent.click(prevBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument();
+    });
+
+    // Now Next (forward in time) is enabled
+    expect(nextBtn).toBeEnabled();
+    fireEvent.click(nextBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/Log Record #101/i)).toBeInTheDocument();
+    });
   });
 
   it('performs Shift-Click range selection across multiple hosts without error', async () => {

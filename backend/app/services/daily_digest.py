@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 import sqlite3
 from typing import Any, Optional, Union
+import urllib.parse
 
 from app.api.deps import run_db_query
 from app.core.config import get_cached_setting, get_db_path
@@ -73,7 +74,7 @@ def compute_daily_digest_rollup(
         """
         SELECT
             CASE
-                WHEN lower(source_alias) = 'docker' THEN app_name
+                WHEN lower(source_ip) = 'docker' OR lower(source_alias) = 'docker' THEN app_name
                 ELSE COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown')
             END AS entity,
             COUNT(*) as error_count,
@@ -199,6 +200,7 @@ def format_digest_body(
     top_errors: list[dict[str, Any]],
     top_services: list[dict[str, Any]],
     app_url: str = "",
+    since_iso: Optional[str] = None,
 ) -> str:
     """Format markdown body for notification push and alert history storage."""
     error_lines = []
@@ -252,9 +254,13 @@ def format_digest_body(
 
     if app_url and app_url.strip():
         clean_url = app_url.strip().rstrip("/")
+        link_target = f"{clean_url}/"
+        if since_iso:
+            encoded_time = urllib.parse.quote(since_iso)
+            link_target = f"{clean_url}/?time={encoded_time}&severity=3"
         body_parts.extend([
             "",
-            f"**Link:** {clean_url}/rules/history",
+            f"[Link to LogShed (digest filters applied)]({link_target})",
         ])
 
     return "\n".join(body_parts)
@@ -323,6 +329,7 @@ async def run_daily_digest(
         top_errors=rollup["top_errors"],
         top_services=rollup["top_services"],
         app_url=app_url,
+        since_iso=rollup.get("since_iso"),
     )
     notification_title = "LogShed: Daily Digest"
 

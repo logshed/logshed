@@ -198,6 +198,24 @@ def test_compute_daily_digest_rollup_with_data(tmp_path: Path):
     assert rollup["top_services"][2]["log_count"] == 2
 
 
+def test_compute_daily_digest_rollup_docker_custom_alias_shows_app(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    recent_str = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection(db_file) as conn:
+        # Ingest error from docker container with custom source_alias (e.g. docker-unraid) and source_ip='docker'
+        conn.execute(
+            "INSERT INTO logs (timestamp, received_at, severity, facility, source_ip, source_alias, app_name, message, raw) VALUES (?, ?, 3, 1, 'docker', 'docker-unraid', 'seer', 'seer error occurred', 'seer error occurred')",
+            (recent_str, recent_str),
+        )
+        rollup = compute_daily_digest_rollup(conn, window_hours=24, db_path=db_file)
+
+    assert rollup["top_errors"][0]["entity"] == "seer"
+    assert rollup["top_errors"][0]["error_count"] == 1
+
+
+
 def test_format_digest_body_no_em_dashes():
     top_errors = [{
         "entity": "api-service",
@@ -215,6 +233,7 @@ def test_format_digest_body_no_em_dashes():
         top_errors=top_errors,
         top_services=top_services,
         app_url="http://localhost:8000",
+        since_iso="2026-09-30T08:18:32.480Z",
     )
 
     # Typography check: absolutely no em dashes allowed
@@ -227,7 +246,8 @@ def test_format_digest_body_no_em_dashes():
     assert "Top Apps / Hosts with Errors or Above" in body
     assert "Top Logging Services" in body
     assert "Executive Summary" not in body
-    assert "http://localhost:8000" in body
+    assert "[Link to LogShed (digest filters applied)](http://localhost:8000/?time=2026-09-30T08%3A18%3A32.480Z&severity=3)" in body
+
 
 @pytest.mark.asyncio
 async def test_run_daily_digest_dispatches_and_records_history(tmp_path: Path):

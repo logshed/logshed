@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Log Inspection Navigation Controls**: Added Next and Previous navigation buttons within the log detail inspection header to step chronologically through the active filtered log stream without closing the modal.
 - **Route-Level Code Splitting**: Added `React.lazy()` route-level code splitting and suspense fallbacks for heavy panels (`StoragePanel`, `AlertsPanel`, `SettingsPanel`, `AiAnalysisModal`), reducing initial bundle size to ~362 kB.
 - **Unified Byte Formatter**: Exported a unified `formatBytes` utility in `frontend/src/utils/formatters.ts` handling zero and negative values defensively without returning invalid strings, and replaced inline byte calculations in storage cards and trend charts.
 - **Container Repository Migration Detection & Banner**: Added automated detection for container instances running from the deprecated personal registry namespace (`ghcr.io/benhornertech/logshed`). Displays a prominent, dismissible warning banner at the top of the interface and a dedicated notice card under Settings > About LogShed advising operators to update their Docker Compose or Unraid template to `ghcr.io/logshed/logshed`. Includes automatic query fallback to official releases in `check_for_updates()` and container startup log warnings.
@@ -62,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Responsive Scheduled Maintenance Layout**: Transformed the scheduled maintenance window display from a horizontal scrolling table into a responsive card layout on mobile viewports, matching drop rules and alert rules styling.
+- **Docker Container Attribution in Daily Digest**: Updated 24-hour daily digest rollup calculations to attribute top error entities originating from Docker to their specific container application name rather than generic Docker references.
+- **Daily Digest Filtered Log Stream Link**: Updated the daily digest notification action link to navigate directly to the log stream filtered to the last 24 hours with severity Error and above, with link text "Link to LogShed (digest filters applied)".
+- **Daily Digest Incident Detail Streamlining**: Omitted the redundant log snippet section from historical incident detail views for Daily Digest records while retaining sample snippets for alert incidents and on-demand diagnoses.
 - **AlertsPanel Sub-Tab Decomposition**: Decomposed the monolithic AlertsPanel into modular sub-tab components (`AlertRulesTab`, `DropRulesTab`, `AlertHistoryTab`, `MaintenanceWindowTab`) while maintaining AlertsPanel as the coordinator managing sub-tab routing and shared state.
 - **Search Bar Memoization & Virtual Scroll Dependency Fix**: Wrapped `LogSearchBar` in `React.memo()` with stable callback references to avoid DOM re-renders on incoming SSE log updates, updated virtual scroll bottom detection in `LiveLogStream` to track primitive indices, and converted multi-select dropdown scroll listeners to passive listeners throttled via `requestAnimationFrame`.
 - **Docker Container Tracking Memory Pruning**: In `DockerTailer`, prune container tracking entries (`_container_last_seen` and `_container_last_messages`) for exited or untracked containers during periodic discovery passes to prevent memory accumulation in dynamic environments.

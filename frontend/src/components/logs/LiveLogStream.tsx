@@ -1600,6 +1600,31 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             return next;
           });
         }}
+        onNavigatePrevious={() => {
+          if (!activeLogDetail) return;
+          const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+          if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
+            setActiveLogDetail(processedLogs[currIdx + 1]);
+          }
+        }}
+        onNavigateNext={() => {
+          if (!activeLogDetail) return;
+          const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+          if (currIdx > 0) {
+            setActiveLogDetail(processedLogs[currIdx - 1]);
+          }
+        }}
+        hasPreviousLog={Boolean(
+          activeLogDetail &&
+          (() => {
+            const idx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+            return idx >= 0 && idx < processedLogs.length - 1;
+          })()
+        )}
+        hasNextLog={Boolean(
+          activeLogDetail &&
+          processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
+        )}
       />
 
       {/* Create Drop Rule Modal */}

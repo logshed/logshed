@@ -217,65 +217,58 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-dark-800 overflow-x-auto">
-              {/* Table Header */}
-              <div className="grid grid-cols-[1.2fr_1.5fr_90px_100px_70px] gap-x-4 min-w-[640px] px-5 py-2.5 bg-dark-950/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                <div>Schedule Name</div>
-                <div>Recurrence</div>
-                <div>Duration</div>
-                <div>Status</div>
-                <div className="text-right">Actions</div>
-              </div>
-
+            <div className="divide-y divide-dark-800">
               {maintenance.schedules.map((sched) => (
                 <div
                   key={sched.id}
-                  className="grid grid-cols-[1.2fr_1.5fr_90px_100px_70px] gap-x-4 min-w-[640px] px-5 py-3 items-center hover:bg-dark-850/50 transition text-xs"
+                  className="p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-dark-850/50"
                 >
-                  <div className="pr-2 min-w-0">
-                    <div className="font-medium text-slate-200 truncate">{sched.name}</div>
-                    {sched.next_run && sched.enabled && !sched.is_active && (
-                      <div className="text-[11px] text-slate-500 mt-0.5">
-                        Next: {formatMaintenanceTime(sched.next_run)}
-                      </div>
-                    )}
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-slate-200">{sched.name}</span>
+                      {sched.is_active && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                          Active Now
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                      <span>
+                        Recurrence: <span className="text-slate-300">{formatScheduleRecurrence(sched)}</span>
+                      </span>
+                      <span>
+                        Duration: <span className="font-mono text-slate-300">{sched.duration_minutes} min</span>
+                      </span>
+                      {sched.next_run && sched.enabled && !sched.is_active && (
+                        <span>
+                          Next: <span className="font-mono text-slate-300">{formatMaintenanceTime(sched.next_run)}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="text-slate-300 text-xs min-w-0 truncate">
-                    {formatScheduleRecurrence(sched)}
-                  </div>
-
-                  <div className="text-slate-300 font-mono text-xs whitespace-nowrap">
-                    {sched.duration_minutes} min
-                  </div>
-
-                  <div>
+                  {/* Actions & Status */}
+                  <div className="flex items-center gap-2.5 self-start md:self-center shrink-0">
                     {sched.is_active ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
                         Active Now
                       </span>
-                    ) : sched.enabled ? (
-                      <button
-                        type="button"
-                        onClick={() => onToggleScheduleEnabled(sched)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/60 transition cursor-pointer"
-                        title="Click to disable"
-                      >
-                        Enabled
-                      </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => onToggleScheduleEnabled(sched)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:text-slate-300 transition cursor-pointer"
-                        title="Click to enable"
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition cursor-pointer ${
+                          sched.enabled
+                            ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/60'
+                            : 'bg-dark-800 text-slate-400 border border-dark-700 hover:text-slate-300'
+                        }`}
+                        title={sched.enabled ? 'Click to disable' : 'Click to enable'}
                       >
-                        Disabled
+                        {sched.enabled ? 'Enabled' : 'Disabled'}
                       </button>
                     )}
-                  </div>
 
-                  <div className="flex items-center justify-end gap-1.5">
                     <button
                       type="button"
                       onClick={() => onOpenEditScheduleModal(sched)}

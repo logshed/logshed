@@ -294,4 +294,54 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     fireEvent.click(dropRuleBtn);
     expect(handleCreateDropRule).toHaveBeenCalledWith(sampleLog);
   });
+
+  it('renders Previous and Next log buttons and triggers navigation callbacks', () => {
+    const handlePrevious = vi.fn();
+    const handleNext = vi.fn();
+
+    const { rerender } = render(
+      <LogDetailModal
+        log={sampleLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onNavigatePrevious={handlePrevious}
+        onNavigateNext={handleNext}
+        hasPreviousLog={true}
+        hasNextLog={true}
+      />
+    );
+
+    const prevBtn = screen.getByRole('button', { name: /Previous log/i });
+    const nextBtn = screen.getByRole('button', { name: /Next log/i });
+
+    expect(prevBtn).toBeInTheDocument();
+    expect(nextBtn).toBeInTheDocument();
+    expect(prevBtn).toBeEnabled();
+    expect(nextBtn).toBeEnabled();
+
+    fireEvent.click(prevBtn);
+    expect(handlePrevious).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(nextBtn);
+    expect(handleNext).toHaveBeenCalledTimes(1);
+
+    // Disable state when boundaries reached
+    rerender(
+      <LogDetailModal
+        log={sampleLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onNavigatePrevious={handlePrevious}
+        onNavigateNext={handleNext}
+        hasPreviousLog={false}
+        hasNextLog={false}
+      />
+    );
+
+    expect(prevBtn).toBeDisabled();
+    expect(nextBtn).toBeDisabled();
+  });
 });
+

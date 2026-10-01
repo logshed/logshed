@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle } from 'lucide-react';
+import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
@@ -17,6 +17,10 @@ interface LogDetailModalProps {
   isHostAliased?: boolean;
   onCreateDropRule?: (log: LogEntry) => void;
   onDeleteLog?: (log: LogEntry) => void;
+  onNavigatePrevious?: () => void;
+  onNavigateNext?: () => void;
+  hasPreviousLog?: boolean;
+  hasNextLog?: boolean;
 }
 
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
@@ -29,6 +33,10 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   isHostAliased,
   onCreateDropRule,
   onDeleteLog,
+  onNavigatePrevious,
+  onNavigateNext,
+  hasPreviousLog,
+  hasNextLog,
 }) => {
   const hostIsAliased = Boolean(
     isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip)
@@ -127,6 +135,34 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={`Log Record #${log.id} - ${log.source_alias}`}
+      subtitle={
+        (onNavigatePrevious || onNavigateNext) ? (
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <button
+              type="button"
+              onClick={onNavigatePrevious}
+              disabled={!hasPreviousLog}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
+              aria-label="Previous log"
+              title="Previous log in current stream view"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Previous</span>
+            </button>
+            <button
+              type="button"
+              onClick={onNavigateNext}
+              disabled={!hasNextLog}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
+              aria-label="Next log"
+              title="Next log in current stream view"
+            >
+              <span>Next</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : undefined
+      }
       width="max-w-3xl"
     >
       <div className="space-y-4 text-xs font-sans">

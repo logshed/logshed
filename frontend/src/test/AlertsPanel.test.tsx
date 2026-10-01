@@ -803,6 +803,18 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText(/900 in/)).toBeInTheDocument();
       expect(screen.getByText(/350 out/)).toBeInTheDocument();
     });
+
+    // Close modal
+    fireEvent.click(screen.getByLabelText('Close dialog'));
+
+    // Click on SSH Brute-Force row which has sample_log
+    const sshRow = screen.getByText('SSH Brute-Force Detection');
+    fireEvent.click(sshRow);
+    await waitFor(() => {
+      expect(screen.getByText('Triggering Log Snippet')).toBeInTheDocument();
+      expect(screen.getByText('Failed password for root')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText('Close dialog'));
   });
 
   it('correctly maps maintenance sub-tab paths', () => {
@@ -1023,6 +1035,39 @@ describe('AlertsPanel Component', () => {
     await waitFor(() => {
       expect(updateSchedulesSpy).toHaveBeenCalled();
     });
+  });
+
+  it('renders maintenance schedules with non-horizontal scrolling card layout on mobile viewports', async () => {
+    const mockSched = {
+      id: 'sched_mobile',
+      name: 'Mobile Backup Window',
+      recurrence: 'daily' as const,
+      start_time: '04:00',
+      duration_minutes: 30,
+      enabled: true,
+      is_active: false,
+    };
+
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+      schedules: [mockSched],
+    });
+
+    render(<AlertsPanel />);
+
+    const maintTabBtn = screen.getByRole('button', { name: /Maintenance/i });
+    fireEvent.click(maintTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Mobile Backup Window')).toBeInTheDocument();
+      expect(screen.getByText('Daily at 04:00')).toBeInTheDocument();
+      expect(screen.getByText('30 min')).toBeInTheDocument();
+    });
+
+    // Ensure the container does not use overflow-x-auto
+    const scrollContainer = screen.getByText('Mobile Backup Window').closest('.overflow-x-auto');
+    expect(scrollContainer).toBeNull();
   });
 
   it('renders advisory banner when alert rules exist but no notification channels are configured', async () => {

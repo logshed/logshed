@@ -311,7 +311,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
       )}
 
       {/* Triggering Log Snippet Card */}
-      {item.sample_log && (
+      {!isDigest && item.sample_log && (
         <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
           <div className="flex items-center justify-between p-2.5 px-3 bg-dark-900 border-b border-dark-700 gap-2">
             <h4 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
