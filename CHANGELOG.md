@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Internal Log Alias Resolution**: Connected `InternalLogHandler` to the active `AliasCache`, allowing application logs from LogShed itself (such as `127.0.0.1` or `logshed`) to resolve to user-defined aliases and persist across container restarts.
 
 ### Changed
+- **Unraid Template Default Network Generality**: Updated default container network in `unraid-template.xml` from `br0` to `bridge` with standard port mappings for broad compatibility across Unraid installations without custom network bridges.
+- **Rules Guide Expansion**: Renamed `docs/ALERT_RULES.md` to `docs/RULES_GUIDE.md` and expanded documentation to cover rate spike velocity alerts with in-memory top-culprit analysis, ingestion drop rules architecture, severity threshold handling, and 1-click preset workflows. Updated associated in-app documentation links across alert and drop rule modals.
+- **Benefits-Focused README Overhaul**: Rewrote `README.md` to highlight homelab benefits in everyday language, simplified initial setup instructions to remove internal implementation details, and updated the documentation guide reference table.
 - **Responsive Scheduled Maintenance Layout**: Transformed the scheduled maintenance window display from a horizontal scrolling table into a responsive card layout on mobile viewports, matching drop rules and alert rules styling.
 - **Docker Container Attribution in Daily Digest**: Updated 24-hour daily digest rollup calculations to attribute top error entities originating from Docker to their specific container application name rather than generic Docker references.
 - **Daily Digest Filtered Log Stream Link**: Updated the daily digest notification action link to navigate directly to the log stream filtered to the last 24 hours with severity Error and above, with link text "Link to LogShed (digest filters applied)".

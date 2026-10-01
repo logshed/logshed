@@ -3,7 +3,7 @@
   <Name>logshed</Name>
   <Repository>ghcr.io/logshed/logshed:latest</Repository>
   <Registry>https://github.com/logshed/logshed/pkgs/container/logshed</Registry>
-  <Network>br0</Network>
+  <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>

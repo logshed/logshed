@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, RotateCcw } from 'lucide-react';
+import { ExternalLink, Play, RotateCcw } from 'lucide-react';
 import { DropRule } from '../../types.ts';
 import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } from '../../api/dropRules.ts';
 import { Modal } from '../common/Modal.tsx';
@@ -223,9 +223,21 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
     >
       <form onSubmit={handleSubmit} className="space-y-4 text-xs font-sans">
         <div>
-          <label className="block text-slate-300 font-medium mb-1">
-            Rule Name <span className="text-red-400">*</span>
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-slate-300 font-medium">
+              Rule Name <span className="text-red-400">*</span>
+            </label>
+            <a
+              href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#drop-rules"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"
+              title="Open Drop Rules Documentation"
+            >
+              <span>Rule Guide &amp; Examples</span>
+              <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+          </div>
           <input
             type="text"
             value={ruleName}

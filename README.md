@@ -52,16 +52,15 @@ LogShed is a compact, self-hosted log hub designed for home labs and personal se
 
 ## Features
 
-- **Single container, single process**: FastAPI and background workers run under a single supervised asyncio process. No separate database process, Redis instance, or message broker required.
-- **Low memory footprint**: Idles at roughly 150 MB to 250 MB of RAM under normal home lab traffic.
-- **Dual ingestion**: Listens for RFC 3164 and RFC 5424 syslog traffic over UDP and TCP (port 1514), and tails local or remote Docker containers directly via the Docker Engine API.
-- **Fast full-text search**: SQLite WAL mode with FTS5 prefix indexing decoupled into a background indexing worker with sub-second catch-up latency.
-- **Real-time alerting & rate spike detection**: In-memory rule engine evaluating threshold sliding windows, immediate pattern matches, and log velocity spikes with cooldown dampening.
-- **Universal notifications**: Dispatches alerts across 80+ services via Apprise (Pushover, Discord, Telegram, Gotify, Ntfy, Slack, Email, and webhooks).
-- **Ingestion drop rules**: Discards repetitive chatter and debug noise in memory before database insertion and FTS5 indexing, with live drop counters and 1-click rule creation.
-- **User-directed AI diagnosis**: On-demand and alert-triggered incident analysis using Google Gemini, OpenAI, or local models (Ollama / vLLM), with automated secret redaction before dispatch.
-- **Host aliases & saved views**: Friendly device naming for IP addresses, with URL-synced saved filter views for quick retrieval.
-- **Automated retention**: Background log pruning on a configurable schedule (default: 14 days) reclaiming disk space safely.
+- **Live Streaming & Fast Search**: Stream incoming logs in real time without lag, and jump back through history using sub-second SQLite FTS5 search. Step chronologically through filtered results directly within the inspection modal.
+- **Noise Control at the Door**: Discard repetitive cron chatter, container health checks, and debug spam in memory with ingestion drop rules before anything touches disk. Create rules with one click from log inspection or start from built-in presets.
+- **Intelligent Alerting & Rate Spike Protection**: Catch critical error bursts, security patterns, or sudden runaway log storms. Real-time in-memory velocity tracking identifies top culprit containers and repeat patterns during storms and sends notifications straight to Discord, Telegram, Pushover, Gotify, or custom webhooks.
+- **On-Demand & Alert AI Diagnosis**: Get human-readable root-cause explanations and practical fix commands when deciphering a cryptic stack trace. All passwords, tokens, and sensitive network addresses are automatically masked before reaching your chosen model (Gemini, OpenAI, or local Ollama).
+- **Daily Digest Summaries**: Receive an automated 24-hour analytical rollup delivered to your notification channels, detailing recurring error counts, top logging containers, and storage trends.
+- **Maintenance Windows**: Silence notification channels with one click during planned package updates, homelab restarts, or scheduled system backups.
+- **Unified Incident & AI History**: Review past alert triggers alongside full AI diagnostic logs, token usage statistics, and prompt history in a single chronological timeline.
+- **Targeted Deletion & Database Compaction**: Prune specific noisy records on demand and compact your SQLite database to reclaim disk space immediately.
+- **Homelab Ready**: Assign friendly host aliases to router and switch IP addresses, save custom filter views with bidirectional URL sync, and run comfortably on modest hardware (~150 to 250 MB RAM).
 
 ---
 
@@ -91,7 +90,7 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 |---|---|
 | [Configuration Reference](docs/CONFIGURATION.md) | Complete environment variable reference, settings hierarchy, and storage paths |
 | [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Linux, and Docker |
-| [Alert Rules Guide](docs/ALERT_RULES.md) | In-depth guide to real-time threshold, pattern, and rate spike alert rules |
+| [Rules Guide](docs/RULES_GUIDE.md) | In-depth guide to real-time threshold, pattern, and rate spike alert rules, plus ingestion drop rules |
 | [Technical Specification](docs/SPEC.md) | Architecture, SQLite schema, FTS5 triggers, and API specifications |
 
 ---
@@ -191,9 +190,10 @@ LogShed provides an official Unraid Community Applications template in [`unraid-
 ### Initial Setup & Authentication
 
 1. Open your browser and navigate to `http://<YOUR_SERVER_IP>:8080`.
-2. On first run, LogShed prompts you to set an **Administrator Password**.
-3. Passwords are saved with **Argon2id** hashing. Once created, the setup endpoint locks permanently (`403 Forbidden`).
-4. Sessions authenticate using cryptographically signed, HTTP-only, `SameSite=Lax` cookies.
+2. On first run, choose an administrator password to complete initial setup.
+3. Log in with your new password to access the dashboard.
+
+*(For detailed architectural and security specifications, see [docs/SPEC.md](docs/SPEC.md).)*
 
 #### Emergency Password Reset (CLI)
 

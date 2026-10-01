@@ -170,7 +170,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           <div className="flex items-center justify-between">
             <label className="text-slate-300 font-medium">Rule Name</label>
             <a
-              href="https://github.com/logshed/logshed/blob/main/docs/ALERT_RULES.md"
+              href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#alert-rules"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"

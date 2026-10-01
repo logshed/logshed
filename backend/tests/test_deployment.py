@@ -140,7 +140,7 @@ class TestUnraidTemplate:
         assert name is not None and name.text == "logshed"
 
         network = root.find("Network")
-        assert network is not None and network.text == "br0"
+        assert network is not None and network.text == "bridge"
 
         webui = root.find("WebUI")
         assert webui is not None and "8080" in webui.text
