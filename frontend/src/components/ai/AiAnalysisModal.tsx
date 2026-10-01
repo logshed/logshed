@@ -1177,3 +1177,5 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     </Modal>
   );
 };
+
+export default AiAnalysisModal;

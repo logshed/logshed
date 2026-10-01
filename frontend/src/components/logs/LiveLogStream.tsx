@@ -923,17 +923,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const virtualItems = rowVirtualizer.getVirtualItems();
   const lastVirtualItem = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1] : null;
 
+  const lastVirtualItemIndex = lastVirtualItem?.index;
+
   useEffect(() => {
-    if (!lastVirtualItem) return;
+    if (lastVirtualItemIndex === undefined) return;
     if (
-      lastVirtualItem.index >= logs.length - 15 &&
+      lastVirtualItemIndex >= logs.length - 15 &&
       hasMoreLogs &&
       !isLoadingMoreRef.current &&
       !isLoadingHistory
     ) {
       loadMoreLogs();
     }
-  }, [lastVirtualItem, logs.length, hasMoreLogs, isLoadingHistory, loadMoreLogs]);
+  }, [lastVirtualItemIndex, logs.length, hasMoreLogs, isLoadingHistory, loadMoreLogs]);
 
   // Merge accumulated sources & apps with aliases (ensuring all discovered items remain selectable)
   const allAvailableSources = useMemo(() => {

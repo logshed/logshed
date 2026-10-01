@@ -1,24 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
-  Bell,
-  Shield,
   ShieldAlert,
-  History,
-  Plus,
-  Trash2,
-  Edit2,
-  CheckCircle2,
-  AlertTriangle,
-  Sparkles,
-  Zap,
-  FlaskConical,
+  Bell,
   FilterX,
-  Download,
-  Upload,
-  Brain,
+  History,
   Clock,
-  ExternalLink,
-  Calendar,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   AlertHistoryItem,
@@ -53,17 +41,18 @@ import {
   downloadBlob,
   slugify,
   formatMaintenanceTime,
-  toLocalDatetimeInputString,
   fromLocalDatetimeInputString,
 } from '../../utils/formatters.ts';
-import { extractCleanSummary } from '../../utils/summary.ts';
 import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal } from './AlertRuleModal.tsx';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
-import { DropRulesCard } from '../settings/DropRulesCard.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
+import { AlertRulesTab } from './tabs/AlertRulesTab.tsx';
+import { DropRulesTab } from './tabs/DropRulesTab.tsx';
+import { AlertHistoryTab } from './tabs/AlertHistoryTab.tsx';
+import { MaintenanceWindowTab, DAYS_OF_WEEK } from './tabs/MaintenanceWindowTab.tsx';
 
 export type AlertViewTab = 'rules' | 'drop-rules' | 'history' | 'maintenance';
 
@@ -117,31 +106,6 @@ const SimpleCountBadge: React.FC<{ count: number; title?: string }> = ({ count, 
   </span>
 );
 
-const DAYS_OF_WEEK = [
-  { value: 0, label: 'Sunday' },
-  { value: 1, label: 'Monday' },
-  { value: 2, label: 'Tuesday' },
-  { value: 3, label: 'Wednesday' },
-  { value: 4, label: 'Thursday' },
-  { value: 5, label: 'Friday' },
-  { value: 6, label: 'Saturday' },
-];
-
-const formatScheduleRecurrence = (s: MaintenanceSchedule): string => {
-  if (s.recurrence === 'daily') {
-    return `Daily at ${s.start_time}`;
-  }
-  if (s.recurrence === 'weekly') {
-    const day = DAYS_OF_WEEK.find((d) => d.value === (s.day_of_week ?? 0))?.label || 'Sunday';
-    return `Weekly on ${day} at ${s.start_time}`;
-  }
-  if (s.recurrence === 'monthly') {
-    const day = s.day_of_month ?? 1;
-    return `Monthly on day ${day} at ${s.start_time}`;
-  }
-  return `At ${s.start_time}`;
-};
-
 export interface AlertsPanelProps {
   onNavigateToSettings?: () => void;
 }
@@ -156,6 +120,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const [presets, setPresets] = useState<AlertPreset[]>([]);
   const [historyItems, setHistoryItems] = useState<AlertHistoryItem[]>([]);
   const [historyTotal, setHistoryTotal] = useState<number>(0);
+  const [historyLimit] = useState<number>(50);
+  const [historyOffset, setHistoryOffset] = useState<number>(0);
   const [dropRules, setDropRules] = useState<DropRule[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
   const [isAiConfigured, setIsAiConfigured] = useState<boolean>(true);
@@ -253,6 +219,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       setPresets(presetsData);
       setHistoryItems(historyData.items);
       setHistoryTotal(historyData.total);
+      setHistoryOffset(0);
       setDropRules(dropRulesData);
       setMaintenance(maintData);
       if (facetsData?.apps) {
@@ -649,6 +616,17 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     }
   };
 
+  const handleHistoryPageChange = async (newOffset: number) => {
+    try {
+      const data = await fetchAlertHistory(historyLimit, newOffset);
+      setHistoryItems(data.items);
+      setHistoryTotal(data.total);
+      setHistoryOffset(newOffset);
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message || 'Failed to load history page.', isError: true });
+    }
+  };
+
   const getChannelStatus = (channelId?: number | null) => {
     if (channelId == null) {
       const anyDisabled = channels.some((c) => !c.is_enabled);
@@ -807,773 +785,61 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
 
       {/* TAB 1: Alert Rules */}
       {activeSubTab === 'rules' && (
-        <div className="space-y-4">
-          {/* Active Maintenance Banner on Rules Tab */}
-          {isMaintenanceActiveNow && (
-            <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
-              <div className="flex items-start sm:items-center gap-3">
-                <span className="p-2 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
-                  <AlertTriangle className="w-4 h-4 animate-pulse" />
-                </span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-amber-200">Maintenance Window Active</span>
-                    {maintenance.schedule_name ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
-                        {maintenance.schedule_name}
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
-                        On-Demand
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-slate-300 mt-0.5">
-                    Alert notifications are silenced
-                    {maintenance.until ? (
-                      <> until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until)}</span></>
-                    ) : null}. Rule evaluation and incident recording continue normally.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                {maintenance.on_demand_until && (
-                  <button
-                    type="button"
-                    onClick={handleClearMaintenance}
-                    className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-amber-300 hover:text-white border border-dark-600 rounded-lg transition cursor-pointer"
-                  >
-                    Clear
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleSubTabChange('maintenance')}
-                  className="px-3 py-1.5 text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-dark-950 rounded-lg transition cursor-pointer"
-                >
-                  Manage Maintenance
-                </button>
-              </div>
-            </div>
-          )}
-          <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-          <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Bell className="w-4 h-4 text-accent-500" />
-                <span>Configured Alert Rules</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Rules evaluated continuously against ingested log batches.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:shrink-0 self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setIsPresetsModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
-                title="Browse and install pre-configured alert presets"
-              >
-                <Zap className="w-3.5 h-3.5 text-accent-500" />
-                <span>Presets</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExportAll}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
-                title="Export all alert rules"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export All</span>
-              </button>
-
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileImport}
-                accept=".json,application/json"
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer whitespace-nowrap"
-                title="Import alert rules from JSON file"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Import</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleOpenCreateModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition shadow-xs cursor-pointer whitespace-nowrap"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>New Alert Rule</span>
-              </button>
-            </div>
-          </div>
-
-          {rules.length === 0 ? (
-            <div className="p-10 text-center space-y-3">
-              <div className="p-3 bg-dark-800 text-slate-400 rounded-full w-12 h-12 mx-auto flex items-center justify-center">
-                <Bell className="w-6 h-6" />
-              </div>
-              <p className="text-xs text-slate-300 font-medium">No alert rules configured yet.</p>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Set up real-time threshold and pattern alerts to get notified of critical system events and errors.
-              </p>
-              <div className="flex flex-wrap justify-center gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsPresetsModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 hover:text-white border border-dark-700 transition cursor-pointer"
-                >
-                  <Zap className="w-3.5 h-3.5 text-accent-500" />
-                  <span>Browse Presets</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleOpenCreateModal}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Create Alert Rule</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="divide-y divide-dark-800">
-              {rules.map((rule) => {
-                const channelStatus = getChannelStatus(rule.channel_id);
-                return (
-                  <div
-                    key={rule.id}
-                    className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                      rule.is_enabled ? 'hover:bg-dark-850/40' : 'opacity-60 bg-dark-950/20'
-                    }`}
-                  >
-                    <div className="space-y-1.5 min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-medium text-slate-200">{rule.name}</span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
-                          {rule.rule_type}
-                        </span>
-                        {rule.ai_enrichment && (
-                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-950/40 text-purple-300 border border-purple-800/50">
-                            <Sparkles className="w-2.5 h-2.5" />
-                            <span>AI Enriched</span>
-                          </span>
-                        )}
-                        {rule.trigger_count > 0 && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-950/30 text-amber-300 border border-amber-800/40">
-                            Fired {rule.trigger_count}x
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                        {rule.filter_app && (
-                          <span>
-                            App: <span className="font-mono text-slate-300">{rule.filter_app}</span>
-                          </span>
-                        )}
-                        {rule.match_pattern && (
-                          <span className="truncate max-w-xs">
-                            Pattern: <code className="font-mono text-accent-400 text-[11px]">{rule.match_pattern}</code>
-                          </span>
-                        )}
-                        <span>
-                          {rule.rule_type === 'rate' ? (
-                            <>Rate: <span className="text-slate-300">&ge; {rule.threshold_count} logs/s in {rule.window_seconds}s</span></>
-                          ) : (
-                            <>Threshold: <span className="text-slate-300">&ge; {rule.threshold_count} in {rule.window_seconds}s</span></>
-                          )}
-                        </span>
-                        <span>
-                          Cooldown: <span className="text-slate-300">{rule.cooldown_seconds}s</span>
-                        </span>
-                        <span>
-                          Target: <span className="text-slate-300">{channelStatus.name}</span>
-                          {channelStatus.isInvalid && (
-                            <span
-                              className="inline-flex items-center gap-1 text-amber-400 ml-1.5 font-medium"
-                              title={channelStatus.warning || undefined}
-                            >
-                              <AlertTriangle className="w-3 h-3 inline" />
-                              <span className="text-[11px] text-amber-300">({channelStatus.warning})</span>
-                            </span>
-                          )}
-                        </span>
-                      </div>
-
-                      {rule.last_triggered_at && (
-                        <div className="text-[11px] text-slate-500">
-                          Last triggered: {new Date(rule.last_triggered_at).toLocaleString()}
-                        </div>
-                      )}
-                    </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    {/* Status Pill Switch */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleRule(rule)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition cursor-pointer ${
-                        rule.is_enabled
-                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                          : 'bg-dark-800 text-slate-400 border border-dark-700'
-                      }`}
-                      title={rule.is_enabled ? 'Click to disable' : 'Click to enable'}
-                    >
-                      {rule.is_enabled ? 'Active' : 'Disabled'}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleOpenTestModal(rule)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-                      title="Test Rule"
-                      aria-label={`Test rule ${rule.name}`}
-                    >
-                      <FlaskConical className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExportSingle(rule)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-                      title="Export rule"
-                      aria-label={`Export rule ${rule.name}`}
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditModal(rule)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-                      title="Edit rule"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRuleToDelete(rule)}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded transition cursor-pointer"
-                      title="Delete rule"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {rules.some((r) => r.ai_enrichment) && (
-          <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl flex items-start gap-2.5 text-amber-200/90 text-xs leading-relaxed">
-            <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <span>
-              <strong className="font-semibold text-amber-300">Automated AI Redaction Notice:</strong> Log events triggering AI-enabled alert rules are automatically dispatched to external AI providers for root-cause diagnosis without prior review. Automated credential scrubbing operates on a best-effort basis and may not catch every sensitive token or secret. Ensure log streams evaluated by AI-enabled rules do not contain unredacted secrets.
-            </span>
-          </div>
-        )}
-
-        {rules.length > 0 && channels.length === 0 && (
-          <div className="p-3.5 bg-dark-900 border border-dark-700 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
-            <div className="flex items-start gap-2.5">
-              <Bell className="w-4 h-4 text-accent-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-slate-200">No Notification Channels Configured</p>
-                <p className="text-slate-400 mt-0.5">
-                  Alert rules will record incidents in the History tab. To receive push notifications, configure a notification channel in Settings.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleNavigateToSettings}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-lg text-xs font-medium text-slate-200 hover:text-white transition cursor-pointer shrink-0 self-start sm:self-auto"
-            >
-              <span>Configure in Settings</span>
-              <ExternalLink className="w-3.5 h-3.5 text-accent-400" />
-            </button>
-          </div>
-        )}
-      </div>
-    )}
+        <AlertRulesTab
+          rules={rules}
+          channels={channels}
+          isMaintenanceActiveNow={isMaintenanceActiveNow}
+          maintenance={maintenance}
+          onClearMaintenance={handleClearMaintenance}
+          onNavigateToMaintenance={() => handleSubTabChange('maintenance')}
+          onOpenPresetsModal={() => setIsPresetsModalOpen(true)}
+          onExportAll={handleExportAll}
+          onFileImport={handleFileImport}
+          fileInputRef={fileInputRef}
+          onOpenCreateModal={handleOpenCreateModal}
+          onToggleRule={handleToggleRule}
+          onOpenTestModal={handleOpenTestModal}
+          onExportSingle={handleExportSingle}
+          onOpenEditModal={handleOpenEditModal}
+          onDeleteRule={(rule) => setRuleToDelete(rule)}
+          onNavigateToSettings={handleNavigateToSettings}
+          getChannelStatus={getChannelStatus}
+        />
+      )}
 
       {/* TAB 2: Ingestion Drop Rules */}
-      {activeSubTab === 'drop-rules' && <DropRulesCard onRulesChange={setDropRules} />}
+      {activeSubTab === 'drop-rules' && <DropRulesTab onRulesChange={setDropRules} />}
 
       {/* TAB 3: History */}
       {activeSubTab === 'history' && (
-        <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-          <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-            <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <History className="w-4 h-4 text-accent-500" />
-                <span>History</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Previous alerts and on-demand analyses
-              </p>
-            </div>
-            {historyItems.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsClearHistoryModalOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-900/30 rounded border border-red-800/40 transition cursor-pointer"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span>Clear All</span>
-              </button>
-            )}
-          </div>
-
-          {historyItems.length === 0 ? (
-            <div className="p-10 text-center space-y-2">
-              <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-              <p className="text-xs text-slate-300 font-medium">No history recorded yet.</p>
-              <p className="text-xs text-slate-500">
-                When alert rules trigger or AI analyses run, records will appear here.
-              </p>
-            </div>
-          ) : isMobile ? (
-            /* Mobile Card View */
-            <div className="divide-y divide-dark-800">
-              {historyItems.map((item) => {
-                const isDigest = item.rule_name === 'Daily Digest';
-                const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
-                const isAiAlert = !isOnDemand && !isDigest && Boolean(item.ai_enrichment);
-                const displayTarget = isDigest
-                  ? 'Daily Digest'
-                  : isOnDemand
-                  ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand')
-                  : item.rule_name;
-                const summaryText = extractCleanSummary(item.incident_summary || item.sample_log || '');
-
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => setSelectedHistoryItem(item)}
-                    className="p-3.5 space-y-2 hover:bg-dark-800/40 transition cursor-pointer select-none"
-                  >
-                    {/* Line 1: Type Badge + Target & Timestamp */}
-                    <div className="flex items-center justify-between text-xs gap-2">
-                      <div className="flex items-center gap-1.5 truncate">
-                        {isDigest ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
-                            <Calendar className="w-2.5 h-2.5 shrink-0" />
-                            Daily Digest
-                          </span>
-                        ) : isOnDemand ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
-                            <Brain className="w-2.5 h-2.5 shrink-0" />
-                            On-Demand
-                          </span>
-                        ) : isAiAlert ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
-                            <Zap className="w-2.5 h-2.5 shrink-0" />
-                            AI Alert
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
-                            <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                            Alert
-                          </span>
-                        )}
-                        <span className="truncate font-sans font-semibold text-slate-100">
-                          {displayTarget}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                        {item.triggered_at.slice(0, 16).replace('T', ' ')}
-                      </span>
-                    </div>
-
-                    {/* Line 2: Clean Summary */}
-                    <div
-                      className="text-slate-300 text-xs line-clamp-2 leading-relaxed font-sans"
-                      title={summaryText}
-                    >
-                      {summaryText || '-'}
-                    </div>
-
-                    {/* Line 3: Model / Count + Actions */}
-                    <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
-                      <div className="flex items-center gap-2">
-                        {item.ai_model && (
-                          <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono truncate max-w-[140px]">
-                            {item.ai_model}
-                          </span>
-                        )}
-                        <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono">
-                          {item.trigger_count} {isDigest ? 'logs' : isOnDemand ? `log${item.trigger_count === 1 ? '' : 's'}` : `event${item.trigger_count === 1 ? '' : 's'}`}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 font-sans shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedHistoryItem(item)}
-                          className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded transition cursor-pointer"
-                        >
-                          View
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setHistoryItemToDelete(item)}
-                          className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded transition cursor-pointer"
-                          title="Delete history record"
-                          aria-label={`Delete record ${item.id}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            /* Desktop Table View */
-            <div className="divide-y divide-dark-800 font-mono text-xs">
-              <div className="grid grid-cols-[135px_110px_200px_1fr_95px] px-4 py-2 text-slate-400 font-medium text-xs font-sans bg-dark-950/60 border-b border-dark-700 select-none">
-                <div>Time</div>
-                <div>Type</div>
-                <div>Target / Rule</div>
-                <div>Summary</div>
-                <div className="text-right">Actions</div>
-              </div>
-
-              {historyItems.map((item) => {
-                const isDigest = item.rule_name === 'Daily Digest';
-                const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
-                const isAiAlert = !isOnDemand && !isDigest && Boolean(item.ai_enrichment);
-                const displayTarget = isDigest
-                  ? 'Daily Digest'
-                  : isOnDemand
-                  ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand')
-                  : item.rule_name;
-                const summaryText = extractCleanSummary(item.incident_summary || item.sample_log || '');
-
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => setSelectedHistoryItem(item)}
-                    className="grid grid-cols-[135px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
-                  >
-                    <div className="text-slate-400 group-hover:text-slate-300 font-mono">
-                      {item.triggered_at.slice(0, 16).replace('T', ' ')}
-                    </div>
-                    <div>
-                      {isDigest ? (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60">
-                          <Calendar className="w-2.5 h-2.5 shrink-0" />
-                          Daily Digest
-                        </span>
-                      ) : isOnDemand ? (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60">
-                          <Brain className="w-2.5 h-2.5 shrink-0" />
-                          On-Demand
-                        </span>
-                      ) : isAiAlert ? (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60">
-                          <Zap className="w-2.5 h-2.5 shrink-0" />
-                          AI Alert
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650">
-                          <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                          Alert
-                        </span>
-                      )}
-                    </div>
-                    <div className="truncate pr-2 font-sans font-medium text-slate-200" title={displayTarget}>
-                      {displayTarget}
-                    </div>
-                    <div
-                      className="text-slate-300 truncate pr-2 group-hover:text-white font-sans text-xs"
-                      title={summaryText}
-                    >
-                      {summaryText || '-'}
-                    </div>
-                    <div className="flex items-center justify-end gap-1.5 font-sans" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedHistoryItem(item)}
-                        className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded transition cursor-pointer"
-                        title="View details"
-                      >
-                        View
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHistoryItemToDelete(item)}
-                        className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded border border-transparent hover:border-red-900/50 transition cursor-pointer"
-                        title="Delete history record"
-                        aria-label={`Delete record ${item.id}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <AlertHistoryTab
+          historyItems={historyItems}
+          historyTotal={historyTotal}
+          isMobile={isMobile}
+          onClearAllHistory={() => setIsClearHistoryModalOpen(true)}
+          onSelectHistoryItem={(item) => setSelectedHistoryItem(item)}
+          onDeleteHistoryItem={(item) => setHistoryItemToDelete(item)}
+          limit={historyLimit}
+          offset={historyOffset}
+          onPageChange={handleHistoryPageChange}
+        />
       )}
 
       {/* TAB 4: Maintenance */}
       {activeSubTab === 'maintenance' && (
-        <div className="space-y-6">
-          {/* Card 1: On-Demand Maintenance */}
-          <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-            <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-accent-500" />
-                  <span>On-Demand Maintenance</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Instantly silence external notifications for ad-hoc maintenance or testing without changing alert rules.
-                </p>
-              </div>
-              <div>
-                {isOnDemandActiveNow ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                    On-Demand Active
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700">
-                    <span className="w-2 h-2 rounded-full bg-slate-600"></span>
-                    On-Demand Inactive
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="p-5 space-y-4">
-              {isOnDemandActiveNow ? (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-amber-950/20 border border-amber-800/40">
-                  <div>
-                    <p className="text-xs font-medium text-amber-200">
-                      Alert notifications are currently silenced
-                    </p>
-                    <p className="text-xs text-slate-300 mt-0.5">
-                      Active until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.on_demand_until)}</span>
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleClearMaintenance}
-                    className="px-4 py-2 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-amber-300 hover:text-white border border-dark-600 rounded-lg transition cursor-pointer self-start sm:self-auto"
-                  >
-                    Clear On-Demand Window
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-slate-300">
-                  Select a preset duration or set a specific end time to immediately silence outgoing alert notifications.
-                </p>
-              )}
-
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
-                {/* Quick Presets */}
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-slate-400">Quick Duration Presets:</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSetPreset(1)}
-                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                    >
-                      +1 Hour
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSetPreset(4)}
-                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                    >
-                      +4 Hours
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSetPreset(8)}
-                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                    >
-                      +8 Hours
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSetPreset(24)}
-                      className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                    >
-                      +24 Hours
-                    </button>
-                  </div>
-                </div>
-
-                {/* Custom Time */}
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-slate-400">Specific End Time:</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="datetime-local"
-                      aria-label="Maintenance window end time"
-                      value={customUntil}
-                      onChange={(e) => setCustomUntil(e.target.value)}
-                      min={toLocalDatetimeInputString(new Date().toISOString())}
-                      className="bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 px-3 py-1.5 focus:border-accent-500 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleApplyCustomWindow}
-                      disabled={!customUntil}
-                      className="px-3.5 py-1.5 text-xs font-medium bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-                    >
-                      Set Window
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Recurring Scheduled Windows */}
-          <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-            <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-accent-500" />
-                  <span>Scheduled Maintenance Windows</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Define daily, weekly, or monthly recurring windows to automatically silence alerts during planned maintenance.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleOpenAddScheduleModal}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-dark-950 bg-accent-500 hover:bg-accent-400 transition cursor-pointer self-start sm:self-auto shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Schedule</span>
-              </button>
-            </div>
-
-            <div className="p-0">
-              {(!maintenance.schedules || maintenance.schedules.length === 0) ? (
-                <div className="p-8 text-center text-xs text-slate-400">
-                  <Clock className="w-8 h-8 mx-auto text-slate-600 mb-2" />
-                  <p className="font-medium text-slate-300">No scheduled windows configured</p>
-                  <p className="text-slate-500 mt-1 max-w-sm mx-auto">
-                    Add recurring daily, weekly, or monthly schedules to automatically suppress notifications during routine maintenance.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleOpenAddScheduleModal}
-                    className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 rounded-lg transition cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Create First Schedule</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="divide-y divide-dark-800 overflow-x-auto">
-                  {/* Table Header */}
-                  <div className="grid grid-cols-[1.2fr_1.5fr_90px_100px_70px] gap-x-4 min-w-[640px] px-5 py-2.5 bg-dark-950/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <div>Schedule Name</div>
-                    <div>Recurrence</div>
-                    <div>Duration</div>
-                    <div>Status</div>
-                    <div className="text-right">Actions</div>
-                  </div>
-
-                  {maintenance.schedules.map((sched) => (
-                    <div
-                      key={sched.id}
-                      className="grid grid-cols-[1.2fr_1.5fr_90px_100px_70px] gap-x-4 min-w-[640px] px-5 py-3 items-center hover:bg-dark-850/50 transition text-xs"
-                    >
-                      <div className="pr-2 min-w-0">
-                        <div className="font-medium text-slate-200 truncate">{sched.name}</div>
-                        {sched.next_run && sched.enabled && !sched.is_active && (
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            Next: {formatMaintenanceTime(sched.next_run)}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="text-slate-300 text-xs min-w-0 truncate">
-                        {formatScheduleRecurrence(sched)}
-                      </div>
-
-                      <div className="text-slate-300 font-mono text-xs whitespace-nowrap">
-                        {sched.duration_minutes} min
-                      </div>
-
-                      <div>
-                        {sched.is_active ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
-                            Active Now
-                          </span>
-                        ) : sched.enabled ? (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleScheduleEnabled(sched)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/60 transition cursor-pointer"
-                            title="Click to disable"
-                          >
-                            Enabled
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleScheduleEnabled(sched)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:text-slate-300 transition cursor-pointer"
-                            title="Click to enable"
-                          >
-                            Disabled
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditScheduleModal(sched)}
-                          className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-                          title="Edit schedule"
-                          aria-label={`Edit ${sched.name}`}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setScheduleToDelete(sched)}
-                          className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded transition cursor-pointer"
-                          title="Delete schedule"
-                          aria-label={`Delete ${sched.name}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <MaintenanceWindowTab
+          maintenance={maintenance}
+          isOnDemandActiveNow={isOnDemandActiveNow}
+          customUntil={customUntil}
+          setCustomUntil={setCustomUntil}
+          onClearMaintenance={handleClearMaintenance}
+          onSetPreset={handleSetPreset}
+          onApplyCustomWindow={handleApplyCustomWindow}
+          onOpenAddScheduleModal={handleOpenAddScheduleModal}
+          onOpenEditScheduleModal={handleOpenEditScheduleModal}
+          onToggleScheduleEnabled={handleToggleScheduleEnabled}
+          onDeleteSchedule={(sched) => setScheduleToDelete(sched)}
+        />
       )}
 
       {/* CREATE / EDIT RULE MODAL */}
@@ -1605,7 +871,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       >
         <div className="space-y-4 text-xs">
           <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to delete alert rule <strong className="text-white">"{ruleToDelete?.name}"</strong>? This will stop all monitoring for this rule.
+            Are you sure you want to delete alert rule <strong className="text-white">"{ruleToDelete?.name}"</strong>?
           </p>
           <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
             <button
@@ -1621,66 +887,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
               className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
             >
               Delete Rule
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* CONFIRM DELETE SINGLE HISTORY RECORD MODAL */}
-      <Modal
-        isOpen={historyItemToDelete !== null}
-        onClose={() => setHistoryItemToDelete(null)}
-        title="Delete Incident Record"
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4 text-xs">
-          <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{historyItemToDelete?.triggered_at ? new Date(historyItemToDelete.triggered_at).toLocaleString() : ''}</span>? This action cannot be undone.
-          </p>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setHistoryItemToDelete(null)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => historyItemToDelete && handleDeleteHistory(historyItemToDelete.id)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Delete Record
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* CONFIRM CLEAR HISTORY MODAL */}
-      <Modal
-        isOpen={isClearHistoryModalOpen}
-        onClose={() => setIsClearHistoryModalOpen(false)}
-        title="Clear Alert History"
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4 text-xs">
-          <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to clear all {historyTotal} historical alert firing records? This action cannot be undone.
-          </p>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsClearHistoryModalOpen(false)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleClearAllHistory}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Clear All Records
             </button>
           </div>
         </div>
@@ -1707,7 +913,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         </Modal>
       )}
 
-      {/* ALERT PRESETS MODAL */}
+      {/* PRESETS INSTALL MODAL */}
       <AlertPresetsModal
         isOpen={isPresetsModalOpen}
         onClose={() => setIsPresetsModalOpen(false)}
@@ -1720,19 +926,86 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         installingPresetId={installingPresetId}
       />
 
+      {/* CLEAR ALL HISTORY MODAL */}
+      <Modal
+        isOpen={isClearHistoryModalOpen}
+        onClose={() => setIsClearHistoryModalOpen(false)}
+        title="Clear All Alert History"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 text-xs">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <p className="text-slate-300 leading-relaxed">
+              Are you sure you want to permanently clear all alert and analysis history records? This action cannot be undone.
+            </p>
+          </div>
+          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsClearHistoryModalOpen(false)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleClearAllHistory}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
+            >
+              Clear All History
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* CONFIRM DELETE SINGLE HISTORY RECORD MODAL */}
+      <Modal
+        isOpen={historyItemToDelete !== null}
+        onClose={() => setHistoryItemToDelete(null)}
+        title="Delete Incident Record"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-300 leading-relaxed">
+            Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{historyItemToDelete?.triggered_at ? new Date(historyItemToDelete.triggered_at).toLocaleString() : ''}</span>? This action cannot be undone.
+          </p>
+          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setHistoryItemToDelete(null)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (historyItemToDelete) {
+                  handleDeleteHistory(historyItemToDelete.id);
+                }
+              }}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
+            >
+              Delete Record
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* ADD / EDIT SCHEDULE MODAL */}
       <Modal
         isOpen={isScheduleModalOpen}
         onClose={() => setIsScheduleModalOpen(false)}
         title={scheduleToEdit ? 'Edit Maintenance Schedule' : 'Add Maintenance Schedule'}
-        maxWidth="max-w-lg"
+        maxWidth="max-w-md"
       >
         <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
           {/* Name */}
           <div>
-            <label className="block text-slate-300 font-medium mb-1">
-              Schedule Name <span className="text-red-400">*</span>
-            </label>
+            <label className="block text-slate-300 font-medium mb-1">Schedule Name</label>
             <input
               type="text"
               required
@@ -1740,7 +1013,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
               value={scheduleFormName}
               onChange={(e) => setScheduleFormName(e.target.value)}
               placeholder="e.g. Weekly Server Maintenance"
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:border-accent-500 focus:outline-none"
+              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
             />
           </div>
 
@@ -1931,3 +1204,5 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     </div>
   );
 };
+
+export default AlertsPanel;

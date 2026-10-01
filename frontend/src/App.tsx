@@ -7,10 +7,12 @@ import { Modal } from './components/common/Modal.tsx';
 import { LoginForm } from './components/auth/LoginForm.tsx';
 import { SetupModal } from './components/auth/SetupModal.tsx';
 import { LiveLogStream } from './components/logs/LiveLogStream.tsx';
-import { StoragePanel } from './components/storage/StoragePanel.tsx';
-import { AlertsPanel } from './components/alerts/AlertsPanel.tsx';
-import { SettingsPanel } from './components/settings/SettingsPanel.tsx';
-import { AiAnalysisModal } from './components/ai/AiAnalysisModal.tsx';
+import { LoadingSpinner } from './components/common/LoadingSpinner.tsx';
+
+const StoragePanel = React.lazy(() => import('./components/storage/StoragePanel'));
+const AlertsPanel = React.lazy(() => import('./components/alerts/AlertsPanel'));
+const SettingsPanel = React.lazy(() => import('./components/settings/SettingsPanel'));
+const AiAnalysisModal = React.lazy(() => import('./components/ai/AiAnalysisModal'));
 import { LogEntry, AppTab, SettingsSubTab } from './types.ts';
 import { LogShedLogo } from './components/common/LogShedLogo.tsx';
 import { useMediaQuery } from './utils/hooks.ts';
@@ -208,40 +210,42 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'storage' && <StoragePanel />}
+        <React.Suspense fallback={<LoadingSpinner />}>
+          {activeTab === 'storage' && <StoragePanel />}
 
-        {activeTab === 'rules' && (
-          <AlertsPanel
+          {activeTab === 'rules' && (
+            <AlertsPanel
+              onNavigateToSettings={() => handleTabChange('settings')}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <SettingsPanel
+              initialSubTab={pendingSettingsSubTab || undefined}
+              initialAddIp={addAliasIp}
+              onAliasSaved={() => {
+                setAddAliasIp(null);
+                setPendingSettingsSubTab(null);
+              }}
+              onDirtyChange={setIsSettingsDirty}
+              saveTriggerRef={saveSettingsTriggerRef}
+            />
+          )}
+
+          {/* Global AI Root-Cause Analysis Modal */}
+          <AiAnalysisModal
+            isOpen={aiSelectedLogs.length > 0}
+            onClose={() => {
+              setAiSelectedLogs([]);
+              if (isMobile) {
+                setClearSelectionSignal((prev) => prev + 1);
+              }
+            }}
+            selectedLogs={aiSelectedLogs}
             onNavigateToSettings={() => handleTabChange('settings')}
           />
-        )}
-
-        {activeTab === 'settings' && (
-          <SettingsPanel
-            initialSubTab={pendingSettingsSubTab || undefined}
-            initialAddIp={addAliasIp}
-            onAliasSaved={() => {
-              setAddAliasIp(null);
-              setPendingSettingsSubTab(null);
-            }}
-            onDirtyChange={setIsSettingsDirty}
-            saveTriggerRef={saveSettingsTriggerRef}
-          />
-        )}
+        </React.Suspense>
       </main>
-
-      {/* Global AI Root-Cause Analysis Modal */}
-      <AiAnalysisModal
-        isOpen={aiSelectedLogs.length > 0}
-        onClose={() => {
-          setAiSelectedLogs([]);
-          if (isMobile) {
-            setClearSelectionSignal((prev) => prev + 1);
-          }
-        }}
-        selectedLogs={aiSelectedLogs}
-        onNavigateToSettings={() => handleTabChange('settings')}
-      />
 
       {/* Unsaved Changes Confirmation Modal */}
       <Modal

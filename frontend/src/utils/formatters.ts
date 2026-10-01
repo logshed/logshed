@@ -158,4 +158,19 @@ export function formatMaintenanceTime(isoString?: string | null): string {
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${timeStr}`;
 }
 
+/**
+ * Formats a byte quantity into a human-readable size string (B, KB, MB, GB, TB, PB).
+ * Handles zero and negative values defensively without returning "NaN undefined".
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const unitIndex = Math.min(Math.max(0, i), sizes.length - 1);
+  return `${parseFloat((bytes / Math.pow(k, unitIndex)).toFixed(2))} ${sizes[unitIndex]}`;
+}
+
 

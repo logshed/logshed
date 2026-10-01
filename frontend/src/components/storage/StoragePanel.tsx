@@ -100,3 +100,5 @@ export const StoragePanel: React.FC = () => {
     </div>
   );
 };
+
+export default StoragePanel;

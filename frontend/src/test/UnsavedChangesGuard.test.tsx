@@ -22,9 +22,10 @@ vi.mock('../components/aliases/HostAliasManager.tsx', () => ({
   HostAliasManager: () => <div data-testid="host-alias-manager">Host Alias Content</div>,
 }));
 
-vi.mock('../components/storage/StoragePanel.tsx', () => ({
-  StoragePanel: () => <div data-testid="storage-panel">Storage Content</div>,
-}));
+vi.mock('../components/storage/StoragePanel.tsx', () => {
+  const StoragePanel = () => <div data-testid="storage-panel">Storage Content</div>;
+  return { StoragePanel, default: StoragePanel };
+});
 
 describe('UnsavedChangesGuard Integration', () => {
   beforeEach(() => {

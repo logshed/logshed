@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { TrendingUp } from 'lucide-react';
 import { StorageMetricsSnapshot } from '../../types.ts';
+import { formatBytes } from '../../utils/formatters.ts';
 
 interface StorageTrendChartProps {
   history: StorageMetricsSnapshot[];
@@ -78,8 +79,14 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
                 fontSize: '11px',
                 fontFamily: 'monospace',
               }}
-              formatter={(value: any, name: any) => {
-                if (name === 'dbMb') return [`${Number(value).toLocaleString()} MB`, 'Database Size'];
+              formatter={(value: any, name: any, item: any) => {
+                if (name === 'dbMb') {
+                  const dbBytes = item?.payload?.dbBytes;
+                  return [
+                    typeof dbBytes === 'number' ? formatBytes(dbBytes) : `${Number(value).toLocaleString()} MB`,
+                    'Database Size',
+                  ];
+                }
                 return [value, name];
               }}
             />

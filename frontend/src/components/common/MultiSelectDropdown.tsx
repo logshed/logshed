@@ -73,13 +73,21 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
+    let rafId: number | null = null;
     const handleScrollOrResize = () => {
-      updatePosition();
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        updatePosition();
+      });
     };
 
-    window.addEventListener('resize', handleScrollOrResize);
-    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize, { passive: true });
+    window.addEventListener('scroll', handleScrollOrResize, { passive: true, capture: true });
     return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
       window.removeEventListener('resize', handleScrollOrResize);
       window.removeEventListener('scroll', handleScrollOrResize, true);
     };

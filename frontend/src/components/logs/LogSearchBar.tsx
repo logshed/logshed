@@ -17,7 +17,7 @@ interface LogSearchBarProps {
   onApplySavedView?: (filters: LogFilterParams) => void;
 }
 
-export const LogSearchBar: React.FC<LogSearchBarProps> = ({
+export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   filters,
   onFilterChange,
   onSearch,
@@ -49,7 +49,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
     loadSavedViews();
   }, [loadSavedViews]);
 
-  const handleTogglePin = async (e: React.MouseEvent, view: SavedView) => {
+  const handleTogglePin = useCallback(async (e: React.MouseEvent, view: SavedView) => {
     e.stopPropagation();
     try {
       const updated = await updateSavedView(view.id, { is_pinned: !view.is_pinned });
@@ -61,9 +61,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
     } catch {
       // Ignored
     }
-  };
+  }, []);
 
-  const handleDeleteSavedView = async (e: React.MouseEvent, viewId: number) => {
+  const handleDeleteSavedView = useCallback(async (e: React.MouseEvent, viewId: number) => {
     e.stopPropagation();
     try {
       await deleteSavedView(viewId);
@@ -71,9 +71,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
     } catch {
       // Ignored
     }
-  };
+  }, []);
 
-  const handleSaveViewSubmit = async (name: string, isPinned: boolean) => {
+  const handleSaveViewSubmit = useCallback(async (name: string, isPinned: boolean) => {
     const cleanParams: Record<string, any> = {};
     if (filters.query?.trim()) cleanParams.query = filters.query.trim();
     if (filters.severity_max !== undefined && filters.severity_max !== null) {
@@ -103,7 +103,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
         (a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || a.name.localeCompare(b.name)
       )
     );
-  };
+  }, [filters]);
 
   // Compute active sources as an array
   const activeSources: string[] = useMemo(() => {
@@ -138,7 +138,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
 
   const hasActiveFilters = activeFilterCount > 0;
 
-  const handleTimePresetChange = (preset: string) => {
+  const handleTimePresetChange = useCallback((preset: string) => {
     setTimePreset(preset);
     if (preset === 'custom') {
       setShowCustomTime(true);
@@ -164,13 +164,13 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
       from: fromDate.toISOString(),
       to: undefined,
     });
-  };
+  }, [filters, onFilterChange]);
 
-  const handleResetFilters = () => {
+  const handleResetFilters = useCallback(() => {
     setTimePreset('all');
     setShowCustomTime(false);
     onReset();
-  };
+  }, [onReset]);
 
   return (
     <div className="bg-dark-950 border-b border-dark-700 p-2.5 flex flex-col gap-2 select-none text-xs shrink-0">
@@ -544,5 +544,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
       />
     </div>
   );
-};
+});
+
+LogSearchBar.displayName = 'LogSearchBar';
+
+export default LogSearchBar;
 

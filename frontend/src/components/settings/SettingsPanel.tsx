@@ -1288,3 +1288,5 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     </div>
   );
 };
+
+export default SettingsPanel;

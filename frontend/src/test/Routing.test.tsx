@@ -22,13 +22,15 @@ vi.mock('../components/aliases/HostAliasManager.tsx', () => ({
   HostAliasManager: () => <div data-testid="host-alias-manager">Host Alias Content</div>,
 }));
 
-vi.mock('../components/storage/StoragePanel.tsx', () => ({
-  StoragePanel: () => <div data-testid="storage-panel">Storage Content</div>,
-}));
+vi.mock('../components/storage/StoragePanel.tsx', () => {
+  const StoragePanel = () => <div data-testid="storage-panel">Storage Content</div>;
+  return { StoragePanel, default: StoragePanel };
+});
 
-vi.mock('../components/alerts/AlertsPanel.tsx', () => ({
-  AlertsPanel: () => <div data-testid="alerts-panel">Alerts Content</div>,
-}));
+vi.mock('../components/alerts/AlertsPanel.tsx', () => {
+  const AlertsPanel = () => <div data-testid="alerts-panel">Alerts Content</div>;
+  return { AlertsPanel, default: AlertsPanel };
+});
 
 describe('URL Routing and History API Synchronization', () => {
   beforeEach(() => {
