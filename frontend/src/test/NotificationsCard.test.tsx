@@ -128,6 +128,28 @@ describe('NotificationsCard Component', () => {
     });
   });
 
+  it('renders Apprise documentation links pointing to services and url-builder', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValueOnce([]);
+
+    render(<NotificationsCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText('New Target')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('New Target'));
+
+    expect(screen.getByText('Add Notification Target')).toBeInTheDocument();
+
+    const servicesLink = screen.getByRole('link', { name: /Services & Syntax/i });
+    expect(servicesLink).toHaveAttribute('href', 'https://appriseit.com/services/');
+    expect(servicesLink).toHaveAttribute('target', '_blank');
+
+    const builderLink = screen.getByRole('link', { name: /URL Builder/i });
+    expect(builderLink).toHaveAttribute('href', 'https://appriseit.com/url-builder/');
+    expect(builderLink).toHaveAttribute('target', '_blank');
+  });
+
   it('disables daily digest controls when no active notification targets exist', async () => {
     vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValueOnce([
       {

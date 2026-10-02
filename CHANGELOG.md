@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **About LogShed Card Location**: Moved the About LogShed card from the Advanced tab to the bottom of the Application Settings tab.
+- **Apprise Documentation Links**: Updated Apprise notification URL documentation links in the Add/Edit Target modal to point to the new official services and URL builder documentation on appriseit.com.
 
 ### Fixed
 - **Unsaved Changes Warning in Rule Modals**: Added unsaved changes protection to alert and drop rule modals when closing via header close button, cancel button, or escape key with pending edits.

@@ -639,15 +639,28 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               <label className="block text-[11px] font-semibold text-slate-400 uppercase">
                 Notification URL (Apprise Format)
               </label>
-              <a
-                href="https://github.com/caronc/apprise/wiki"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"
-              >
-                <span>Syntax Docs</span>
-                <ExternalLink className="w-2.5 h-2.5" />
-              </a>
+              <div className="flex items-center gap-2.5">
+                <a
+                  href="https://appriseit.com/services/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"
+                  title="View supported Apprise notification services and syntax"
+                >
+                  <span>Services &amp; Syntax</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+                <a
+                  href="https://appriseit.com/url-builder/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"
+                  title="Construct notification URLs using the official Apprise URL Builder"
+                >
+                  <span>URL Builder</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
             </div>
             <input
               type="text"
