@@ -115,3 +115,56 @@ class TestParseIsoToUtcDatetime:
         assert parse_iso_to_utc_datetime("not-a-date") is None
         assert parse_iso_to_utc_datetime("2026-99-99T99:99:99") is None
 
+
+class TestExpandSourceAliases:
+    """Tests for expand_source_aliases helper function."""
+
+    def test_empty_or_none_sources(self):
+        from app.core.utils import expand_source_aliases
+        assert expand_source_aliases(None) == []
+        assert expand_source_aliases([]) == []
+        assert expand_source_aliases([""]) == []
+
+    def test_no_connection_returns_parsed_sources(self):
+        from app.core.utils import expand_source_aliases
+        assert expand_source_aliases(["host1,host2", "host3"]) == ["host1", "host2", "host3"]
+
+    def test_symmetric_expansion_from_alias_and_ip(self):
+        import sqlite3
+        from app.core.utils import expand_source_aliases
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute("CREATE TABLE host_aliases (ip TEXT, alias TEXT)")
+            conn.execute("INSERT INTO host_aliases VALUES ('127.0.0.1', 'LogShed')")
+            conn.execute("INSERT INTO host_aliases VALUES ('docker', 'Docker Server')")
+            conn.execute("INSERT INTO host_aliases VALUES ('172.22.2.11', 'Proxmox')")
+
+            # Query by alias -> expands to alias + ip
+            res1 = expand_source_aliases(["LogShed"], conn=conn)
+            assert sorted(res1) == ["127.0.0.1", "LogShed"]
+
+            # Query by lowercase alias -> expands to lowercase + original alias + ip
+            res2 = expand_source_aliases(["logshed"], conn=conn)
+            assert "127.0.0.1" in res2
+            assert "LogShed" in res2
+            assert "logshed" in res2
+
+            # Query by IP -> expands to IP + alias
+            res3 = expand_source_aliases(["127.0.0.1"], conn=conn)
+            assert sorted(res3) == ["127.0.0.1", "LogShed"]
+
+            # Query by multi-word alias
+            res4 = expand_source_aliases(["Docker Server"], conn=conn)
+            assert sorted(res4) == ["Docker Server", "docker"]
+
+            # Query by unaliased host -> preserves host without error
+            res5 = expand_source_aliases(["unknown-host"], conn=conn)
+            assert res5 == ["unknown-host"]
+
+            # Combined list
+            res6 = expand_source_aliases(["LogShed", "Proxmox"], conn=conn)
+            assert sorted(res6) == ["127.0.0.1", "172.22.2.11", "LogShed", "Proxmox"]
+        finally:
+            conn.close()
+

@@ -252,6 +252,105 @@ async def test_delete_all_logs_for_host(client: AsyncClient, auth_cookie: dict):
 
 
 @pytest.mark.asyncio
+async def test_delete_and_filter_symmetric_alias_expansion(client: AsyncClient, auth_cookie: dict):
+    """
+    Verify symmetric alias expansion:
+    Deleting or filtering by an alias (e.g. 'LogShed Server') matches logs that were recorded
+    with historical alias casing ('logshed') or raw IP ('127.0.0.1').
+    """
+    db_path = get_db_path()
+    base_time = datetime.datetime(2026, 9, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+
+    # Insert logs with variations of source_alias and raw source_ip
+    entries = [
+        # Log 1: source_ip = 127.0.0.1, source_alias = 'logshed' (lowercase historical)
+        {
+            "timestamp": (base_time + datetime.timedelta(minutes=1)).isoformat(),
+            "received_at": (base_time + datetime.timedelta(minutes=1)).isoformat(),
+            "source_ip": "127.0.0.1",
+            "source_alias": "logshed",
+            "app_name": "backend",
+            "facility": 1,
+            "severity": 6,
+            "message": "Starting server",
+            "raw": "Starting server",
+        },
+        # Log 2: source_ip = 127.0.0.1, source_alias = 'LogShed' (mixed case)
+        {
+            "timestamp": (base_time + datetime.timedelta(minutes=2)).isoformat(),
+            "received_at": (base_time + datetime.timedelta(minutes=2)).isoformat(),
+            "source_ip": "127.0.0.1",
+            "source_alias": "LogShed",
+            "app_name": "backend",
+            "facility": 1,
+            "severity": 6,
+            "message": "Ready to receive connections",
+            "raw": "Ready to receive connections",
+        },
+        # Log 3: source_ip = 172.22.2.11, source_alias = 'proxmox'
+        {
+            "timestamp": (base_time + datetime.timedelta(minutes=3)).isoformat(),
+            "received_at": (base_time + datetime.timedelta(minutes=3)).isoformat(),
+            "source_ip": "172.22.2.11",
+            "source_alias": "proxmox",
+            "app_name": "pvedaemon",
+            "facility": 1,
+            "severity": 5,
+            "message": "VM status update",
+            "raw": "VM status update",
+        },
+    ]
+
+    query = """
+        INSERT INTO logs (
+            timestamp, received_at, source_ip, source_alias,
+            app_name, facility, severity, message, raw
+        ) VALUES (
+            :timestamp, :received_at, :source_ip, :source_alias,
+            :app_name, :facility, :severity, :message, :raw
+        )
+    """
+    with get_connection(db_path) as conn:
+        conn.executemany(query, entries)
+        # Configure host alias mapping 127.0.0.1 -> 'LogShed Server'
+        conn.execute(
+            "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
+            ("127.0.0.1", "LogShed Server", base_time.isoformat()),
+        )
+        conn.commit()
+
+    # 1. Test preview count using alias 'LogShed Server': should match both 127.0.0.1 logs
+    preview_res = await client.post(
+        "/api/logs/delete/preview",
+        json={"sources": ["LogShed Server"]},
+        cookies=auth_cookie,
+    )
+    assert preview_res.status_code == 200
+    assert preview_res.json()["matched_count"] == 2
+
+    # 2. Test querying /api/logs with source='LogShed Server'
+    query_res = await client.get("/api/logs?source=LogShed+Server", cookies=auth_cookie)
+    assert query_res.status_code == 200
+    assert query_res.json()["total"] == 2
+
+    # 3. Delete by alias 'LogShed Server'
+    del_res = await client.post(
+        "/api/logs/delete",
+        json={"sources": ["LogShed Server"]},
+        cookies=auth_cookie,
+    )
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted_count"] == 2
+
+    # 4. Only proxmox log remains
+    remaining_res = await client.get("/api/logs", cookies=auth_cookie)
+    assert remaining_res.status_code == 200
+    remaining = remaining_res.json()["logs"]
+    assert len(remaining) == 1
+    assert remaining[0]["source_ip"] == "172.22.2.11"
+
+
+@pytest.mark.asyncio
 async def test_delete_all_logs_for_app(client: AsyncClient, auth_cookie: dict):
     db_path = get_db_path()
     _seed_test_logs(db_path)

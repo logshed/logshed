@@ -79,6 +79,56 @@ def parse_multi_values(values: Optional[list[str]]) -> list[str]:
     return result
 
 
+def expand_source_aliases(
+    sources: Optional[list[str]],
+    conn: Optional[Any] = None,
+) -> list[str]:
+    """
+    Symmetrically expand a list of source names or IPs using configured host aliases.
+    For each source, adds its corresponding IP and alias equivalents (bidirectionally and
+    case-insensitively), ensuring queries and deletion filters match both raw IPs and
+    historical alias spellings without requiring costly unindexed SQL functions.
+    """
+    parsed = parse_multi_values(sources)
+    if not parsed:
+        return []
+
+    # If no database connection is supplied, return parsed inputs deduplicated
+    if conn is None:
+        return parsed
+
+    expanded: set[str] = set(parsed)
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT ip, alias FROM host_aliases")
+        rows = cursor.fetchall()
+    except Exception:
+        return sorted(expanded)
+
+    # Build bidirectional lookup maps keyed by lowercase string
+    lookup: dict[str, set[str]] = {}
+    for row in rows:
+        ip = str(row[0]).strip() if row[0] is not None else ""
+        alias = str(row[1]).strip() if row[1] is not None else ""
+        if not ip and not alias:
+            continue
+
+        pair_items = {item for item in (ip, alias) if item}
+        for item in pair_items:
+            key = item.lower()
+            if key not in lookup:
+                lookup[key] = set()
+            lookup[key].update(pair_items)
+
+    for item in parsed:
+        matches = lookup.get(item.lower())
+        if matches:
+            expanded.update(matches)
+
+    return sorted(expanded)
+
+
 import re
 
 # Reserved FTS5 syntax operators

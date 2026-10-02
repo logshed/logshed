@@ -15,13 +15,21 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from app.core.migrations import get_connection
-from app.core.utils import escape_fts_tokens, format_fts_query, parse_multi_values
+from app.core.utils import (
+    escape_fts_tokens,
+    expand_source_aliases,
+    format_fts_query,
+    parse_multi_values,
+)
 from app.models import LogDeleteRequest
 
 logger = logging.getLogger(__name__)
 
 
-def build_deletion_filter(criteria: LogDeleteRequest) -> tuple[str, dict[str, Any]]:
+def build_deletion_filter(
+    criteria: LogDeleteRequest,
+    conn: Optional[sqlite3.Connection] = None,
+) -> tuple[str, dict[str, Any]]:
     """
     Build parameterized WHERE clause and parameter dictionary for log deletion.
     Guards against unconstrained full-table wipe unless delete_all is explicitly True.
@@ -45,7 +53,7 @@ def build_deletion_filter(criteria: LogDeleteRequest) -> tuple[str, dict[str, An
             params[f"id_{i}"] = log_id
 
     # 2. Source / Host filter (source_alias or source_ip)
-    parsed_sources = parse_multi_values(criteria.sources)
+    parsed_sources = expand_source_aliases(criteria.sources, conn=conn)
     if parsed_sources:
         has_filter = True
         src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
@@ -109,9 +117,9 @@ def count_matching_logs(db_path: Union[str, Path], criteria: LogDeleteRequest) -
     Count the number of logs matching the deletion criteria without modifying the database.
     Used for UI preview counters and safety confirmation dialogs.
     """
-    where_sql, params = build_deletion_filter(criteria)
     conn = get_connection(db_path)
     try:
+        where_sql, params = build_deletion_filter(criteria, conn=conn)
         cursor = conn.cursor()
         count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
         try:
@@ -147,7 +155,6 @@ def execute_delete_logs(
     consistently purges all deleted tokens from logs_fts.
     """
     db_path_obj = Path(db_path)
-    where_sql, params = build_deletion_filter(criteria)
 
     # Pre-drain unindexed logs so logs_ad trigger cleans all target rows from logs_fts
     if index_pending:
@@ -160,6 +167,7 @@ def execute_delete_logs(
     total_deleted = 0
     conn = get_connection(db_path_obj)
     try:
+        where_sql, params = build_deletion_filter(criteria, conn=conn)
         cursor = conn.cursor()
 
         # If direct log IDs are given, chunk them into groups of 500

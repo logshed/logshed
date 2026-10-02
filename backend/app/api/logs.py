@@ -23,7 +23,12 @@ from app.models import (
     LogFacetsResponse,
     LogListResponse,
 )
-from app.core.utils import escape_fts_tokens, format_fts_query, parse_multi_values
+from app.core.utils import (
+    escape_fts_tokens,
+    expand_source_aliases,
+    format_fts_query,
+    parse_multi_values,
+)
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 
 import sqlite3
@@ -84,7 +89,7 @@ async def list_logs(
                 where_clauses.append("logs_fts MATCH :fts_term")
                 params["fts_term"] = fts_term
 
-        parsed_sources = parse_multi_values(source)
+        parsed_sources = expand_source_aliases(source, conn=conn)
         if parsed_sources:
             src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
             where_clauses.append(f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))")
@@ -186,7 +191,9 @@ async def stream_logs(
     """
     Server-Sent Events (SSE) endpoint to stream real-time incoming logs to the browser.
     """
-    parsed_sources = set(parse_multi_values(source))
+    parsed_sources = set(
+        await run_db_query(lambda conn: expand_source_aliases(source, conn=conn))
+    )
     parsed_apps = set(parse_multi_values(app_name))
 
     queue = await sse_manager.subscribe()
