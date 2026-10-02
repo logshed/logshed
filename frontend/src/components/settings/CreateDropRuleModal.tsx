@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ExternalLink, Play, RotateCcw } from 'lucide-react';
 import { DropRule } from '../../types.ts';
 import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } from '../../api/dropRules.ts';
 import { Modal } from '../common/Modal.tsx';
+import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 
 interface CreateDropRuleModalProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [currentCount, setCurrentCount] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState<boolean>(false);
 
   // Interactive tester states
   const [sampleMessage, setSampleMessage] = useState<string>('');
@@ -127,6 +129,62 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       prevTargetKeyRef.current = '';
     }
   }, [isOpen, currentTargetKey]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setShowDiscardConfirm(false);
+    }
+  }, [isOpen]);
+
+  const isDirty = useMemo(() => {
+    if (!isOpen) return false;
+    if (ruleToEdit) {
+      const initialRuleName = ruleToEdit.name || ruleToEdit.app_pattern || ruleToEdit.source_pattern || '';
+      return (
+        ruleName !== initialRuleName ||
+        messagePattern !== (ruleToEdit.message_pattern || '') ||
+        isRegex !== (ruleToEdit.is_regex || false) ||
+        sourcePattern !== (ruleToEdit.source_pattern || '') ||
+        appPattern !== (ruleToEdit.app_pattern || '') ||
+        severityThreshold !== (ruleToEdit.severity_threshold ?? null) ||
+        isEnabled !== ruleToEdit.is_enabled
+      );
+    } else {
+      const defaultName = initialName || (initialApp ? `Drop ${initialApp} Chatter` : (initialSource ? `Drop ${initialSource}` : ''));
+      return (
+        ruleName !== defaultName ||
+        messagePattern !== (initialMessage || '') ||
+        isRegex !== false ||
+        sourcePattern !== (initialSource || '') ||
+        appPattern !== (initialApp || '') ||
+        severityThreshold !== null ||
+        isEnabled !== true
+      );
+    }
+  }, [
+    isOpen,
+    ruleToEdit,
+    initialName,
+    initialApp,
+    initialSource,
+    initialMessage,
+    ruleName,
+    messagePattern,
+    isRegex,
+    sourcePattern,
+    appPattern,
+    severityThreshold,
+    isEnabled,
+  ]);
+
+  const handleCloseAttempt = () => {
+    if (showDiscardConfirm) return;
+    if (isDirty) {
+      setShowDiscardConfirm(true);
+    } else {
+      onClose();
+    }
+  };
 
   const hasFilterCriteria = Boolean(
     messagePattern.trim() || sourcePattern.trim() || appPattern.trim() || severityThreshold !== null
@@ -217,7 +275,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleCloseAttempt}
       title={ruleToEdit ? 'Edit Ingestion Drop Rule' : 'Create Ingestion Drop Rule'}
       maxWidth="max-w-2xl"
     >
@@ -556,8 +614,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition"
+              onClick={handleCloseAttempt}
+              className="px-3 py-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer"
             >
               Cancel
             </button>
@@ -577,6 +635,15 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           </div>
         </div>
       </form>
+
+      <UnsavedChangesModal
+        isOpen={showDiscardConfirm}
+        onKeepEditing={() => setShowDiscardConfirm(false)}
+        onDiscard={() => {
+          setShowDiscardConfirm(false);
+          onClose();
+        }}
+      />
     </Modal>
   );
 };

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
 import { AlertRule, AlertRuleCreate, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
 import { createAlertRule, updateAlertRule } from '../../api/alerts.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { Modal } from '../common/Modal.tsx';
+import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 
 export interface AlertRuleModalProps {
   isOpen: boolean;
@@ -39,9 +40,14 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const [formIsEnabled, setFormIsEnabled] = useState<boolean>(true);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setShowDiscardConfirm(false);
+      return;
+    }
+    setShowDiscardConfirm(false);
 
     if (ruleToEdit) {
       setFormName(ruleToEdit.name);
@@ -79,6 +85,74 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormError(null);
     }
   }, [isOpen, ruleToEdit, channels]);
+
+  const isDirty = useMemo(() => {
+    if (!isOpen) return false;
+    if (ruleToEdit) {
+      const initialApps = ruleToEdit.filter_app
+        ? ruleToEdit.filter_app.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+      const appsChanged =
+        formFilterApps.length !== initialApps.length ||
+        formFilterApps.some((app, i) => app !== initialApps[i]);
+      const initialSeverity =
+        ruleToEdit.filter_severity !== null && ruleToEdit.filter_severity !== undefined
+          ? ruleToEdit.filter_severity
+          : '';
+      return (
+        formName !== ruleToEdit.name ||
+        formRuleType !== ruleToEdit.rule_type ||
+        formChannelId !== (ruleToEdit.channel_id ?? null) ||
+        appsChanged ||
+        formFilterSeverity !== initialSeverity ||
+        formMatchPattern !== (ruleToEdit.match_pattern || '') ||
+        formThresholdCount !== ruleToEdit.threshold_count ||
+        formWindowSeconds !== ruleToEdit.window_seconds ||
+        formCooldownSeconds !== ruleToEdit.cooldown_seconds ||
+        formAiEnrichment !== ruleToEdit.ai_enrichment ||
+        formIsEnabled !== ruleToEdit.is_enabled
+      );
+    } else {
+      const initialChannel = channels.length > 0 ? channels[0].id : null;
+      return (
+        formName !== '' ||
+        formRuleType !== 'threshold' ||
+        formChannelId !== initialChannel ||
+        formFilterApps.length > 0 ||
+        formFilterSeverity !== '' ||
+        formMatchPattern !== '' ||
+        formThresholdCount !== 1 ||
+        formWindowSeconds !== 60 ||
+        formCooldownSeconds !== 300 ||
+        formAiEnrichment !== false ||
+        formIsEnabled !== true
+      );
+    }
+  }, [
+    isOpen,
+    ruleToEdit,
+    channels,
+    formName,
+    formRuleType,
+    formChannelId,
+    formFilterApps,
+    formFilterSeverity,
+    formMatchPattern,
+    formThresholdCount,
+    formWindowSeconds,
+    formCooldownSeconds,
+    formAiEnrichment,
+    formIsEnabled,
+  ]);
+
+  const handleCloseAttempt = () => {
+    if (showDiscardConfirm) return;
+    if (isDirty) {
+      setShowDiscardConfirm(true);
+    } else {
+      onClose();
+    }
+  };
 
   const handleSaveRule = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,7 +228,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleCloseAttempt}
       title={ruleToEdit ? 'Edit Alert Rule' : 'Create New Alert Rule'}
       maxWidth="max-w-xl"
     >
@@ -444,7 +518,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         <div className="pt-4 border-t border-dark-700 flex justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCloseAttempt}
             className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 transition cursor-pointer"
           >
             Cancel
@@ -459,6 +533,15 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </button>
         </div>
       </form>
+
+      <UnsavedChangesModal
+        isOpen={showDiscardConfirm}
+        onKeepEditing={() => setShowDiscardConfirm(false)}
+        onDiscard={() => {
+          setShowDiscardConfirm(false);
+          onClose();
+        }}
+      />
     </Modal>
   );
 };

@@ -222,4 +222,123 @@ describe('AlertRuleModal Component', () => {
       screen.getByText(/AI provider is disabled or not configured/i)
     ).toBeInTheDocument();
   });
+
+  it('closes immediately without warning when X button is clicked with no unsaved changes', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={mockRule}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const closeBtn = screen.getByRole('button', { name: 'Close dialog' });
+    fireEvent.click(closeBtn);
+
+    expect(screen.queryByText('Unsaved Changes')).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('warns about unsaved changes when user edits rule name and clicks X button', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={mockRule}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const nameInput = screen.getByDisplayValue('Database Timeout Spike');
+    fireEvent.change(nameInput, { target: { value: 'Renamed Rule' } });
+
+    const closeBtn = screen.getByRole('button', { name: 'Close dialog' });
+    fireEvent.click(closeBtn);
+
+    expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+    expect(
+      screen.getByText('You have unsaved changes. Closing now will discard those edits.')
+    ).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps editing when "Keep Editing" is clicked in unsaved changes confirmation', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={mockRule}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const nameInput = screen.getByDisplayValue('Database Timeout Spike');
+    fireEvent.change(nameInput, { target: { value: 'Renamed Rule' } });
+
+    const closeBtn = screen.getByRole('button', { name: 'Close dialog' });
+    fireEvent.click(closeBtn);
+
+    expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+
+    const keepEditingBtn = screen.getByRole('button', { name: 'Keep Editing' });
+    fireEvent.click(keepEditingBtn);
+
+    expect(screen.queryByText('Unsaved Changes')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('Renamed Rule')).toBeInTheDocument();
+  });
+
+  it('discards edits and closes when "Discard Changes" is clicked in unsaved changes confirmation', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={mockRule}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const nameInput = screen.getByDisplayValue('Database Timeout Spike');
+    fireEvent.change(nameInput, { target: { value: 'Renamed Rule' } });
+
+    const closeBtn = screen.getByRole('button', { name: 'Close dialog' });
+    fireEvent.click(closeBtn);
+
+    const discardBtn = screen.getByRole('button', { name: 'Discard Changes' });
+    fireEvent.click(discardBtn);
+
+    expect(screen.queryByText('Unsaved Changes')).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('warns about unsaved changes when user clicks Cancel button with edits', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={mockRule}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+    const nameInput = screen.getByDisplayValue('Database Timeout Spike');
+    fireEvent.change(nameInput, { target: { value: 'Renamed Rule' } });
+
+    const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelBtn);
+
+    expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

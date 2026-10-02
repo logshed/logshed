@@ -545,8 +545,8 @@ describe('SettingsPanel Component', () => {
     );
   });
 
-  it('renders About LogShed section with installed version and up to date status', async () => {
-    render(<SettingsPanel initialSubTab="advanced" />);
+  it('renders About LogShed section on application tab with installed version and up to date status', async () => {
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -565,6 +565,16 @@ describe('SettingsPanel Component', () => {
     expect(changelogLink).toHaveAttribute('target', '_blank');
   });
 
+  it('does not render About LogShed section on advanced tab', async () => {
+    render(<SettingsPanel initialSubTab="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('About LogShed')).not.toBeInTheDocument();
+  });
+
   it('renders App update available notice in About section when newer GHCR version exists', async () => {
     vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
       current_version: '1.1.0-beta.3',
@@ -574,7 +584,7 @@ describe('SettingsPanel Component', () => {
       checked_at: 1700000000.0,
     });
 
-    render(<SettingsPanel initialSubTab="advanced" />);
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -597,7 +607,7 @@ describe('SettingsPanel Component', () => {
       repo_deprecated: true,
     });
 
-    render(<SettingsPanel initialSubTab="advanced" />);
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('Container Repository Moved')).toBeInTheDocument();
@@ -616,7 +626,7 @@ describe('SettingsPanel Component', () => {
       checked_at: 1700000000.0,
     });
 
-    render(<SettingsPanel initialSubTab="advanced" />);
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -692,8 +702,8 @@ describe('SettingsPanel Component', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
-        expect(screen.getByText('About LogShed')).toBeInTheDocument();
       });
+      expect(screen.queryByText('About LogShed')).toBeNull();
       expect(screen.queryByText('Host Alias Manager')).toBeNull();
 
       // Switch back to Application tab
@@ -702,6 +712,7 @@ describe('SettingsPanel Component', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+        expect(screen.getByText('About LogShed')).toBeInTheDocument();
       });
     });
 

@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **About LogShed Card Location**: Moved the About LogShed card from the Advanced tab to the bottom of the Application Settings tab.
+
 ### Fixed
+- **Unsaved Changes Warning in Rule Modals**: Added unsaved changes protection to alert and drop rule modals when closing via header close button, cancel button, or escape key with pending edits.
 - **Symmetric Host Alias & Case Expansion**: Symmetrically resolve configured host aliases and their underlying IP addresses bidirectionally and case-insensitively across log queries, live SSE streams, and targeted deletion filters. Ensures filtering or deleting by friendly alias (e.g. `LogShed Server`) consistently matches historical rows logged with alternative casing (`logshed`) or raw IP (`127.0.0.1`) without incurring unindexed SQLite table scans.
 
 ## [1.2.0-beta.1] - 2026-10-01
