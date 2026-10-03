@@ -411,6 +411,31 @@ class TestSyslogParsing:
         assert result["app_name"] == "app"
         assert result["message"] == "[malformed_sd"
 
+    def test_syslog_logfmt_parsing(self):
+        """Logfmt format with time, level, and msg parsed correctly."""
+        raw = b'time="2026-10-03T14:56:31Z" level=info msg="Successfully refreshed custom fields cache with 0 fields."'
+        result = parse_syslog_message(raw, "10.0.0.1")
+        assert result["timestamp"] == "2026-10-03T14:56:31+00:00"
+        assert result["severity"] == 6
+        assert result["message"] == "Successfully refreshed custom fields cache with 0 fields."
+
+    def test_syslog_maintainerr_app_pipe_parsing(self):
+        """Maintainerr application-prefixed pipe format with DD/MM/YYYY timestamp and bracketed level."""
+        raw = b"[maintainerr] | 03/10/2026 16:00:33  [INFO] [RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+        result = parse_syslog_message(raw, "10.0.0.1", local_tz=datetime.timezone.utc)
+        assert result["app_name"] == "maintainerr"
+        assert result["timestamp"] == "2026-10-03T16:00:33+00:00"
+        assert result["severity"] == 6
+        assert result["message"] == "[RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+
+    def test_syslog_valkey_parsing(self):
+        """Valkey / Redis server line with pid:role, day mon year, and warning marker."""
+        raw = b"1:M 02 Oct 2026 11:47:57.745 # Warning: No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf"
+        result = parse_syslog_message(raw, "10.0.0.1", local_tz=datetime.timezone.utc)
+        assert result["timestamp"] == "2026-10-02T11:47:57.745000+00:00"
+        assert result["severity"] == 4  # '#' maps to warning / 4
+        assert "Warning: No config file specified, using the default config." in result["message"]
+
 
 # ===================================================================
 # 2. Network Listeners & Protocols

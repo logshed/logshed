@@ -5,7 +5,7 @@ import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { useClipboard } from '../../utils/hooks.ts';
-import { stripAnsi } from '../../utils/formatters.ts';
+import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 
 interface LogDetailModalProps {
   log: LogEntry | null;
@@ -122,12 +122,16 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
   if (!log) return null;
 
+  const isDockerSource =
+    log.source_ip === 'docker' || log.source_alias?.toLowerCase() === 'docker';
+  const cleanedPayload = cleanLogMessageForDisplay(log.message);
+
   const handleCopyRaw = async () => {
     await copyRaw(log.raw);
   };
 
   const handleCopyMsg = async () => {
-    await copyMsg(stripAnsi(log.message));
+    await copyMsg(cleanedPayload);
   };
 
   return (
@@ -309,14 +313,16 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto">
             {/* Sanitized text element without dangerouslySetInnerHTML */}
-            {stripAnsi(log.message)}
+            {cleanedPayload}
           </div>
         </div>
 
-        {/* Raw Syslog Envelope */}
+        {/* Raw Syslog / Container Envelope */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Raw Syslog Packet</span>
+            <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+              {isDockerSource ? 'Raw Container Output' : 'Raw Syslog Packet'}
+            </span>
             <button
               onClick={handleCopyRaw}
               className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition"

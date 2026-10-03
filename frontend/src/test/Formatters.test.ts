@@ -119,6 +119,30 @@ describe('cleanLogMessageForDisplay', () => {
     const input = 'Log file rotated successfully';
     expect(cleanLogMessageForDisplay(input)).toBe(input);
   });
+
+  it('cleans logfmt message extracting msg content and stripping time/level', () => {
+    const input = 'time="2026-10-03T14:56:31Z" level=info msg="Successfully refreshed custom fields cache with 0 fields."';
+    const expected = 'Successfully refreshed custom fields cache with 0 fields.';
+    expect(cleanLogMessageForDisplay(input)).toBe(expected);
+  });
+
+  it('cleans Maintainerr application-prefixed line stripping app tag, slash date, and INFO bracket', () => {
+    const input = "[maintainerr] | 03/10/2026 16:00:33  [INFO] [RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done.";
+    const expected = "[RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done.";
+    expect(cleanLogMessageForDisplay(input)).toBe(expected);
+  });
+
+  it('cleans Valkey / Redis line stripping pid:role, date, and warning symbol', () => {
+    const input = '1:M 02 Oct 2026 11:47:57.745 # Warning: No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf';
+    const expected = 'No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf';
+    expect(cleanLogMessageForDisplay(input)).toBe(expected);
+  });
+
+  it('cleans Plex Scan message preserving subsystem tag and message body', () => {
+    const input = '2026-10-03T15:40:00.087Z [info][Plex Scan]: Recently Added Scan Complete';
+    const expected = '[Plex Scan]: Recently Added Scan Complete';
+    expect(cleanLogMessageForDisplay(input)).toBe(expected);
+  });
 });
 
 describe('toLocalDatetimeInputString', () => {

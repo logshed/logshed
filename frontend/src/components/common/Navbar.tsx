@@ -130,17 +130,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Ingestion & Queue Health */}
           {health && (
-            <div className="hidden sm:flex items-center space-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-4">
-              <span title="Ingestion Rate">
-                Rate:{' '}
+            <div className="flex items-center space-x-2.5 sm:space-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-2.5 sm:pl-4">
+              <span title="Ingestion Rate" className="text-[11px] sm:text-xs">
+                <span className="hidden sm:inline">Rate:{' '}</span>
                 <span className="text-slate-200">
                   {(health.ingest_rate ?? 0).toFixed(1)} logs/s
                 </span>
               </span>
-              <span title="Queue Depth">
+              <span title="Queue Depth" className="hidden sm:inline">
                 Queue: <span className="text-slate-200">{health.queue_depth}</span>
               </span>
-              <span title="Dropped Logs Total">
+              <span title="Dropped Logs Total" className="hidden sm:inline">
                 Dropped:{' '}
                 <span className={health.dropped_logs > 0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
                   {health.dropped_logs}

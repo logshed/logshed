@@ -25,6 +25,7 @@ from app.collectors.docker_collector import (
     _make_log_entry,
     _parse_docker_host,
     _parse_docker_log_line,
+    _parse_docker_message_content,
     _should_ignore_container,
     _tail_container_logs,
 )
@@ -628,6 +629,34 @@ class TestDockerTimestampAndAccurateResume:
         assert entry["timestamp"] == ts
         assert entry["message"] == "Worker process started"
         assert entry["raw"] == "Worker process started"
+
+    def test_make_log_entry_custom_raw(self):
+        """_make_log_entry preserves custom raw string while storing parsed message."""
+        raw_line = 'time="2026-10-03T15:56:31Z" level=info msg="Refreshed cache."'
+        entry = _make_log_entry("paperless", "c123", "Refreshed cache.", severity=6, raw=raw_line)
+        assert entry["message"] == "Refreshed cache."
+        assert entry["raw"] == raw_line
+
+    def test_parse_docker_message_content_logfmt(self):
+        """_parse_docker_message_content extracts msg="..." and explicit level."""
+        line = 'time="2026-10-03T15:56:31Z" level=info msg="Successfully refreshed custom fields cache with 0 fields."'
+        msg, sev = _parse_docker_message_content(line, 6)
+        assert msg == "Successfully refreshed custom fields cache with 0 fields."
+        assert sev == 6
+
+    def test_parse_docker_message_content_valkey(self):
+        """_parse_docker_message_content extracts Valkey warning line."""
+        line = "1:M 02 Oct 2026 11:47:57.745 # Warning: No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf"
+        msg, sev = _parse_docker_message_content(line, 6)
+        assert msg == "Warning: No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf"
+        assert sev == 4
+
+    def test_parse_docker_message_content_maintainerr(self):
+        """_parse_docker_message_content extracts Maintainerr pipe line."""
+        line = "[maintainerr] | 03/10/2026 16:00:33  [INFO] [RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+        msg, sev = _parse_docker_message_content(line, 6)
+        assert msg == "[RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+        assert sev == 6
 
     @pytest.mark.asyncio
     async def test_initial_attach_uses_tail_0_and_timestamps_true(self):

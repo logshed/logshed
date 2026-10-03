@@ -10,8 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **About LogShed Card Location**: Moved the About LogShed card from the Advanced tab to the bottom of the Application Settings tab.
 - **Apprise Documentation Links**: Updated Apprise notification URL documentation links in the Add/Edit Target modal to point to the new official services and URL builder documentation on appriseit.com.
+- **Mobile Navbar Ingestion Metric**: Render the compact logs per second rate on mobile navigation bars beside the logo.
 
 ### Fixed
+- **Structured Log Payload Parsing in Collectors**: Parse message payloads, explicit severity levels, and timestamps from logfmt (`msg="..."`), Valkey/Redis, and Maintainerr application pipes in both Syslog and Docker collectors while preserving complete raw packets.
+- **Log Detail Modal Payload & Raw Distinction**: Render cleaned message payloads in the log inspection slide-over modal, copy cleaned text on message copy, and dynamically label raw output as Raw Container Output for Docker entries.
 - **FTS Prefix Search with Relational Filter Query Plan**: Evaluated full-text search match queries as an uncorrelated subquery rather than an inner join in the log query API, preventing the SQLite query planner from driving scans via relational indexes and re-evaluating FTS match doclists for every candidate row.
 - **Log Stream Search Debouncing & Loading Feedback**: Added a 300ms debounce to search-as-you-type input in the live log stream to prevent dispatching superseded backend queries on every keystroke, alongside an in-flight status indicator when refreshing active log views.
 - **Daily Digest Severity Priority**: Prioritize entities by minimum event severity before event count when generating 24-hour daily digest analytical rollups. Ensures critical, alert, or emergency events are highlighted even when other hosts log higher volumes of standard errors.

@@ -46,6 +46,20 @@ const WORD_LEVEL_REGEX =
   /^(?:(?:emerg|emergency|alert|crit|critical|fatal|panic|err|error|warn|warning|notice|info|informational|debug|trace|verbose)\s*:?\s+|log:\s+)/i;
 
 /**
+ * Additional prefix matchers:
+ * - Valkey / Redis server line: "1:M 02 Oct 2026 11:47:57.745 # " or "1:S ... * "
+ * - Application-prefixed pipe: "[maintainerr] | 03/10/2026 16:00:33 "
+ * - Day-first slash date: "03/10/2026 16:00:33 "
+ */
+const VALKEY_PREFIX_REGEX = /^\d+:[a-zA-Z]\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s+[#*.-]\s*/;
+
+const APP_PIPE_DATE_REGEX = /^\[[^\]]+\]\s*\|\s*\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s*/;
+
+const DMY_SLASH_TIMESTAMP_REGEX = /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s*/;
+
+const LOGFMT_MSG_REGEX = /^(?:time|ts)=["']?[^"'\s]+["']?\s+(?:.*?\b)?msg=(?:"([^"]*)"|'([^']*)'|(\S+))/;
+
+/**
  * Trims redundant leading timestamps and repeated severity prefixes from message text
  * for clean display in the live log stream table rows.
  * Preserves the original message content in full if no redundant prefix matches.
@@ -55,16 +69,32 @@ export function cleanLogMessageForDisplay(text: string | null | undefined): stri
   const stripped = stripAnsi(text);
   let clean = stripped.trim();
 
-  // 1. Strip leading redundant timestamps
-  clean = clean.replace(LEADING_TIMESTAMP_REGEX, '');
+  // 1. Check for logfmt format with msg="..."
+  const logfmtMatch = clean.match(LOGFMT_MSG_REGEX);
+  if (logfmtMatch) {
+    const extractedMsg = logfmtMatch[1] ?? logfmtMatch[2] ?? logfmtMatch[3];
+    if (extractedMsg) {
+      return extractedMsg;
+    }
+  }
 
-  // 2. If preceded by a bracketed subsystem tag like [MONITOR] before the level, preserve the subsystem:
+  // 2. Strip Valkey / Redis prefix (<pid>:<role> <date> <time> <level_char>)
+  clean = clean.replace(VALKEY_PREFIX_REGEX, '');
+
+  // 3. Strip [app] | DD/MM/YYYY HH:MM:SS prefix
+  clean = clean.replace(APP_PIPE_DATE_REGEX, '');
+
+  // 4. Strip leading redundant timestamps (including DD/MM/YYYY)
+  clean = clean.replace(LEADING_TIMESTAMP_REGEX, '');
+  clean = clean.replace(DMY_SLASH_TIMESTAMP_REGEX, '');
+
+  // 5. If preceded by a bracketed subsystem tag like [MONITOR] before the level, preserve the subsystem:
   clean = clean.replace(SUBSYSTEM_WITH_LEVEL_REGEX, '$1 ');
 
-  // 3. Match leading bracketed level: [error], [warn], [info], etc.
+  // 6. Match leading bracketed level: [error], [warn], [info], etc.
   clean = clean.replace(BRACKET_LEVEL_REGEX, '');
 
-  // 4. Match leading unbracketed level: "WARN: ...", "INFO   ..."
+  // 7. Match leading unbracketed level: "WARN: ...", "INFO   ..."
   clean = clean.replace(WORD_LEVEL_REGEX, '');
 
   const result = clean.trim();
