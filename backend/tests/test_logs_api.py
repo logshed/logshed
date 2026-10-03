@@ -359,6 +359,58 @@ class TestLogQuerying:
         assert data_col_and_ip["logs"][0]["app_name"] == "nginx"
         assert "10.0.0.1" in data_col_and_ip["logs"][0]["message"]
 
+    @pytest.mark.asyncio
+    async def test_fts_prefix_query_combined_with_app_filter_is_evaluated_once(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """
+        Regression: combining an app filter with an auto-prefixed search term (e.g. 'existing' -> existing*)
+        must not let the planner drive the join from the app index and re-evaluate the FTS5 MATCH
+        (rebuilding the full prefix doclist) once per candidate row.
+        """
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        entries = []
+        for i in range(6000):
+            # Many rows outside the app filter contain the search term (large prefix doclist)
+            entries.append((
+                f"2026-09-01T10:{(i // 60) % 60:02d}:{i % 60:02d}Z", "2026-09-01T10:00:00Z",
+                "10.0.0.2", "media-host", "sonarr", 1, 6,
+                f"Skipping existing file episode{i}.mkv", "raw",
+            ))
+            # Many rows inside the app filter that do not contain the term (large scan candidate set)
+            entries.append((
+                f"2026-09-01T11:{(i // 60) % 60:02d}:{i % 60:02d}Z", "2026-09-01T11:00:00Z",
+                "10.0.0.3", "media-host", "radarr", 1, 6,
+                f"Refreshing movie{i} metadata", "raw",
+            ))
+        for i in range(5):
+            entries.append((
+                f"2026-09-01T09:00:0{i}Z", "2026-09-01T09:00:00Z",
+                "10.0.0.3", "media-host", "radarr", 1, 6,
+                f"Not importing movie{i}, existing file is better", "raw",
+            ))
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                entries,
+            )
+            conn.commit()
+
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        res = await client.get("/api/logs", params={"query": "existing", "app_name": "radarr"})
+        duration = loop.time() - t0
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total"] == 5
+        assert all(log["app_name"] == "radarr" for log in data["logs"])
+        assert all("existing" in log["message"] for log in data["logs"])
+        assert duration < 0.5, f"Prefix FTS query with app filter took {duration:.2f}s"
+
 
 # ===================================================================
 # 2. Surrounding Context

@@ -283,6 +283,7 @@ interface LiveLogStreamProps {
 
 const MAX_BUFFER_SIZE = 50000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onDiagnoseAi,
@@ -688,9 +689,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // In-flight query cancellation / stale response guard
   const fetchRequestIdRef = useRef<number>(0);
+  // Pending debounced reload scheduled by free-text search edits
+  const searchDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load initial logs on mount or on filter apply
   const loadInitialLogs = useCallback(async (overrideFilters?: LogFilterParams) => {
+    if (searchDebounceTimerRef.current !== null) {
+      clearTimeout(searchDebounceTimerRef.current);
+      searchDebounceTimerRef.current = null;
+    }
     const reqId = ++fetchRequestIdRef.current;
     try {
       setIsLoadingHistory(true);
@@ -789,9 +796,28 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   }, [filters, hasMoreLogs, isLoadingHistory, updateFacetsWithNewLogs]);
 
+  // Reload on filter changes. Free-text query edits are debounced so search-as-you-type does not
+  // dispatch a backend FTS query per keystroke (superseded queries keep running server-side);
+  // structured filter changes (host, app, severity, time) reload immediately.
+  const previousQueryRef = useRef<string | undefined>(filters.query);
   useEffect(() => {
-    loadInitialLogs();
-  }, [loadInitialLogs]);
+    const queryChanged = previousQueryRef.current !== filters.query;
+    previousQueryRef.current = filters.query;
+    if (!queryChanged) {
+      loadInitialLogs();
+      return;
+    }
+    searchDebounceTimerRef.current = setTimeout(() => {
+      searchDebounceTimerRef.current = null;
+      loadInitialLogs();
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      if (searchDebounceTimerRef.current !== null) {
+        clearTimeout(searchDebounceTimerRef.current);
+        searchDebounceTimerRef.current = null;
+      }
+    };
+  }, [loadInitialLogs, filters.query]);
 
   const handleApplySavedView = useCallback((newParams: LogFilterParams) => {
     setFilters(newParams);
@@ -1459,6 +1485,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             </div>
           )}
         </div>
+
+        {/* Floating Busy Indicator: filter/search reload in flight while previous results remain visible */}
+        {isLoadingHistory && logs.length > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-dark-900/95 border border-dark-700 text-slate-300 text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-in fade-in duration-150"
+          >
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-400" />
+            <span>Updating results...</span>
+          </div>
+        )}
 
         {/* Floating Pause/Resume Banner */}
         {!autoScroll && missedLogsCount > 0 && (

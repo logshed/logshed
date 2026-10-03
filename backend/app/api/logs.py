@@ -78,15 +78,16 @@ async def list_logs(
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         is_fts = bool(query and query.strip())
-        from_table = "logs"
 
         if is_fts:
             fts_term = format_fts_query(query)
             if not fts_term.strip():
                 where_clauses.append("0")
             else:
-                from_table = "logs JOIN logs_fts ON logs.id = logs_fts.rowid"
-                where_clauses.append("logs_fts MATCH :fts_term")
+                # Uncorrelated subquery: FTS5 evaluates the MATCH exactly once. A JOIN lets the planner
+                # drive from a relational index (e.g. app_name) and re-run the MATCH per candidate row,
+                # rebuilding the full doclist of auto-prefixed terms each time (quadratic cost).
+                where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
                 params["fts_term"] = fts_term
 
         parsed_sources = expand_source_aliases(source, conn=conn)
@@ -120,12 +121,12 @@ async def list_logs(
         # Total count query: cap count evaluation to avoid full table scans on broad queries
         count_limit = max(1001, offset + limit + 1)
         params["count_limit"] = count_limit
-        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM {from_table} {where_sql} LIMIT :count_limit)"
+        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
         # Log selection query
         select_sql = f"""
             SELECT logs.id, logs.timestamp, logs.received_at, logs.source_ip, logs.source_alias,
                    logs.app_name, logs.facility, logs.severity, logs.message, logs.raw
-            FROM {from_table}
+            FROM logs
             {where_sql}
             ORDER BY logs.timestamp DESC, logs.id DESC
             LIMIT :limit OFFSET :offset

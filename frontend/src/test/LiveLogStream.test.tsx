@@ -856,6 +856,83 @@ describe('LiveLogStream Component', () => {
     });
   });
 
+  it('debounces search-as-you-type so only the settled query is fetched from the backend', async () => {
+    const fetchLogsSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    fetchLogsSpy.mockClear();
+
+    const searchInput = screen.getByPlaceholderText(/Full-text search/i);
+    for (const partial of ['e', 'ex', 'exi', 'exis', 'exist', 'existi', 'existin', 'existing']) {
+      fireEvent.change(searchInput, { target: { value: partial } });
+    }
+
+    await waitFor(() => {
+      expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'existing', offset: 0 }));
+    });
+    const queriedTerms = fetchLogsSpy.mock.calls.map(([params]) => params?.query);
+    expect(queriedTerms).toEqual(['existing']);
+  });
+
+  it('submits the search immediately on Enter without a duplicate debounced fetch', async () => {
+    const fetchLogsSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    fetchLogsSpy.mockClear();
+
+    const searchInput = screen.getByPlaceholderText(/Full-text search/i);
+    fireEvent.change(searchInput, { target: { value: 'timeout' } });
+    fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
+
+    expect(fetchLogsSpy).toHaveBeenCalledTimes(1);
+    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'timeout', offset: 0 }));
+
+    // Outlast the debounce window and confirm no second request was dispatched
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    });
+    expect(fetchLogsSpy.mock.calls.filter(([params]) => params?.offset === 0)).toHaveLength(1);
+  });
+
+  it('shows an updating indicator while a filter reload is in flight over existing results', async () => {
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Updating results...')).toBeNull();
+
+    let resolvePending: (value: logsApi.LogListResult) => void = () => {};
+    vi.spyOn(logsApi, 'fetchLogs').mockImplementation(
+      () => new Promise<logsApi.LogListResult>((resolve) => {
+        resolvePending = resolve;
+      }),
+    );
+
+    const severitySelect = screen.getAllByDisplayValue('All Severities')[0];
+    fireEvent.change(severitySelect, { target: { value: '3' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Updating results...')).toBeInTheDocument();
+    });
+    // Previous results remain visible while the reload is pending
+    expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+
+    await act(async () => {
+      resolvePending({ logs: [sampleLogs[0]], total: 1, limit: 500, offset: 0 });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Updating results...')).toBeNull();
+    });
+  });
+
   it('filters incoming SSE logs client-side when an active search query is applied', async () => {
     // Start with search filter applied
     vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({
