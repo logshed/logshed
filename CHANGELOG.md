@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apprise Documentation Links**: Updated Apprise notification URL documentation links in the Add/Edit Target modal to point to the new official services and URL builder documentation on appriseit.com.
 
 ### Fixed
+- **Daily Digest Severity Priority**: Prioritize entities by minimum event severity before event count when generating 24-hour daily digest analytical rollups. Ensures critical, alert, or emergency events are highlighted even when other hosts log higher volumes of standard errors.
 - **Unsaved Changes Warning in Rule Modals**: Added unsaved changes protection to alert and drop rule modals when closing via header close button, cancel button, or escape key with pending edits.
 - **Symmetric Host Alias & Case Expansion**: Symmetrically resolve configured host aliases and their underlying IP addresses bidirectionally and case-insensitively across log queries, live SSE streams, and targeted deletion filters. Ensures filtering or deleting by friendly alias (e.g. `LogShed Server`) consistently matches historical rows logged with alternative casing (`logshed`) or raw IP (`127.0.0.1`) without incurring unindexed SQLite table scans.
 

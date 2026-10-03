@@ -81,11 +81,12 @@ def compute_daily_digest_rollup(
             SUM(CASE WHEN severity = 0 THEN 1 ELSE 0 END) as emerg_count,
             SUM(CASE WHEN severity = 1 THEN 1 ELSE 0 END) as alert_count,
             SUM(CASE WHEN severity = 2 THEN 1 ELSE 0 END) as crit_count,
-            SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END) as err_count
+            SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END) as err_count,
+            MIN(severity) as min_severity
         FROM logs
         WHERE severity <= 3 AND timestamp >= ?
         GROUP BY entity
-        ORDER BY error_count DESC, entity ASC
+        ORDER BY min_severity ASC, error_count DESC, entity ASC
         LIMIT 3
         """,
         (since_iso,),

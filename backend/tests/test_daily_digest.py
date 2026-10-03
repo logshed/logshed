@@ -215,6 +215,53 @@ def test_compute_daily_digest_rollup_docker_custom_alias_shows_app(tmp_path: Pat
     assert rollup["top_errors"][0]["error_count"] == 1
 
 
+def test_compute_daily_digest_rollup_prioritizes_severity_over_error_count(tmp_path: Path):
+    """
+    Verify that an entity with a critical/emergency log (e.g. 1 critical log)
+    is prioritized ahead of entities with higher counts of error logs (e.g. 5 errors).
+    """
+    db_file = tmp_path / "logs.db"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    recent_str = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection(db_file) as conn:
+        # Host 1: 5 error logs (severity 3)
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO logs (timestamp, received_at, severity, facility, source_ip, source_alias, app_name, message, raw) VALUES (?, ?, 3, 1, '10.0.0.10', 'host-err-1', 'app1', 'err', 'err')",
+                (recent_str, recent_str),
+            )
+        # Host 2: 5 error logs (severity 3)
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO logs (timestamp, received_at, severity, facility, source_ip, source_alias, app_name, message, raw) VALUES (?, ?, 3, 1, '10.0.0.20', 'host-err-2', 'app2', 'err', 'err')",
+                (recent_str, recent_str),
+            )
+        # Host 3: 5 error logs (severity 3)
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO logs (timestamp, received_at, severity, facility, source_ip, source_alias, app_name, message, raw) VALUES (?, ?, 3, 1, '10.0.0.30', 'host-err-3', 'app3', 'err', 'err')",
+                (recent_str, recent_str),
+            )
+        # Host 4: 1 critical log (severity 2)
+        conn.execute(
+            "INSERT INTO logs (timestamp, received_at, severity, facility, source_ip, source_alias, app_name, message, raw) VALUES (?, ?, 2, 1, '10.0.0.40', 'host-crit', 'database', 'fatal storage error', 'fatal storage error')",
+            (recent_str, recent_str),
+        )
+
+        rollup = compute_daily_digest_rollup(conn, window_hours=24, db_path=db_file)
+
+    top_entities = [e["entity"] for e in rollup["top_errors"]]
+    # The host with 1 critical log must be ranked first despite having fewer total logs
+    assert top_entities[0] == "host-crit"
+    assert rollup["top_errors"][0]["crit_count"] == 1
+    assert rollup["top_errors"][0]["error_count"] == 1
+    # The remaining two slots in the top 3 are taken by the hosts with 5 error logs
+    assert len(rollup["top_errors"]) == 3
+    assert set(top_entities[1:]) == {"host-err-1", "host-err-2"}
+
+
+
 
 def test_format_digest_body_no_em_dashes():
     top_errors = [{
