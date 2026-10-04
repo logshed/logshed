@@ -889,6 +889,47 @@ class TestSyslogNetworkAndProtocol:
         assert received[1][1]["message"] == "newline message"
         await proto.stop()
 
+    @pytest.mark.asyncio
+    async def test_tcp_syslog_logs_starting_with_numbers_not_misidentified_as_octet_counted(self, db_path: Path):
+        """TCP protocol treats logs starting with numbers as newline-delimited frames rather than octet-counted frames."""
+        received = []
+
+        class MockAssembler:
+            async def feed(self, stream_key: str, entry: dict):
+                received.append((stream_key, entry))
+            def get_active_stream_key_for_source(self, ip: str):
+                return None
+
+        alias_cache = AliasCache(db_path)
+        proto = SyslogTCPProtocol(MockAssembler(), alias_cache)
+
+        class MockTransport:
+            def __init__(self):
+                self.closed = False
+            def get_extra_info(self, name):
+                return ("10.0.0.8", 54321)
+            def close(self):
+                self.closed = True
+
+        transport = MockTransport()
+        proto.connection_made(transport)
+
+        # Send logs starting with numbers such as HTTP status codes
+        frame1 = b"200 OK - HTTP GET /health\n"
+        proto.data_received(frame1)
+
+        frame2 = b"404 Not Found - GET /missing\n"
+        proto.data_received(frame2)
+
+        await asyncio.sleep(0.05)
+
+        assert transport.closed is False
+        assert proto.buffer == b""
+        assert len(received) == 2
+        assert "200 OK - HTTP GET /health" in received[0][1]["message"]
+        assert "404 Not Found - GET /missing" in received[1][1]["message"]
+        await proto.stop()
+
 
 # ===================================================================
 # 3. Syslog Configuration (SYSLOG_PORT)

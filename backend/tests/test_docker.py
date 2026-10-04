@@ -1666,6 +1666,128 @@ class TestDockerDemuxFrameResync:
         assert entries[0]["message"] == "Final unbuffered status"
         assert entries[0]["timestamp"] == ts
 
+    @pytest.mark.asyncio
+    async def test_multiplexed_stream_chunk_line_buffering(self):
+        """In multiplexed mode, line buffer retains incomplete line fragments across frames and chunks."""
+        assembler = KeyedMultilineAssembler()
+        entries = []
+
+        async def capture_feed(key, entry):
+            entries.append(entry)
+
+        assembler.feed = capture_feed
+        cancel_event = asyncio.Event()
+
+        # Frame 1: stdout with incomplete first line fragment
+        msg1 = b"Part 1 of line 1, "
+        frame1 = bytes([1, 0, 0, 0]) + len(msg1).to_bytes(4, "big") + msg1
+
+        # Frame 2: stdout with remainder of line 1, complete line 2, and partial line 3
+        msg2 = b"part 2 completed\nLine 2 complete\nLine 3 starts"
+        frame2 = bytes([1, 0, 0, 0]) + len(msg2).to_bytes(4, "big") + msg2
+
+        # Frame 3: stderr with remainder of line 3
+        msg3 = b" and finished\n"
+        frame3 = bytes([2, 0, 0, 0]) + len(msg3).to_bytes(4, "big") + msg3
+
+        class MockMultiplexedResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                # Yield frame1 first
+                yield frame1
+                # Yield frame2 in two chunks to test chunk-level and frame-level buffering
+                mid = len(frame2) // 2
+                yield frame2[:mid]
+                yield frame2[mid:]
+                # Yield frame3
+                yield frame3
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                return MockMultiplexedResp()
+
+        task = asyncio.create_task(
+            _tail_container_logs(
+                MockClient(),
+                "cid_mux_buf",
+                "app_mux_buf",
+                assembler,
+                cancel_event,
+                heartbeat_interval=0,
+            )
+        )
+        await asyncio.sleep(0.08)
+        cancel_event.set()
+        await task
+
+        assert len(entries) == 3
+        assert entries[0]["message"] == "Part 1 of line 1, part 2 completed"
+        assert entries[1]["message"] == "Line 2 complete"
+        assert entries[2]["message"] == "Line 3 starts and finished"
+
+    @pytest.mark.asyncio
+    async def test_multiplexed_trailing_buffer_without_newline_emitted_at_eof(self):
+        """In multiplexed mode, trailing line fragment without newline is emitted when stream terminates."""
+        assembler = KeyedMultilineAssembler()
+        entries = []
+
+        async def capture_feed(key, entry):
+            entries.append(entry)
+
+        assembler.feed = capture_feed
+        cancel_event = asyncio.Event()
+
+        msg = b"Final multiplexed line without newline"
+        frame = bytes([1, 0, 0, 0]) + len(msg).to_bytes(4, "big") + msg
+
+        class MockMuxResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                yield frame
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                return MockMuxResp()
+
+        task = asyncio.create_task(
+            _tail_container_logs(
+                MockClient(),
+                "cid_mux_eof",
+                "app_mux_eof",
+                assembler,
+                cancel_event,
+                heartbeat_interval=0,
+            )
+        )
+        await asyncio.sleep(0.05)
+        cancel_event.set()
+        await task
+
+        assert len(entries) == 1
+        assert entries[0]["message"] == "Final multiplexed line without newline"
+
     def test_max_tty_buffer_constant(self):
         assert MAX_TTY_BUFFER == 65536
 

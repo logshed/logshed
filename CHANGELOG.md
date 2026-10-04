@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mobile Navbar Ingestion Metric**: Render the compact logs per second rate on mobile navigation bars beside the logo.
 
 ### Fixed
+- **Syslog TCP Octet-Counting Framing**: Narrowed octet-counting frame detection to require a valid syslog priority header prefix immediately after the message length, preventing logs beginning with numbers (such as HTTP status codes) from misparsing as frame lengths and cleanly falling back to newline delimitation.
+- **Docker Multiplexed Stream Line Buffering**: Maintained persistent line buffers across multiplexed container stream chunks when `is_tty=False`, splitting on newlines and buffering trailing fragments to preserve complete log line integrity across frame boundaries.
 - **Structured Log Payload Parsing in Collectors**: Parse message payloads, explicit severity levels, and timestamps from logfmt (`msg="..."`), Valkey/Redis, and Maintainerr application pipes in both Syslog and Docker collectors while preserving complete raw packets.
 - **Log Detail Modal Payload & Raw Distinction**: Render cleaned message payloads in the log inspection slide-over modal, copy cleaned text on message copy, and dynamically label raw output as Raw Container Output for Docker entries.
 - **FTS Prefix Search with Relational Filter Query Plan**: Evaluated full-text search match queries as an uncorrelated subquery rather than an inner join in the log query API, preventing the SQLite query planner from driving scans via relational indexes and re-evaluating FTS match doclists for every candidate row.

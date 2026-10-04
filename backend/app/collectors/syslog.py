@@ -760,11 +760,11 @@ class SyslogTCPProtocol(asyncio.Protocol):
                 if not self.buffer:
                     break
 
-            # RFC 6587 octet counting: <MSG-LEN> SP <MSG>
-            match = re.match(rb"^(\d+) ", self.buffer)
+            # RFC 6587 octet counting: <MSG-LEN> SP <MSG> (verifying priority header prefix)
+            match = re.match(rb"^(\d+) <\d+>", self.buffer)
             if match:
                 msg_len = int(match.group(1))
-                header_len = match.end()
+                header_len = len(match.group(1)) + 1
 
                 if msg_len > MAX_TCP_BUFFER:
                     logger.warning(

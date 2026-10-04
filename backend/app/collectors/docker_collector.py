@@ -556,12 +556,13 @@ async def _tail_container_logs(
                 resp.raise_for_status()
                 backoff = _CONTAINER_INITIAL_BACKOFF
                 buffer = b""
+                line_buffer = ""
 
                 last_activity = asyncio.get_running_loop().time()
                 heartbeat_failed = False
 
                 async def _consume_stream() -> None:
-                    nonlocal buffer, last_activity
+                    nonlocal buffer, line_buffer, last_activity
                     async for chunk in resp.aiter_bytes():
                         if cancel_event.is_set():
                             return
@@ -593,8 +594,10 @@ async def _tail_container_logs(
                             # Multiplexed mode: demux frames with automatic header resynchronization
                             frames, buffer = _demux_stream(buffer)
                             for stream_type, payload in frames:
-                                text = payload.decode("utf-8", errors="replace")
-                                for line in text.splitlines():
+                                text = line_buffer + payload.decode("utf-8", errors="replace")
+                                lines = text.split("\n")
+                                line_buffer = lines.pop()
+                                for line in lines:
                                     line = line.rstrip("\r")
                                     if not line:
                                         continue
@@ -602,7 +605,7 @@ async def _tail_container_logs(
                                     if entry:
                                         await assembler.feed(stream_key, entry)
 
-                    # Flush any trailing TTY bytes on clean stream completion
+                    # Flush any trailing TTY or multiplexed bytes on clean stream completion
                     if is_tty and buffer:
                         while len(buffer) > MAX_TTY_BUFFER:
                             logger.warning(
@@ -617,6 +620,13 @@ async def _tail_container_logs(
                                     await assembler.feed(stream_key, entry)
                         line = buffer.decode("utf-8", errors="replace").rstrip("\r")
                         buffer = b""
+                        if line:
+                            entry = _process_line(line)
+                            if entry:
+                                await assembler.feed(stream_key, entry)
+                    elif not is_tty and line_buffer:
+                        line = line_buffer.rstrip("\r")
+                        line_buffer = ""
                         if line:
                             entry = _process_line(line)
                             if entry:
