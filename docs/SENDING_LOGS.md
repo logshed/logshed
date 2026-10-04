@@ -171,30 +171,38 @@ pfSense generates BSD-style (RFC 3164) log payloads. LogShed natively extracts t
 
 ## Home Assistant
 
-Home Assistant does not natively stream internal application logs to a remote syslog daemon out of the box. Using the **Remote Logger** integration via HACS, you can forward Core warnings, errors, and custom integration issues directly to your syslog server without device telemetry spam.
+Home Assistant does not natively stream internal application logs to a remote syslog daemon out of the box. Using the **Remote Logger** integration via HACS alongside Home Assistant's native event bus, you can forward Core warnings, errors, and custom integration issues directly to your syslog server with real-time dispatch and zero device telemetry spam.
 
 ### Configuration Steps
 
-1. Install the **Remote Logger** integration via HACS:
+1. Enable log event broadcasting in `configuration.yaml`:
+   - Open your `configuration.yaml` file and add the following entry:
+     ```yaml
+     system_log:
+       fire_event: true
+     ```
+   - *(By default, Home Assistant does not broadcast UI log entries to the internal event bus; this directive allows the integration to intercept them).*
+2. Install the **Remote Logger** integration via HACS:
    - In the Home Assistant sidebar, navigate to: **HACS**.
    - Search for **Remote Logger** (by Rhizomatics) and click **Download**.
-   - Restart Home Assistant under **Settings > System > Restart**.
-2. In the Home Assistant web interface, navigate to:
+   - Restart Home Assistant under **Settings > System > Restart** to load both the integration and the YAML changes.
+3. In the Home Assistant web interface, navigate to:
    **Settings > Devices & Services > Add Integration**
    *(Search for **Remote Logger**, select it, and choose **Syslog** as the output type)*.
-3. Configure the connection fields:
+4. Configure the connection fields:
    - **Host / IP**: Enter the IP address of your syslog server.
    - **Port**: Enter `1514` (or your target syslog listener port).
-   - **Transport**: Select **UDP** (or **TCP** if configured on your receiver).
+   - **Transport**: Select **UDP**.
    - **Syslog Facility**: Select `local0` (recommended user-defined facility) or `daemon`.
+   - **Batch Max Size**: Set to `1` *(forces immediate dispatch, preventing sporadic warnings and errors from waiting on the default ~60-second batch timer)*.
    - Click **Submit**.
-4. Configure event subscriptions:
+5. Configure event subscriptions:
    - **Use System Log events in place of Python root logger**: Toggle **ON** (captures the exact warnings and errors visible in **Settings > System > Logs**, including custom integration errors).
    - **Home Assistant lifecycle events**: Optional (enable to capture start and stop events).
    - **Home Assistant core change events**: Toggle **OFF**.
    - **Home Assistant core activity**: Toggle **OFF**.
    - **Home Assistant state changes**: Toggle **OFF** (ensures sensor telemetry and entity state updates are excluded).
-5. Click **Submit** to apply and save changes.
+6. Click **Submit** to apply and save changes.
 
 ---
 
