@@ -27,6 +27,7 @@ This guide provides step-by-step instructions for forwarding syslog traffic and 
 - [Synology DSM](#synology-dsm)
 - [UniFi Network](#unifi-network)
 - [pfSense](#pfsense)
+- [Home Assistant](#home-assistant)
 - [Generic Linux with rsyslog](#generic-linux-with-rsyslog)
 - [Generic Linux with syslog-ng](#generic-linux-with-syslog-ng)
 - [Docker Containers (via DockerTailer)](#docker-containers-via-dockertailer)
@@ -165,6 +166,35 @@ pfSense includes remote syslog capabilities to transmit packet filter activity, 
 ### Format Note
 
 pfSense generates BSD-style (RFC 3164) log payloads. LogShed natively extracts the originating hostname, application name, and severity code from pfSense frames.
+
+---
+
+## Home Assistant
+
+Home Assistant does not natively stream internal application logs to a remote syslog daemon out of the box. Using the **Remote Logger** integration via HACS, you can forward Core warnings, errors, and custom integration issues directly to your syslog server without device telemetry spam.
+
+### Configuration Steps
+
+1. Install the **Remote Logger** integration via HACS:
+   - In the Home Assistant sidebar, navigate to: **HACS**.
+   - Search for **Remote Logger** (by Rhizomatics) and click **Download**.
+   - Restart Home Assistant under **Settings > System > Restart**.
+2. In the Home Assistant web interface, navigate to:
+   **Settings > Devices & Services > Add Integration**
+   *(Search for **Remote Logger**, select it, and choose **Syslog** as the output type)*.
+3. Configure the connection fields:
+   - **Host / IP**: Enter the IP address of your syslog server.
+   - **Port**: Enter `1514` (or your target syslog listener port).
+   - **Transport**: Select **UDP** (or **TCP** if configured on your receiver).
+   - **Syslog Facility**: Select `local0` (recommended user-defined facility) or `daemon`.
+   - Click **Submit**.
+4. Configure event subscriptions:
+   - **Use System Log events in place of Python root logger**: Toggle **ON** (captures the exact warnings and errors visible in **Settings > System > Logs**, including custom integration errors).
+   - **Home Assistant lifecycle events**: Optional (enable to capture start and stop events).
+   - **Home Assistant core change events**: Toggle **OFF**.
+   - **Home Assistant core activity**: Toggle **OFF**.
+   - **Home Assistant state changes**: Toggle **OFF** (ensures sensor telemetry and entity state updates are excluded).
+5. Click **Submit** to apply and save changes.
 
 ---
 
