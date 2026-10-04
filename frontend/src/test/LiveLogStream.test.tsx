@@ -1441,10 +1441,14 @@ describe('matchesSearchQuery Helper Function', () => {
     expect(matchesSearchQuery(baseLog, 'nginx missing_term')).toBe(false);
   });
 
-  it('supports regex patterns', () => {
-    expect(matchesSearchQuery(baseLog, '^Upstream.*timeout')).toBe(true);
-    expect(matchesSearchQuery(baseLog, 'microservice$')).toBe(true);
-    expect(matchesSearchQuery(baseLog, '^microservice')).toBe(false);
+  it('supports precompiled regex patterns when explicitly supplied', () => {
+    expect(matchesSearchQuery(baseLog, '^Upstream.*timeout', /^Upstream.*timeout/i)).toBe(true);
+    expect(matchesSearchQuery(baseLog, 'microservice$', /microservice$/i)).toBe(true);
+    expect(matchesSearchQuery(baseLog, '^microservice', /^microservice/i)).toBe(false);
+  });
+
+  it('does not dynamically compile arbitrary regex queries to prevent ReDoS', () => {
+    expect(matchesSearchQuery(baseLog, '^Upstream.*timeout')).toBe(false);
   });
 
   it('supports column-specific queries like app_name: and source:', () => {

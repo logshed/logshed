@@ -20,11 +20,14 @@ import time
 from typing import Any, Optional, Union
 
 from app.core.redactor import redact
+from app.core.regex_validator import validate_pattern_complexity
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
 
 logger = logging.getLogger(__name__)
+
+_REGEX_METACHARS = frozenset("*+?[](){}^$|")
 
 
 def format_sample_log_for_alert(raw_msg: str, max_lines: int = 5, max_chars: int = 500) -> str:
@@ -104,13 +107,25 @@ class CompiledAlertRule:
 
         self.compiled_regex: Optional[re.Pattern] = None
         self._match_pattern_lower: Optional[str] = None
+        self._has_regex_metachars: bool = False
+        self._regex_verified: bool = False
         if self.match_pattern and self.match_pattern.strip() and self.match_pattern.strip() != "*":
             clean_pat = self.match_pattern.strip()
             self._match_pattern_lower = clean_pat.lower()
-            try:
-                self.compiled_regex = re.compile(clean_pat, re.IGNORECASE)
-            except re.error:
-                self.compiled_regex = None
+            self._has_regex_metachars = any(c in _REGEX_METACHARS for c in clean_pat)
+            if self._has_regex_metachars:
+                try:
+                    validate_pattern_complexity(clean_pat)
+                    self._regex_verified = True
+                    self.compiled_regex = re.compile(clean_pat, re.IGNORECASE)
+                except Exception as exc:
+                    logger.warning(
+                        "Alert rule %s pattern '%s' failed regex validation: %s",
+                        self.id,
+                        clean_pat,
+                        exc,
+                    )
+                    self.compiled_regex = None
 
     def _recompute_suppress_epoch(self) -> None:
         """Parse suppress_until ISO string into a UTC epoch timestamp."""
@@ -146,17 +161,39 @@ class CompiledAlertRule:
             if actual_sev > self.filter_severity:
                 return False
 
-        # 3. Message pattern check (using cached regex or pre-lowercased substring)
+        # 3. Message pattern check (prioritize substring matching when no regex metacharacters)
         if self._match_pattern_lower:
             message = str(entry.get("message") or "")
             raw = str(entry.get("raw") or "")
 
-            if self.compiled_regex is not None:
-                if not (self.compiled_regex.search(message) or (raw and self.compiled_regex.search(raw))):
-                    return False
-            else:
+            has_metachars = getattr(self, "_has_regex_metachars", None)
+            if has_metachars is None:
+                has_metachars = bool(self.match_pattern and any(c in _REGEX_METACHARS for c in self.match_pattern))
+
+            if not has_metachars:
                 pat_lower = self._match_pattern_lower
                 if pat_lower not in message.lower() and (not raw or pat_lower not in raw.lower()):
+                    return False
+            else:
+                if not getattr(self, "_regex_verified", False):
+                    if self.match_pattern and self.match_pattern.strip() != "*":
+                        clean_pat = self.match_pattern.strip()
+                        try:
+                            validate_pattern_complexity(clean_pat)
+                            self._regex_verified = True
+                            if self.compiled_regex is None:
+                                self.compiled_regex = re.compile(clean_pat, re.IGNORECASE)
+                        except Exception:
+                            return False
+                    else:
+                        return False
+
+                if self.compiled_regex is not None:
+                    msg_cand = message[:16384]
+                    raw_cand = raw[:16384] if raw else ""
+                    if not (self.compiled_regex.search(msg_cand) or (raw_cand and self.compiled_regex.search(raw_cand))):
+                        return False
+                else:
                     return False
 
         return True

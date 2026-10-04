@@ -19,6 +19,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+from app.core.regex_validator import safe_regex_search
 from app.services.drop_filter import CompiledDropRule, DropFilter, get_drop_filter, init_drop_filter
 
 
@@ -845,3 +846,26 @@ class TestDropRulesIngestionPipeline:
         item = queue.get_nowait()
         assert item["message"] == "High memory consumption warning"
         assert item["severity"] == 4
+
+
+def test_safe_regex_search_in_thread_and_bounded():
+    """Verify safe_regex_search runs in-thread and bounds candidate strings to 16,384 chars."""
+    import re
+
+    # 1. Matching precompiled regex
+    pat = re.compile(r"error:\s*\d+", re.IGNORECASE)
+    assert safe_regex_search(pat, "System error: 500 occurred") is True
+    assert safe_regex_search(pat, "All systems operational") is False
+
+    # 2. String pattern auto-validation and matching
+    assert safe_regex_search(r"warning:\s*\w+", "System warning: high_load") is True
+
+    # 3. Pathological backtracking pattern rejected when string is passed
+    assert safe_regex_search(r"(a+)+$", "aaaaaaaaaaaaaaaaaaaaa!") is False
+
+    # 4. Long string bounded to 16,384 characters
+    # If the match only occurs after 16,384 chars, it should NOT match
+    long_prefix = "x" * 16384
+    long_msg = long_prefix + "target_word"
+    assert safe_regex_search(r"target_word", long_msg) is False
+    assert safe_regex_search(r"^x+", long_msg) is True

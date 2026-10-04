@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mobile Navbar Ingestion Metric**: Render the compact logs per second rate on mobile navigation bars beside the logo.
 
 ### Fixed
+- **Regex Validation Thread Safety & Bounded Search**: Removed the unmanaged thread pool executor from regex evaluation to prevent spinning thread leaks on backtracking patterns, executing pre-compiled regular expressions directly in-thread on candidate strings bounded to 16,384 characters.
+- **Client-Side Live Stream Search ReDoS Protection**: Removed dynamic regex compilation on user search queries in the live log stream, relying strictly on case-insensitive substring matching, whitespace-delimited token splitting across all terms, and column-specific prefixes (`app:`, `source:`).
+- **Alert Evaluator Pattern Matching Safety**: Applied case-insensitive substring matching first for alert rule patterns that do not contain regex metacharacters, and checked pattern complexity before compilation when regex matching is required to reject catastrophic backtracking antipatterns.
 - **Syslog TCP Octet-Counting Framing**: Narrowed octet-counting frame detection to require a valid syslog priority header prefix immediately after the message length, preventing logs beginning with numbers (such as HTTP status codes) from misparsing as frame lengths and cleanly falling back to newline delimitation.
 - **Docker Multiplexed Stream Line Buffering**: Maintained persistent line buffers across multiplexed container stream chunks when `is_tty=False`, splitting on newlines and buffering trailing fragments to preserve complete log line integrity across frame boundaries.
 - **Structured Log Payload Parsing in Collectors**: Parse message payloads, explicit severity levels, and timestamps from logfmt (`msg="..."`), Valkey/Redis, and Maintainerr application pipes in both Syslog and Docker collectors while preserving complete raw packets.

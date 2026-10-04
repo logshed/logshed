@@ -134,6 +134,68 @@ class TestCompiledAlertRule:
         assert rule_substring.matches({"message": "Server error: 502 Bad Gateway detected"}) is True
         assert rule_substring.matches({"message": "Server running smoothly"}) is False
 
+    def test_alert_rule_pattern_safety_and_metacharacter_check(self):
+        """Verify substring matching is prioritized when no metacharacters, and complexity is verified when present."""
+        # Literal string with no regex metacharacters
+        rule_literal = CompiledAlertRule(
+            id=1,
+            name="Literal Pattern Rule",
+            rule_type="threshold",
+            channel_id=None,
+            filter_app=None,
+            filter_severity=None,
+            match_pattern="error 500",
+            threshold_count=1,
+            window_seconds=60,
+            cooldown_seconds=60,
+            ai_enrichment=False,
+            is_enabled=True,
+        )
+        assert getattr(rule_literal, "_has_regex_metachars", False) is False
+        assert rule_literal.compiled_regex is None
+        assert rule_literal.matches({"message": "Encountered ERROR 500 in service"}) is True
+        assert rule_literal.matches({"message": "Encountered ERROR 404 in service"}) is False
+
+        # Pattern with regex metacharacters
+        rule_regex = CompiledAlertRule(
+            id=2,
+            name="Regex Pattern Rule",
+            rule_type="threshold",
+            channel_id=None,
+            filter_app=None,
+            filter_severity=None,
+            match_pattern="error (400|500)",
+            threshold_count=1,
+            window_seconds=60,
+            cooldown_seconds=60,
+            ai_enrichment=False,
+            is_enabled=True,
+        )
+        assert getattr(rule_regex, "_has_regex_metachars", False) is True
+        assert rule_regex.compiled_regex is not None
+        assert rule_regex.matches({"message": "Encountered ERROR 500 in service"}) is True
+        assert rule_regex.matches({"message": "Encountered ERROR 400 in service"}) is True
+        assert rule_regex.matches({"message": "Encountered ERROR 404 in service"}) is False
+
+        # Vulnerable pattern with catastrophic backtracking fails complexity validation
+        rule_vulnerable = CompiledAlertRule(
+            id=3,
+            name="Vulnerable Rule",
+            rule_type="threshold",
+            channel_id=None,
+            filter_app=None,
+            filter_severity=None,
+            match_pattern="(a+)+$",
+            threshold_count=1,
+            window_seconds=60,
+            cooldown_seconds=60,
+            ai_enrichment=False,
+            is_enabled=True,
+        )
+        assert getattr(rule_vulnerable, "_has_regex_metachars", False) is True
+        assert rule_vulnerable.compiled_regex is None
+        assert rule_vulnerable.matches({"message": "aaaaaaaaaaaaa!"}) is False
+
     def test_disabled_rule_never_matches(self):
         rule = CompiledAlertRule(
             id=1,

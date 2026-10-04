@@ -5,11 +5,8 @@ Provides security checks against pathological nested repetition antipatterns
 susceptible to catastrophic backtracking (Regular Expression Denial of Service).
 """
 
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import re
-import threading
 from typing import Optional, Tuple, Union
 from fastapi import HTTPException, status
 
@@ -171,50 +168,34 @@ def compile_safe_regex(pattern: str, flags: int = 0) -> re.Pattern:
     return re.compile(pattern, flags)
 
 
-_REGEX_POOL: Optional[ThreadPoolExecutor] = None
-_REGEX_POOL_LOCK = threading.Lock()
-
-
-def get_regex_executor() -> ThreadPoolExecutor:
-    """Return dedicated ThreadPoolExecutor for isolated regex matching."""
-    global _REGEX_POOL
-    with _REGEX_POOL_LOCK:
-        if _REGEX_POOL is None or getattr(_REGEX_POOL, "_shutdown", False):
-            _REGEX_POOL = ThreadPoolExecutor(
-                max_workers=4,
-                thread_name_prefix="logshed-regex",
-            )
-        return _REGEX_POOL
-
-
 def safe_regex_search(
     pattern: Union[re.Pattern, str],
     string: str,
     timeout: float = 0.1,
 ) -> bool:
     """
-    Safely execute regular expression search with timeout protection
-    to prevent hanging worker threads or event loops.
+    Safely execute regular expression search directly in-thread on a candidate
+    string bounded to 16,384 characters. Pattern complexity must be pre-validated
+    to prevent catastrophic backtracking without leaking worker threads.
     """
     if not string:
         return False
 
     try:
-        compiled = pattern if isinstance(pattern, re.Pattern) else re.compile(pattern, re.IGNORECASE)
-    except Exception:
-        return False
-
-    # Bound candidate string length to prevent massive buffer scanning
-    candidate = string[:65536]
-
-    executor = get_regex_executor()
-    future = executor.submit(compiled.search, candidate)
-    try:
-        match = future.result(timeout=timeout)
-        return match is not None
-    except (concurrent.futures.TimeoutError, TimeoutError):
-        logger.warning(f"Regular expression matching timed out after {timeout}s.")
-        return False
+        if isinstance(pattern, re.Pattern):
+            compiled = pattern
+        else:
+            validate_pattern_complexity(pattern)
+            compiled = re.compile(pattern, re.IGNORECASE)
     except Exception as exc:
-        logger.debug(f"Regular expression execution error: {exc}")
+        logger.debug("Regular expression compilation or validation error: %s", exc)
+        return False
+
+    # Bound candidate string length to 16,384 characters
+    candidate = string[:16384]
+
+    try:
+        return compiled.search(candidate) is not None
+    except Exception as exc:
+        logger.debug("Regular expression execution error: %s", exc)
         return False

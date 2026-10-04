@@ -217,19 +217,8 @@ export function matchesSearchQuery(
     return true;
   }
 
-  // 2. Try regex match (using precompiled regex if available, else compiling on demand)
-  const regex =
-    precompiledRegex !== undefined
-      ? precompiledRegex
-      : (() => {
-          try {
-            return new RegExp(q, 'i');
-          } catch {
-            return null;
-          }
-        })();
-
-  if (regex && fields.some((f) => regex.test(f))) {
+  // 2. Precompiled regex match (only if explicitly provided)
+  if (precompiledRegex && fields.some((f) => precompiledRegex.test(f))) {
     return true;
   }
 
@@ -344,21 +333,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filtersRef = useRef<LogFilterParams>(filters);
 
-  // Precompile search pattern / RegExp when filters.query changes
-  const compiledSearchRegex = useMemo(() => {
-    const q = filters.query?.trim();
-    if (!q) return null;
-    try {
-      return new RegExp(q, 'i');
-    } catch {
-      return null;
-    }
-  }, [filters.query]);
-
-  const compiledSearchRegexRef = useRef<RegExp | null>(compiledSearchRegex);
-  useEffect(() => {
-    compiledSearchRegexRef.current = compiledSearchRegex;
-  }, [compiledSearchRegex]);
 
   useEffect(() => {
     filtersRef.current = filters;
@@ -861,7 +835,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
         // Client-Side Query Filtering on Ingest (Issue #2)
         const currentQuery = filtersRef.current?.query;
-        if (currentQuery && !matchesSearchQuery(entry, currentQuery, compiledSearchRegexRef.current)) {
+        if (currentQuery && !matchesSearchQuery(entry, currentQuery)) {
           return;
         }
 
