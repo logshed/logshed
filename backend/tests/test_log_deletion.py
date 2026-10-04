@@ -475,3 +475,35 @@ async def test_delete_all_with_explicit_flag(client: AsyncClient, auth_cookie: d
 
     check_res = await client.get("/api/logs", cookies=auth_cookie)
     assert len(check_res.json()["logs"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_logs_with_complex_fts_query_fallback(client: AsyncClient, auth_cookie: dict):
+    """
+    Verify preview and delete succeed with complex punctuation FTS query
+    using escape_fts_tokens fallback symmetry.
+    """
+    db_path = get_db_path()
+    _seed_test_logs(db_path)
+
+    # Query with punctuation and unclosed quote/paren that triggers FTS syntax error
+    complex_query = 'nginx: ("unclosed paren'
+
+    # 1. Preview count handles fallback without error
+    preview_res = await client.post(
+        "/api/logs/delete/preview",
+        json={"query": complex_query},
+        cookies=auth_cookie,
+    )
+    assert preview_res.status_code == 200
+    assert preview_res.json()["matched_count"] == 0
+
+    # 2. Deletion execution handles fallback symmetrically without error
+    del_res = await client.post(
+        "/api/logs/delete",
+        json={"query": complex_query},
+        cookies=auth_cookie,
+    )
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted_count"] == 0
+

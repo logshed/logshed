@@ -423,16 +423,14 @@ def create_app() -> FastAPI:
         )
 
     # FTS search consistency middleware: ensures pending unindexed logs are caught up
-    # prior to executing full-text search queries.
+    # prior to executing full-text search queries by signaling the background worker.
     @app.middleware("http")
     async def fts_search_consistency(request: Request, call_next):
         if request.url.path == "/api/logs" and request.query_params.get("query"):
-            db_path = get_db_path()
-            from app.services.fts_indexer import index_pending_logs
-            try:
-                await asyncio.to_thread(index_pending_logs, db_path)
-            except Exception:
-                pass
+            from app.services.fts_indexer import get_fts_worker
+            worker = get_fts_worker()
+            if worker:
+                worker.notify_new_logs()
         return await call_next(request)
 
     # Security headers middleware

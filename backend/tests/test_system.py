@@ -344,6 +344,42 @@ class TestRetentionAndPruneWorker:
             remaining = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             assert remaining == 10
 
+    def test_execute_prune_iso_datetime_boundary_comparison(self, tmp_path: Path):
+        """execute_prune accurately compares ISO-8601 timestamps containing 'T' against cutoff_iso."""
+        db_file = tmp_path / "logs.db"
+        run_migrations(db_file)
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # 15 days ago (older than 14 days retention)
+        old_ts = (now - datetime.timedelta(days=15)).isoformat()
+        # 13 days ago (younger than 14 days retention)
+        fresh_ts = (now - datetime.timedelta(days=13)).isoformat()
+
+        with get_connection(db_file) as conn:
+            conn.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '192.168.1.1', 'gw', 'app', 1, 6, 'old iso log', 'old iso log')
+                """,
+                (old_ts, old_ts),
+            )
+            conn.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '192.168.1.1', 'gw', 'app', 1, 6, 'fresh iso log', 'fresh iso log')
+                """,
+                (fresh_ts, fresh_ts),
+            )
+            conn.commit()
+
+        res = execute_prune(db_file, retention_days=14)
+        assert res["deleted_logs"] == 1
+
+        with get_connection(db_file) as conn:
+            remaining = conn.execute("SELECT message FROM logs").fetchall()
+            assert len(remaining) == 1
+            assert remaining[0][0] == "fresh iso log"
+
 
     @pytest.mark.asyncio
     async def test_storage_metrics_worker_manual_trigger_single_row(self, tmp_path: Path):

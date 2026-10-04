@@ -3,6 +3,7 @@ Log retention pruning and database cleanup service for LogShed.
 """
 
 import asyncio
+import datetime
 import logging
 import os
 import shutil
@@ -31,6 +32,8 @@ def execute_prune(
     retention_days = max(1, retention_days)
     total_deleted = 0
     db_path_obj = Path(db_path)
+    cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=retention_days)
+    cutoff_iso = cutoff_dt.isoformat()
 
     if index_pending:
         from app.services.fts_indexer import index_pending_logs
@@ -49,13 +52,13 @@ def execute_prune(
         delete_query = """
             DELETE FROM logs WHERE id IN (
                 SELECT id FROM logs 
-                WHERE timestamp < datetime('now', '-' || ? || ' days') 
+                WHERE timestamp < :cutoff_time 
                   AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)
                 LIMIT 5000
             )
         """
         while True:
-            cursor.execute(delete_query, (retention_days,))
+            cursor.execute(delete_query, {"cutoff_time": cutoff_iso})
             count = cursor.rowcount
             conn.commit()
             total_deleted += count

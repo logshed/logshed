@@ -182,20 +182,34 @@ def execute_delete_logs(
                 total_deleted += cursor.rowcount
         else:
             # Iterative batch deletion by criteria
-            while True:
-                delete_sql = f"""
-                    DELETE FROM logs WHERE id IN (
-                        SELECT id FROM logs
-                        {where_sql}
-                        LIMIT :batch_limit
-                    )
-                """
-                cursor.execute(delete_sql, {**params, "batch_limit": batch_size})
-                count = cursor.rowcount
-                conn.commit()
-                total_deleted += count
-                if count == 0:
-                    break
+            delete_sql = f"""
+                DELETE FROM logs WHERE id IN (
+                    SELECT id FROM logs
+                    {where_sql}
+                    LIMIT :batch_limit
+                )
+            """
+            try:
+                while True:
+                    cursor.execute(delete_sql, {**params, "batch_limit": batch_size})
+                    count = cursor.rowcount
+                    conn.commit()
+                    total_deleted += count
+                    if count == 0:
+                        break
+            except sqlite3.OperationalError:
+                if "fts_term" in params and criteria.query:
+                    fallback_term = escape_fts_tokens(criteria.query)
+                    params["fts_term"] = fallback_term
+                    while True:
+                        cursor.execute(delete_sql, {**params, "batch_limit": batch_size})
+                        count = cursor.rowcount
+                        conn.commit()
+                        total_deleted += count
+                        if count == 0:
+                            break
+                else:
+                    raise
 
         # Compact FTS5 index if a significant volume of rows was deleted
         if total_deleted >= 5000:

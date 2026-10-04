@@ -21,6 +21,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+from app.services.fts_indexer import index_pending_logs
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +81,7 @@ def _seed_logs(db_path: Path, entries: list[dict]):
     with get_connection(db_path) as conn:
         conn.executemany(query, entries)
         conn.commit()
+    index_pending_logs(db_path)
 
 
 # ===================================================================
@@ -222,6 +224,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         # 1. Column filter syntax: app_name:auth
         res_col = await client.get("/api/logs", params={"query": "app_name:auth"})
@@ -273,6 +276,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         malformed_queries = [
             # 1. Unallowlisted or incomplete column prefix
@@ -343,6 +347,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         # 1. Search for IP address with dots (e.g. 192.168.1.1)
         res_ip = await client.get("/api/logs", params={"query": "192.168.1.1"})
@@ -398,6 +403,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         loop = asyncio.get_running_loop()
         t0 = loop.time()

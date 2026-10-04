@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Daily Digest Severity Priority**: Prioritize entities by minimum event severity before event count when generating 24-hour daily digest analytical rollups. Ensures critical, alert, or emergency events are highlighted even when other hosts log higher volumes of standard errors.
 - **Unsaved Changes Warning in Rule Modals**: Added unsaved changes protection to alert and drop rule modals when closing via header close button, cancel button, or escape key with pending edits.
 - **Symmetric Host Alias & Case Expansion**: Symmetrically resolve configured host aliases and their underlying IP addresses bidirectionally and case-insensitively across log queries, live SSE streams, and targeted deletion filters. Ensures filtering or deleting by friendly alias (e.g. `LogShed Server`) consistently matches historical rows logged with alternative casing (`logshed`) or raw IP (`127.0.0.1`) without incurring unindexed SQLite table scans.
+- **FTS Search Consistency Concurrency**: Signal the background `FTSIndexWorker` via event loop notification on search requests instead of dispatching uncoordinated indexing passes in worker threads, eliminating competing write locks during query execution.
+- **Retention Prune Datetime Comparison**: Calculate retention cutoff timestamps in UTC ISO-8601 formatting in Python to guarantee exact string comparison against stored ISO timestamps in SQLite pruning queries.
+- **Log Deletion FTS Fallback Symmetry**: Added error handling symmetry with search previews in iterative batch deletion, falling back to escaped token matching on operational errors to prevent complex or punctuation-heavy queries from failing during execution.
 
 ## [1.2.0-beta.1] - 2026-10-01
 

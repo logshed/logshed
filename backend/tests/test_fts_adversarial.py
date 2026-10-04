@@ -524,10 +524,12 @@ class TestAdversarialMiddlewareAndConcurrency:
 
     @pytest.mark.asyncio
     async def test_search_consistency_middleware_indexes_on_query(self, db_path: Path, monkeypatch):
-        """HTTP GET /api/logs?query= automatically flushes pending unindexed logs before executing query."""
+        """HTTP GET /api/logs?query= signals running FTSIndexWorker via notify_new_logs without opening competing transactions."""
+        from unittest.mock import MagicMock
         from httpx import ASGITransport, AsyncClient
         from app.main import app
         from app.core.security import SESSION_COOKIE_NAME, create_session_token, get_or_create_master_key
+        from app.services.fts_indexer import set_fts_worker
 
         # Configure app to use the test database and secret key
         key_file = db_path.parent / ".secret_key"
@@ -538,43 +540,79 @@ class TestAdversarialMiddlewareAndConcurrency:
 
         unique_search_term = f"middlewaretest_{int(time.time() * 1000)}"
 
-        # Insert directly into logs table without indexing
-        conn = get_connection(db_path)
-        with conn:
-            conn.execute(
-                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, message, raw)
-                   VALUES ('2026-09-01T12:00:00+00:00', '2026-09-01T12:00:00+00:00', '10.0.0.1', 'host1', 'auth-srv', ?, ?)""",
-                (f"user login event {unique_search_term} successful", "raw"),
-            )
-        conn.close()
+        # 1. Verify signaling with mock worker
+        mock_worker = MagicMock()
+        set_fts_worker(mock_worker)
+        try:
+            token = create_session_token(user_id=1)
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                cookies={SESSION_COOKIE_NAME: token},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            ) as client:
+                # Query without search query should not notify
+                resp = await client.get("/api/logs")
+                assert resp.status_code == 200
+                assert not mock_worker.notify_new_logs.called
 
-        # Confirm unindexed prior to HTTP request
-        conn = get_connection(db_path)
-        last_id_before = conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
-        conn.close()
-        assert last_id_before == 0
+                # Query with search query should notify background worker
+                resp = await client.get(f"/api/logs?query={unique_search_term}")
+                assert resp.status_code == 200
+                assert mock_worker.notify_new_logs.called
+        finally:
+            set_fts_worker(None)
 
-        token = create_session_token(user_id=1)
-        transport = ASGITransport(app=app)
-        async with AsyncClient(
-            transport=transport,
-            base_url="http://test",
-            cookies={SESSION_COOKIE_NAME: token},
-            headers={"X-Requested-With": "XMLHttpRequest"},
-        ) as client:
-            resp = await client.get(f"/api/logs?query={unique_search_term}")
+        # 2. Verify with live worker: notification wakes worker to index pending logs
+        worker = FTSIndexWorker(db_path, batch_size=1000, poll_interval=10.0)
+        worker_task = asyncio.create_task(worker.run())
+        try:
+            # Insert directly into logs table without indexing
+            conn = get_connection(db_path)
+            with conn:
+                conn.execute(
+                    """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, message, raw)
+                       VALUES ('2026-09-01T12:00:00+00:00', '2026-09-01T12:00:00+00:00', '10.0.0.1', 'host1', 'auth-srv', ?, ?)""",
+                    (f"user login event {unique_search_term} successful", "raw"),
+                )
+            conn.close()
 
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1
-        assert len(data["logs"]) == 1
-        assert unique_search_term in data["logs"][0]["message"]
+            # Confirm unindexed prior to HTTP request
+            conn = get_connection(db_path)
+            last_id_before = conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
+            conn.close()
+            assert last_id_before == 0
 
-        # Confirm middleware advanced last_indexed_id
-        conn = get_connection(db_path)
-        last_id_after = conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
-        conn.close()
-        assert last_id_after >= 1
+            token = create_session_token(user_id=1)
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                cookies={SESSION_COOKIE_NAME: token},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            ) as client:
+                resp = await client.get(f"/api/logs?query={unique_search_term}")
+                assert resp.status_code == 200
+
+            # Worker was signaled by middleware; wait for background indexing to complete
+            last_id_after = 0
+            for _ in range(50):
+                conn = get_connection(db_path)
+                last_id_after = conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
+                conn.close()
+                if last_id_after >= 1:
+                    break
+                await asyncio.sleep(0.02)
+            assert last_id_after >= 1
+        finally:
+            await worker.stop()
+            worker_task.cancel()
+            try:
+                await worker_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            set_fts_worker(None)
 
     def test_special_syntax_tokens_and_unicode_indexing(self, db_path: Path):
         """FTS indexing handles unicode, emojis, unbalanced quotes, and FTS syntax characters safely."""
