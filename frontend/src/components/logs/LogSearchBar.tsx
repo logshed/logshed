@@ -15,6 +15,8 @@ interface LogSearchBarProps {
   availableSources?: string[];
   availableApps?: string[];
   onApplySavedView?: (filters: LogFilterParams) => void;
+  totalCount?: number;
+  totalCapped?: boolean;
 }
 
 export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
@@ -25,6 +27,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   availableSources = [],
   availableApps = [],
   onApplySavedView,
+  totalCount,
+  totalCapped = false,
 }) => {
   const [timePreset, setTimePreset] = useState<string>('all');
   const [showCustomTime, setShowCustomTime] = useState<boolean>(false);
@@ -223,6 +227,17 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           <Search className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Filter</span>
         </button>
+
+        {/* Capped or Matched Count Indicator */}
+        {hasActiveFilters && totalCount !== undefined && totalCount !== null && (
+          <span
+            className="text-slate-400 font-mono text-[11px] shrink-0"
+            data-testid="search-bar-total-count"
+            title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} logs matched`}
+          >
+            {totalCapped ? '1,000+ logs' : `${totalCount.toLocaleString()} log${totalCount === 1 ? '' : 's'}`}
+          </span>
+        )}
 
         {/* Conditional Prominent Reset Button with Active Filter Count Indicator */}
         {hasActiveFilters && (

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **About LogShed Card Location**: Moved the About LogShed card from the Advanced tab to the bottom of the Application Settings tab.
 - **Apprise Documentation Links**: Updated Apprise notification URL documentation links in the Add/Edit Target modal to point to the new official services and URL builder documentation on appriseit.com.
 - **Mobile Navbar Ingestion Metric**: Render the compact logs per second rate on mobile navigation bars beside the logo.
+- **Log Buffer Ceiling & Ingestion Alias Mapping**: Lowered maximum in-memory log buffer size from 50,000 to 3,000 records, resolved host aliases once upon ingestion in `prepareLogEntry`, and bypassed full-array re-mapping during periodic flush cycles.
+- **Capped Log Count Indication**: Added `total_capped` boolean flag to log list API responses and displayed "1,000+ logs" when results reach count limits under active filters instead of showing a literal "1,001".
 
 ### Fixed
 - **Regex Validation Thread Safety & Bounded Search**: Removed the unmanaged thread pool executor from regex evaluation to prevent spinning thread leaks on backtracking patterns, executing pre-compiled regular expressions directly in-thread on candidate strings bounded to 16,384 characters.

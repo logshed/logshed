@@ -174,10 +174,17 @@ async def list_logs(
             for r in rows
         ]
 
-        return logs, total
+        total_capped = bool(total >= count_limit)
+        return logs, total, total_capped
 
-    logs, total = await run_db_query(_query_db)
-    return LogListResponse(logs=logs, total=total, limit=limit, offset=offset)
+    logs, total, total_capped = await run_db_query(_query_db)
+    return LogListResponse(
+        logs=logs,
+        total=total,
+        limit=limit,
+        offset=offset,
+        total_capped=total_capped,
+    )
 
 
 @router.get("/stream")

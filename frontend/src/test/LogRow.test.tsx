@@ -142,6 +142,36 @@ describe('LogRow Component and Optimization', () => {
     expect(prepared.strippedMessage).toBe('Slow query detected');
   });
 
+  it('prepareLogEntry canonicalizes host alias upon ingestion when aliases are supplied', () => {
+    const rawLog = {
+      id: 201,
+      timestamp: '2026-09-03T14:30:15.123Z',
+      received_at: '2026-09-03T14:30:15.150Z',
+      source_ip: '10.0.0.1',
+      source_alias: '10.0.0.1',
+      app_name: 'postgres',
+      facility: 1,
+      severity: 4,
+      message: 'query finished',
+      raw: 'raw log line',
+    };
+
+    // 1. IP match takes precedence
+    const aliasedByIp = prepareLogEntry(rawLog, { '10.0.0.1': 'db-primary' });
+    expect(aliasedByIp.source_alias).toBe('db-primary');
+
+    // 2. Existing alias rename match
+    const aliasedByName = prepareLogEntry(
+      { ...rawLog, source_ip: '', source_alias: 'old-gateway' },
+      { 'old-gateway': 'edge-router' }
+    );
+    expect(aliasedByName.source_alias).toBe('edge-router');
+
+    // 3. Fallback to existing alias when not in mapping
+    const unaliased = prepareLogEntry(rawLog, { '192.168.1.1': 'gateway' });
+    expect(unaliased.source_alias).toBe('10.0.0.1');
+  });
+
   it('matchesSearchQuery supports precompiled RegExp pattern', () => {
     const precompiled = new RegExp('upstream', 'i');
     expect(matchesSearchQuery(baseLog, 'upstream', precompiled)).toBe(true);

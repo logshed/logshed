@@ -257,6 +257,51 @@ class TestLogQuerying:
         assert res_bad.json()["total"] == 1
 
     @pytest.mark.asyncio
+    async def test_total_capped_indication(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """Verify that total_capped is True when row count reaches or exceeds count_limit."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        # Insert 1005 log entries
+        bulk_entries = [
+            (
+                f"2026-08-30T10:00:{i % 60:02d}Z",
+                f"2026-08-30T10:00:{i % 60:02d}Z",
+                "10.0.0.1",
+                "srv1",
+                "app1",
+                1,
+                6,
+                f"Log message {i}",
+                f"raw {i}",
+            )
+            for i in range(1005)
+        ]
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                bulk_entries,
+            )
+
+        # Query with default limit=100, offset=0 -> count_limit = max(1001, 101) = 1001
+        res = await client.get("/api/logs", params={"limit": 100, "offset": 0})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total"] == 1001
+        assert data["total_capped"] is True
+
+        # Query with offset=1000, limit=50 -> count_limit = max(1001, 1000 + 50 + 1) = 1051
+        # DB has 1005 entries, so total is 1005 (< 1051) and total_capped is False
+        res_page = await client.get("/api/logs", params={"limit": 50, "offset": 1000})
+        assert res_page.status_code == 200
+        data_page = res_page.json()
+        assert data_page["total"] == 1005
+        assert data_page["total_capped"] is False
+
+    @pytest.mark.asyncio
     async def test_malformed_fts5_queries_safety(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):

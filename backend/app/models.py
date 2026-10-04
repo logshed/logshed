@@ -69,6 +69,7 @@ class LogListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    total_capped: bool = False
 
 
 class LogContextResponse(BaseModel):

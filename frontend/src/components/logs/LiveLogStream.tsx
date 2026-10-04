@@ -182,10 +182,20 @@ export function formatLocalTimestamp(ts: string, fallbackTs?: string): string {
   }
 }
 
-export function prepareLogEntry(entry: LogEntry | ProcessedLogEntry): ProcessedLogEntry {
+export function prepareLogEntry(
+  entry: LogEntry | ProcessedLogEntry,
+  aliases?: Record<string, string>,
+): ProcessedLogEntry {
   const existing = entry as ProcessedLogEntry;
+  const canonical =
+    aliases &&
+    ((entry.source_ip && aliases[entry.source_ip]) ||
+      (entry.source_alias && aliases[entry.source_alias]));
+  const source_alias = canonical || entry.source_alias;
+
   return {
     ...entry,
+    source_alias,
     formattedTimestamp:
       existing.formattedTimestamp ?? formatLocalTimestamp(entry.timestamp, entry.received_at),
     cleanedMessage: existing.cleanedMessage ?? cleanLogMessageForDisplay(entry.message),
@@ -270,7 +280,7 @@ interface LiveLogStreamProps {
   pullTouchHandlers?: PullTouchHandlers;
 }
 
-const MAX_BUFFER_SIZE = 50000;
+const MAX_BUFFER_SIZE = 3000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -309,6 +319,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [hasMoreLogs, setHasMoreLogs] = useState<boolean>(true);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [totalCapped, setTotalCapped] = useState<boolean>(false);
   const historicalOffsetRef = useRef<number>(0);
   const isLoadingMoreRef = useRef<boolean>(false);
   const [filters, setFilters] = useState<LogFilterParams>(() => parseFiltersFromUrl());
@@ -506,19 +518,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   }, [mergedAliases]);
 
   const processedLogs = useMemo(() => {
-    if (!mergedAliases || Object.keys(mergedAliases).length === 0) {
-      return logs;
-    }
-    return logs.map((log) => {
-      const canonical =
-        (log.source_ip && mergedAliases[log.source_ip]) ||
-        (log.source_alias && mergedAliases[log.source_alias]);
-      if (canonical && log.source_alias !== canonical) {
-        return { ...log, source_alias: canonical };
-      }
-      return log;
-    });
-  }, [logs, mergedAliases]);
+    return logs;
+  }, [logs]);
 
   const isMobile = useMediaQuery('(max-width: 767px)');
   const parentRef = useRef<HTMLDivElement>(null);
@@ -697,11 +698,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
 
       // Keep newest logs at the top (res.logs is ordered DESC)
-      const preparedLogs = res.logs.map(prepareLogEntry);
+      const preparedLogs = res.logs.map((entry) => prepareLogEntry(entry, mergedAliasesRef.current));
       setLogs(preparedLogs);
       updateFacetsWithNewLogs(res.logs);
       historicalOffsetRef.current = res.logs.length;
-      if (res.logs.length < 500 || (res.total !== undefined && res.logs.length >= res.total)) {
+      setTotalCount(res.total);
+      setTotalCapped(Boolean(res.total_capped));
+      if (res.logs.length < 500 || (res.total !== undefined && !res.total_capped && res.logs.length >= res.total)) {
         setHasMoreLogs(false);
       }
       setMissedLogsCount(0);
@@ -742,12 +745,16 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
 
       historicalOffsetRef.current = currentOffset + res.logs.length;
-      if (res.logs.length < 500 || (res.total !== undefined && historicalOffsetRef.current >= res.total)) {
+      if (res.total !== undefined) {
+        setTotalCount(res.total);
+        setTotalCapped(Boolean(res.total_capped));
+      }
+      if (res.logs.length < 500 || (res.total !== undefined && !res.total_capped && historicalOffsetRef.current >= res.total)) {
         setHasMoreLogs(false);
       }
       if (res.logs.length > 0) {
         updateFacetsWithNewLogs(res.logs);
-        const preparedLogs = res.logs.map(prepareLogEntry);
+        const preparedLogs = res.logs.map((entry) => prepareLogEntry(entry, mergedAliasesRef.current));
         setLogs((prev) => {
           const existingIds = new Set(prev.map((l) => l.id));
           const uniqueIncoming = preparedLogs.filter((l) => !existingIds.has(l.id));
@@ -840,7 +847,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }
 
         // Buffer incoming SSE logs (Issue #1)
-        incomingBufferRef.current.push(prepareLogEntry(entry));
+        incomingBufferRef.current.push(prepareLogEntry(entry, mergedAliasesRef.current));
 
         if (incomingBufferRef.current.length >= 500) {
           if (flushTimerRef.current !== null) {
@@ -1218,6 +1225,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     setLastSelectedLogIndex(null);
     setMissedLogsCount(0);
     setHasMoreLogs(false);
+    setTotalCount(0);
+    setTotalCapped(false);
   };
 
   const handleResetFilters = useCallback(() => {
@@ -1250,6 +1259,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           availableSources={availableSourcesForSelectedApps}
           availableApps={availableAppsForSelectedHosts}
           onApplySavedView={handleApplySavedView}
+          totalCount={totalCount ?? undefined}
+          totalCapped={totalCapped}
         />
 
         {/* Stream Controls & Filter Pills Bar */}
@@ -1455,7 +1466,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
             <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
-             - Reached beginning of log history ({logs.length.toLocaleString()} log{logs.length === 1 ? '' : 's'} loaded) -
+             - Reached beginning of log history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
             </div>
           )}
         </div>
@@ -1567,7 +1578,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
           setLogs((prevLogs) => {
             const existingIds = new Set(prevLogs.map((l) => l.id));
-            const missingLogs = logsToInspect.filter((l) => !existingIds.has(l.id)).map(prepareLogEntry);
+            const missingLogs = logsToInspect
+              .filter((l) => !existingIds.has(l.id))
+              .map((l) => prepareLogEntry(l, mergedAliasesRef.current));
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
               const cmp = b.timestamp.localeCompare(a.timestamp);
@@ -1581,7 +1594,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           setActiveLogDetail(null);
           setLogs((prevLogs) => {
             const existingIds = new Set(prevLogs.map((l) => l.id));
-            const missingLogs = targetAndCtxLogs.filter((l) => !existingIds.has(l.id)).map(prepareLogEntry);
+            const missingLogs = targetAndCtxLogs
+              .filter((l) => !existingIds.has(l.id))
+              .map((l) => prepareLogEntry(l, mergedAliasesRef.current));
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
               const cmp = b.timestamp.localeCompare(a.timestamp);

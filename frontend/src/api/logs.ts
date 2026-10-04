@@ -13,6 +13,7 @@ export interface LogListResult {
   total: number;
   limit: number;
   offset: number;
+  total_capped?: boolean;
 }
 
 export async function fetchLogs(params: LogFilterParams = {}): Promise<LogListResult> {

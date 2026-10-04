@@ -1404,6 +1404,32 @@ describe('LiveLogStream Component', () => {
     expect(ruleNameInput).toHaveValue('Custom Drop Rule Name');
     expect(regexCheckbox).toBeChecked();
   });
+
+  it('displays "1,000+ logs" when total_capped is true instead of a literal 1,001', async () => {
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValueOnce({
+      logs: [...sampleLogs],
+      total: 1001,
+      total_capped: true,
+      limit: 500,
+      offset: 0,
+    });
+
+    window.history.replaceState({}, '', '?q=timeout');
+
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+
+    // Check that capped representation appears and literal 1,001 does not
+    const cappedIndicators = screen.getAllByText('1,000+ logs');
+    expect(cappedIndicators.length).toBeGreaterThan(0);
+    expect(screen.queryByText('1,001')).toBeNull();
+    expect(screen.queryByText('1,001 logs')).toBeNull();
+
+    window.history.replaceState({}, '', '/');
+  });
 });
 
 describe('matchesSearchQuery Helper Function', () => {
