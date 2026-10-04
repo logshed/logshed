@@ -5,7 +5,7 @@ All notable changes to LogShed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0-beta.2] - 2026-10-04
 
 ### Changed
 - **About LogShed Card Location**: Moved the About LogShed card from the Advanced tab to the bottom of the Application Settings tab.
@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log Detail Modal Payload & Raw Distinction**: Render cleaned message payloads in the log inspection slide-over modal, copy cleaned text on message copy, and dynamically label raw output as Raw Container Output for Docker entries.
 - **FTS Prefix Search with Relational Filter Query Plan**: Evaluated full-text search match queries as an uncorrelated subquery rather than an inner join in the log query API, preventing the SQLite query planner from driving scans via relational indexes and re-evaluating FTS match doclists for every candidate row.
 - **Log Stream Search Debouncing & Loading Feedback**: Added a 300ms debounce to search-as-you-type input in the live log stream to prevent dispatching superseded backend queries on every keystroke, alongside an in-flight status indicator when refreshing active log views.
-- **Daily Digest Severity Priority**: Prioritize entities by minimum event severity before event count when generating 24-hour daily digest analytical rollups. Ensures critical, alert, or emergency events are highlighted even when other hosts log higher volumes of standard errors.
+- **Daily Digest Severity Priority**: Sort entities by minimum event severity before event count when generating 24-hour daily digest analytical rollups. Ensures critical, alert, or emergency events are highlighted even when other hosts log higher volumes of standard errors.
 - **Unsaved Changes Warning in Rule Modals**: Added unsaved changes protection to alert and drop rule modals when closing via header close button, cancel button, or escape key with pending edits.
 - **Symmetric Host Alias & Case Expansion**: Symmetrically resolve configured host aliases and their underlying IP addresses bidirectionally and case-insensitively across log queries, live SSE streams, and targeted deletion filters. Ensures filtering or deleting by friendly alias (e.g. `LogShed Server`) consistently matches historical rows logged with alternative casing (`logshed`) or raw IP (`127.0.0.1`) without incurring unindexed SQLite table scans.
 - **FTS Search Consistency Concurrency**: Signal the background `FTSIndexWorker` via event loop notification on search requests instead of dispatching uncoordinated indexing passes in worker threads, eliminating competing write locks during query execution.
@@ -151,7 +151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native multi-architecture container images (`linux/amd64` and `linux/arm64`).
 - Unraid Community Applications template (`unraid-template.xml`) with cache-pool POSIX locking recommendations.
 
-[Unreleased]: https://github.com/logshed/logshed/compare/v1.2.0-beta.1...HEAD
+[1.2.0-beta.2]: https://github.com/logshed/logshed/compare/v1.2.0-beta.1...v1.2.0-beta.2
 [1.2.0-beta.1]: https://github.com/logshed/logshed/compare/v1.1.0...v1.2.0-beta.1
 [1.1.0]: https://github.com/logshed/logshed/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/logshed/logshed/releases/tag/v1.0.0
