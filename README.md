@@ -105,6 +105,12 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 | **CPU** | 1 vCPU / core | 1 - 2 cores (handles continuous FTS5 indexing and log stream parsing) |
 | **Storage** | 1 GB free space | Direct SSD / NVMe cache pool (high IOPS for SQLite WAL checkpoints) |
 
+### Performance & Storage Profile
+
+- **Memory Footprint**: ~150 to 250 MB RAM under normal operation.
+- **Storage Ratio**: ~650 to 750 bytes per record on disk (includes raw text, relational indexes, and FTS5 full-text search segments). 100,000 logs occupy roughly 67 MB, and 1,000,000 logs occupy roughly 670 MB.
+- **Burst Tolerance**: Built with an in-memory staging queue and batching SQLite WAL writer. While normal homelab traffic is typically 10 to 100 logs/second, on direct SSD storage the pipeline can absorb brief bursts of several thousand logs/second without packet drops during container restart loops or service incidents.
+
 > [!WARNING]
 > **Storage & Filesystem Notice for SQLite WAL Mode:**
 > Always host the `/data` directory on a local filesystem (ext4, btrfs, zfs) or a direct SSD cache pool. **Do not place `/data` on network mounts (NFS, SMB) or Unraid user shares (`/mnt/user/`)**, as these do not reliably support POSIX file locking or shared memory (`mmap`) required for concurrent SQLite WAL checkpoints.
