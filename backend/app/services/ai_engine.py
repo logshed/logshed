@@ -280,6 +280,99 @@ async def fetch_available_models(
     return discovered_models
 
 
+SEVERITY_CODE_TO_NAME: dict[int, str] = {
+    0: "EMERG",
+    1: "ALERT",
+    2: "CRIT",
+    3: "ERROR",
+    4: "WARN",
+    5: "NOTICE",
+    6: "INFO",
+    7: "DEBUG",
+}
+
+
+def extract_rfc5424_structured_data(raw_text: Optional[str]) -> Optional[str]:
+    """
+    Extract structured data blocks ([sdid param="val"...]) from an RFC 5424 syslog raw string.
+    Returns the structured data string if present, or None if NILVALUE ('-') or not found.
+    """
+    if not raw_text:
+        return None
+    content = raw_text.strip()
+    pri_match = re.match(r"^<\d{1,3}>", content)
+    if pri_match:
+        content = content[pri_match.end():]
+    if not (content.startswith("1 ") and not content.startswith("1:")):
+        return None
+    content = content[2:]
+    header_parts = content.split(" ", 5)
+    if len(header_parts) < 6:
+        return None
+    remainder = header_parts[5]
+    if not remainder.startswith("["):
+        return None
+    sd_end = 0
+    i = 0
+    while i < len(remainder) and remainder[i] == "[":
+        j = i + 1
+        found_close = False
+        while j < len(remainder):
+            if remainder[j] == "]":
+                sd_end = j + 1
+                found_close = True
+                break
+            if remainder[j] == "\\" and j + 1 < len(remainder):
+                j += 1
+            j += 1
+        if not found_close:
+            break
+        i = sd_end
+        if i < len(remainder) and remainder[i] == " " and i + 1 < len(remainder) and remainder[i + 1] == "[":
+            i += 1
+    if sd_end > 0:
+        sd = remainder[:sd_end].strip()
+        if sd and sd != "-":
+            return sd
+    return None
+
+
+def format_prompt_log_line(
+    timestamp: Any,
+    source: Optional[str],
+    app_name: Optional[str],
+    message: str,
+    severity: Optional[int] = None,
+    raw: Optional[str] = None,
+) -> str:
+    """
+    Format a single log record for inclusion in AI analysis prompt streams.
+    Combines chronological timestamp, resolved source host/alias, application name,
+    explicit severity code, and diagnostic structured data payload.
+    """
+    ts_str = str(timestamp) if timestamp else "unknown"
+    source_str = source or "unknown"
+    app_str = app_name or "unknown"
+
+    sev_part = ""
+    if severity is not None:
+        try:
+            sev_int = int(severity)
+            sev_label = SEVERITY_CODE_TO_NAME.get(sev_int, f"SEV{sev_int}")
+            sev_part = f"[{sev_label}] "
+        except (ValueError, TypeError):
+            pass
+
+    msg_str = message or ""
+    sd = extract_rfc5424_structured_data(raw)
+    if sd and sd not in msg_str:
+        payload = f"{sd} {msg_str}".strip() if msg_str else sd
+    else:
+        payload = msg_str
+
+    return f"[{ts_str}] [{source_str}] [{app_str}] {sev_part}{payload}"
+
+
 def build_analysis_prompt(
     source_alias: str,
     app_name: str,

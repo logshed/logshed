@@ -2132,6 +2132,113 @@ class TestAiRateLimiting:
             assert "Rate limit exceeded" in data["detail"]
 
 
+class TestPromptFormattingAndStructuredData:
+    """Test suite for prompt log line formatting, severity injection, and RFC 5424 structured data extraction."""
+
+    def test_extract_rfc5424_structured_data_opentelemetry(self):
+        raw = '<131>1 2026-10-05T03:14:21.418878+01:00 - homeassistant - - [opentelemetry code.file.path="components/wled/coordinator.py" code.line.number="117" code.function.name="homeassistant.components.wled" exception.count="1" exception.first_occurred="2026-10-05T03:14:21.418878+01:00"] No PONG received after 15.0 seconds'
+        sd = ai_engine.extract_rfc5424_structured_data(raw)
+        assert sd is not None
+        assert 'code.file.path="components/wled/coordinator.py"' in sd
+        assert 'code.line.number="117"' in sd
+        assert 'code.function.name="homeassistant.components.wled"' in sd
+
+    def test_extract_rfc5424_structured_data_multiple_blocks(self):
+        raw = '<134>1 2024-01-15T10:30:00.000Z srv01 myapp 1234 ID47 [sd1 a="1"] [sd2 b="2"] Clean message text'
+        sd = ai_engine.extract_rfc5424_structured_data(raw)
+        assert sd == '[sd1 a="1"] [sd2 b="2"]'
+
+    def test_extract_rfc5424_structured_data_nil_and_non_5424(self):
+        # NILVALUE structured data '-'
+        assert ai_engine.extract_rfc5424_structured_data("<165>1 2024-03-01T12:00:00Z - - - - - Just a message") is None
+        # None or empty string
+        assert ai_engine.extract_rfc5424_structured_data(None) is None
+        assert ai_engine.extract_rfc5424_structured_data("") is None
+        # Valkey container line
+        assert ai_engine.extract_rfc5424_structured_data("29:C 05 Oct 2026 09:55:37.265 * DB saved on disk") is None
+        # RFC 3164 syslog line
+        assert ai_engine.extract_rfc5424_structured_data("<30>Oct  5 08:46:16 antigravity systemd[1]: var-lib-docker.mount: Deactivated successfully.") is None
+
+    def test_format_prompt_log_line_user_samples(self):
+        # Sample 1: Home Assistant RFC 5424 with OpenTelemetry structured data
+        raw1 = '<131>1 2026-10-05T03:14:21.418878+01:00 - homeassistant - - [opentelemetry code.file.path="components/wled/coordinator.py" code.line.number="117" code.function.name="homeassistant.components.wled" exception.count="1" exception.first_occurred="2026-10-05T03:14:21.418878+01:00"] No PONG received after 15.0 seconds'
+        line1 = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-05T02:14:21.418878+00:00",
+            source="Home Assistant",
+            app_name="homeassistant",
+            message="No PONG received after 15.0 seconds",
+            severity=3,
+            raw=raw1,
+        )
+        assert line1 == '[2026-10-05T02:14:21.418878+00:00] [Home Assistant] [homeassistant] [ERROR] [opentelemetry code.file.path="components/wled/coordinator.py" code.line.number="117" code.function.name="homeassistant.components.wled" exception.count="1" exception.first_occurred="2026-10-05T03:14:21.418878+01:00"] No PONG received after 15.0 seconds'
+
+        # Sample 2: Valkey with Notice severity (5)
+        raw2 = "29:C 05 Oct 2026 09:55:37.265 * DB saved on disk"
+        line2 = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-05T08:55:37.265656+00:00",
+            source="Docker",
+            app_name="Valkey",
+            message="DB saved on disk",
+            severity=5,
+            raw=raw2,
+        )
+        assert line2 == "[2026-10-05T08:55:37.265656+00:00] [Docker] [Valkey] [NOTICE] DB saved on disk"
+
+        # Sample 3: systemd with Info severity (6)
+        raw3 = "<30>Oct  5 08:46:16 antigravity systemd[1]: var-lib-docker-overlay2-sk8pg7p9z9ttrxg5aq5yev7hi-merged.mount: Deactivated successfully."
+        line3 = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-05T08:46:16.486869+00:00",
+            source="Antigravity",
+            app_name="systemd",
+            message="var-lib-docker-overlay2-sk8pg7p9z9ttrxg5aq5yev7hi-merged.mount: Deactivated successfully.",
+            severity=6,
+            raw=raw3,
+        )
+        assert line3 == "[2026-10-05T08:46:16.486869+00:00] [Antigravity] [systemd] [INFO] var-lib-docker-overlay2-sk8pg7p9z9ttrxg5aq5yev7hi-merged.mount: Deactivated successfully."
+
+    def test_format_prompt_log_line_does_not_duplicate_existing_structured_data(self):
+        raw = '<131>1 2026-10-05T03:14:21.418878+01:00 - homeassistant - - [meta tag="auth"] Session expired'
+        line = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-05T02:14:21+00:00",
+            source="Home Assistant",
+            app_name="homeassistant",
+            message='[meta tag="auth"] Session expired',
+            severity=4,
+            raw=raw,
+        )
+        # Must not have duplicate [meta tag="auth"]
+        assert line.count('[meta tag="auth"]') == 1
+        assert "[WARN]" in line
+
+    @pytest.mark.asyncio
+    async def test_preview_prompt_includes_severity_and_structured_data_end_to_end(self, populated_db, auth_client):
+        # Insert a log with RFC 5424 structured data into populated_db
+        raw_sd = '<131>1 2026-10-05T03:14:21.418878+01:00 - homeassistant - - [opentelemetry code.file.path="components/wled/coordinator.py" code.line.number="117"] No PONG received after 15.0 seconds'
+        conn = sqlite3.connect(populated_db)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+            VALUES ('2026-10-05T02:14:21.418878+00:00', '2026-10-05T02:14:21.418878+00:00', '192.168.1.10', 'Home Assistant', 'homeassistant', 16, 3, 'No PONG received after 15.0 seconds', ?)
+            """,
+            (raw_sd,),
+        )
+        log_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        res = await auth_client.post("/api/ai/preview", json={"log_ids": [log_id]})
+        assert res.status_code == 200
+        data = res.json()
+        prompt_text = data["redacted_prompt"]
+
+        assert "[Home Assistant] [homeassistant] [ERROR]" in prompt_text
+        assert 'code.file.path="components/wled/coordinator.py"' in prompt_text
+        assert 'code.line.number="117"' in prompt_text
+        assert "No PONG received after 15.0 seconds" in prompt_text
+
+
+
 
 
 

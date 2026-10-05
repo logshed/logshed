@@ -23,6 +23,7 @@ from app.models import AiAuditItem
 from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
     build_analysis_prompt,
+    format_prompt_log_line,
     truncate_logs_to_budget,
 )
 
@@ -46,7 +47,7 @@ def fetch_and_validate_logs(
     cursor = conn.cursor()
     cursor.execute(
         f"""
-        SELECT id, timestamp, source_ip, source_alias, app_name, severity, message
+        SELECT id, timestamp, source_ip, source_alias, app_name, severity, message, raw
         FROM logs
         WHERE id IN ({placeholders})
         ORDER BY timestamp ASC, id ASC
@@ -179,7 +180,14 @@ async def build_diagnosis_context(
     app_name = ", ".join(unique_apps) if unique_apps else "unknown"
 
     raw_lines = [
-        f"[{r['timestamp']}] [{r['source_alias'] or r['source_ip'] or 'unknown'}] [{r['app_name']}] {r['message']}"
+        format_prompt_log_line(
+            timestamp=r["timestamp"],
+            source=r["source_alias"] or r["source_ip"],
+            app_name=r["app_name"],
+            message=r["message"],
+            severity=r["severity"],
+            raw=r["raw"] if "raw" in r.keys() else None,
+        )
         for r in rows
     ]
     redacted_lines = redact(raw_lines)

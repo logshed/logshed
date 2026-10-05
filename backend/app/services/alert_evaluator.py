@@ -587,7 +587,7 @@ class AlertEvaluator:
                 from app.api.deps import run_db_query
                 from app.core.config import DEFAULT_AI_MODEL
                 from app.services.ai_service import read_ai_settings
-                from app.services.ai_engine import execute_ai_analysis
+                from app.services.ai_engine import execute_ai_analysis, format_prompt_log_line
 
                 ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
 
@@ -623,7 +623,14 @@ class AlertEvaluator:
 
                     # Format and redact log window
                     raw_lines = [
-                        f"[{l.get('timestamp')}] [{l.get('source_alias') or l.get('source_ip') or 'unknown'}] [{l.get('app_name') or 'unknown'}] {l.get('message', '')}"
+                        format_prompt_log_line(
+                            timestamp=l.get("timestamp"),
+                            source=l.get("source_alias") or l.get("source_ip"),
+                            app_name=l.get("app_name"),
+                            message=l.get("message", ""),
+                            severity=l.get("severity"),
+                            raw=l.get("raw"),
+                        )
                         for l in triggering_logs[-50:]  # Cap at recent 50 logs
                     ]
                     redacted_lines = redact(raw_lines)

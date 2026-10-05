@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mobile Navbar Ingestion Metric**: Render the compact logs per second rate on mobile navigation bars beside the logo.
 - **Log Buffer Ceiling & Ingestion Alias Mapping**: Lowered maximum in-memory log buffer size from 50,000 to 3,000 records, resolved host aliases once upon ingestion in `prepareLogEntry`, and bypassed full-array re-mapping during periodic flush cycles.
 - **Capped Log Count Indication**: Added `total_capped` boolean flag to log list API responses and displayed "1,000+ logs" when results reach count limits under active filters instead of showing a literal "1,001".
+- **AI Prompt Formatting & Structured Data Preservation**: Include explicit severity codes in AI prompt log lines and extract RFC 5424 structured data blocks (such as OpenTelemetry file paths and line numbers) from raw packets to provide enriched diagnostic context for automated analysis without cluttering the UI log table.
 
 ### Fixed
 - **Regex Validation Thread Safety & Bounded Search**: Removed the unmanaged thread pool executor from regex evaluation to prevent spinning thread leaks on backtracking patterns, executing pre-compiled regular expressions directly in-thread on candidate strings bounded to 16,384 characters.
