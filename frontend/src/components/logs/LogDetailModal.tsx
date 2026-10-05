@@ -304,10 +304,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               <span>Message Payload</span>
             </span>
             <button
+              type="button"
               onClick={handleCopyMsg}
-              className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition"
+              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+              title="Copy message payload"
             >
-              {copiedMsg ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{copiedMsg ? 'Copied' : 'Copy Message'}</span>
             </button>
           </div>
@@ -324,10 +326,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               {isDockerSource ? 'Raw Container Output' : 'Raw Syslog Packet'}
             </span>
             <button
+              type="button"
               onClick={handleCopyRaw}
-              className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition"
+              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+              title="Copy raw log record"
             >
-              {copiedRaw ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              {copiedRaw ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{copiedRaw ? 'Copied' : 'Copy Raw'}</span>
             </button>
           </div>

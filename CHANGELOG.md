@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AI Prompt Formatting & Structured Data Preservation**: Include explicit severity codes in AI prompt log lines and extract RFC 5424 structured data blocks (such as OpenTelemetry file paths and line numbers) from raw packets to provide enriched diagnostic context for automated analysis without cluttering the UI log table.
 
 ### Fixed
+- **Mobile & Insecure Context Clipboard Copy**: Added secondary DOM range selection fallback for clipboard copy on non-secure origins and mobile WebKit browsers, and expanded touch target padding on log detail and incident copy buttons.
 - **Regex Validation Thread Safety & Bounded Search**: Removed the unmanaged thread pool executor from regex evaluation to prevent spinning thread leaks on backtracking patterns, executing pre-compiled regular expressions directly in-thread on candidate strings bounded to 16,384 characters.
 - **Client-Side Live Stream Search ReDoS Protection**: Removed dynamic regex compilation on user search queries in the live log stream, relying strictly on case-insensitive substring matching, whitespace-delimited token splitting across all terms, and column-specific prefixes (`app:`, `source:`).
 - **Alert Evaluator Pattern Matching Safety**: Applied case-insensitive substring matching first for alert rule patterns that do not contain regex metacharacters, and checked pattern complexity before compilation when regex matching is required to reject catastrophic backtracking antipatterns.

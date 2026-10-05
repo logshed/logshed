@@ -596,9 +596,10 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <button
                     type="button"
                     onClick={handleCopyPrompt}
-                    className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                    title="Copy prompt"
                   >
-                    {copiedPrompt ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copiedPrompt ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedPrompt ? 'Copied' : 'Copy Prompt'}</span>
                   </button>
                 </div>
