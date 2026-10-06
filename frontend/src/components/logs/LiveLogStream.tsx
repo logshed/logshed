@@ -22,7 +22,7 @@ import { useMediaQuery } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { LogRow, ProcessedLogEntry, areLogRowPropsEqual } from './LogRow.tsx';
-import { CreateDropRuleModal } from '../settings/CreateDropRuleModal.tsx';
+import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
 import { Modal } from '../common/Modal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 

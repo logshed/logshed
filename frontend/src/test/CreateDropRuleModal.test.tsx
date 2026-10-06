@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CreateDropRuleModal } from '../components/settings/CreateDropRuleModal.tsx';
+import { CreateDropRuleModal } from '../components/alerts/CreateDropRuleModal.tsx';
 import { DropRule } from '../types.ts';
 
 const mockRule: DropRule = {

@@ -184,24 +184,6 @@ export interface AiDiagnosisResponse {
   audit_id?: number;
 }
 
-export interface AiAuditEntry {
-  id: number;
-  timestamp: string;
-  source_alias: string;
-  app_name: string;
-  log_count: number;
-  user_context?: string | null;
-  model: string;
-  prompt_sent: string;
-  response_text: string;
-  tokens_in?: number;
-  tokens_out?: number;
-  tokens_thoughts?: number;
-  tokens_used: number;
-  system_prompt?: string | null;
-  trigger_source?: 'on-demand' | 'alert';
-}
-
 export interface AuthStatusResponse {
   setup_required: boolean;
   authenticated: boolean;

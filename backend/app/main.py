@@ -266,7 +266,7 @@ async def lifespan(app: FastAPI):
     # 7. Start ModelRefreshWorker (periodically updates available AI models)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_model_refresh_worker, "ModelRefreshWorker", db_path)))
 
-    # 7. Start Syslog Server (optional / non-fatal in dev/test)
+    # 8. Start Syslog Server (optional / non-fatal in dev/test)
     try:
         syslog_port = get_syslog_port()
         _syslog_server = SyslogServer(
@@ -282,7 +282,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"SyslogServer could not be started: {e}")
 
-    # 7. Start Docker Tailer (optional / non-fatal if Docker socket is not present)
+    # 9. Start Docker Tailer (optional / non-fatal if Docker socket is not present)
     try:
         shared_cache = _syslog_server.alias_cache if _syslog_server else None
         _docker_tailer = DockerTailer(assembler=_assembler, db_path=db_path, alias_cache=shared_cache)
@@ -290,7 +290,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"DockerTailer could not be started: {e}")
 
-    # 8. Attach internal log handler so application warnings and errors appear in LogShed
+    # 10. Attach internal log handler so application warnings and errors appear in LogShed
     persisted_level = None
     try:
         import sqlite3

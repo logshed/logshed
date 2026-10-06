@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DropRulesCard } from '../components/settings/DropRulesCard.tsx';
+import { DropRulesCard } from '../components/alerts/tabs/DropRulesTab.tsx';
 import * as dropRulesApi from '../api/dropRules.ts';
 import { DropRule } from '../types.ts';
 
