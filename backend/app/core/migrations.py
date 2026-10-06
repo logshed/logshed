@@ -171,13 +171,15 @@ VALUES ('retention_days', '14', datetime('now'), 0);
 # Registry of migrations to run. Must be ordered by version ascending.
 def migrate_v2(conn: sqlite3.Connection) -> None:
     """
-    Execute Migration 2: Decoupled asynchronous FTS5 indexing, drop rules, and saved views.
+    Execute Migration 2: Decoupled asynchronous FTS5 indexing, drop rules, saved views,
+    notification channels, and alert rules (LogShed v1.2.0 upgrade).
     - Drop synchronous logs_ai trigger on logs.
-    - Create fts_index_state tracking table.
-    - Initialize last_indexed_id to MAX(id) of existing logs.
+    - Create fts_index_state tracking table and initialize last_indexed_id.
     - Recreate logs_ad and logs_au with WHEN condition guarding against unindexed rows.
-    - Create drop_rules table and idx_drop_rules_enabled index.
-    - Create saved_views table and idx_saved_views_pinned index.
+    - Create drop_rules, saved_views, notification_channels, alert_rules, and alert_history tables.
+    - Add trigger_source column to ai_audit_log if not present.
+    - Clamp future-dated log timestamps to received_at.
+    - Backfill historical on-demand ai_audit_log entries into alert_history.
     """
     logger.info("Running migration v2...")
     conn.executescript('''
@@ -297,70 +299,42 @@ VALUES ('retention_days', '14', datetime('now'), 0);
 CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);
 ''')
 
-    try:
+    # Add trigger_source column to existing v1 ai_audit_log table if not already present
+    cur = conn.execute("PRAGMA table_info(ai_audit_log);")
+    existing_columns = {row[1] for row in cur.fetchall()}
+    if "trigger_source" not in existing_columns:
         conn.execute("ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand'")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        conn.execute("ALTER TABLE drop_rules ADD COLUMN name TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        conn.execute("ALTER TABLE alert_history ADD COLUMN ai_model TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        conn.execute("ALTER TABLE alert_history ADD COLUMN ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL")
-    except sqlite3.OperationalError:
-        pass
 
     # Defensively clamp future-dated timestamps using indexed timestamp bounds
     # to avoid expensive full-table scans across historical logs on boot.
-    try:
-        conn.execute(
-            "UPDATE logs SET timestamp = received_at "
-            "WHERE timestamp > strftime('%Y-%m-%dT%H:%M:%S', 'now', '+1 minute') AND timestamp > received_at;"
-        )
-    except sqlite3.OperationalError:
-        pass
-
-    # Backfill drop_rules name if empty
-    try:
-        conn.execute(
-            "UPDATE drop_rules SET name = COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(app_pattern), ''), NULLIF(TRIM(source_pattern), ''), 'Drop Rule') WHERE name IS NULL OR TRIM(name) = '';"
-        )
-    except sqlite3.OperationalError:
-        pass
+    conn.execute(
+        "UPDATE logs SET timestamp = received_at "
+        "WHERE timestamp > strftime('%Y-%m-%dT%H:%M:%S', 'now', '+1 minute') AND timestamp > received_at;"
+    )
 
     # Backfill on-demand ai_audit_log entries into alert_history
-    try:
-        conn.execute("""
-            INSERT INTO alert_history (
-                rule_id, rule_name, channel_id, trigger_count, sample_log,
-                incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at
-            )
-            SELECT
-                NULL,
-                'On-Demand Analysis',
-                NULL,
-                a.log_count,
-                NULL,
-                a.response_text,
-                1,
-                a.model,
-                a.id,
-                a.timestamp
-            FROM ai_audit_log a
-            WHERE (a.trigger_source = 'on-demand' OR a.trigger_source IS NULL)
-              AND NOT EXISTS (
-                  SELECT 1 FROM alert_history h WHERE h.ai_audit_id = a.id
-              );
-        """)
-    except sqlite3.OperationalError:
-        pass
+    conn.execute("""
+        INSERT INTO alert_history (
+            rule_id, rule_name, channel_id, trigger_count, sample_log,
+            incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at
+        )
+        SELECT
+            NULL,
+            'On-Demand Analysis',
+            NULL,
+            a.log_count,
+            NULL,
+            a.response_text,
+            1,
+            a.model,
+            a.id,
+            a.timestamp
+        FROM ai_audit_log a
+        WHERE (a.trigger_source = 'on-demand' OR a.trigger_source IS NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM alert_history h WHERE h.ai_audit_id = a.id
+          );
+    """)
 
 
 MIGRATIONS = [
