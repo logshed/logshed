@@ -5,8 +5,11 @@ Provides security checks against pathological nested repetition antipatterns
 susceptible to catastrophic backtracking (Regular Expression Denial of Service).
 """
 
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import re
+import threading
 from typing import Optional, Tuple, Union
 from fastapi import HTTPException, status
 
@@ -31,16 +34,27 @@ _NESTED_REPETITION_RE = re.compile(
     re.VERBOSE,
 )
 
-# Detect repeated alternations susceptible to catastrophic backtracking:
-# e.g. (a|aa)+, ([a-z]|[a-z][a-z])+, (foo|foobar)*
+# Detect repeated alternations susceptible to catastrophic backtracking.
+# Safe disjoint alternations without repetitions like (GET|POST)+ or (a|b)+ are permitted.
+# Only flag alternations containing nested quantifiers or overlapping repetitions:
+# e.g. (a|b+)+, (a+|b)+, (a|aa)+, ([a-z]|[a-z][a-z])+, (foo|foobar)*
 _ALTERNATION_REPETITION_RE = re.compile(
     r"""
-    (
-        \((?:\?[:=!<=])?        # Group start
-        (?:[^\(\)]*?\|[^\(\)]*?) # Inner content containing alternation |
-        \)                      # Group end
-        (?:\+|\*|\{\d+,\d*\})   # Outer quantifier +, *, or {n,m}
+    \( (?:\?[:=!<=])?        # Group start
+    (?:
+        # Branch 1: Inner alternation branch containing inner repetition quantifiers
+        [^\(\)]*? (?:[+*]|\{\d+,\d*\}) [^\(\)]*? \| [^\(\)]*?
+        |
+        [^\(\)]*? \| [^\(\)]*? (?:[+*]|\{\d+,\d*\}) [^\(\)]*?
+        |
+        # Branch 2: Alternations with identical prefixes inducing overlap backtracking,
+        # e.g. (a|aa)+, (foo|foobar)+, ([a-z]|[a-z][a-z])+
+        ([^\|\(\)]+) \| \1 [^\|\(\)]+
+        |
+        ([^\|\(\)]+) [^\|\(\)]+ \| \2
     )
+    \)                       # Group end
+    (?:\+|\*|\{\d+,\d*\})    # Outer quantifier +, *, or {n,m}
     """,
     re.VERBOSE,
 )
@@ -168,15 +182,40 @@ def compile_safe_regex(pattern: str, flags: int = 0) -> re.Pattern:
     return re.compile(pattern, flags)
 
 
+_REGEX_POOL: Optional[ThreadPoolExecutor] = None
+_REGEX_POOL_LOCK = threading.Lock()
+
+
+def get_regex_executor() -> ThreadPoolExecutor:
+    """Return dedicated ThreadPoolExecutor for isolated regex matching."""
+    global _REGEX_POOL
+    with _REGEX_POOL_LOCK:
+        if _REGEX_POOL is None or getattr(_REGEX_POOL, "_shutdown", False):
+            _REGEX_POOL = ThreadPoolExecutor(
+                max_workers=4,
+                thread_name_prefix="logshed-regex",
+            )
+        return _REGEX_POOL
+
+
+def shutdown_regex_executor(wait: bool = True) -> None:
+    """Terminate the dedicated regex ThreadPoolExecutor gracefully."""
+    global _REGEX_POOL
+    with _REGEX_POOL_LOCK:
+        if _REGEX_POOL is not None:
+            _REGEX_POOL.shutdown(wait=wait, cancel_futures=True)
+            _REGEX_POOL = None
+
+
 def safe_regex_search(
     pattern: Union[re.Pattern, str],
     string: str,
     timeout: float = 0.1,
 ) -> bool:
     """
-    Safely execute regular expression search directly in-thread on a candidate
-    string bounded to 16,384 characters. Pattern complexity must be pre-validated
-    to prevent catastrophic backtracking without leaking worker threads.
+    Safely execute regular expression search bounded by a timeout to prevent
+    blocking execution on pathological inputs. Candidate strings are bounded
+    to 16,384 characters.
     """
     if not string:
         return False
@@ -194,8 +233,14 @@ def safe_regex_search(
     # Bound candidate string length to 16,384 characters
     candidate = string[:16384]
 
+    executor = get_regex_executor()
+    future = executor.submit(compiled.search, candidate)
     try:
-        return compiled.search(candidate) is not None
+        match = future.result(timeout=timeout)
+        return match is not None
+    except (concurrent.futures.TimeoutError, TimeoutError):
+        logger.warning("Regular expression search timed out after %ss.", timeout)
+        return False
     except Exception as exc:
         logger.debug("Regular expression execution error: %s", exc)
         return False

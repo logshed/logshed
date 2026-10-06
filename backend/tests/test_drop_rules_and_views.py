@@ -849,7 +849,7 @@ class TestDropRulesIngestionPipeline:
 
 
 def test_safe_regex_search_in_thread_and_bounded():
-    """Verify safe_regex_search runs in-thread and bounds candidate strings to 16,384 chars."""
+    """Verify safe_regex_search enforces bounded execution timeout and bounds candidate strings to 16,384 chars."""
     import re
 
     # 1. Matching precompiled regex
@@ -857,8 +857,9 @@ def test_safe_regex_search_in_thread_and_bounded():
     assert safe_regex_search(pat, "System error: 500 occurred") is True
     assert safe_regex_search(pat, "All systems operational") is False
 
-    # 2. String pattern auto-validation and matching
+    # 2. String pattern auto-validation and matching (including safe alternations)
     assert safe_regex_search(r"warning:\s*\w+", "System warning: high_load") is True
+    assert safe_regex_search(r"(GET|POST)+", "GET /health 200") is True
 
     # 3. Pathological backtracking pattern rejected when string is passed
     assert safe_regex_search(r"(a+)+$", "aaaaaaaaaaaaaaaaaaaaa!") is False
@@ -869,3 +870,8 @@ def test_safe_regex_search_in_thread_and_bounded():
     long_msg = long_prefix + "target_word"
     assert safe_regex_search(r"target_word", long_msg) is False
     assert safe_regex_search(r"^x+", long_msg) is True
+
+    # 5. Bounded execution timeout gracefully returns False on timeout
+    # When given a precompiled backtracking pattern that bypasses string validation
+    backtracking_pat = re.compile(r"(a+)+$")
+    assert safe_regex_search(backtracking_pat, "a" * 30 + "!", timeout=0.01) is False

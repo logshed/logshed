@@ -384,6 +384,12 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Error shutting down notification executor: {e}")
 
     try:
+        from app.core.regex_validator import shutdown_regex_executor
+        shutdown_regex_executor(wait=False)
+    except Exception as e:
+        logger.warning(f"Error shutting down regex executor: {e}")
+
+    try:
         from app.services.drop_filter import get_drop_filter
         get_drop_filter().flush_counts()
     except Exception as e:

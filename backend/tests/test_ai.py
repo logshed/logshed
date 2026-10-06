@@ -186,9 +186,10 @@ Multiple transaction queries deadlock on shared index.
     def test_parse_structured_ai_response_fallback(self):
         unstructured = "This is a simple single-paragraph diagnosis of an outage."
         summary, root_cause, remediation = ai_engine.parse_structured_ai_response(unstructured)
-        assert summary == unstructured
-        assert "summary" in root_cause.lower()
-        assert "service logs" in remediation.lower()
+        assert unstructured in summary
+        assert "Structured markdown sections were not returned by the model." in summary
+        assert root_cause == ""
+        assert remediation == ""
 
     @pytest.mark.asyncio
     async def test_dispatch_gemini_request_mocked(self):
