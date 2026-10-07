@@ -97,7 +97,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Form states
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
-  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'openai_compatible'>('gemini');
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'openai_compatible'>('gemini');
   const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODEL);
   const [aiFallbackModels, setAiFallbackModels] = useState<string>('');
   const [aiApiKey, setAiApiKey] = useState<string>('');
@@ -190,7 +190,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleProviderChange = (newProvider: 'gemini' | 'openai' | 'openai_compatible') => {
+  const handleProviderChange = (newProvider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible') => {
     setAiProvider(newProvider);
     setIsCustomModel(false);
     setSelectedFallbackToAdd('');
@@ -662,6 +662,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               >
                 <option value="gemini">Google Gemini</option>
                 <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic Claude</option>
                 <option value="openai_compatible">OpenAI-Compatible (Ollama / vLLM / LocalAI)</option>
               </select>
             </div>
@@ -701,7 +702,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <div>
                   <span className="font-semibold text-amber-200">API Key Required to Discover Models:</span>
                   <p className="text-[11px] text-amber-300/80 mt-0.5">
-                    Enter and save your API key above to query {aiProvider === 'gemini' ? 'Google Gemini' : 'OpenAI'} and populate available text models.
+                    Enter and save your API key above to query {aiProvider === 'gemini' ? 'Google Gemini' : aiProvider === 'openai' ? 'OpenAI' : aiProvider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'} and populate available text models.
                   </p>
                 </div>
               </div>
@@ -802,7 +803,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="text"
                   value={aiModel}
                   onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                  placeholder={aiProvider === 'gemini' ? DEFAULT_AI_MODEL : aiProvider === 'openai' ? 'gpt-4o' : 'llama3.2'}
+                  placeholder={aiProvider === 'gemini' ? DEFAULT_AI_MODEL : aiProvider === 'openai' ? 'gpt-4o' : aiProvider === 'anthropic' ? 'claude-sonnet-4-6' : 'llama3.2'}
                   className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
                 />
               )}

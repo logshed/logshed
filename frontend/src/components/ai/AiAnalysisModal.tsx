@@ -679,7 +679,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start gap-2 text-amber-300 text-xs font-mono">
                     <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <span>
-                      No API key configured for {provider === 'gemini' ? 'Google Gemini' : 'OpenAI'}. Please configure your API key in Settings to load models and run AI analysis.
+                      No API key configured for {provider === 'gemini' ? 'Google Gemini' : provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'}. Please configure your API key in Settings to load models and run AI analysis.
                     </span>
                   </div>
                 )}
@@ -766,7 +766,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         type="text"
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-4o' : 'llama3.2'}
+                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-4-6' : 'llama3.2'}
                         className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
                       />
                     )}

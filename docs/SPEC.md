@@ -435,8 +435,8 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
 - **Privacy and Token Safeguards:** Clear privacy, credential redaction, and token usage warnings are presented in the UI when enabling this option (inside `AlertRuleModal` and notice banners on the Rules & Alerts Hub). The UI explicitly informs administrators that triggering logs are automatically dispatched to external AI providers without manual pre-screening, that automated scrubbing operates on a best-effort basis, and that automated triggers consume API tokens. If an AI provider is not configured in Settings, AI enrichment cannot be enabled and displays a direct link to Settings.
 
 ### 4.2 AI Provider Abstraction
-Unified client supporting Google Gemini (`google-genai` SDK) and OpenAI-compatible endpoints (`openai` SDK, configurable `base_url` for Ollama/vLLM/LocalAI).
-- **Model Configuration:** Configurable default model per provider (e.g., `gemini-3.7-flash`, `gpt-4o`, `llama3.2`), with fallback model lists and optional per-request overrides in the UI modal.
+Unified client supporting Google Gemini (`google-genai` SDK), Anthropic Claude (`anthropic` SDK), and OpenAI-compatible endpoints (`openai` SDK, configurable `base_url` for Ollama/vLLM/LocalAI).
+- **Model Configuration:** Configurable default model per provider (e.g., `gemini-3.7-flash`, `gpt-4o`, `claude-sonnet-4-6`, `llama3.2`), with fallback model lists and optional per-request overrides in the UI modal.
 - **Dynamic Model Discovery:** Discovers available models from the configured provider, cached in SQLite for 24 hours. A background worker (`ModelRefreshWorker`) refreshes the cache every 12 hours, and manual refresh can be triggered via `/api/ai/models/refresh`.
 - **Prompt Construction:**
   - System prompt establishes role as an expert systems engineer and Linux/Docker administrator.
@@ -612,7 +612,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * **Maintenance Actions:** Manual trigger for log purge, FTS5 index compaction, WAL truncation, and SQLite vacuum with real-time UI updates.
 
 * **Settings Panel (`/settings`):**
-  * **Application Settings:** Encrypted API key management (Google Gemini, OpenAI / custom OpenAI-compatible endpoint like Ollama/vLLM), dynamic model discovery with 24-hour cache, multi-model failover configuration, custom system prompt, retention slider (1 to 30 days, capped by `MAX_RETENTION_DAYS`), internal log level, and GHCR release update check toggle.
+  * **Application Settings:** Encrypted API key management (Google Gemini, Anthropic Claude, OpenAI / custom OpenAI-compatible endpoint like Ollama/vLLM), dynamic model discovery with 24-hour cache, multi-model failover configuration, custom system prompt, retention slider (1 to 30 days, capped by `MAX_RETENTION_DAYS`), internal log level, and GHCR release update check toggle.
   * **Notification Channels Card:** Configure Apprise push notification targets (Discord, Telegram, Slack, Pushover, email, webhook, etc.) with live test dispatch.
   * **Host Alias Manager (`/settings/aliases`):** Dedicated table to manage IP-to-Hostname mappings (e.g., `192.168.1.1` -> `OPNsense Firewall`) with quick-add prompts for newly detected, unmapped IP addresses.
   * **Advanced Settings (`/settings/advanced`):** Runtime controls for AI timeout, reasoning token budget, base application URL, private IP webhook targets, Docker collector toggle and exclusions, trusted proxy headers, cookie security, Syslog TCP connection ceilings, and daily analytical digest scheduling.

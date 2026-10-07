@@ -326,6 +326,59 @@ Multiple transaction queries deadlock on shared index.
             assert create_kwargs.get("reasoning_effort") == "low"
 
     @pytest.mark.asyncio
+    async def test_dispatch_anthropic_request_mocked(self):
+        mock_content = [MagicMock(type="text", text="## Summary\nClaude summary\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix")]
+        mock_usage = MagicMock(input_tokens=150, output_tokens=50, thinking_tokens=0)
+        mock_response = MagicMock(content=mock_content, usage=mock_usage)
+
+        mock_create = AsyncMock(return_value=mock_response)
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            mock_inst = MagicMock()
+            mock_inst.messages.create = mock_create
+            mock_cls.return_value = mock_inst
+
+            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.dispatch_anthropic_request(
+                api_key="ant-key",
+                model="claude-3-5-haiku-20241022",
+                prompt="test prompt",
+            )
+            assert "Claude summary" in text
+            assert tokens_in == 150
+            assert tokens_out == 50
+            assert tokens == 200
+            create_kwargs = mock_create.call_args[1]
+            assert create_kwargs["model"] == "claude-3-5-haiku-20241022"
+            assert "thinking" not in create_kwargs
+            assert create_kwargs["temperature"] == 0.2
+
+    @pytest.mark.asyncio
+    async def test_dispatch_anthropic_request_thinking(self):
+        mock_content = [
+            MagicMock(type="thinking", text="Internal thought"),
+            MagicMock(type="text", text="## Summary\nThinking summary\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix"),
+        ]
+        mock_usage = MagicMock(input_tokens=150, output_tokens=50, thinking_tokens=30)
+        mock_response = MagicMock(content=mock_content, usage=mock_usage)
+
+        mock_create = AsyncMock(return_value=mock_response)
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            mock_inst = MagicMock()
+            mock_inst.messages.create = mock_create
+            mock_cls.return_value = mock_inst
+
+            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.dispatch_anthropic_request(
+                api_key="ant-key",
+                model="claude-sonnet-4-6",
+                prompt="test prompt",
+                thinking_budget=1024,
+            )
+            assert "Thinking summary" in text
+            assert tokens_thoughts == 30
+            create_kwargs = mock_create.call_args[1]
+            assert create_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+            assert "temperature" not in create_kwargs
+
+    @pytest.mark.asyncio
     async def test_dispatch_gemini_legacy_model_omits_thinking_config(self):
         mock_resp = MagicMock()
         mock_resp.text = "## Summary\nLegacy summary\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix"
@@ -413,6 +466,38 @@ Multiple transaction queries deadlock on shared index.
                 model="gpt-4o",
                 prompt=prompt_sent,
                 base_url="https://api.openai.com/v1",
+                system_prompt=None,
+                timeout=45.0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_execute_ai_analysis_with_anthropic_provider(self):
+        with patch("app.services.ai_engine.dispatch_anthropic_request", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = (
+                "## Summary\nClaude summary\n\n## Root Cause\nClaude cause\n\n## Actionable Remediation\nClaude fix",
+                120,
+                40,
+                0,
+                160,
+            )
+            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = (
+                await ai_engine.execute_ai_analysis(
+                    provider="anthropic",
+                    model="claude-sonnet-4-6",
+                    api_key="sk-ant-test",
+                    base_url=None,
+                    source_alias="router",
+                    app_name="dnsmasq",
+                    redacted_logs="test log",
+                    log_count=1,
+                    timeout=45.0,
+                )
+            )[:9]
+            assert summary == "Claude summary"
+            mock_dispatch.assert_called_once_with(
+                api_key="sk-ant-test",
+                model="claude-sonnet-4-6",
+                prompt=prompt_sent,
                 system_prompt=None,
                 timeout=45.0,
             )
@@ -1872,7 +1957,11 @@ class TestAiModelDiscovery:
 
         mock_models = [
             MockModel("gpt-4o"),
+            MockModel("gpt-4o-2024-05-13"),
+            MockModel("gpt-4o-search-preview"),
             MockModel("o3-mini"),
+            MockModel("o3-mini-2025-01-31"),
+            MockModel("gpt-3.5-turbo-0125"),
             MockModel("text-embedding-3-small"),
             MockModel("whisper-1"),
         ]
@@ -1886,6 +1975,10 @@ class TestAiModelDiscovery:
             model_ids = [m["id"] for m in models]
             assert "gpt-4o" in model_ids
             assert "o3-mini" in model_ids
+            assert "gpt-4o-2024-05-13" not in model_ids
+            assert "gpt-4o-search-preview" not in model_ids
+            assert "o3-mini-2025-01-31" not in model_ids
+            assert "gpt-3.5-turbo-0125" not in model_ids
             assert "text-embedding-3-small" not in model_ids
             assert "whisper-1" not in model_ids
 
@@ -1936,6 +2029,49 @@ class TestAiModelDiscovery:
             assert "whisper-large-v3" not in model_ids
             assert "nomic-embed-text" not in model_ids
 
+    @pytest.mark.asyncio
+    async def test_fetch_available_models_anthropic_success(self):
+        """Discovers Anthropic Claude models and flags thinking capability."""
+        class MockModel:
+            def __init__(self, model_id, display_name=None):
+                self.id = model_id
+                self.display_name = display_name or model_id
+
+        class AsyncIterator:
+            def __init__(self, items):
+                self.items = items
+            def __aiter__(self):
+                self._iter = iter(self.items)
+                return self
+            async def __anext__(self):
+                try:
+                    return next(self._iter)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        mock_models = [
+            MockModel("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+            MockModel("claude-3-5-haiku-20241022", "Claude 3.5 Haiku"),
+            MockModel("claude-transcribe", "Claude Transcribe"),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.models.list = AsyncMock(return_value=AsyncIterator(mock_models))
+
+        with patch("app.services.ai_engine.AsyncAnthropic", return_value=mock_client):
+            models = await ai_engine.fetch_available_models("anthropic", api_key="test-anthropic-key")
+
+            model_ids = [m["id"] for m in models]
+            assert "claude-sonnet-4-6" in model_ids
+            assert "claude-3-5-haiku-20241022" in model_ids
+            assert "claude-transcribe" not in model_ids
+
+            sonnet = next(m for m in models if m["id"] == "claude-sonnet-4-6")
+            assert sonnet["supports_thinking"] is True
+
+            haiku = next(m for m in models if m["id"] == "claude-3-5-haiku-20241022")
+            assert haiku["supports_thinking"] is False
+
     def test_is_text_generation_model_classification(self):
         """Verifies text vs non-text model detection."""
         assert ai_engine.is_text_generation_model("gemini-3.7-flash") is True
@@ -1963,6 +2099,9 @@ class TestAiModelDiscovery:
 
         models_openai = await ai_engine.fetch_available_models("openai", api_key="")
         assert models_openai == []
+
+        models_anthropic = await ai_engine.fetch_available_models("anthropic", api_key="")
+        assert models_anthropic == []
 
     @pytest.mark.asyncio
     async def test_get_ai_models_endpoint_no_key_prompts_user(self, populated_db, auth_client):

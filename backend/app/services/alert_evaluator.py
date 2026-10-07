@@ -614,7 +614,7 @@ class AlertEvaluator:
                         incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
                 else:
                     ai_provider = (ai_settings.get("ai_provider") or "gemini").lower()
-                    default_model = DEFAULT_AI_MODEL if ai_provider == "gemini" else ("gpt-4o" if ai_provider == "openai" else "llama3.2")
+                    default_model = DEFAULT_AI_MODEL if ai_provider == "gemini" else ("gpt-4o" if ai_provider == "openai" else ("claude-sonnet-4-6" if ai_provider == "anthropic" else "llama3.2"))
                     ai_model = ai_settings.get("ai_model") or default_model
                     ai_key = ai_settings.get("ai_api_key", "")
                     ai_base = ai_settings.get("ai_base_url")

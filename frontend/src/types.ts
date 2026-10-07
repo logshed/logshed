@@ -47,7 +47,7 @@ export interface HostAlias {
 
 export interface SystemSettings {
   ai_enabled?: boolean;
-  ai_provider: 'gemini' | 'openai' | 'openai_compatible';
+  ai_provider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
   ai_model: string;
   ai_fallback_models?: string;
   ai_api_key?: string;

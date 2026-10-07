@@ -195,7 +195,7 @@ async def build_diagnosis_context(
     redacted_logs_text = truncate_logs_to_budget(redacted_logs_text)
 
     provider = (provider_override or settings.get("ai_provider") or "gemini").lower()
-    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else "llama3.2")
+    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else ("claude-sonnet-4-6" if provider == "anthropic" else "llama3.2"))
     model = model_override or settings.get("ai_model") or default_model
     api_key = settings.get("ai_api_key", "")
     base_url = settings.get("ai_base_url") or None

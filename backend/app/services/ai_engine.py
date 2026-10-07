@@ -13,6 +13,11 @@ import re
 from typing import Any, Callable, Optional
 
 import httpx
+from anthropic import (
+    AsyncAnthropic,
+    APITimeoutError as AnthropicTimeoutError,
+    APIStatusError as AnthropicAPIStatusError,
+)
 from google import genai
 from google.genai import types as genai_types
 from openai import AsyncOpenAI, APITimeoutError
@@ -49,7 +54,7 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
     Deadline Exceeded, Model Overload, Rate Limit / Quota Exhaustion, or 404 Model Not Found error,
     qualifying the request for failover to a fallback model.
     """
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, APITimeoutError, httpx.TimeoutException)):
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, APITimeoutError, AnthropicTimeoutError, httpx.TimeoutException)):
         return True
     if isinstance(exc, AiServiceUnavailableError):
         return True
@@ -59,7 +64,7 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
     if raw_code is not None:
         try:
             int_code = int(raw_code)
-            if int_code in (404, 408, 429, 500, 502, 503, 504):
+            if int_code in (404, 408, 429, 500, 502, 503, 504, 529):
                 return True
         except (ValueError, TypeError):
             pass
@@ -80,6 +85,7 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
         "504",
         "502",
         "500",
+        "529",
         "429",
         "408",
         "timeout",
@@ -103,13 +109,19 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
 def supports_gemini_thinking(model_name: str) -> bool:
     """Returns True if the Gemini model family supports reasoning/thinking budgets."""
     m = model_name.lower()
-    return "3." in m or "2.5" in m or "thinking" in m or "think" in m
+    return any(v in m for v in ("2.5", "3.", "3-", "4.", "4-", "5.", "thinking", "think"))
 
 
 def supports_openai_reasoning(model_name: str) -> bool:
     """Returns True if the OpenAI/compatible model supports reasoning_effort parameter."""
     m = model_name.lower()
-    return m.startswith(("o1", "o3", "o4")) or "-o1" in m or "-o3" in m or "reason" in m
+    return bool(re.search(r"(?:^|[-_])o\d", m) or "reason" in m)
+
+
+def supports_claude_thinking(model_name: str) -> bool:
+    """Returns True if the Claude model supports extended thinking / reasoning budgets."""
+    m = model_name.lower()
+    return bool(re.search(r"claude-(?:3[.-][7-9]|[a-z]+-[4-9]|[4-9])", m) or "thinking" in m or "think" in m)
 
 
 NON_TEXT_MODEL_KEYWORDS: tuple[str, ...] = (
@@ -126,6 +138,7 @@ NON_TEXT_MODEL_KEYWORDS: tuple[str, ...] = (
     # Image / Video / Multimodal Generation
     "image",
     "imagen",
+    "banana",
     "dall-e",
     "dalle",
     "flux",
@@ -244,16 +257,42 @@ async def fetch_available_models(
         async for m in paginator:
             model_id = m.id
             low_id = model_id.lower()
-            is_chat = low_id.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-", "ft:gpt-", "ft:o1-"))
+            is_chat = low_id.startswith(("gpt-", "chatgpt-", "ft:gpt-")) or bool(re.match(r"^(ft:)?o\d+", low_id))
             if not is_chat:
                 continue
             if not is_text_generation_model(model_id):
+                continue
+            # Filter out dated point-in-time snapshots and specialized search variants
+            # to keep the selection dropdown streamlined.
+            if re.search(r"-(?:\d{4}|\d{8}|\d{4}-\d{2}-\d{2})$", low_id):
+                continue
+            if "-search-" in low_id or low_id.endswith(("-search-preview", "-search-api")):
                 continue
 
             supports_thinking = supports_openai_reasoning(model_id)
             discovered_models.append({
                 "id": model_id,
                 "name": model_id,
+                "description": None,
+                "supports_thinking": supports_thinking,
+                "is_deprecated": False,
+            })
+
+    elif clean_provider == "anthropic":
+        if not api_key:
+            return []
+        client = AsyncAnthropic(api_key=api_key)
+        pager = await client.models.list()
+        async for m in pager:
+            model_id = m.id
+            display_name = getattr(m, "display_name", None) or model_id
+            if not is_text_generation_model(model_id):
+                continue
+
+            supports_thinking = supports_claude_thinking(model_id)
+            discovered_models.append({
+                "id": model_id,
+                "name": display_name,
                 "description": None,
                 "supports_thinking": supports_thinking,
                 "is_deprecated": False,
@@ -691,9 +730,101 @@ async def call_openai(
         raise RuntimeError(err_msg) from e
 
 
+async def call_anthropic(
+    api_key: str,
+    model: str,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    timeout: float = DEFAULT_AI_TIMEOUT,
+    max_retries: int = 1,
+    thinking_budget: Optional[int] = None,
+) -> tuple[str, int, int, int, int]:
+    """
+    Dispatch request to Anthropic Claude via the anthropic SDK.
+    """
+    effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
+    client = AsyncAnthropic(api_key=api_key or "no-key", timeout=timeout)
+
+    create_kwargs: dict[str, Any] = {
+        "model": model,
+        "system": effective_system_prompt,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    effective_budget = thinking_budget if thinking_budget is not None else DEFAULT_AI_THINKING_BUDGET
+    if supports_claude_thinking(model) and effective_budget is not None and effective_budget > 0:
+        create_kwargs["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": effective_budget,
+        }
+        create_kwargs["max_tokens"] = max(4096, effective_budget + 2048)
+    else:
+        create_kwargs["max_tokens"] = 4096
+        create_kwargs["temperature"] = 0.2
+
+    try:
+        response = await client.messages.create(**create_kwargs)
+
+        text_parts: list[str] = []
+        for block in getattr(response, "content", []):
+            if getattr(block, "type", "") == "text" or hasattr(block, "text"):
+                text_parts.append(block.text)
+
+        text = "\n".join(text_parts).strip()
+        if not text:
+            raise RuntimeError("Anthropic endpoint returned empty response content.")
+
+        usage = getattr(response, "usage", None)
+        tokens_in = getattr(usage, "input_tokens", 0) or 0
+        tokens_out = getattr(usage, "output_tokens", 0) or 0
+        tokens_thoughts = getattr(usage, "thinking_tokens", 0) or 0
+        tokens_used = tokens_in + tokens_out + tokens_thoughts
+        if tokens_used == 0:
+            tokens_in, tokens_out, tokens_thoughts, tokens_used = extract_token_usage(prompt, text, usage)
+
+        return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
+
+    except AnthropicTimeoutError as te:
+        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
+    except (asyncio.TimeoutError, TimeoutError):
+        raise TimeoutError("Anthropic endpoint timed out")
+    except httpx.TimeoutException as te:
+        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
+    except (ValueError, AiServiceUnavailableError):
+        raise
+    except AnthropicAPIStatusError as se:
+        clean_err = str(redact(str(se)[:500]))
+        err_msg = f"Anthropic endpoint error: {clean_err}"
+        if is_debug_or_dev():
+            logger.warning(f"AI analysis request failed: {clean_err}", exc_info=True)
+        else:
+            logger.warning(f"AI analysis request failed: {clean_err}")
+        if se.status_code in (404, 408, 429, 500, 502, 503, 504, 529):
+            raise AiServiceUnavailableError(err_msg, code=se.status_code) from se
+        raise RuntimeError(err_msg) from se
+    except Exception as e:
+        clean_err = str(redact(str(e)[:500]))
+        err_msg = f"Anthropic endpoint error: {clean_err}"
+        if is_debug_or_dev():
+            logger.warning(f"AI analysis request failed: {clean_err}", exc_info=True)
+        else:
+            logger.warning(f"AI analysis request failed: {clean_err}")
+        err_code = getattr(e, "code", None) or getattr(e, "status_code", None)
+        err_lower = clean_err.lower()
+        if (
+            err_code in (404, 408, 429, 500, 502, 503, 504, 529)
+            or any(kw in err_lower for kw in ("503", "504", "529", "overload", "unavailable", "deadline", "rate limit"))
+        ):
+            raise AiServiceUnavailableError(err_msg, code=err_code or 503) from e
+        raise RuntimeError(err_msg) from e
+
+
 # Aliases for backward compatibility with existing tests and call sites
 dispatch_gemini_request = call_gemini
 dispatch_openai_request = call_openai
+dispatch_anthropic_request = call_anthropic
 
 
 MAX_LOG_TEXT_CHARS = 100_000
@@ -761,7 +892,7 @@ async def execute_ai_analysis(
         )
 
     norm_provider = (provider or "gemini").lower()
-    primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-4o" if norm_provider == "openai" else "llama3.2"))
+    primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-4o" if norm_provider == "openai" else ("claude-sonnet-4-6" if norm_provider == "anthropic" else "llama3.2")))
 
     # Build chain of distinct candidate models to try
     models_to_try = [primary_model]
@@ -845,6 +976,30 @@ async def execute_ai_analysis(
                         dispatch_kwargs["thinking_budget"] = thinking_budget
 
                 raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_openai_request(
+                    **dispatch_kwargs
+                )
+            elif norm_provider == "anthropic":
+                dispatch_kwargs = {
+                    "api_key": api_key,
+                    "model": current_model,
+                    "prompt": prompt,
+                    "system_prompt": system_prompt,
+                    "timeout": timeout,
+                }
+                if thinking_budget is not None:
+                    target_func = getattr(dispatch_anthropic_request, "side_effect", None) or dispatch_anthropic_request
+                    if not callable(target_func):
+                        target_func = dispatch_anthropic_request
+                    try:
+                        sig = inspect.signature(target_func)
+                        if "thinking_budget" in sig.parameters:
+                            dispatch_kwargs["thinking_budget"] = thinking_budget
+                        elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) and not hasattr(dispatch_anthropic_request, "side_effect"):
+                            dispatch_kwargs["thinking_budget"] = thinking_budget
+                    except Exception:
+                        dispatch_kwargs["thinking_budget"] = thinking_budget
+
+                raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_anthropic_request(
                     **dispatch_kwargs
                 )
             else:

@@ -60,7 +60,7 @@ def _check_ai_rate_limit(request: Request, user: dict) -> None:
 
 @router.get("/models", response_model=AiModelsResponse)
 async def list_available_models(
-    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'openai_compatible')"),
+    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
     """
@@ -73,8 +73,13 @@ async def list_available_models(
     api_key = stored_settings.get("ai_api_key", "").strip()
 
     # If the provider requires an API key and none is set, prompt user
-    if clean_provider in ("gemini", "openai") and not api_key:
-        provider_name = "Google Gemini" if clean_provider == "gemini" else "OpenAI"
+    if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
+        provider_names = {
+            "gemini": "Google Gemini",
+            "openai": "OpenAI",
+            "anthropic": "Anthropic Claude",
+        }
+        provider_name = provider_names.get(clean_provider, clean_provider)
         return AiModelsResponse(
             provider=clean_provider,
             models=[],
@@ -117,7 +122,7 @@ async def list_available_models(
 
 @router.post("/models/refresh", response_model=AiModelsResponse)
 async def refresh_available_models(
-    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'openai_compatible')"),
+    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
     """
@@ -131,8 +136,13 @@ async def refresh_available_models(
     base_url = stored_settings.get("ai_base_url")
 
     # If the provider requires an API key and none is set, prompt user
-    if clean_provider in ("gemini", "openai") and not api_key:
-        provider_name = "Google Gemini" if clean_provider == "gemini" else "OpenAI"
+    if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
+        provider_names = {
+            "gemini": "Google Gemini",
+            "openai": "OpenAI",
+            "anthropic": "Anthropic Claude",
+        }
+        provider_name = provider_names.get(clean_provider, clean_provider)
         return AiModelsResponse(
             provider=clean_provider,
             models=[],
