@@ -159,11 +159,12 @@ def _seed_test_logs(db_path: Path):
 
 @pytest.mark.asyncio
 async def test_delete_single_log_success(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
     # Fetch initial logs
-    list_res = await client.get("/api/logs", cookies=auth_cookie)
+    list_res = await client.get("/api/logs")
     assert list_res.status_code == 200
     logs = list_res.json()["logs"]
     assert len(logs) == 5
@@ -171,14 +172,14 @@ async def test_delete_single_log_success(client: AsyncClient, auth_cookie: dict)
     target_id = logs[0]["id"]
 
     # Delete single log
-    del_res = await client.delete(f"/api/logs/{target_id}", cookies=auth_cookie)
+    del_res = await client.delete(f"/api/logs/{target_id}")
     assert del_res.status_code == 200
     data = del_res.json()
     assert data["status"] == "ok"
     assert data["deleted_count"] == 1
 
     # Verify deleted from logs
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 4
     assert not any(l["id"] == target_id for l in remaining)
@@ -193,7 +194,8 @@ async def test_delete_single_log_success(client: AsyncClient, auth_cookie: dict)
 
 @pytest.mark.asyncio
 async def test_delete_single_log_not_found(client: AsyncClient, auth_cookie: dict):
-    del_res = await client.delete("/api/logs/999999", cookies=auth_cookie)
+    client.cookies = auth_cookie
+    del_res = await client.delete("/api/logs/999999")
     assert del_res.status_code == 404
     assert "not found" in del_res.json()["detail"].lower()
 
@@ -204,22 +206,22 @@ async def test_delete_single_log_not_found(client: AsyncClient, auth_cookie: dic
 
 @pytest.mark.asyncio
 async def test_delete_multiple_logs_by_id(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
-    list_res = await client.get("/api/logs", cookies=auth_cookie)
+    list_res = await client.get("/api/logs")
     logs = list_res.json()["logs"]
     ids_to_delete = [logs[0]["id"], logs[1]["id"]]
 
     del_res = await client.post(
         "/api/logs/delete",
         json={"log_ids": ids_to_delete},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 2
 
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 3
     for deleted_id in ids_to_delete:
@@ -232,6 +234,7 @@ async def test_delete_multiple_logs_by_id(client: AsyncClient, auth_cookie: dict
 
 @pytest.mark.asyncio
 async def test_delete_all_logs_for_host(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
@@ -239,13 +242,12 @@ async def test_delete_all_logs_for_host(client: AsyncClient, auth_cookie: dict):
     del_res = await client.post(
         "/api/logs/delete",
         json={"sources": ["pve1"]},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 3
 
     # Check remaining: only pve2 logs remain
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 2
     assert all(l["source_alias"] == "pve2" for l in remaining)
@@ -253,6 +255,7 @@ async def test_delete_all_logs_for_host(client: AsyncClient, auth_cookie: dict):
 
 @pytest.mark.asyncio
 async def test_delete_and_filter_symmetric_alias_expansion(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     """
     Verify symmetric alias expansion:
     Deleting or filtering by an alias (e.g. 'LogShed Server') matches logs that were recorded
@@ -323,13 +326,12 @@ async def test_delete_and_filter_symmetric_alias_expansion(client: AsyncClient, 
     preview_res = await client.post(
         "/api/logs/delete/preview",
         json={"sources": ["LogShed Server"]},
-        cookies=auth_cookie,
     )
     assert preview_res.status_code == 200
     assert preview_res.json()["matched_count"] == 2
 
     # 2. Test querying /api/logs with source='LogShed Server'
-    query_res = await client.get("/api/logs?source=LogShed+Server", cookies=auth_cookie)
+    query_res = await client.get("/api/logs?source=LogShed+Server")
     assert query_res.status_code == 200
     assert query_res.json()["total"] == 2
 
@@ -337,13 +339,12 @@ async def test_delete_and_filter_symmetric_alias_expansion(client: AsyncClient, 
     del_res = await client.post(
         "/api/logs/delete",
         json={"sources": ["LogShed Server"]},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 2
 
     # 4. Only proxmox log remains
-    remaining_res = await client.get("/api/logs", cookies=auth_cookie)
+    remaining_res = await client.get("/api/logs")
     assert remaining_res.status_code == 200
     remaining = remaining_res.json()["logs"]
     assert len(remaining) == 1
@@ -352,6 +353,7 @@ async def test_delete_and_filter_symmetric_alias_expansion(client: AsyncClient, 
 
 @pytest.mark.asyncio
 async def test_delete_all_logs_for_app(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
@@ -359,13 +361,12 @@ async def test_delete_all_logs_for_app(client: AsyncClient, auth_cookie: dict):
     del_res = await client.post(
         "/api/logs/delete",
         json={"apps": ["nginx"]},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 2
 
     # Check remaining: no nginx logs
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 3
     assert not any(l["app_name"] == "nginx" for l in remaining)
@@ -373,6 +374,7 @@ async def test_delete_all_logs_for_app(client: AsyncClient, auth_cookie: dict):
 
 @pytest.mark.asyncio
 async def test_delete_logs_by_time_range(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
@@ -383,13 +385,12 @@ async def test_delete_logs_by_time_range(client: AsyncClient, auth_cookie: dict)
             "from": "2026-09-03T00:00:00",
             "to": "2026-09-05T23:59:59",
         },
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     # Sep 3 (nginx), Sep 4 (sshd), Sep 5 (dockerd) -> 3 logs deleted
     assert del_res.json()["deleted_count"] == 3
 
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 2
     # Sep 2 (nginx) and Sep 6 (kernel) remain
@@ -400,6 +401,7 @@ async def test_delete_logs_by_time_range(client: AsyncClient, auth_cookie: dict)
 
 @pytest.mark.asyncio
 async def test_delete_logs_combined_criteria(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
@@ -410,13 +412,12 @@ async def test_delete_logs_combined_criteria(client: AsyncClient, auth_cookie: d
             "sources": ["pve1"],
             "apps": ["nginx"],
         },
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 2
 
     # pve1 sshd should still be intact
-    check_res = await client.get("/api/logs?source=pve1", cookies=auth_cookie)
+    check_res = await client.get("/api/logs?source=pve1")
     remaining_pve1 = check_res.json()["logs"]
     assert len(remaining_pve1) == 1
     assert remaining_pve1[0]["app_name"] == "sshd"
@@ -428,19 +429,19 @@ async def test_delete_logs_combined_criteria(client: AsyncClient, auth_cookie: d
 
 @pytest.mark.asyncio
 async def test_preview_delete_logs(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
     preview_res = await client.post(
         "/api/logs/delete/preview",
         json={"apps": ["nginx"]},
-        cookies=auth_cookie,
     )
     assert preview_res.status_code == 200
     assert preview_res.json()["matched_count"] == 2
 
     # Verify no logs were actually deleted
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     assert len(check_res.json()["logs"]) == 5
 
 
@@ -450,11 +451,11 @@ async def test_preview_delete_logs(client: AsyncClient, auth_cookie: dict):
 
 @pytest.mark.asyncio
 async def test_empty_delete_request_rejected(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     # Empty request without delete_all flag must return 400
     del_res = await client.post(
         "/api/logs/delete",
         json={},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 400
     assert "must specify at least one filter criterion" in del_res.json()["detail"].lower()
@@ -462,23 +463,24 @@ async def test_empty_delete_request_rejected(client: AsyncClient, auth_cookie: d
 
 @pytest.mark.asyncio
 async def test_delete_all_with_explicit_flag(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     db_path = get_db_path()
     _seed_test_logs(db_path)
 
     del_res = await client.post(
         "/api/logs/delete",
         json={"delete_all": True},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 5
 
-    check_res = await client.get("/api/logs", cookies=auth_cookie)
+    check_res = await client.get("/api/logs")
     assert len(check_res.json()["logs"]) == 0
 
 
 @pytest.mark.asyncio
 async def test_delete_logs_with_complex_fts_query_fallback(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
     """
     Verify preview and delete succeed with complex punctuation FTS query
     using escape_fts_tokens fallback symmetry.
@@ -493,7 +495,6 @@ async def test_delete_logs_with_complex_fts_query_fallback(client: AsyncClient, 
     preview_res = await client.post(
         "/api/logs/delete/preview",
         json={"query": complex_query},
-        cookies=auth_cookie,
     )
     assert preview_res.status_code == 200
     assert preview_res.json()["matched_count"] == 0
@@ -502,7 +503,6 @@ async def test_delete_logs_with_complex_fts_query_fallback(client: AsyncClient, 
     del_res = await client.post(
         "/api/logs/delete",
         json={"query": complex_query},
-        cookies=auth_cookie,
     )
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 0

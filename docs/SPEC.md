@@ -513,7 +513,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/alerts/import` | Import alert rules from JSON payload | `{"rules": [...], "collision_strategy": "skip" \| "overwrite" \| "rename"}` |
 | `GET` | `/api/alerts/presets` | List built-in security canary alert presets (e.g., SSH brute force, OOM killer, sudo escalation) | None |
 | `POST` | `/api/alerts/presets/{preset_id}/install` | Install a built-in alert preset | `{"channel_id": ..., "is_enabled": true}` |
-| `GET` | `/api/alerts/history` | Fetch paginated incident firing history with AI summaries | Query params: `rule_id`, `limit`, `offset` |
+| `GET` | `/api/alerts/history` | Fetch paginated incident firing history with AI summaries, full prompt envelopes, model identifiers, and token breakdowns | Query params: `rule_id`, `limit`, `offset` |
 | `DELETE` | `/api/alerts/history/{history_id}` | Delete a single incident history record | None |
 | `DELETE` | `/api/alerts/history` | Clear all incident firing history records | None |
 | `GET` | `/api/alerts/maintenance` | Retrieve current alert maintenance window status and recurring schedules | None |
@@ -549,9 +549,6 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/ai/diagnose/stream` | Stream live diagnosis stages, failover events, and tokens via SSE | Same payload as `/api/ai/diagnose` |
 | `GET` | `/api/ai/models` | Discover available models from configured or requested provider (cached in SQLite for 24h) | Query params: `provider`, `refresh: bool` |
 | `POST` | `/api/ai/models/refresh` | Force immediate live refresh and cache update of available AI models from the provider | None |
-| `GET` | `/api/ai/audit` | Fetch historical AI queries & token usage | Query params: `limit`, `offset` |
-| `DELETE` | `/api/ai/audit/{audit_id}` | Delete a single AI audit record | None |
-| `DELETE` | `/api/ai/audit` | Clear all AI audit records | None |
 | **Host Aliases** |  |  |  |
 | `GET` | `/api/aliases` | List IP-to-Host mappings | None |
 | `POST` | `/api/aliases` | Upsert host alias mapping (retroactively updates existing logs) | `{"ip": "...", "alias": "...", "notes": "..."}` |
@@ -596,7 +593,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * **Alert Rules Tab:** Full CRUD management for threshold, pattern match, and spike alert rules. Configure Apprise notification targets, sliding evaluation windows, cooldown suppression periods, and optional automated AI root-cause incident enrichment. Includes dry-run pattern testing against historical logs and JSON bundle export/import.
   * **Automated AI Redaction Notice:** When rules with AI enrichment are enabled, the UI renders prominent warnings explaining that triggering events are dispatched automatically to external AI providers without manual review, that automated scrubbing operates on a best-effort basis, and that automated triggers consume API tokens.
   * **Drop Rules Tab:** Configure pre-storage discard filters (keyword or regex) matching message content, application name, or source, with severity thresholds. Displays live dropped counters per rule, counter reset actions, dry-run testing against recent logs, and JSON export/import.
-  * **Alert History Tab:** Historical audit of fired alert incidents displaying trigger timestamps, trigger counts, sample log extracts, and AI root-cause summaries and remediation suggestions. Supports single and bulk history deletion.
+  * **Alert History Tab:** Unified incident history and AI audit records covering on-demand log analyses, automated rule enrichments, and daily analytical digests. Detail inspection drawer (rendered via `IncidentHistoryDetail.tsx`) presents full prompt envelopes, model badges, incident summaries, and token consumption breakdowns (input, output, reasoning/thought, and total). Supports single-item and bulk history deletion.
   * **Maintenance Window Tab:** Configure active on-demand alert suppression periods or recurring schedules by day of week and time window to silence alerts during routine maintenance.
   * **Security Canary Presets Modal:** 1-click installation of production-tested security canary alerts (SSH brute force, OOM killer, sudo privilege escalation, proxy authentication floods) and drop rule presets (Docker healthchecks, noisy background daemons).
 
@@ -613,10 +610,9 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 
 * **Settings Panel (`/settings`):**
   * **Application Settings:** Encrypted API key management (Google Gemini, Anthropic Claude, OpenAI / custom OpenAI-compatible endpoint like Ollama/vLLM), dynamic model discovery with 24-hour cache, multi-model failover configuration, custom system prompt, retention slider (1 to 30 days, capped by `MAX_RETENTION_DAYS`), internal log level, and GHCR release update check toggle.
-  * **Notification Channels Card:** Configure Apprise push notification targets (Discord, Telegram, Slack, Pushover, email, webhook, etc.) with live test dispatch.
+  * **Notification Channels Card:** Configure Apprise push notification targets (Discord, Telegram, Slack, Pushover, email, webhook, etc.) with live test dispatch, and schedule daily analytical digests (`NotificationsCard.tsx`).
   * **Host Alias Manager (`/settings/aliases`):** Dedicated table to manage IP-to-Hostname mappings (e.g., `192.168.1.1` -> `OPNsense Firewall`) with quick-add prompts for newly detected, unmapped IP addresses.
-  * **Advanced Settings (`/settings/advanced`):** Runtime controls for AI timeout, reasoning token budget, base application URL, private IP webhook targets, Docker collector toggle and exclusions, trusted proxy headers, cookie security, Syslog TCP connection ceilings, and daily analytical digest scheduling.
-  * **Interactive AI Audit Log:** Historical dispatches, user notes, model responses, token consumption breakdown (in, out, thoughts, total), trigger source indicator (`on-demand` vs. `alert`), and single/bulk deletion.
+  * **Advanced Settings (`/settings/advanced`):** Runtime controls for AI timeout, reasoning token budget, base application URL, private IP webhook targets, Docker collector toggle and exclusions, trusted proxy headers, cookie security, and Syslog TCP connection ceilings (`AdvancedSettingsCard.tsx`).
 
 * **Build & Asset Distribution:**
 * Vite configured to build production static assets directly into `backend/app/static/`.

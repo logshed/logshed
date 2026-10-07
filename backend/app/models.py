@@ -531,40 +531,6 @@ class AiDiagnosisResponse(BaseModel):
     audit_id: Optional[int] = None
 
 
-class AiAuditItem(BaseModel):
-    """Single historical AI analysis record."""
-    id: int
-    timestamp: str
-    source_alias: str
-    app_name: str
-    log_count: int
-    user_context: Optional[str] = None
-    model: str
-    prompt_sent: str
-    response_text: str
-    tokens_in: int = 0
-    tokens_out: int = 0
-    tokens_thoughts: int = 0
-    tokens_used: int
-    system_prompt: Optional[str] = None
-    trigger_source: str = Field("on-demand", description="Trigger origin: 'on-demand' or 'alert'")
-
-
-AiAuditEntry = AiAuditItem
-
-
-class AiAuditListResponse(BaseModel):
-    """Paginated list of historical AI analysis audits."""
-    items: list[AiAuditItem]
-    total: int
-
-
-class AiAuditDeleteResponse(BaseModel):
-    """Status response for deleting AI audit records."""
-    status: str = "ok"
-    deleted_id: Optional[int] = None
-    deleted_count: Optional[int] = None
-
 
 class AiModelInfo(BaseModel):
     """Information regarding an available model discovered from a provider."""

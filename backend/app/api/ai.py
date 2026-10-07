@@ -1,9 +1,8 @@
 """
-AI Preview, Analysis, and Audit Log API endpoints for LogShed.
+AI Preview and Analysis API endpoints for LogShed.
 """
 
 import asyncio
-import datetime
 import json
 import logging
 from typing import Optional
@@ -16,8 +15,6 @@ from app.core.rate_limiter import ai_rate_limiter
 from app.core.redactor import redact
 from app.core.security import SESSION_COOKIE_NAME
 from app.models import (
-    AiAuditDeleteResponse,
-    AiAuditListResponse,
     AiDiagnosisRequest,
     AiDiagnosisResponse,
     AiModelInfo,
@@ -34,10 +31,7 @@ from app.services.ai_engine import (
 )
 from app.services.ai_service import (
     build_diagnosis_context,
-    clear_ai_audit_logs,
-    delete_ai_audit_item,
     is_cache_fresh,
-    list_ai_audit_logs,
     read_ai_settings,
     save_diagnosis_audit,
     save_models_cache,
@@ -488,40 +482,4 @@ async def diagnose_logs_stream(
     )
 
 
-@router.get("/audit", response_model=AiAuditListResponse)
-async def list_ai_audit(
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    trigger_source: Optional[str] = Query(None, description="Filter by trigger origin ('on-demand' or 'alert')"),
-    user: dict = Depends(get_current_user),
-) -> AiAuditListResponse:
-    """
-    Retrieve historical AI analyses from ai_audit_log.
-    """
-    items, total = await list_ai_audit_logs(limit=limit, offset=offset, trigger_source=trigger_source)
-    return AiAuditListResponse(items=items, total=total)
 
-
-@router.delete("/audit/{audit_id}", response_model=AiAuditDeleteResponse)
-async def delete_ai_audit_item_endpoint(
-    audit_id: int,
-    user: dict = Depends(get_current_user),
-) -> AiAuditDeleteResponse:
-    """
-    Delete a single AI audit log entry by ID.
-    """
-    found = await delete_ai_audit_item(audit_id)
-    if not found:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI audit entry not found")
-    return AiAuditDeleteResponse(status="ok", deleted_id=audit_id, deleted_count=1)
-
-
-@router.delete("/audit", response_model=AiAuditDeleteResponse)
-async def clear_ai_audit_log_endpoint(
-    user: dict = Depends(get_current_user),
-) -> AiAuditDeleteResponse:
-    """
-    Clear all AI audit log entries.
-    """
-    count = await clear_ai_audit_logs()
-    return AiAuditDeleteResponse(status="ok", deleted_count=count)

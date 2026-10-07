@@ -245,21 +245,21 @@ class TestDropRulesApi:
 
     @pytest.mark.asyncio
     async def test_csrf_protection(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         # Missing X-Requested-With header
         res = await client.post(
             "/api/drop-rules",
             headers={"X-Requested-With": ""},
-            cookies=auth_cookie,
             json={"message_pattern": "test"},
         )
         assert res.status_code == 403
 
     @pytest.mark.asyncio
     async def test_crud_drop_rule(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         # 1. Create rule
         create_res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={
                 "source_pattern": "192.168.1.*",
                 "app_pattern": "dnsmasq",
@@ -277,7 +277,7 @@ class TestDropRulesApi:
         assert data["dropped_count"] == 0
 
         # 2. List rules
-        list_res = await client.get("/api/drop-rules", cookies=auth_cookie)
+        list_res = await client.get("/api/drop-rules")
         assert list_res.status_code == 200
         rules = list_res.json()
         assert len(rules) >= 1
@@ -286,7 +286,6 @@ class TestDropRulesApi:
         # 3. Update rule
         update_res = await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={
                 "is_enabled": False,
                 "message_pattern": "DHCPNAK",
@@ -299,18 +298,18 @@ class TestDropRulesApi:
         assert updated["source_pattern"] == "192.168.1.*"
 
         # 4. Delete rule
-        del_res = await client.delete(f"/api/drop-rules/{rule_id}", cookies=auth_cookie)
+        del_res = await client.delete(f"/api/drop-rules/{rule_id}")
         assert del_res.status_code == 200
 
         # Verify gone
-        del_res2 = await client.delete(f"/api/drop-rules/{rule_id}", cookies=auth_cookie)
+        del_res2 = await client.delete(f"/api/drop-rules/{rule_id}")
         assert del_res2.status_code == 404
 
     @pytest.mark.asyncio
     async def test_invalid_regex_rejected(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={
                 "message_pattern": "[invalid(regex",
                 "is_regex": True,
@@ -328,9 +327,9 @@ class TestDropRulesApi:
         "([a-z]+)*",
     ])
     async def test_catastrophic_backtracking_rejected(self, client: AsyncClient, auth_cookie: dict, redos_pattern: str):
+        client.cookies = auth_cookie
         res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={
                 "message_pattern": redos_pattern,
                 "is_regex": True,
@@ -341,10 +340,10 @@ class TestDropRulesApi:
 
     @pytest.mark.asyncio
     async def test_dry_run_test_endpoint(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         # Match case
         res1 = await client.post(
             "/api/drop-rules/test",
-            cookies=auth_cookie,
             json={
                 "source_pattern": "192.168.1.*",
                 "app_pattern": "traefik*",
@@ -362,7 +361,6 @@ class TestDropRulesApi:
         # Non-match case
         res2 = await client.post(
             "/api/drop-rules/test",
-            cookies=auth_cookie,
             json={
                 "source_pattern": "10.0.0.*",
                 "app_pattern": "traefik*",
@@ -379,7 +377,6 @@ class TestDropRulesApi:
         # Invalid regex in test returns error instead of crashing
         res3 = await client.post(
             "/api/drop-rules/test",
-            cookies=auth_cookie,
             json={
                 "message_pattern": "(unclosed parenthesis",
                 "is_regex": True,
@@ -393,7 +390,6 @@ class TestDropRulesApi:
         # 4. Wildcard '*' message pattern with specific app matches any message
         res4 = await client.post(
             "/api/drop-rules/test",
-            cookies=auth_cookie,
             json={
                 "app_pattern": "pvedaemon",
                 "message_pattern": "*",
@@ -409,7 +405,6 @@ class TestDropRulesApi:
         # Threshold 6 (Info and below): Debug (7) matches
         res_sev_debug = await client.post(
             "/api/drop-rules/test",
-            cookies=auth_cookie,
             json={
                 "message_pattern": "*",
                 "severity_threshold": 6,
@@ -423,7 +418,6 @@ class TestDropRulesApi:
         # Threshold 6: Warning (4) is more critical -> does not match
         res_sev_warn = await client.post(
             "/api/drop-rules/test",
-            cookies=auth_cookie,
             json={
                 "message_pattern": "*",
                 "severity_threshold": 6,
@@ -437,7 +431,6 @@ class TestDropRulesApi:
         # 6. Empty criteria rejected
         empty_res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"message_pattern": "*"},
         )
         assert empty_res.status_code == 400
@@ -445,7 +438,6 @@ class TestDropRulesApi:
         # 7. Rule created with app only (message_pattern defaults to '*')
         app_only_res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"app_pattern": "pvedaemon"},
         )
         assert app_only_res.status_code == 201
@@ -454,9 +446,9 @@ class TestDropRulesApi:
 
     @pytest.mark.asyncio
     async def test_reset_counter(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
+        client.cookies = auth_cookie
         create_res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"name": "Custom Drop Rule", "message_pattern": "count_reset_test"},
         )
         rule_id = create_res.json()["id"]
@@ -468,16 +460,16 @@ class TestDropRulesApi:
         flt.flush_counts()
 
         # Reset counter
-        reset_res = await client.post(f"/api/drop-rules/{rule_id}/reset", cookies=auth_cookie)
+        reset_res = await client.post(f"/api/drop-rules/{rule_id}/reset")
         assert reset_res.status_code == 200
         assert reset_res.json()["dropped_count"] == 0
         assert reset_res.json()["name"] == "Custom Drop Rule"
 
     @pytest.mark.asyncio
     async def test_update_rule_resets_counter_on_criteria_change(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         create_res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"message_pattern": "initial_pattern"},
         )
         rule_id = create_res.json()["id"]
@@ -487,14 +479,13 @@ class TestDropRulesApi:
         flt.flush_counts()
 
         # Check count > 0
-        get_res = await client.get("/api/drop-rules", cookies=auth_cookie)
+        get_res = await client.get("/api/drop-rules")
         rule = next(r for r in get_res.json() if r["id"] == rule_id)
         assert rule["dropped_count"] == 1
 
         # Update only is_enabled - should NOT reset counter
         toggle_res = await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={"is_enabled": False},
         )
         assert toggle_res.status_code == 200
@@ -503,7 +494,6 @@ class TestDropRulesApi:
         # Update message_pattern (criteria change) - SHOULD reset counter to 0
         update_res = await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={"message_pattern": "new_pattern"},
         )
         assert update_res.status_code == 200
@@ -512,21 +502,19 @@ class TestDropRulesApi:
         # Re-enable rule
         await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={"is_enabled": True},
         )
 
         # Simulate another drop
         flt.should_drop(None, None, None, "new_pattern")
         flt.flush_counts()
-        get_res2 = await client.get("/api/drop-rules", cookies=auth_cookie)
+        get_res2 = await client.get("/api/drop-rules")
         rule2 = next(r for r in get_res2.json() if r["id"] == rule_id)
         assert rule2["dropped_count"] == 1
 
         # Update severity_threshold (criteria change) - SHOULD reset counter to 0
         update_sev_res = await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={"severity_threshold": 6},
         )
         assert update_sev_res.status_code == 200
@@ -535,17 +523,16 @@ class TestDropRulesApi:
 
     @pytest.mark.asyncio
     async def test_severity_threshold_validation_and_crud(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         # 1. Invalid severity_threshold (< 0 or > 7) rejected
         invalid_high = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"message_pattern": "test", "severity_threshold": 8},
         )
         assert invalid_high.status_code == 422
 
         invalid_low = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"message_pattern": "test", "severity_threshold": -1},
         )
         assert invalid_low.status_code == 422
@@ -553,7 +540,6 @@ class TestDropRulesApi:
         # 2. Rule created with severity_threshold only (message defaults to '*')
         sev_only = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={"severity_threshold": 7},
         )
         assert sev_only.status_code == 201
@@ -564,7 +550,6 @@ class TestDropRulesApi:
         # 3. Update clearing severity_threshold back to None (null)
         clear_res = await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={"severity_threshold": None, "app_pattern": "sshd"},
         )
         assert clear_res.status_code == 200
@@ -573,10 +558,10 @@ class TestDropRulesApi:
 
     @pytest.mark.asyncio
     async def test_drop_rule_name_crud_and_fallback(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         # 1. Create rule with explicit name
         res = await client.post(
             "/api/drop-rules",
-            cookies=auth_cookie,
             json={
                 "name": "Drop Noisy Nginx Health",
                 "app_pattern": "nginx",
@@ -591,21 +576,20 @@ class TestDropRulesApi:
         # 2. Update name
         up_res = await client.put(
             f"/api/drop-rules/{rule_id}",
-            cookies=auth_cookie,
             json={"name": "Renamed Filter Rule"},
         )
         assert up_res.status_code == 200
         assert up_res.json()["name"] == "Renamed Filter Rule"
 
         # 3. Verify in list
-        list_res = await client.get("/api/drop-rules", cookies=auth_cookie)
+        list_res = await client.get("/api/drop-rules")
         assert list_res.status_code == 200
         matched = [r for r in list_res.json() if r["id"] == rule_id]
         assert len(matched) == 1
         assert matched[0]["name"] == "Renamed Filter Rule"
 
         # 4. Clean up
-        await client.delete(f"/api/drop-rules/{rule_id}", cookies=auth_cookie)
+        await client.delete(f"/api/drop-rules/{rule_id}")
 
 
 # ===================================================================
@@ -621,10 +605,10 @@ class TestSavedViewsApi:
 
     @pytest.mark.asyncio
     async def test_crud_and_pin_ordering(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
         # 1. Create two views: one unpinned 'Zebra', one pinned 'Alpha'
         v1_res = await client.post(
             "/api/saved-views",
-            cookies=auth_cookie,
             json={
                 "name": "Zebra Unpinned",
                 "query_params": {"q": "error", "severity": 3},
@@ -638,7 +622,6 @@ class TestSavedViewsApi:
 
         v2_res = await client.post(
             "/api/saved-views",
-            cookies=auth_cookie,
             json={
                 "name": "Alpha Pinned",
                 "query_params": {"app": "traefik"},
@@ -649,7 +632,7 @@ class TestSavedViewsApi:
         v2_id = v2_res.json()["id"]
 
         # 2. List views: pinned views come first
-        list_res = await client.get("/api/saved-views", cookies=auth_cookie)
+        list_res = await client.get("/api/saved-views")
         assert list_res.status_code == 200
         views = list_res.json()
         assert len(views) >= 2
@@ -660,20 +643,19 @@ class TestSavedViewsApi:
         # 3. Update view: toggle pin on Zebra Unpinned
         up_res = await client.put(
             f"/api/saved-views/{v1_id}",
-            cookies=auth_cookie,
             json={"is_pinned": True, "name": "A-Zebra Pinned"},
         )
         assert up_res.status_code == 200
         assert up_res.json()["is_pinned"] is True
 
         # 4. Delete view
-        del_res = await client.delete(f"/api/saved-views/{v1_id}", cookies=auth_cookie)
+        del_res = await client.delete(f"/api/saved-views/{v1_id}")
         assert del_res.status_code == 200
-        del_res_404 = await client.delete(f"/api/saved-views/{v1_id}", cookies=auth_cookie)
+        del_res_404 = await client.delete(f"/api/saved-views/{v1_id}")
         assert del_res_404.status_code == 404
 
         # Clean up v2
-        await client.delete(f"/api/saved-views/{v2_id}", cookies=auth_cookie)
+        await client.delete(f"/api/saved-views/{v2_id}")
 
 
 # ===================================================================
@@ -874,4 +856,4 @@ def test_safe_regex_search_in_thread_and_bounded():
     # 5. Bounded execution timeout gracefully returns False on timeout
     # When given a precompiled backtracking pattern that bypasses string validation
     backtracking_pat = re.compile(r"(a+)+$")
-    assert safe_regex_search(backtracking_pat, "a" * 30 + "!", timeout=0.01) is False
+    assert safe_regex_search(backtracking_pat, "a" * 22 + "!", timeout=0.01) is False

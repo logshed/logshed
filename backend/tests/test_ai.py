@@ -1068,140 +1068,7 @@ class TestAiDiagnoseWorkflow:
             assert call_kwargs["api_key"] == "ollama-key"
             assert call_kwargs["base_url"] == "http://192.168.1.100:11434/v1"
 
-    @pytest.mark.asyncio
-    async def test_audit_log_persisted_and_queryable(self, populated_db, auth_client):
-        with patch(
-            "app.api.ai.execute_ai_analysis",
-            new_callable=AsyncMock,
-            return_value=(
-                "Audit test summary",
-                "Audit test cause",
-                "Audit test fix",
-                "Raw audit text",
-                "### System Metadata\n- Host: router\n\n### Redacted Log Stream\n```\nlogs\n```",
-                80,
-                31,
-                0,
-                111,
-            ),
-        ):
-            res = await auth_client.post(
-                "/api/ai/diagnose",
-                json={"log_ids": [1, 2], "user_context": "Audit check context"},
-            )
-            assert res.status_code == 200
-            audit_id = res.json()["audit_id"]
 
-        audit_res = await auth_client.get("/api/ai/audit?limit=10")
-        assert audit_res.status_code == 200
-        audit_data = audit_res.json()
-        assert audit_data["total"] >= 1
-
-        matching = [item for item in audit_data["items"] if item["id"] == audit_id]
-        assert len(matching) == 1
-        entry = matching[0]
-        assert entry["source_alias"] == "router"
-        assert entry["app_name"] == "dnsmasq"
-        assert entry["log_count"] == 2
-        assert entry["user_context"] == "Audit check context"
-        assert entry["tokens_used"] == 111
-        assert entry["trigger_source"] == "on-demand"
-
-    @pytest.mark.asyncio
-    async def test_audit_log_filter_by_trigger_source(self, populated_db, auth_client):
-        from app.services.ai_service import save_diagnosis_audit
-
-        # Insert on-demand audit entry
-        await save_diagnosis_audit(
-            source_alias="host1",
-            app_name="app1",
-            log_count=5,
-            user_context="on-demand context",
-            actual_model="gemini-3.7-flash",
-            prompt_sent="prompt1",
-            raw_response="response1",
-            tokens_in=100,
-            tokens_out=50,
-            tokens_thoughts=0,
-            tokens_used=150,
-            system_prompt="sys1",
-            trigger_source="on-demand",
-        )
-
-        # Insert alert audit entry
-        await save_diagnosis_audit(
-            source_alias="host2",
-            app_name="app2",
-            log_count=3,
-            user_context="Alert Rule: High CPU",
-            actual_model="gemini-3.7-flash",
-            prompt_sent="prompt2",
-            raw_response="response2",
-            tokens_in=200,
-            tokens_out=60,
-            tokens_thoughts=0,
-            tokens_used=260,
-            system_prompt="sys2",
-            trigger_source="alert",
-        )
-
-        # Query all
-        res_all = await auth_client.get("/api/ai/audit")
-        assert res_all.status_code == 200
-        data_all = res_all.json()
-        assert any(i["trigger_source"] == "on-demand" for i in data_all["items"])
-        assert any(i["trigger_source"] == "alert" for i in data_all["items"])
-
-        # Query filtered by alert
-        res_alert = await auth_client.get("/api/ai/audit?trigger_source=alert")
-        assert res_alert.status_code == 200
-        data_alert = res_alert.json()
-        assert len(data_alert["items"]) >= 1
-        assert all(i["trigger_source"] == "alert" for i in data_alert["items"])
-
-        # Query filtered by on-demand
-        res_demand = await auth_client.get("/api/ai/audit?trigger_source=on-demand")
-        assert res_demand.status_code == 200
-        data_demand = res_demand.json()
-        assert len(data_demand["items"]) >= 1
-        assert all(i["trigger_source"] == "on-demand" for i in data_demand["items"])
-
-    @pytest.mark.asyncio
-    async def test_delete_ai_audit_item_and_clear_all(self, populated_db, auth_client):
-        with patch(
-            "app.api.ai.execute_ai_analysis",
-            new_callable=AsyncMock,
-            return_value=("Summary", "Cause", "Fix", "Raw", "Prompt", 50, 20, 0, 70),
-        ):
-            res = await auth_client.post(
-                "/api/ai/diagnose",
-                json={"log_ids": [1, 2]},
-            )
-            assert res.status_code == 200
-            audit_id = res.json()["audit_id"]
-
-        del_res = await auth_client.delete(f"/api/ai/audit/{audit_id}")
-        assert del_res.status_code == 200
-        assert del_res.json()["status"] == "ok"
-        assert del_res.json()["deleted_id"] == audit_id
-
-        del_res_404 = await auth_client.delete(f"/api/ai/audit/{audit_id}")
-        assert del_res_404.status_code == 404
-
-        with patch(
-            "app.api.ai.execute_ai_analysis",
-            new_callable=AsyncMock,
-            return_value=("Summary 2", "Cause 2", "Fix 2", "Raw 2", "Prompt 2", 50, 20, 0, 70),
-        ):
-            await auth_client.post("/api/ai/diagnose", json={"log_ids": [1, 2]})
-
-        clear_res = await auth_client.delete("/api/ai/audit")
-        assert clear_res.status_code == 200
-        assert clear_res.json()["status"] == "ok"
-
-        list_res = await auth_client.get("/api/ai/audit")
-        assert list_res.status_code == 200
-        assert list_res.json()["total"] == 0
 
     @pytest.mark.asyncio
     async def test_diagnose_with_prompt_override_dispatches_directly_and_audits(self, populated_db, auth_client):
@@ -1243,11 +1110,13 @@ class TestAiDiagnoseWorkflow:
             call_kwargs = mock_exec.call_args[1]
             assert call_kwargs["prompt_override"] == custom_prompt
 
-            audit_res = await auth_client.get("/api/ai/audit?limit=5")
-            assert audit_res.status_code == 200
-            matching = [item for item in audit_res.json()["items"] if item["id"] == audit_id]
-            assert len(matching) == 1
-            assert matching[0]["prompt_sent"] == custom_prompt
+            conn = sqlite3.connect(populated_db)
+            cur = conn.cursor()
+            cur.execute("SELECT prompt_sent FROM ai_audit_log WHERE id = ?", (audit_id,))
+            row = cur.fetchone()
+            conn.close()
+            assert row is not None
+            assert row[0] == custom_prompt
 
     @pytest.mark.asyncio
     async def test_diagnose_api_failure_logging_concise(self, populated_db, auth_client, monkeypatch):
@@ -1309,11 +1178,13 @@ class TestAiDiagnoseWorkflow:
             call_kwargs = mock_exec.call_args[1]
             assert call_kwargs["system_prompt"] == custom_sys
 
-            audit_res = await auth_client.get("/api/ai/audit?limit=5")
-            assert audit_res.status_code == 200
-            matching = [item for item in audit_res.json()["items"] if item["id"] == audit_id]
-            assert len(matching) == 1
-            assert matching[0]["system_prompt"] == custom_sys
+            conn = sqlite3.connect(populated_db)
+            cur = conn.cursor()
+            cur.execute("SELECT system_prompt FROM ai_audit_log WHERE id = ?", (audit_id,))
+            row = cur.fetchone()
+            conn.close()
+            assert row is not None
+            assert row[0] == custom_sys
 
     @pytest.mark.asyncio
     async def test_diagnose_rejects_more_than_200_log_ids(self, populated_db, auth_client):
@@ -1366,12 +1237,14 @@ class TestAiDiagnoseWorkflow:
             assert "api_key=[REDACTED]" in call_kwargs["user_context"]
 
             # Verify audit log saved scrubbed user_context
-            audit_res = await auth_client.get("/api/ai/audit?limit=5")
-            assert audit_res.status_code == 200
-            matching = [item for item in audit_res.json()["items"] if item["id"] == audit_id]
-            assert len(matching) == 1
-            assert "topsecretusercontext12345" not in matching[0]["user_context"]
-            assert "api_key=[REDACTED]" in matching[0]["user_context"]
+            conn = sqlite3.connect(populated_db)
+            cur = conn.cursor()
+            cur.execute("SELECT user_context FROM ai_audit_log WHERE id = ?", (audit_id,))
+            row = cur.fetchone()
+            conn.close()
+            assert row is not None
+            assert "topsecretusercontext12345" not in row[0]
+            assert "api_key=[REDACTED]" in row[0]
 
             # Also test prompt_override redaction
             mock_exec.reset_mock()
@@ -1794,11 +1667,13 @@ class TestAiFastFailoverAndFallback:
             assert audit_id is not None
 
             # Verify that ai_audit_log accurately recorded the fallback model
-            audit_res = await auth_client.get("/api/ai/audit?limit=5")
-            assert audit_res.status_code == 200
-            matching = [item for item in audit_res.json()["items"] if item["id"] == audit_id]
-            assert len(matching) == 1
-            assert matching[0]["model"] == "gemini-2.5-flash"
+            conn = sqlite3.connect(populated_db)
+            cur = conn.cursor()
+            cur.execute("SELECT model FROM ai_audit_log WHERE id = ?", (audit_id,))
+            row = cur.fetchone()
+            conn.close()
+            assert row is not None
+            assert row[0] == "gemini-2.5-flash"
 
     @pytest.mark.asyncio
     async def test_settings_ai_fallback_models_crud(self, populated_db, auth_client):

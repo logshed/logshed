@@ -295,6 +295,7 @@ def built_image(docker_available):
     subprocess.run(["docker", "rmi", "-f", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+@pytest.mark.e2e
 class TestDockerLiveContainer:
 
     def test_container_default_port_and_healthcheck(self, built_image):

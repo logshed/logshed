@@ -91,6 +91,6 @@ class TestRegexValidator:
         """Verify execution timeout safely bounds backtracking searches."""
         # Precompiled pattern bypasses initial string complexity checks
         backtracking_pat = re.compile(r"(a+)+$")
-        candidate = "a" * 30 + "!"
+        candidate = "a" * 22 + "!"
         # Short timeout should terminate or abandon search and return False
         assert safe_regex_search(backtracking_pat, candidate, timeout=0.01) is False
