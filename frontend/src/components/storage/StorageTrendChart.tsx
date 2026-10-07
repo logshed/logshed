@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { TrendingUp } from 'lucide-react';
 import { StorageMetricsSnapshot } from '../../types.ts';
+import { formatBytes } from '../../utils/formatters.ts';
 
 interface StorageTrendChartProps {
   history: StorageMetricsSnapshot[];
@@ -54,7 +55,7 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
 
       <div className="h-56 w-full" data-testid="storage-trend-chart">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="dbSizeGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
@@ -63,7 +64,13 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
             <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 10 }} />
-            <YAxis stroke="#64748b" tick={{ fontSize: 10 }} unit="MB" />
+            <YAxis
+              stroke="#64748b"
+              tick={{ fontSize: 10 }}
+              width={70}
+              tickFormatter={(val: number) => (val >= 10 ? Math.round(val).toLocaleString() : String(val))}
+              unit="MB"
+            />
             <Tooltip
               contentStyle={{
                 backgroundColor: '#0b0f19',
@@ -72,8 +79,14 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
                 fontSize: '11px',
                 fontFamily: 'monospace',
               }}
-              formatter={(value: any, name: any) => {
-                if (name === 'dbMb') return [`${value} MB`, 'Database Size'];
+              formatter={(value: any, name: any, item: any) => {
+                if (name === 'dbMb') {
+                  const dbBytes = item?.payload?.dbBytes;
+                  return [
+                    typeof dbBytes === 'number' ? formatBytes(dbBytes) : `${Number(value).toLocaleString()} MB`,
+                    'Database Size',
+                  ];
+                }
                 return [value, name];
               }}
             />

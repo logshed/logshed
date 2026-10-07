@@ -5,6 +5,7 @@ Tests for storage metrics, retention prune worker, healthcheck, settings encrypt
 import asyncio
 import datetime
 import os
+import shutil
 import stat
 from pathlib import Path
 import pytest
@@ -12,6 +13,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
+from app.core.pipeline import QueueConsumer
 from app.core.migrations import get_connection, run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
@@ -26,7 +28,13 @@ from app.cli import seed_logs
 from app.api.deps import run_db_query
 from app.collectors.docker_collector import DockerTailer, _tail_container_logs
 from app.main import _supervise_worker, create_app
-from app.services.retention import PruneWorker, execute_prune
+from app.services.retention import (
+    InsufficientDiskSpaceError,
+    PruneWorker,
+    check_vacuum_headroom,
+    execute_prune,
+    execute_vacuum,
+)
 from app.services.storage_metrics import (
     StorageMetricsWorker,
     prune_old_metrics,
@@ -335,6 +343,42 @@ class TestRetentionAndPruneWorker:
         with get_connection(db_file) as conn:
             remaining = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             assert remaining == 10
+
+    def test_execute_prune_iso_datetime_boundary_comparison(self, tmp_path: Path):
+        """execute_prune accurately compares ISO-8601 timestamps containing 'T' against cutoff_iso."""
+        db_file = tmp_path / "logs.db"
+        run_migrations(db_file)
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # 15 days ago (older than 14 days retention)
+        old_ts = (now - datetime.timedelta(days=15)).isoformat()
+        # 13 days ago (younger than 14 days retention)
+        fresh_ts = (now - datetime.timedelta(days=13)).isoformat()
+
+        with get_connection(db_file) as conn:
+            conn.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '192.168.1.1', 'gw', 'app', 1, 6, 'old iso log', 'old iso log')
+                """,
+                (old_ts, old_ts),
+            )
+            conn.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '192.168.1.1', 'gw', 'app', 1, 6, 'fresh iso log', 'fresh iso log')
+                """,
+                (fresh_ts, fresh_ts),
+            )
+            conn.commit()
+
+        res = execute_prune(db_file, retention_days=14)
+        assert res["deleted_logs"] == 1
+
+        with get_connection(db_file) as conn:
+            remaining = conn.execute("SELECT message FROM logs").fetchall()
+            assert len(remaining) == 1
+            assert remaining[0][0] == "fresh iso log"
 
 
     @pytest.mark.asyncio
@@ -898,6 +942,70 @@ class TestSettingsEncryptionAndKeyManagement:
         # Automatically clamped from 60 down to 30, NOT reverting to the old 7 days
         assert data_reboot["retention_days"] == 30
 
+    @pytest.mark.asyncio
+    async def test_ai_enabled_setting_toggle_and_persistence(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        # Fresh install without API key should default ai_enabled to False
+        res_initial = await client.get("/api/settings")
+        assert res_initial.status_code == 200
+        assert res_initial.json()["ai_enabled"] is False
+
+        # Enable AI and configure an API key
+        res_enable = await client.post(
+            "/api/settings",
+            json={
+                "ai_enabled": True,
+                "ai_provider": "openai",
+                "ai_api_key": "sk-test-key-12345",
+            },
+        )
+        assert res_enable.status_code == 200
+
+        res_check = await client.get("/api/settings")
+        assert res_check.status_code == 200
+        assert res_check.json()["ai_enabled"] is True
+
+        # Disable AI
+        res_disable = await client.post(
+            "/api/settings",
+            json={"ai_enabled": False},
+        )
+        assert res_disable.status_code == 200
+
+        res_check_disabled = await client.get("/api/settings")
+        assert res_check_disabled.status_code == 200
+        assert res_check_disabled.json()["ai_enabled"] is False
+
+        # Verify DB value directly
+        db_file = tmp_path / "logs.db"
+        with get_connection(db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_enabled'")
+            row = cursor.fetchone()
+            assert row is not None
+            assert row[0] == "0"
+
+        # Re-enable AI
+        res_re_enable = await client.post(
+            "/api/settings",
+            json={"ai_enabled": True},
+        )
+        assert res_re_enable.status_code == 200
+
+        res_check_re_enabled = await client.get("/api/settings")
+        assert res_check_re_enabled.status_code == 200
+        assert res_check_re_enabled.json()["ai_enabled"] is True
+
+        with get_connection(db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_enabled'")
+            row = cursor.fetchone()
+            assert row is not None
+            assert row[0] == "1"
+
 
 
 # ===================================================================
@@ -1279,6 +1387,274 @@ class TestHostAliases:
             )
             assert res_bad.status_code == 422
             assert "Invalid IP address format" in res_bad.json()["detail"]
+
+    def test_batch_update_log_aliases_orders_by_id_desc(self, tmp_path: Path, monkeypatch):
+        """_batch_update_log_aliases processes the newest logs (highest id) first."""
+        from app.api.aliases import _batch_update_log_aliases
+        db_file = tmp_path / "logs.db"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (id, timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES (?, ?, ?, '192.168.1.50', '192.168.1.50', 'app', 1, 6, 'msg', 'raw')""",
+                [(i, now, now) for i in [10, 20, 30, 40]],
+            )
+            conn.commit()
+
+            sleep_called = False
+
+            def mock_sleep(_duration):
+                nonlocal sleep_called
+                if not sleep_called:
+                    sleep_called = True
+                    # After first batch of 2 rows, IDs 40 and 30 should be updated, 10 and 20 not yet
+                    c = conn.cursor()
+                    c.execute("SELECT id, source_alias FROM logs ORDER BY id ASC")
+                    rows = c.fetchall()
+                    row_map = {r[0]: r[1] for r in rows}
+                    assert row_map[40] == "target-alias"
+                    assert row_map[30] == "target-alias"
+                    assert row_map[20] == "192.168.1.50"
+                    assert row_map[10] == "192.168.1.50"
+
+            monkeypatch.setattr("time.sleep", mock_sleep)
+            _batch_update_log_aliases(conn, "192.168.1.50", "target-alias", batch_size=2)
+            assert sleep_called is True
+
+            # All 4 rows should now be updated
+            c = conn.cursor()
+            c.execute("SELECT id, source_alias FROM logs ORDER BY id ASC")
+            rows = c.fetchall()
+            for r in rows:
+                assert r[1] == "target-alias"
+
+    @pytest.mark.asyncio
+    async def test_background_alias_update_logs_cleanly_on_db_error(self, client: AsyncClient, auth_cookie: dict, caplog):
+        from unittest.mock import patch
+        import logging
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        with patch("app.api.aliases._batch_update_log_aliases", side_effect=Exception("Simulated SQLite lock error")):
+            with caplog.at_level(logging.ERROR):
+                create_res = await client.post(
+                    "/api/aliases",
+                    json={"ip": "192.168.1.100", "alias": "failing-alias", "notes": "Test fail"},
+                )
+                assert create_res.status_code == 200
+                assert "Background retroactive alias update failed for 192.168.1.100 -> failing-alias: Simulated SQLite lock error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_background_alias_delete_logs_cleanly_on_db_error(self, client: AsyncClient, auth_cookie: dict, caplog):
+        from unittest.mock import patch
+        import logging
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        create_res = await client.post(
+            "/api/aliases",
+            json={"ip": "192.168.1.101", "alias": "delete-fail-alias"},
+        )
+        assert create_res.status_code == 200
+
+        with patch("app.api.aliases._batch_update_log_aliases", side_effect=Exception("Simulated disk I/O failure")):
+            with caplog.at_level(logging.ERROR):
+                del_res = await client.delete("/api/aliases/192.168.1.101")
+                assert del_res.status_code == 200
+                assert "Background retroactive alias reversion failed for 192.168.1.101: Simulated disk I/O failure" in caplog.text
+
+
+# ===================================================================
+# 6. Database Compaction (Vacuum)
+# ===================================================================
+
+class TestDatabaseVacuum:
+    """Tests for on-demand database vacuum compaction and headroom protection."""
+
+    @pytest.mark.asyncio
+    async def test_vacuum_requires_authentication(self, client: AsyncClient):
+        """Unauthenticated requests to /api/system/vacuum are rejected with 401."""
+        res = await client.post("/api/system/vacuum")
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_vacuum_insufficient_disk_space_guard(
+        self, client: AsyncClient, auth_cookie: dict, monkeypatch
+    ):
+        """Vacuum fails with 400 when free disk headroom is below database size plus safe margin."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        # Mock shutil.disk_usage to return a small amount of free bytes (e.g. 10 MB)
+        from collections import namedtuple
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+        monkeypatch.setattr(
+            "shutil.disk_usage",
+            lambda path: Usage(total=10**10, used=10**10 - 10 * 1024 * 1024, free=10 * 1024 * 1024),
+        )
+
+        res = await client.post("/api/system/vacuum")
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert "Insufficient temporary disk headroom" in detail
+
+    @pytest.mark.asyncio
+    async def test_vacuum_endpoint_success_and_metrics_update(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """Vacuum successfully repacks the database file and records fresh storage metrics."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        # Seed 1000 logs, then delete 900 of them to generate freelist pages
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        entries = [
+            {
+                "timestamp": now,
+                "received_at": now,
+                "source_ip": "192.168.1.100",
+                "source_alias": "test-host",
+                "app_name": "app",
+                "facility": 1,
+                "severity": 6,
+                "message": f"Log entry {i} padding " + ("x" * 500),
+                "raw": f"raw {i}",
+            }
+            for i in range(1000)
+        ]
+        _seed_logs(db_file, entries)
+
+        # Delete most logs to create empty freelist pages
+        with get_connection(db_file) as conn:
+            conn.execute("DELETE FROM logs WHERE id > 100")
+            conn.commit()
+
+        res = await client.post("/api/system/vacuum")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert data["previous_size_bytes"] > 0
+        assert data["new_size_bytes"] > 0
+        assert data["reclaimed_bytes"] >= 0
+        assert "metrics" in data
+        metrics = data["metrics"]
+        assert metrics["db_size_bytes"] == data["new_size_bytes"]
+        assert metrics["total_logs_count"] == 100
+
+    @pytest.mark.asyncio
+    async def test_vacuum_pauses_and_resumes_queue_consumer(self, tmp_path: Path):
+        """Vacuum pauses QueueConsumer writes while buffering incoming logs in memory."""
+        db_file = tmp_path / "logs.db"
+        consumer = QueueConsumer(db_file)
+        assert not consumer.is_paused
+
+        # Run consumer in background task
+        task = asyncio.create_task(consumer.run())
+        try:
+            # Pause writes
+            await consumer.pause_writes()
+            assert consumer.is_paused
+
+            # Put logs into queue while paused
+            queue = pipeline_mod.get_queue()
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            test_entry = {
+                "timestamp": now,
+                "received_at": now,
+                "source_ip": "10.0.0.1",
+                "source_alias": "buffered-host",
+                "app_name": "test-app",
+                "facility": 1,
+                "severity": 6,
+                "message": "Buffered message during vacuum",
+                "raw": "Buffered message during vacuum",
+            }
+            queue.put_nowait(test_entry)
+
+            # Check that log was NOT inserted into db while paused
+            await asyncio.sleep(0.1)
+            with get_connection(db_file) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
+                assert count == 0
+                assert queue.qsize() == 1
+
+            # Resume writes
+            consumer.resume_writes()
+            assert not consumer.is_paused
+
+            # Wait for consumer to drain buffered log to database
+            for _ in range(20):
+                await asyncio.sleep(0.05)
+                with get_connection(db_file) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
+                    if count == 1:
+                        break
+
+            with get_connection(db_file) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
+                assert count == 1
+        finally:
+            await consumer.stop()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_vacuum_conflict_when_already_running(
+        self, client: AsyncClient, auth_cookie: dict, monkeypatch
+    ):
+        """Concurrent vacuum requests return 409 Conflict."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        async def _delayed_vacuum(*args, **kwargs):
+            await asyncio.sleep(0.3)
+            return {
+                "status": "ok",
+                "previous_size_bytes": 1000,
+                "new_size_bytes": 800,
+                "reclaimed_bytes": 200,
+                "metrics": {
+                    "recorded_at": "2026-09-28T00:00:00Z",
+                    "db_size_bytes": 800,
+                    "disk_free_bytes": 1000000000,
+                    "disk_total_bytes": 2000000000,
+                    "total_logs_count": 0,
+                },
+            }
+
+        monkeypatch.setattr("app.api.system.execute_vacuum", _delayed_vacuum)
+
+        res1, res2 = await asyncio.gather(
+            client.post("/api/system/vacuum"),
+            client.post("/api/system/vacuum"),
+        )
+
+        statuses = {res1.status_code, res2.status_code}
+        assert 200 in statuses
+        assert 409 in statuses
+
+    def test_check_vacuum_headroom_helper(self, tmp_path: Path, monkeypatch):
+        """check_vacuum_headroom verifies disk headroom against safe margin."""
+        from collections import namedtuple
+        db_file = tmp_path / "logs.db"
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+
+        # Sufficient headroom
+        monkeypatch.setattr(
+            "shutil.disk_usage",
+            lambda p: Usage(total=10**10, used=10**9, free=9 * 10**9),
+        )
+        db_size, free, required = check_vacuum_headroom(db_file, safe_margin_bytes=100 * 1024 * 1024)
+        assert free >= required
+
+        # Insufficient headroom
+        monkeypatch.setattr(
+            "shutil.disk_usage",
+            lambda p: Usage(total=10**10, used=10**10 - 1000, free=1000),
+        )
+        with pytest.raises(InsufficientDiskSpaceError) as exc_info:
+            check_vacuum_headroom(db_file, safe_margin_bytes=100 * 1024 * 1024)
+        assert "Insufficient temporary disk headroom" in str(exc_info.value)
+
 
 
 

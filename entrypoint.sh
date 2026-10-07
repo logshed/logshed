@@ -49,8 +49,8 @@ if [ -S "$DOCKER_SOCKET_PATH" ] || [ -e "$DOCKER_SOCKET_PATH" ]; then
     fi
 fi
 
-# Ensure /data exists and is owned recursively by appuser
-mkdir -p /data
+# Ensure /data and preset directories exist and are owned recursively by appuser
+mkdir -p /data/presets/alerts /data/presets/drops
 CURRENT_OWNER=$(stat -c '%u:%g' /data 2>/dev/null || stat -f '%u:%g' /data 2>/dev/null)
 if [ "$CURRENT_OWNER" != "$PUID:$PGID" ]; then
     chown -R appuser:appuser /data 2>/dev/null || true

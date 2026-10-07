@@ -263,6 +263,53 @@ class TestInternalLogHandler:
         assert "Traceback (most recent call last):" in entry["message"]
         assert "Traceback" in entry["raw"]
 
+    def test_internal_log_handler_resolves_alias_from_alias_cache_for_127_0_0_1(self, tmp_path):
+        from app.collectors.syslog import AliasCache
+        db_file = tmp_path / "test_alias.db"
+        run_migrations(db_file)
+        import sqlite3
+        with sqlite3.connect(str(db_file)) as conn:
+            conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('127.0.0.1', 'Local', '2026-09-01T00:00:00Z')")
+            conn.commit()
+
+        cache = AliasCache(db_file)
+        handler = InternalLogHandler(level="DEBUG", alias_cache=cache)
+        q = get_queue()
+
+        handler.emit(self._make_record(level=logging.INFO, msg="Internal startup log"))
+        assert not q.empty()
+        entry = q.get_nowait()
+        assert entry["source_ip"] == "127.0.0.1"
+        assert entry["source_alias"] == "Local"
+
+    def test_internal_log_handler_resolves_alias_from_alias_cache_for_logshed_name(self, tmp_path):
+        from app.collectors.syslog import AliasCache
+        db_file = tmp_path / "test_alias_name.db"
+        run_migrations(db_file)
+        import sqlite3
+        with sqlite3.connect(str(db_file)) as conn:
+            conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('logshed', 'Local-Shed', '2026-09-01T00:00:00Z')")
+            conn.commit()
+
+        cache = AliasCache(db_file)
+        handler = InternalLogHandler(level="DEBUG", alias_cache=cache)
+        q = get_queue()
+
+        handler.emit(self._make_record(level=logging.INFO, msg="Named internal log"))
+        assert not q.empty()
+        entry = q.get_nowait()
+        assert entry["source_alias"] == "Local-Shed"
+
+    def test_internal_log_handler_falls_back_to_logshed_when_unaliased(self):
+        handler = InternalLogHandler(level="DEBUG")
+        q = get_queue()
+
+        handler.emit(self._make_record(level=logging.INFO, msg="Default unaliased internal log"))
+        assert not q.empty()
+        entry = q.get_nowait()
+        assert entry["source_ip"] == "127.0.0.1"
+        assert entry["source_alias"] == "logshed"
+
     def test_loop_suppression_ignored_loggers(self):
         handler = InternalLogHandler(level="DEBUG")
         q = get_queue()

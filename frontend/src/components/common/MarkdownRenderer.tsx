@@ -131,6 +131,33 @@ export type BlockNode =
   | { type: 'paragraph'; lines: string[] };
 
 /**
+ * Strips common leading whitespace prefix from all non-empty lines (similar to Python textwrap.dedent).
+ * Preserves relative indentation within the block.
+ */
+export function dedentLines(lines: string[]): string[] {
+  const nonEmptyLines = lines.filter((l) => l.trim() !== '');
+  if (nonEmptyLines.length === 0) return lines;
+
+  let minIndent = Infinity;
+  for (const line of nonEmptyLines) {
+    const match = line.match(/^[ \t]*/);
+    const indent = match ? match[0].length : 0;
+    if (indent < minIndent) {
+      minIndent = indent;
+    }
+  }
+
+  if (minIndent === 0 || minIndent === Infinity) {
+    return lines;
+  }
+
+  return lines.map((line) => {
+    if (line.trim() === '') return '';
+    return line.length >= minIndent ? line.slice(minIndent) : line;
+  });
+}
+
+/**
  * Parses markdown into structured Block AST.
  * Handles nested code blocks in list items, preserving code syntax (including YAML dashes).
  */
@@ -160,10 +187,11 @@ export function parseMarkdownBlocks(content: string): BlockNode[] {
         i++;
       }
       if (i < lines.length) i++; // skip closing ```
+      const dedented = dedentLines(codeLines);
       blocks.push({
         type: 'code_block',
         language,
-        code: codeLines.join('\n'),
+        code: dedented.join('\n'),
       });
       continue;
     }

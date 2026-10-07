@@ -1,0 +1,13 @@
+{
+  "id": "ssh_bruteforce",
+  "name": "SSH Brute-Force Detection",
+  "description": "Detects repeated failed SSH authentication attempts from offending IP addresses.",
+  "rule_type": "threshold",
+  "filter_app": "sshd",
+  "filter_severity": null,
+  "match_pattern": "Failed password|authentication failure|invalid user",
+  "threshold_count": 5,
+  "window_seconds": 60,
+  "cooldown_seconds": 300,
+  "ai_enrichment": true
+}

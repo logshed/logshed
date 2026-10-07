@@ -1,9 +1,8 @@
 """
-AI Preview, Analysis, and Audit Log API endpoints for LogShed.
+AI Preview and Analysis API endpoints for LogShed.
 """
 
 import asyncio
-import datetime
 import json
 import logging
 from typing import Optional
@@ -16,11 +15,10 @@ from app.core.rate_limiter import ai_rate_limiter
 from app.core.redactor import redact
 from app.core.security import SESSION_COOKIE_NAME
 from app.models import (
-    AiAuditDeleteResponse,
-    AiAuditListResponse,
     AiDiagnosisRequest,
     AiDiagnosisResponse,
     AiModelInfo,
+    AiModelRefreshRequest,
     AiModelsResponse,
     AiPreviewRequest,
     AiPreviewResponse,
@@ -34,10 +32,7 @@ from app.services.ai_engine import (
 )
 from app.services.ai_service import (
     build_diagnosis_context,
-    clear_ai_audit_logs,
-    delete_ai_audit_item,
     is_cache_fresh,
-    list_ai_audit_logs,
     read_ai_settings,
     save_diagnosis_audit,
     save_models_cache,
@@ -60,23 +55,31 @@ def _check_ai_rate_limit(request: Request, user: dict) -> None:
 
 @router.get("/models", response_model=AiModelsResponse)
 async def list_available_models(
-    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'openai_compatible')"),
-    refresh: bool = Query(False, description="Force live refresh from provider API"),
+    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
     """
-    Retrieve active text models for the specified or configured provider.
-    Models are cached in SQLite with a 24-hour TTL and refreshed on demand or periodically.
+    Retrieve active text models for the specified or configured provider from SQLite cache.
+    Strictly read-only; does not query external providers or perform database writes.
     If no API key is configured, returns has_api_key=False with an empty list.
     """
     stored_settings, updated_map = await run_db_query(read_ai_settings)
-    clean_provider = (provider or stored_settings.get("ai_provider") or "gemini").lower()
-    api_key = stored_settings.get("ai_api_key", "").strip()
-    base_url = stored_settings.get("ai_base_url")
+    active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
+    clean_provider = (provider or active_db_provider).lower()
+
+    # Provider-specific key check
+    api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
+    if not api_key and clean_provider == active_db_provider:
+        api_key = stored_settings.get("ai_api_key", "").strip()
 
     # If the provider requires an API key and none is set, prompt user
-    if clean_provider in ("gemini", "openai") and not api_key:
-        provider_name = "Google Gemini" if clean_provider == "gemini" else "OpenAI"
+    if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
+        provider_names = {
+            "gemini": "Google Gemini",
+            "openai": "OpenAI",
+            "anthropic": "Anthropic Claude",
+        }
+        provider_name = provider_names.get(clean_provider, clean_provider)
         return AiModelsResponse(
             provider=clean_provider,
             models=[],
@@ -89,8 +92,7 @@ async def list_available_models(
     cached_json = stored_settings.get(cache_key)
     cached_updated_at = updated_map.get(cache_key)
 
-    # Return cached models if fresh and refresh not forced
-    if not refresh and cached_json and is_cache_fresh(cached_updated_at):
+    if cached_json:
         try:
             cached_items = json.loads(cached_json)
             clean_items = [
@@ -101,12 +103,72 @@ async def list_available_models(
                 provider=clean_provider,
                 models=[AiModelInfo(**item) for item in clean_items],
                 has_api_key=True,
-                cached_at=str(cached_updated_at),
+                cached_at=str(cached_updated_at) if cached_updated_at else None,
                 is_live=False,
                 error=None,
             )
         except Exception as e:
             logger.warning(f"Failed to parse cached models for {clean_provider}: {e}")
+
+    return AiModelsResponse(
+        provider=clean_provider,
+        models=[],
+        has_api_key=True,
+        cached_at=None,
+        is_live=False,
+        error=None,
+    )
+
+
+@router.post("/models/refresh", response_model=AiModelsResponse)
+async def refresh_available_models(
+    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
+    payload: Optional[AiModelRefreshRequest] = None,
+    user: dict = Depends(get_current_user),
+) -> AiModelsResponse:
+    """
+    Force live refresh of available models from external provider API.
+    Updates the cache in system_settings and returns discovered models.
+    Optionally accepts a fresh API key in payload to test and store without a prior save.
+    Requires authentication and CSRF header.
+    """
+    stored_settings, updated_map = await run_db_query(read_ai_settings)
+    active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
+    clean_provider = (provider or active_db_provider).lower()
+
+    key_from_payload = False
+    if payload and payload.api_key and payload.api_key != "********" and payload.api_key.strip():
+        api_key = payload.api_key.strip()
+        key_from_payload = True
+    else:
+        api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
+        if not api_key and clean_provider == active_db_provider:
+            api_key = stored_settings.get("ai_api_key", "").strip()
+
+    if payload and payload.base_url and payload.base_url.strip():
+        base_url = payload.base_url.strip()
+    else:
+        base_url = stored_settings.get(f"ai_base_url_{clean_provider}") or stored_settings.get("ai_base_url")
+
+    # If the provider requires an API key and none is set, prompt user
+    if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
+        provider_names = {
+            "gemini": "Google Gemini",
+            "openai": "OpenAI",
+            "anthropic": "Anthropic Claude",
+        }
+        provider_name = provider_names.get(clean_provider, clean_provider)
+        return AiModelsResponse(
+            provider=clean_provider,
+            models=[],
+            has_api_key=False,
+            is_live=False,
+            error=f"No API key configured for {provider_name}. Please configure your API key in Settings to view available models.",
+        )
+
+    cache_key = f"ai_models_cache_{clean_provider}"
+    cached_json = stored_settings.get(cache_key)
+    cached_updated_at = updated_map.get(cache_key)
 
     # Query provider live
     try:
@@ -116,7 +178,35 @@ async def list_available_models(
             base_url=base_url if base_url else None,
         )
 
-        now_str = await run_db_query(lambda conn: save_models_cache(conn, cache_key, discovered))
+        def _persist_refresh(conn):
+            now_iso = save_models_cache(conn, cache_key, discovered)
+            if key_from_payload:
+                from app.core.security import encrypt_value
+                from app.core.config import invalidate_settings_cache
+                enc = encrypt_value(api_key)
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, is_encrypted = 1
+                    """,
+                    (f"ai_api_key_{clean_provider}", enc, now_iso),
+                )
+                if clean_provider == active_db_provider:
+                    cur.execute(
+                        """
+                        INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+                        VALUES ('ai_api_key', ?, ?, 1)
+                        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, is_encrypted = 1
+                        """,
+                        (enc, now_iso),
+                    )
+                conn.commit()
+                invalidate_settings_cache()
+            return now_iso
+
+        now_str = await run_db_query(_persist_refresh)
         return AiModelsResponse(
             provider=clean_provider,
             models=[AiModelInfo(**m) for m in discovered],
@@ -139,7 +229,7 @@ async def list_available_models(
                     provider=clean_provider,
                     models=[AiModelInfo(**item) for item in clean_stale],
                     has_api_key=True,
-                    cached_at=str(cached_updated_at),
+                    cached_at=str(cached_updated_at) if cached_updated_at else None,
                     is_live=False,
                     error=f"Could not refresh models from {clean_provider}: {exc}. Displaying cached list.",
                 )
@@ -181,6 +271,8 @@ async def preview_ai_prompt(
         source_alias=ctx["source_alias"],
         app_name=ctx["app_name"],
         system_prompt=ctx["system_prompt"],
+        ai_enabled=ctx.get("ai_enabled", True),
+        has_ai_api_key=ctx.get("has_ai_api_key", True),
     )
 
 
@@ -208,6 +300,12 @@ async def diagnose_logs(
             fallback_models_override=req.fallback_models,
         )
 
+        if not ctx.get("ai_enabled", True):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
+            )
+
         ai_res = await execute_ai_analysis(
             provider=ctx["provider"],
             model=ctx["model"],
@@ -222,6 +320,8 @@ async def diagnose_logs(
             prompt_override=ctx["redacted_prompt_override"],
             system_prompt=ctx["system_prompt"],
             fallback_models=ctx["fallback_models"],
+            timeout=ctx.get("ai_timeout", 45.0),
+            thinking_budget=ctx.get("ai_thinking_budget", 1024),
         )
 
         if len(ai_res) == 11:
@@ -313,6 +413,12 @@ async def diagnose_logs_stream(
         fallback_models_override=req.fallback_models,
     )
 
+    if not ctx.get("ai_enabled", True):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
+        )
+
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
 
@@ -344,6 +450,8 @@ async def diagnose_logs_stream(
                     system_prompt=ctx["system_prompt"],
                     fallback_models=ctx["fallback_models"],
                     on_progress=on_progress,
+                    timeout=ctx.get("ai_timeout", 45.0),
+                    thinking_budget=ctx.get("ai_thinking_budget", 1024),
                 )
 
                 if len(ai_res) == 11:
@@ -423,39 +531,4 @@ async def diagnose_logs_stream(
     )
 
 
-@router.get("/audit", response_model=AiAuditListResponse)
-async def list_ai_audit(
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    user: dict = Depends(get_current_user),
-) -> AiAuditListResponse:
-    """
-    Retrieve historical AI analyses from ai_audit_log.
-    """
-    items, total = await list_ai_audit_logs(limit=limit, offset=offset)
-    return AiAuditListResponse(items=items, total=total)
 
-
-@router.delete("/audit/{audit_id}", response_model=AiAuditDeleteResponse)
-async def delete_ai_audit_item_endpoint(
-    audit_id: int,
-    user: dict = Depends(get_current_user),
-) -> AiAuditDeleteResponse:
-    """
-    Delete a single AI audit log entry by ID.
-    """
-    found = await delete_ai_audit_item(audit_id)
-    if not found:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI audit entry not found")
-    return AiAuditDeleteResponse(status="ok", deleted_id=audit_id, deleted_count=1)
-
-
-@router.delete("/audit", response_model=AiAuditDeleteResponse)
-async def clear_ai_audit_log_endpoint(
-    user: dict = Depends(get_current_user),
-) -> AiAuditDeleteResponse:
-    """
-    Clear all AI audit log entries.
-    """
-    count = await clear_ai_audit_logs()
-    return AiAuditDeleteResponse(status="ok", deleted_count=count)

@@ -1,34 +1,39 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { AlertCircle, RefreshCw, Save } from 'lucide-react';
 import { useAuth } from './context/AuthContext.tsx';
+import { AliasContext } from './context/AliasContext.tsx';
 import { Navbar } from './components/common/Navbar.tsx';
 import { Modal } from './components/common/Modal.tsx';
 import { LoginForm } from './components/auth/LoginForm.tsx';
 import { SetupModal } from './components/auth/SetupModal.tsx';
 import { LiveLogStream } from './components/logs/LiveLogStream.tsx';
-import { HostAliasManager } from './components/aliases/HostAliasManager.tsx';
-import { StoragePanel } from './components/storage/StoragePanel.tsx';
-import { SettingsPanel } from './components/settings/SettingsPanel.tsx';
-import { AiAnalysisModal } from './components/ai/AiAnalysisModal.tsx';
-import { LogEntry, AppTab } from './types.ts';
+import { LoadingSpinner } from './components/common/LoadingSpinner.tsx';
+
+const StoragePanel = React.lazy(() => import('./components/storage/StoragePanel'));
+const AlertsPanel = React.lazy(() => import('./components/alerts/AlertsPanel'));
+const SettingsPanel = React.lazy(() => import('./components/settings/SettingsPanel'));
+const AiAnalysisModal = React.lazy(() => import('./components/ai/AiAnalysisModal'));
+import { LogEntry, AppTab, SettingsSubTab } from './types.ts';
 import { LogShedLogo } from './components/common/LogShedLogo.tsx';
 import { useMediaQuery } from './utils/hooks.ts';
 import { usePullToRefresh } from './utils/usePullToRefresh.ts';
+import { fetchVersion } from './api/system.ts';
 
 export const pathToTab = (pathname: string): AppTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
-  if (clean === '/aliases') return 'aliases';
-  if (clean === '/storage') return 'storage';
-  if (clean === '/settings') return 'settings';
+  if (clean === '/aliases' || clean.startsWith('/aliases/')) return 'settings';
+  if (clean === '/storage' || clean.startsWith('/storage/')) return 'storage';
+  if (clean === '/rules' || clean.startsWith('/rules/')) return 'rules';
+  if (clean === '/settings' || clean.startsWith('/settings/')) return 'settings';
   return 'stream';
 };
 
 export const tabToPath = (tab: AppTab): string => {
   switch (tab) {
-    case 'aliases':
-      return '/aliases';
     case 'storage':
       return '/storage';
+    case 'rules':
+      return '/rules';
     case 'settings':
       return '/settings';
     case 'stream':
@@ -42,7 +47,16 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
   const [aiSelectedLogs, setAiSelectedLogs] = useState<LogEntry[]>([]);
   const [addAliasIp, setAddAliasIp] = useState<string | null>(null);
+  const [pendingSettingsSubTab, setPendingSettingsSubTab] = useState<SettingsSubTab | null>(null);
   const [clearSelectionSignal, setClearSelectionSignal] = useState<number>(0);
+  const [aliasVersion, setAliasVersion] = useState<number>(0);
+  const bumpAliasVersion = useCallback(() => {
+    setAliasVersion((prev) => prev + 1);
+  }, []);
+  const aliasContextValue = useMemo(
+    () => ({ aliasVersion, bumpAliasVersion }),
+    [aliasVersion, bumpAliasVersion]
+  );
   const isMobile = useMediaQuery('(max-width: 767px)');
 
   const {
@@ -81,6 +95,25 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [activeTab, isSettingsDirty]);
 
+  // Dynamic browser title for beta / prerelease builds (e.g. LogShed [1.2.0-beta.1])
+  const titleSetRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!isAuthenticated || titleSetRef.current) return;
+    titleSetRef.current = true;
+
+    fetchVersion()
+      .then((data) => {
+        if (data.current_version && data.current_version.includes('-')) {
+          document.title = `LogShed [${data.current_version}]`;
+        } else {
+          document.title = 'LogShed';
+        }
+      })
+      .catch(() => {
+        // Fall back to default title on error
+      });
+  }, [isAuthenticated]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-dark-950 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
@@ -104,13 +137,17 @@ export const App: React.FC = () => {
 
   const handleAddAliasFromLog = (ip: string) => {
     setAddAliasIp(ip);
-    handleTabChange('aliases');
+    setPendingSettingsSubTab('aliases');
+    handleTabChange('settings');
   };
 
   const handleTabChange = (nextTab: AppTab) => {
     if (activeTab === 'settings' && isSettingsDirty && nextTab !== 'settings') {
       setPendingTab(nextTab);
       return;
+    }
+    if (nextTab !== 'settings') {
+      setPendingSettingsSubTab(null);
     }
     setActiveTab(nextTab);
     const targetPath = tabToPath(nextTab);
@@ -120,7 +157,8 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-dvh max-h-dvh w-full max-w-full bg-dark-950 text-slate-200 flex flex-col overflow-hidden select-text">
+    <AliasContext.Provider value={aliasContextValue}>
+      <div className="h-dvh max-h-dvh w-full max-w-full bg-dark-950 text-slate-200 flex flex-col overflow-hidden select-text">
       {/* Mobile Pull-to-Refresh Indicator */}
       {isMobile && (isPulling || isRefreshing) && (
         <div
@@ -158,7 +196,9 @@ export const App: React.FC = () => {
       {/* Main Content Area */}
       <main
         className={`flex-1 min-h-0 relative ${
-          activeTab === 'stream' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
+          activeTab === 'stream'
+            ? 'overflow-hidden flex flex-col'
+            : 'overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]'
         } pb-14 md:pb-0`}
       >
         {activeTab === 'stream' && (
@@ -170,34 +210,42 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'aliases' && (
-          <HostAliasManager
-            initialAddIp={addAliasIp}
-            onAliasSaved={() => setAddAliasIp(null)}
-          />
-        )}
+        <React.Suspense fallback={<LoadingSpinner />}>
+          {activeTab === 'storage' && <StoragePanel />}
 
-        {activeTab === 'storage' && <StoragePanel />}
+          {activeTab === 'rules' && (
+            <AlertsPanel
+              onNavigateToSettings={() => handleTabChange('settings')}
+            />
+          )}
 
-        {activeTab === 'settings' && (
-          <SettingsPanel
-            onDirtyChange={setIsSettingsDirty}
-            saveTriggerRef={saveSettingsTriggerRef}
+          {activeTab === 'settings' && (
+            <SettingsPanel
+              initialSubTab={pendingSettingsSubTab || undefined}
+              initialAddIp={addAliasIp}
+              onAliasSaved={() => {
+                setAddAliasIp(null);
+                setPendingSettingsSubTab(null);
+              }}
+              onDirtyChange={setIsSettingsDirty}
+              saveTriggerRef={saveSettingsTriggerRef}
+            />
+          )}
+
+          {/* Global AI Root-Cause Analysis Modal */}
+          <AiAnalysisModal
+            isOpen={aiSelectedLogs.length > 0}
+            onClose={() => {
+              setAiSelectedLogs([]);
+              if (isMobile) {
+                setClearSelectionSignal((prev) => prev + 1);
+              }
+            }}
+            selectedLogs={aiSelectedLogs}
+            onNavigateToSettings={() => handleTabChange('settings')}
           />
-        )}
+        </React.Suspense>
       </main>
-
-      {/* Global AI Root-Cause Analysis Modal */}
-      <AiAnalysisModal
-        isOpen={aiSelectedLogs.length > 0}
-        onClose={() => {
-          setAiSelectedLogs([]);
-          if (isMobile) {
-            setClearSelectionSignal((prev) => prev + 1);
-          }
-        }}
-        selectedLogs={aiSelectedLogs}
-      />
 
       {/* Unsaved Changes Confirmation Modal */}
       <Modal
@@ -291,6 +339,7 @@ export const App: React.FC = () => {
           </div>
         </div>
       </Modal>
-    </div>
+      </div>
+    </AliasContext.Provider>
   );
 };

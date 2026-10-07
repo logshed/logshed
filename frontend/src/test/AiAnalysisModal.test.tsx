@@ -491,7 +491,7 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       expect(aiApi.previewAiPrompt).toHaveBeenCalled();
     });
 
-    const runBtn = screen.getByText('Run AI Analysis');
+    const runBtn = await screen.findByText('Run AI Analysis');
     fireEvent.click(runBtn);
 
     await waitFor(() => {
@@ -741,6 +741,105 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     });
 
     expect(fullPromptTextarea.value).toBe(editedLine1);
+  });
+
+  it('displays advisory banner and disables run button when AI is disabled in settings', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+      ...samplePreview,
+      ai_enabled: false,
+      has_ai_api_key: true,
+    });
+    const onNavigateToSettings = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <AiAnalysisModal
+        isOpen={true}
+        onClose={onClose}
+        selectedLogs={sampleLogs}
+        onNavigateToSettings={onNavigateToSettings}
+      />
+    );
+
+    await screen.findByPlaceholderText('Redacted prompt...');
+
+    expect(screen.getByText('AI Provider Disabled')).toBeInTheDocument();
+    expect(
+      screen.getByText(/AI features are disabled in system configuration\. Enable an AI provider in Settings to inspect logs\./i)
+    ).toBeInTheDocument();
+
+    const configureBtn = screen.getByRole('button', { name: /Configure in Settings/i });
+    expect(configureBtn).toBeInTheDocument();
+
+    fireEvent.click(configureBtn);
+    expect(onClose).toHaveBeenCalled();
+    expect(onNavigateToSettings).toHaveBeenCalled();
+
+    const runBtn = screen.getByRole('button', { name: /Run AI Analysis/i });
+    expect(runBtn).toBeDisabled();
+  });
+
+  it('displays advisory banner and disables run button when API key is missing', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+      ...samplePreview,
+      ai_enabled: true,
+      has_ai_api_key: false,
+    });
+
+    render(
+      <AiAnalysisModal
+        isOpen={true}
+        onClose={vi.fn()}
+        selectedLogs={sampleLogs}
+      />
+    );
+
+    await screen.findByPlaceholderText('Redacted prompt...');
+
+    expect(screen.getByText('AI Provider Not Configured')).toBeInTheDocument();
+    expect(
+      screen.getByText(/An API key is required to query models\. Configure your AI provider in Settings to inspect logs\./i)
+    ).toBeInTheDocument();
+
+    const runBtn = screen.getByRole('button', { name: /Run AI Analysis/i });
+    expect(runBtn).toBeDisabled();
+  });
+
+  it('lists Anthropic Claude in provider options and switches model settings when changing provider', async () => {
+    render(
+      <AiAnalysisModal
+        isOpen={true}
+        onClose={vi.fn()}
+        selectedLogs={sampleLogs}
+      />
+    );
+
+    await screen.findByPlaceholderText('Redacted prompt...');
+
+    // Open Model & Provider Settings
+    const toggleBtn = screen.getByRole('button', { name: /Model & Provider Settings/i });
+    fireEvent.click(toggleBtn);
+
+    const providerSelect = screen.getByDisplayValue('Google Gemini') as HTMLSelectElement;
+    const optionValues = Array.from(providerSelect.querySelectorAll('option')).map((o) => o.value);
+    expect(optionValues).toContain('gemini');
+    expect(optionValues).toContain('openai');
+    expect(optionValues).toContain('anthropic');
+    expect(optionValues).toContain('openai_compatible');
+
+    // Switch to OpenAI
+    fireEvent.change(providerSelect, { target: { value: 'openai' } });
+
+    await waitFor(() => {
+      expect(aiApi.getAiModels).toHaveBeenCalledWith('openai');
+    });
+
+    // Switch to Anthropic Claude
+    fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
+
+    await waitFor(() => {
+      expect(aiApi.getAiModels).toHaveBeenCalledWith('anthropic');
+    });
   });
 });
 

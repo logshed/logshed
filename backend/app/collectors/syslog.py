@@ -12,7 +12,7 @@ import sqlite3
 import threading
 import weakref
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.core.migrations import get_connection
 from app.core.pipeline import (
@@ -24,6 +24,72 @@ from app.core.pipeline import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MONTH_MAP = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+def _parse_valkey_datetime(
+    day_str: str,
+    mon_str: str,
+    year_str: str,
+    time_str: str,
+    now: datetime.datetime,
+    local_tz: datetime.tzinfo,
+) -> str:
+    """Parse Valkey/Redis style datetime (e.g. 02 Oct 2026 11:47:57.745) to UTC ISO format."""
+    try:
+        day = int(day_str)
+        month = _MONTH_MAP.get(mon_str.lower(), 1)
+        year = int(year_str)
+        time_clean = time_str.replace(",", ".")
+        time_parts = time_clean.split(":")
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+        sec_parts = time_parts[2].split(".")
+        second = int(sec_parts[0])
+        microsecond = int(float("0." + sec_parts[1]) * 1_000_000) if len(sec_parts) > 1 else 0
+        dt = datetime.datetime(year, month, day, hour, minute, second, microsecond)
+        candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
+        candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
+        if abs((candidate_b - now).total_seconds()) < abs((candidate_a - now).total_seconds()):
+            dt_utc = candidate_b
+        else:
+            dt_utc = candidate_a
+        return dt_utc.isoformat()
+    except Exception:
+        return f"{year_str}-{mon_str}-{day_str}T{time_str}"
+
+def _parse_dmy_or_datetime(
+    dmy_str: str,
+    time_str: str,
+    now: datetime.datetime,
+    local_tz: datetime.tzinfo,
+) -> str:
+    """Parse day-first slash date (DD/MM/YYYY HH:MM:SS) to UTC ISO format."""
+    try:
+        parts = dmy_str.split("/")
+        day = int(parts[0])
+        month = int(parts[1])
+        year = int(parts[2])
+        time_clean = time_str.replace(",", ".")
+        time_parts = time_clean.split(":")
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+        sec_parts = time_parts[2].split(".")
+        second = int(sec_parts[0])
+        microsecond = int(float("0." + sec_parts[1]) * 1_000_000) if len(sec_parts) > 1 else 0
+        dt = datetime.datetime(year, month, day, hour, minute, second, microsecond)
+        candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
+        candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
+        if abs((candidate_b - now).total_seconds()) < abs((candidate_a - now).total_seconds()):
+            dt_utc = candidate_b
+        else:
+            dt_utc = candidate_a
+        return dt_utc.isoformat()
+    except Exception:
+        return f"{dmy_str}T{time_str}"
 
 def _parse_iso_or_datetime(
     ts_str: str,
@@ -98,6 +164,7 @@ def parse_syslog_message(
     
     # Parse PRI
     has_pri = False
+    explicit_severity = False
     pri_match = re.match(r"^<(\d{1,3})>", content)
     if pri_match:
         has_pri = True
@@ -136,9 +203,9 @@ def parse_syslog_message(
         # 5. Fallback: single word or unparsed
         result["message"] = msg_part
 
-    # Check RFC 5424: version MUST be exactly '1' followed by a space.
-    # This prevents misidentifying RFC 3164 messages that start with a digit.
-    if content.startswith("1 "):
+    # Check RFC 5424: version MUST be exactly '1' followed by a space, followed by a valid timestamp or '-'
+    # This prevents misidentifying Valkey/Redis messages like '1:M ...' or other numbers.
+    if content.startswith("1 ") and not content.startswith("1:"):
         content = content[2:]  # skip "1 "
         # RFC 5424 format after version:
         # TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID SP STRUCTURED-DATA [SP MSG]
@@ -325,6 +392,43 @@ def parse_syslog_message(
             _parse_msg_into_app_and_content(parts[1])
         else:
             _parse_msg_into_app_and_content(rem)
+    elif (m_valkey := re.match(r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)", content)):
+        # Valkey / Redis server format: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
+        result["timestamp"] = _parse_valkey_datetime(
+            m_valkey.group(2), m_valkey.group(3), m_valkey.group(4), m_valkey.group(5), now, local_tz
+        )
+        level_char = m_valkey.group(6)
+        valkey_sev_map = {"#": 4, "*": 5, ".": 7, "-": 7}
+        result["severity"] = valkey_sev_map.get(level_char, 6)
+        explicit_severity = True
+        result["message"] = m_valkey.group(7)
+    elif (m_app_pipe := re.match(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)", content)):
+        # Application-prefixed pipe format: [maintainerr] | 03/10/2026 16:00:33 [INFO] ...
+        result["app_name"] = m_app_pipe.group(1)
+        result["timestamp"] = _parse_dmy_or_datetime(
+            m_app_pipe.group(2), m_app_pipe.group(3), now, local_tz
+        )
+        rem = m_app_pipe.group(4)
+        m_level = re.match(r"^\[([a-zA-Z]+)\]\s*(.*)", rem)
+        if m_level and m_level.group(1).lower() in SEVERITY_LEVEL_MAP:
+            result["severity"] = SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+            explicit_severity = True
+            result["message"] = m_level.group(2)
+        else:
+            result["message"] = rem
+    elif (m_logfmt := re.match(r"""^(?:time|ts)=["']?([^"'\s]+)["']?\s+(.*)""", content)):
+        # Logfmt format: time="2026-10-03T14:56:31Z" level=info msg="..."
+        result["timestamp"] = _parse_iso_or_datetime(m_logfmt.group(1), now, local_tz)
+        rem = m_logfmt.group(2)
+        m_level = re.search(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""", rem)
+        if m_level and m_level.group(1).lower() in SEVERITY_LEVEL_MAP:
+            result["severity"] = SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+            explicit_severity = True
+        m_msg = re.search(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""", rem)
+        if m_msg:
+            result["message"] = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
+        else:
+            result["message"] = rem
     else:
         # Fallback: unparsed message without recognized timestamp
         result["message"] = content
@@ -332,9 +436,9 @@ def parse_syslog_message(
     # Content-based severity fallback inspection:
     # If PRI was missing or has a generic default/notice priority (>= 5),
     # inspect message content for explicit severity keywords (e.g. error, warn, panic)
-    if not has_pri or result["severity"] >= 5:
-        content_sev = detect_severity(result["message"])
-        if not has_pri:
+    if (not has_pri and not explicit_severity) or result["severity"] >= 5:
+        content_sev = detect_severity(result["message"] if not content.startswith(('time=', 'ts=')) else content)
+        if not has_pri and not explicit_severity:
             result["severity"] = content_sev
         elif content_sev < result["severity"]:
             result["severity"] = content_sev
@@ -656,11 +760,11 @@ class SyslogTCPProtocol(asyncio.Protocol):
                 if not self.buffer:
                     break
 
-            # RFC 6587 octet counting: <MSG-LEN> SP <MSG>
-            match = re.match(rb"^(\d+) ", self.buffer)
+            # RFC 6587 octet counting: <MSG-LEN> SP <MSG> (verifying priority header prefix)
+            match = re.match(rb"^(\d+) <\d+>", self.buffer)
             if match:
                 msg_len = int(match.group(1))
-                header_len = match.end()
+                header_len = len(match.group(1)) + 1
 
                 if msg_len > MAX_TCP_BUFFER:
                     logger.warning(
@@ -769,6 +873,38 @@ class SyslogServer:
     @property
     def active_tcp_connections(self) -> int:
         return len(self.tcp_protocols)
+
+    def update_limits(
+        self,
+        max_connections: Optional[int] = None,
+        inactivity_timeout: Optional[float] = None,
+    ) -> None:
+        """
+        Dynamically update concurrent TCP connection limit and client inactivity timeout.
+        Live connections update their timers immediately; new connection ceilings apply
+        to subsequent inbound sockets.
+        """
+        changed = False
+        if max_connections is not None:
+            new_max = max(1, max_connections)
+            if new_max != self.max_tcp_connections:
+                self.max_tcp_connections = new_max
+                changed = True
+
+        if inactivity_timeout is not None:
+            new_timeout = max(0.0, inactivity_timeout)
+            if new_timeout != self.tcp_inactivity_timeout:
+                self.tcp_inactivity_timeout = new_timeout
+                for proto in list(self.tcp_protocols):
+                    proto.inactivity_timeout = self.tcp_inactivity_timeout
+                    proto._reset_inactivity_timer()
+                changed = True
+
+        if changed:
+            logger.info(
+                f"SyslogServer limits updated: max_tcp_connections={self.max_tcp_connections}, "
+                f"tcp_inactivity_timeout={self.tcp_inactivity_timeout}s"
+            )
 
     async def start(self) -> None:
         """Create and start alias cache refresh, then both UDP and TCP transports."""

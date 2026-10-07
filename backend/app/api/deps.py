@@ -6,6 +6,7 @@ All SQLite queries are dispatched via asyncio.to_thread() to keep the event loop
 import asyncio
 import datetime
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
@@ -30,21 +31,90 @@ def invalidate_admin_auth_cache() -> None:
     _cached_admin_updated_at_time = 0.0
 
 
+_thread_local = threading.local()
+_all_connections: set[sqlite3.Connection] = set()
+_all_connections_lock = threading.Lock()
+
+
+def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
+    """
+    Get or open a cached thread-local read connection for the given database path.
+    Configures WAL mode and performance pragmas once upon connection creation.
+    """
+    if not hasattr(_thread_local, "connections"):
+        _thread_local.connections = {}
+
+    resolved_key = str(Path(db_path).resolve())
+    conn = _thread_local.connections.get(resolved_key)
+    if conn is not None:
+        try:
+            _ = conn.total_changes
+        except sqlite3.ProgrammingError:
+            conn = None
+
+    if conn is None:
+        conn = sqlite3.connect(resolved_key, check_same_thread=True)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        _thread_local.connections[resolved_key] = conn
+        with _all_connections_lock:
+            _all_connections.add(conn)
+
+    return conn
+
+
+def close_thread_local_connections() -> None:
+    """
+    Close all cached SQLite connections on the calling thread and clear the dictionary.
+    Useful for test fixtures, thread teardown, and process shutdown.
+    """
+    if hasattr(_thread_local, "connections"):
+        for conn in list(_thread_local.connections.values()):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _thread_local.connections.clear()
+
+
+def reset_all_db_connections() -> None:
+    """
+    Close all open SQLite connections across all threads.
+    Thread-local caches will detect the closed connection and automatically reopen on next use.
+    """
+    with _all_connections_lock:
+        for conn in list(_all_connections):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _all_connections.clear()
+    close_thread_local_connections()
+
+
+async def reset_all_db_connections_async() -> None:
+    """Async wrapper to reset all database connections."""
+    await asyncio.to_thread(reset_all_db_connections)
+
+
 async def run_db_query(fn: Callable[[sqlite3.Connection], T], custom_db_path: Optional[Path] = None) -> T:
     """
     Executes a synchronous database function in a worker thread using asyncio.to_thread().
-    Automatically manages connection lifecycle.
+    Reuses thread-local read connections across invocations on the same thread.
     """
     db_path = custom_db_path or get_db_path()
 
     def _execute() -> T:
-        conn = get_connection(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = get_thread_read_connection(db_path)
         try:
             with conn:
                 return fn(conn)
         finally:
-            conn.close()
+            if conn.in_transaction:
+                conn.rollback()
 
     return await asyncio.to_thread(_execute)
 
@@ -86,11 +156,7 @@ async def _is_session_revoked(payload: dict[str, Any]) -> bool:
 
     if updated_at_epoch is not None:
         iat_val = float(iat)
-        is_revoked = (
-            int(iat_val) < int(updated_at_epoch)
-            if (isinstance(iat, int) or iat_val.is_integer())
-            else iat_val < updated_at_epoch
-        )
+        is_revoked = iat_val < updated_at_epoch
         return is_revoked
 
     return False

@@ -559,50 +559,69 @@ class TestQueueConsumer:
 
     @pytest.mark.asyncio
     async def test_run_db_query_closes_connection(self, db_path: Path):
-        """run_db_query must explicitly close the database connection in a finally block."""
-        from unittest.mock import patch, MagicMock
+        """run_db_query reuses thread-local connections across sequential queries on the same thread."""
+        import threading
         import app.api.deps as deps_mod
 
-        spied_conn = None
-        orig_get_conn = deps_mod.get_connection
+        deps_mod.close_thread_local_connections()
 
-        def _get_wrapped_conn(p):
-            nonlocal spied_conn
-            conn = orig_get_conn(p)
-            spied_conn = MagicMock(wraps=conn)
-            return spied_conn
+        # Verify sequential calls on the same thread reuse the exact same sqlite3.Connection
+        def _run_sequential_queries():
+            conn1 = deps_mod.get_thread_read_connection(db_path)
+            res1 = conn1.execute("SELECT 1").fetchone()[0]
+            conn2 = deps_mod.get_thread_read_connection(db_path)
+            res2 = conn2.execute("SELECT 2").fetchone()[0]
+            assert conn1 is conn2
+            return res1, res2
 
-        with patch.object(deps_mod, "get_connection", side_effect=_get_wrapped_conn):
-            result = await run_db_query(lambda conn: conn.execute("SELECT 1").fetchone()[0], custom_db_path=db_path)
+        res1, res2 = await asyncio.to_thread(_run_sequential_queries)
+        assert res1 == 1
+        assert res2 == 2
 
-        assert result == 1
-        assert spied_conn is not None
-        spied_conn.close.assert_called_once()
+        # Verify sequential run_db_query calls
+        recorded = []
+
+        def _record_query(conn: sqlite3.Connection):
+            recorded.append((threading.get_ident(), conn))
+            return conn.execute("SELECT 42").fetchone()[0]
+
+        r1 = await run_db_query(_record_query, custom_db_path=db_path)
+        r2 = await run_db_query(_record_query, custom_db_path=db_path)
+        assert r1 == 42
+        assert r2 == 42
+        assert len(recorded) == 2
+        if recorded[0][0] == recorded[1][0]:
+            assert recorded[0][1] is recorded[1][1]
 
     @pytest.mark.asyncio
     async def test_run_db_query_closes_connection_on_exception(self, db_path: Path):
-        """run_db_query must explicitly close the database connection even if query raises."""
-        from unittest.mock import patch, MagicMock
+        """When an exception is raised, conn.in_transaction is rolled back and connection remains valid."""
         import app.api.deps as deps_mod
 
-        spied_conn = None
-        orig_get_conn = deps_mod.get_connection
+        deps_mod.close_thread_local_connections()
 
-        def _get_wrapped_conn(p):
-            nonlocal spied_conn
-            conn = orig_get_conn(p)
-            spied_conn = MagicMock(wraps=conn)
-            return spied_conn
+        # Create a test table for transaction testing
+        await run_db_query(
+            lambda conn: conn.execute("CREATE TABLE IF NOT EXISTS test_fail (val INT)"),
+            custom_db_path=db_path,
+        )
 
         def _failing_query(conn: sqlite3.Connection):
+            conn.execute("INSERT INTO test_fail VALUES (999)")
+            assert conn.in_transaction
             raise RuntimeError("query error")
 
-        with patch.object(deps_mod, "get_connection", side_effect=_get_wrapped_conn):
-            with pytest.raises(RuntimeError, match="query error"):
-                await run_db_query(_failing_query, custom_db_path=db_path)
+        with pytest.raises(RuntimeError, match="query error"):
+            await run_db_query(_failing_query, custom_db_path=db_path)
 
-        assert spied_conn is not None
-        spied_conn.close.assert_called_once()
+        def _verify_clean(conn: sqlite3.Connection):
+            assert not conn.in_transaction
+            row_count = conn.execute("SELECT COUNT(*) FROM test_fail WHERE val = 999").fetchone()[0]
+            assert row_count == 0
+            return conn.execute("SELECT 100").fetchone()[0]
+
+        result = await run_db_query(_verify_clean, custom_db_path=db_path)
+        assert result == 100
 
     def test_internal_log_handler_suppresses_db_loop_loggers(self):
         """InternalLogHandler must ignore logs from pipeline, retention, and storage_metrics."""

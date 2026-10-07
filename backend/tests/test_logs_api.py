@@ -21,6 +21,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+from app.services.fts_indexer import index_pending_logs
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +81,7 @@ def _seed_logs(db_path: Path, entries: list[dict]):
     with get_connection(db_path) as conn:
         conn.executemany(query, entries)
         conn.commit()
+    index_pending_logs(db_path)
 
 
 # ===================================================================
@@ -222,6 +224,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         # 1. Column filter syntax: app_name:auth
         res_col = await client.get("/api/logs", params={"query": "app_name:auth"})
@@ -254,6 +257,51 @@ class TestLogQuerying:
         assert res_bad.json()["total"] == 1
 
     @pytest.mark.asyncio
+    async def test_total_capped_indication(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """Verify that total_capped is True when row count reaches or exceeds count_limit."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        # Insert 1005 log entries
+        bulk_entries = [
+            (
+                f"2026-08-30T10:00:{i % 60:02d}Z",
+                f"2026-08-30T10:00:{i % 60:02d}Z",
+                "10.0.0.1",
+                "srv1",
+                "app1",
+                1,
+                6,
+                f"Log message {i}",
+                f"raw {i}",
+            )
+            for i in range(1005)
+        ]
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                bulk_entries,
+            )
+
+        # Query with default limit=100, offset=0 -> count_limit = max(1001, 101) = 1001
+        res = await client.get("/api/logs", params={"limit": 100, "offset": 0})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total"] == 1001
+        assert data["total_capped"] is True
+
+        # Query with offset=1000, limit=50 -> count_limit = max(1001, 1000 + 50 + 1) = 1051
+        # DB has 1005 entries, so total is 1005 (< 1051) and total_capped is False
+        res_page = await client.get("/api/logs", params={"limit": 50, "offset": 1000})
+        assert res_page.status_code == 200
+        data_page = res_page.json()
+        assert data_page["total"] == 1005
+        assert data_page["total_capped"] is False
+
+    @pytest.mark.asyncio
     async def test_malformed_fts5_queries_safety(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):
@@ -273,6 +321,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         malformed_queries = [
             # 1. Unallowlisted or incomplete column prefix
@@ -343,6 +392,7 @@ class TestLogQuerying:
                 entries,
             )
             conn.commit()
+        index_pending_logs(db_file)
 
         # 1. Search for IP address with dots (e.g. 192.168.1.1)
         res_ip = await client.get("/api/logs", params={"query": "192.168.1.1"})
@@ -358,6 +408,59 @@ class TestLogQuerying:
         assert data_col_and_ip["total"] == 1
         assert data_col_and_ip["logs"][0]["app_name"] == "nginx"
         assert "10.0.0.1" in data_col_and_ip["logs"][0]["message"]
+
+    @pytest.mark.asyncio
+    async def test_fts_prefix_query_combined_with_app_filter_is_evaluated_once(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """
+        Regression: combining an app filter with an auto-prefixed search term (e.g. 'existing' -> existing*)
+        must not let the planner drive the join from the app index and re-evaluate the FTS5 MATCH
+        (rebuilding the full prefix doclist) once per candidate row.
+        """
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        entries = []
+        for i in range(6000):
+            # Many rows outside the app filter contain the search term (large prefix doclist)
+            entries.append((
+                f"2026-09-01T10:{(i // 60) % 60:02d}:{i % 60:02d}Z", "2026-09-01T10:00:00Z",
+                "10.0.0.2", "media-host", "sonarr", 1, 6,
+                f"Skipping existing file episode{i}.mkv", "raw",
+            ))
+            # Many rows inside the app filter that do not contain the term (large scan candidate set)
+            entries.append((
+                f"2026-09-01T11:{(i // 60) % 60:02d}:{i % 60:02d}Z", "2026-09-01T11:00:00Z",
+                "10.0.0.3", "media-host", "radarr", 1, 6,
+                f"Refreshing movie{i} metadata", "raw",
+            ))
+        for i in range(5):
+            entries.append((
+                f"2026-09-01T09:00:0{i}Z", "2026-09-01T09:00:00Z",
+                "10.0.0.3", "media-host", "radarr", 1, 6,
+                f"Not importing movie{i}, existing file is better", "raw",
+            ))
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                entries,
+            )
+            conn.commit()
+        index_pending_logs(db_file)
+
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        res = await client.get("/api/logs", params={"query": "existing", "app_name": "radarr"})
+        duration = loop.time() - t0
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total"] == 5
+        assert all(log["app_name"] == "radarr" for log in data["logs"])
+        assert all("existing" in log["message"] for log in data["logs"])
+        assert duration < 0.5, f"Prefix FTS query with app filter took {duration:.2f}s"
 
 
 # ===================================================================
@@ -783,6 +886,55 @@ class TestLogStreamAndFacets:
         assert "nas-box" in data["app_to_hosts"]["smartd"]
         assert "nas-box" in data["app_to_hosts"]["zfs-scrub"]
         assert "192.168.1.50" not in data["app_to_hosts"]["smartd"]
+
+    @pytest.mark.asyncio
+    async def test_log_facets_resolves_stale_source_alias_during_background_update(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """
+        When an alias is modified while logs still contain an older source_alias in SQLite,
+        facets must resolve the host to the active alias and omit the stale alias.
+        """
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        recent_ts = (now_utc - datetime.timedelta(hours=1)).isoformat()
+
+        test_entries = [
+            {
+                "timestamp": recent_ts,
+                "received_at": recent_ts,
+                "source_ip": "192.168.1.50",
+                "source_alias": "nas-legacy-name",
+                "app_name": "samba",
+                "facility": 1,
+                "severity": 6,
+                "message": "SMB connection established",
+                "raw": "SMB connection established",
+            },
+        ]
+        _seed_logs(db_file, test_entries)
+
+        with sqlite3.connect(str(db_file)) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
+                ("192.168.1.50", "nas-renamed", recent_ts),
+            )
+            conn.commit()
+
+        response = await client.get("/api/logs/facets")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "nas-renamed" in data["sources"]
+        assert "nas-legacy-name" not in data["sources"]
+        assert "192.168.1.50" not in data["sources"]
+        assert "samba" in data["host_to_apps"].get("nas-renamed", [])
+        assert "nas-legacy-name" not in data["host_to_apps"]
+        assert "nas-renamed" in data["app_to_hosts"].get("samba", [])
+        assert "nas-legacy-name" not in data["app_to_hosts"].get("samba", [])
+
 
     @pytest.mark.asyncio
     async def test_log_facets_preserves_infrequent_unaliased_hosts_beyond_seven_days(

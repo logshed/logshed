@@ -274,4 +274,118 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(transferredLogs).toHaveLength(4);
     expect(transferredLogs.every((l: LogEntry) => l.source_alias === 'proxmox-01')).toBe(true);
   });
+
+  it('renders Create Drop Rule button and calls callback when clicked', () => {
+    const handleCreateDropRule = vi.fn();
+
+    render(
+      <LogDetailModal
+        log={sampleLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onCreateDropRule={handleCreateDropRule}
+      />
+    );
+
+    const dropRuleBtn = screen.getByRole('button', { name: /Create Drop Rule/i });
+    expect(dropRuleBtn).toBeInTheDocument();
+
+    fireEvent.click(dropRuleBtn);
+    expect(handleCreateDropRule).toHaveBeenCalledWith(sampleLog);
+  });
+
+  it('renders Previous and Next log buttons and triggers navigation callbacks', () => {
+    const handlePrevious = vi.fn();
+    const handleNext = vi.fn();
+
+    const { rerender } = render(
+      <LogDetailModal
+        log={sampleLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onNavigatePrevious={handlePrevious}
+        onNavigateNext={handleNext}
+        hasPreviousLog={true}
+        hasNextLog={true}
+      />
+    );
+
+    const prevBtn = screen.getByRole('button', { name: /Previous log/i });
+    const nextBtn = screen.getByRole('button', { name: /Next log/i });
+
+    expect(prevBtn).toBeInTheDocument();
+    expect(nextBtn).toBeInTheDocument();
+    expect(prevBtn).toBeEnabled();
+    expect(nextBtn).toBeEnabled();
+
+    fireEvent.click(prevBtn);
+    expect(handlePrevious).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(nextBtn);
+    expect(handleNext).toHaveBeenCalledTimes(1);
+
+    // Disable state when boundaries reached
+    rerender(
+      <LogDetailModal
+        log={sampleLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onNavigatePrevious={handlePrevious}
+        onNavigateNext={handleNext}
+        hasPreviousLog={false}
+        hasNextLog={false}
+      />
+    );
+
+    expect(prevBtn).toBeDisabled();
+    expect(nextBtn).toBeDisabled();
+  });
+
+  it('renders cleaned message payload and Raw Container Output for Docker logs', () => {
+    const dockerLog: LogEntry = {
+      id: 935138,
+      timestamp: '2026-10-03T15:56:31.293875+00:00',
+      received_at: '2026-10-03T15:56:31.294203+00:00',
+      source_ip: 'docker',
+      source_alias: 'Docker',
+      app_name: 'Paperless-GPT',
+      facility: 1,
+      severity: 6,
+      message: 'time="2026-10-03T15:56:31Z" level=info msg="Successfully refreshed custom fields cache with 0 fields."',
+      raw: 'time="2026-10-03T15:56:31Z" level=info msg="Successfully refreshed custom fields cache with 0 fields."',
+    };
+
+    render(
+      <LogDetailModal
+        log={dockerLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+      />
+    );
+
+    // Cleaned payload extracted
+    expect(screen.getByText('Successfully refreshed custom fields cache with 0 fields.')).toBeInTheDocument();
+    // Dynamic container label
+    expect(screen.getByText('Raw Container Output')).toBeInTheDocument();
+    expect(screen.queryByText('Raw Syslog Packet')).toBeNull();
+  });
+
+  it('renders Raw Syslog Packet label for non-Docker logs', () => {
+    render(
+      <LogDetailModal
+        log={sampleLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Raw Syslog Packet')).toBeInTheDocument();
+    expect(screen.queryByText('Raw Container Output')).toBeNull();
+  });
 });
+

@@ -7,7 +7,7 @@ import re
 from typing import NamedTuple, Optional
 
 # Default installed version if not set via environment variable
-APP_VERSION = os.environ.get("LOGSHED_VERSION", "1.1.0")
+APP_VERSION = os.environ.get("LOGSHED_VERSION", "1.2.0")
 
 # Regular expression matching semantic versions (e.g. 1.0.0, v1.1.0, 1.2.0-beta.1)
 _SEMVER_RE = re.compile(

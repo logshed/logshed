@@ -4,8 +4,11 @@ Host aliases API endpoints for IP to Hostname mapping management.
 
 import asyncio
 import datetime
+import logging
 import time
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
@@ -34,10 +37,10 @@ async def list_aliases(user: dict = Depends(get_current_user)) -> list[HostAlias
     return await run_db_query(_get_all)
 
 
-def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_size: int = 500) -> None:
+def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_size: int = 1000) -> None:
     """
     Retroactively update or revert source_alias for existing logs in chunked batches.
-    Prevents long table locks on large datasets.
+    Prevents long table locks on large datasets while interleaving concurrent writes.
     """
     cursor = conn.cursor()
     update_query = """
@@ -45,6 +48,7 @@ def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_siz
         WHERE source_ip = ? AND id IN (
             SELECT id FROM logs
             WHERE source_ip = ? AND source_alias != ?
+            ORDER BY id DESC
             LIMIT ?
         )
     """
@@ -54,12 +58,13 @@ def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_siz
         conn.commit()
         if count < batch_size:
             break
-        time.sleep(0.01)
+        time.sleep(0.005)
 
 
 @router.post("", response_model=HostAliasResponse)
 async def create_or_update_alias(
     req: HostAliasCreate,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> HostAliasResponse:
     """Create or update an IP-to-hostname alias mapping, updating existing logs retroactively."""
@@ -81,9 +86,6 @@ async def create_or_update_alias(
         )
         conn.commit()
 
-        # Retroactively update previously ingested logs for this source IP in chunked batches
-        _batch_update_log_aliases(conn, clean_ip, clean_alias, batch_size=500)
-
         cursor.execute("SELECT ip, alias, notes, created_at FROM host_aliases WHERE ip = ?", (clean_ip,))
         row = cursor.fetchone()
         return HostAliasResponse(
@@ -95,12 +97,21 @@ async def create_or_update_alias(
 
     res = await run_db_query(_upsert)
     await asyncio.to_thread(reload_active_alias_caches)
+
+    def _run_batch(conn):
+        try:
+            _batch_update_log_aliases(conn, clean_ip, clean_alias, batch_size=1000)
+        except Exception as exc:
+            logger.error(f"Background retroactive alias update failed for {clean_ip} -> {clean_alias}: {exc}")
+
+    background_tasks.add_task(run_db_query, _run_batch)
     return res
 
 
 @router.delete("/{ip}", response_model=MessageResponse)
 async def delete_alias(
     ip: str,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """Delete a host alias mapping by IP address, reverting existing logs to raw IP."""
@@ -109,9 +120,6 @@ async def delete_alias(
         cursor.execute("DELETE FROM host_aliases WHERE ip = ?", (ip,))
         deleted = cursor.rowcount > 0
         conn.commit()
-        if deleted:
-            # Revert previously ingested logs for this source IP back to the raw IP in chunked batches
-            _batch_update_log_aliases(conn, ip, ip, batch_size=500)
         return deleted
 
     deleted = await run_db_query(_delete)
@@ -122,4 +130,12 @@ async def delete_alias(
         )
 
     await asyncio.to_thread(reload_active_alias_caches)
+
+    def _run_batch_delete(conn):
+        try:
+            _batch_update_log_aliases(conn, ip, ip, batch_size=1000)
+        except Exception as exc:
+            logger.error(f"Background retroactive alias reversion failed for {ip}: {exc}")
+
+    background_tasks.add_task(run_db_query, _run_batch_delete)
     return MessageResponse(status="ok")

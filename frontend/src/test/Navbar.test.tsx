@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Navbar } from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
+import * as alertsApi from '../api/alerts.ts';
 
 vi.mock('../context/AuthContext.tsx', () => ({
   useAuth: () => ({
@@ -141,17 +142,18 @@ describe('Navbar Component', () => {
     });
 
     const consoleBtn = screen.getByRole('button', { name: /Console View/i });
-    const aliasesBtn = screen.getByRole('button', { name: /Host Aliases/i });
+    const rulesBtn = screen.getByRole('button', { name: /Rules & History/i });
     const storageBtn = screen.getByRole('button', { name: /Storage/i });
     const settingsBtn = screen.getByRole('button', { name: /^Settings$/i });
 
     expect(consoleBtn).toBeInTheDocument();
-    expect(aliasesBtn).toBeInTheDocument();
+    expect(rulesBtn).toBeInTheDocument();
     expect(storageBtn).toBeInTheDocument();
     expect(settingsBtn).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Host Aliases/i })).toBeNull();
 
-    fireEvent.click(aliasesBtn);
-    expect(onTabChange).toHaveBeenCalledWith('aliases');
+    fireEvent.click(rulesBtn);
+    expect(onTabChange).toHaveBeenCalledWith('rules');
 
     fireEvent.click(storageBtn);
     expect(onTabChange).toHaveBeenCalledWith('storage');
@@ -191,7 +193,7 @@ describe('Navbar Component', () => {
     });
 
     const updateLink = screen.getByRole('link', { name: /App update available/i });
-    expect(updateLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed/releases');
+    expect(updateLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases');
     expect(updateLink).toHaveAttribute('target', '_blank');
   });
 
@@ -224,5 +226,133 @@ describe('Navbar Component', () => {
 
     expect(screen.queryByText('App update available')).not.toBeInTheDocument();
   });
+
+  it('renders repository migration notice banner when repo_deprecated is true', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+      current_version: '1.2.0',
+      latest_version: '1.2.0',
+      update_available: false,
+      check_enabled: true,
+      checked_at: 1700000000.0,
+      repo_deprecated: true,
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Repository Moved:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/ghcr\.io\/benhornertech\/logshed/i)).toBeInTheDocument();
+    expect(screen.getByText(/ghcr\.io\/logshed\/logshed/i)).toBeInTheDocument();
+
+    const dismissBtn = screen.getByRole('button', { name: /Dismiss/i });
+    fireEvent.click(dismissBtn);
+    expect(screen.queryByText('Repository Moved:')).not.toBeInTheDocument();
+  });
+
+  it('renders amber maintenance banner when maintenance window is active', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /Clear/i })).toBeInTheDocument();
+  });
+
+  it('clears maintenance window when Clear button in banner is clicked', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+    });
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
+    });
+
+    const clearBtn = screen.getByRole('button', { name: /Clear/i });
+    fireEvent.click(clearBtn);
+
+    await waitFor(() => {
+      expect(setMaintSpy).toHaveBeenCalledWith(null);
+      expect(screen.queryByText(/Maintenance window active - alerts silenced until/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render maintenance banner when maintenance window is inactive', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: false,
+      until: null,
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(alertsApi.fetchMaintenanceWindow).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText(/Maintenance window active/i)).not.toBeInTheDocument();
+  });
 });
+
 

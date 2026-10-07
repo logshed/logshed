@@ -1,10 +1,11 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SettingsPanel } from '../components/settings/SettingsPanel.tsx';
+import { SettingsPanel, pathToSettingsSubTab, settingsSubTabToPath } from '../components/settings/SettingsPanel.tsx';
 import * as settingsApi from '../api/settings.ts';
 import * as aiApi from '../api/ai.ts';
 import * as authApi from '../api/auth.ts';
 import * as systemApi from '../api/system.ts';
+import * as notifApi from '../api/notifications.ts';
 import { DEFAULT_SYSTEM_PROMPT } from '../utils/aiPrompt.ts';
 
 const mockLogout = vi.fn();
@@ -20,6 +21,7 @@ vi.mock('../context/AuthContext.tsx', () => ({
 describe('SettingsPanel Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.pushState(null, '', '/settings');
     vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
       current_version: '1.1.0-beta.3',
       latest_version: '1.0.0',
@@ -49,6 +51,7 @@ describe('SettingsPanel Component', () => {
       cached_at: null,
       is_live: true,
     });
+    vi.spyOn(notifApi, 'fetchNotificationChannels').mockResolvedValue([]);
   });
 
   it('renders AI System Instructions card, allows editing and saving ai_system_prompt', async () => {
@@ -477,7 +480,7 @@ describe('SettingsPanel Component', () => {
   });
 
   it('validates password fields and shows error when passwords do not match', async () => {
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
@@ -505,7 +508,7 @@ describe('SettingsPanel Component', () => {
   it('handles successful admin password change with login notice and logout redirect', async () => {
     const changePwdSpy = vi.spyOn(authApi, 'changePassword').mockResolvedValue({ status: 'ok' });
 
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="advanced" />);
 
     await waitFor(() => {
       expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
@@ -542,8 +545,8 @@ describe('SettingsPanel Component', () => {
     );
   });
 
-  it('renders About LogShed section with installed version and up to date status', async () => {
-    render(<SettingsPanel />);
+  it('renders About LogShed section on application tab with installed version and up to date status', async () => {
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -554,12 +557,22 @@ describe('SettingsPanel Component', () => {
     expect(screen.getByText(/MIT License - Copyright \(c\) 2026 LogShed Contributors/)).toBeInTheDocument();
 
     const repoLink = screen.getByRole('link', { name: /GitHub Repository/i });
-    expect(repoLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed');
+    expect(repoLink).toHaveAttribute('href', 'https://github.com/logshed/logshed');
     expect(repoLink).toHaveAttribute('target', '_blank');
 
     const changelogLink = screen.getByRole('link', { name: /Changelog/i });
-    expect(changelogLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed/blob/main/CHANGELOG.md');
+    expect(changelogLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/blob/main/CHANGELOG.md');
     expect(changelogLink).toHaveAttribute('target', '_blank');
+  });
+
+  it('does not render About LogShed section on advanced tab', async () => {
+    render(<SettingsPanel initialSubTab="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('About LogShed')).not.toBeInTheDocument();
   });
 
   it('renders App update available notice in About section when newer GHCR version exists', async () => {
@@ -571,7 +584,7 @@ describe('SettingsPanel Component', () => {
       checked_at: 1700000000.0,
     });
 
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -581,7 +594,27 @@ describe('SettingsPanel Component', () => {
     expect(screen.getByText('v1.2.0')).toBeInTheDocument();
 
     const releaseNotesLink = screen.getByRole('link', { name: /Release Notes/i });
-    expect(releaseNotesLink).toHaveAttribute('href', 'https://github.com/BenHornerTech/logshed/releases');
+    expect(releaseNotesLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases');
+  });
+
+  it('renders Container Repository Moved warning in About section when repo_deprecated is true', async () => {
+    vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+      current_version: '1.2.0',
+      latest_version: '1.2.0',
+      update_available: false,
+      check_enabled: true,
+      checked_at: 1700000000.0,
+      repo_deprecated: true,
+    });
+
+    render(<SettingsPanel initialSubTab="app" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Container Repository Moved')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/ghcr\.io\/benhornertech\/logshed/i)).toBeInTheDocument();
+    expect(screen.getByText(/ghcr\.io\/logshed\/logshed/i)).toBeInTheDocument();
   });
 
   it('renders Update checks are disabled in About section when check_enabled is false', async () => {
@@ -593,7 +626,7 @@ describe('SettingsPanel Component', () => {
       checked_at: 1700000000.0,
     });
 
-    render(<SettingsPanel />);
+    render(<SettingsPanel initialSubTab="app" />);
 
     await waitFor(() => {
       expect(screen.getByText('About LogShed')).toBeInTheDocument();
@@ -629,6 +662,394 @@ describe('SettingsPanel Component', () => {
           check_for_updates: false,
         })
       );
+    });
+  });
+
+  describe('Sub-tabs and route helpers', () => {
+    it('maps pathname to corresponding SettingsSubTab and vice versa', () => {
+      expect(pathToSettingsSubTab('/settings')).toBe('app');
+      expect(pathToSettingsSubTab('/settings/')).toBe('app');
+      expect(pathToSettingsSubTab('/settings/app')).toBe('app');
+      expect(pathToSettingsSubTab('/settings/aliases')).toBe('aliases');
+      expect(pathToSettingsSubTab('/aliases')).toBe('aliases');
+      expect(pathToSettingsSubTab('/aliases/')).toBe('aliases');
+      expect(pathToSettingsSubTab('/settings/advanced')).toBe('advanced');
+
+      expect(settingsSubTabToPath('app')).toBe('/settings/app');
+      expect(settingsSubTabToPath('aliases')).toBe('/settings/aliases');
+      expect(settingsSubTabToPath('advanced')).toBe('/settings/advanced');
+    });
+
+    it('switches between sub-tabs when tab buttons are clicked', async () => {
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+      });
+
+      // Switch to Host Aliases tab
+      const aliasesTab = screen.getByRole('button', { name: /^Host Aliases$/i });
+      fireEvent.click(aliasesTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('Host Alias Manager')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Internal Application Logging')).toBeNull();
+
+      // Switch to Advanced tab
+      const advancedTab = screen.getByRole('button', { name: /^Advanced$/i });
+      fireEvent.click(advancedTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('About LogShed')).toBeNull();
+      expect(screen.queryByText('Host Alias Manager')).toBeNull();
+
+      // Switch back to Application tab
+      const appTab = screen.getByRole('button', { name: /^Application$/i });
+      fireEvent.click(appTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+        expect(screen.getByText('About LogShed')).toBeInTheDocument();
+      });
+    });
+
+    it('initializes on given initialSubTab prop', async () => {
+      render(<SettingsPanel initialSubTab="aliases" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Host Alias Manager')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Internal Application Logging')).toBeNull();
+    });
+
+    it('reports dirty state only when App sub-tab is active', async () => {
+      const onDirtyChange = vi.fn();
+      render(<SettingsPanel onDirtyChange={onDirtyChange} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
+      });
+
+      // Make change in app subtab
+      const select = screen.getByLabelText('Internal Log Severity Threshold');
+      fireEvent.change(select, { target: { value: 'ERROR' } });
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      });
+
+      // Switch to Host Aliases tab
+      const aliasesTab = screen.getByRole('button', { name: /^Host Aliases$/i });
+      fireEvent.click(aliasesTab);
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+      });
+
+      // Switch back to Application tab
+      const appTab = screen.getByRole('button', { name: /^Application$/i });
+      fireEvent.click(appTab);
+
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      });
+    });
+  });
+
+  describe('AI Enablement Toggle and Section Visibility', () => {
+    it('hides AI configuration fields and displays advisory notice when ai_enabled is false', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: false,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: false,
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Enable AI Features/i)).toBeInTheDocument();
+      });
+
+      const aiCheckbox = screen.getByRole('checkbox', { name: /Enable AI Features/i });
+      expect(aiCheckbox).not.toBeChecked();
+
+      // Advisory notice is rendered
+      expect(screen.getByText(/AI Features Disabled/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Existing alert rules configured with AI enrichment will continue to trigger/i)
+      ).toBeInTheDocument();
+
+      // AI configuration fields should NOT be rendered
+      expect(screen.queryByText(/^AI Provider$/)).toBeNull();
+      expect(screen.queryByPlaceholderText('Enter system instructions...')).toBeNull();
+    });
+
+    it('toggles AI enablement, reveals fields when checked, and saves ai_enabled setting', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: false,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: false,
+      });
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('checkbox', { name: /Enable AI Features/i })).toBeInTheDocument();
+      });
+
+      const aiCheckbox = screen.getByRole('checkbox', { name: /Enable AI Features/i });
+      expect(aiCheckbox).not.toBeChecked();
+
+      // Check the box
+      fireEvent.click(aiCheckbox);
+      expect(aiCheckbox).toBeChecked();
+
+      // AI configuration fields should now appear
+      await waitFor(() => {
+        expect(screen.getByText('AI Provider')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Enter system instructions...')).toBeInTheDocument();
+      });
+
+      // Save changes
+      const saveBtn = screen.getByRole('button', { name: /Save Changes/i });
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ai_enabled: true,
+          })
+        );
+      });
+    });
+
+    it('allows editing daily digest settings and saving via the sticky Save Changes button', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+        daily_digest_enabled: false,
+        daily_digest_channel_id: null,
+        daily_digest_schedule_time: '09:00',
+      });
+      vi.spyOn(notifApi, 'fetchNotificationChannels').mockResolvedValue([
+        {
+          id: 1,
+          name: 'Homelab Discord',
+          url: 'discord://1...9/a...f',
+          is_enabled: true,
+          created_at: '2026-09-18T12:00:00Z',
+          updated_at: '2026-09-18T12:00:00Z',
+        },
+      ]);
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Daily Digest Rollup')).toBeInTheDocument();
+      });
+
+      // No unsaved changes initially
+      expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
+
+      // Check daily digest checkbox
+      const digestCheckbox = screen.getByLabelText(/Enable 24-hour daily digest rollup/i);
+      fireEvent.click(digestCheckbox);
+      expect(digestCheckbox).toBeChecked();
+
+      // Save button should now be visible in sticky action bar
+      const saveBtn = await screen.findByRole('button', { name: /Save Changes/i });
+      expect(saveBtn).toBeInTheDocument();
+
+      // Change schedule time
+      const timeInput = screen.getByLabelText(/Schedule Time/i);
+      fireEvent.change(timeInput, { target: { value: '18:30' } });
+
+      // Click Save Changes
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            daily_digest_enabled: true,
+            daily_digest_schedule_time: '18:30',
+          })
+        );
+      });
+    });
+  });
+
+  describe('AI Provider State Preservation and Key Management', () => {
+    it('shows empty API key and placeholder when switching to an unconfigured provider, and restores previous provider state when switching back', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+        ai_providers_config: {
+          gemini: {
+            has_api_key: true,
+            ai_api_key: '********',
+            ai_model: 'gemini-3.7-flash',
+            ai_fallback_models: 'gemini-2.5-flash',
+            ai_base_url: null,
+          },
+          openai: {
+            has_api_key: false,
+            ai_api_key: '',
+            ai_model: 'gpt-4o',
+            ai_fallback_models: '',
+            ai_base_url: null,
+          },
+        },
+      });
+
+      vi.spyOn(aiApi, 'getAiModels').mockImplementation(async (provider) => {
+        if (provider === 'openai') {
+          return {
+            provider: 'openai',
+            models: [],
+            has_api_key: false,
+            cached_at: null,
+            is_live: true,
+          };
+        }
+        return {
+          provider: 'gemini',
+          models: [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+          has_api_key: true,
+          cached_at: null,
+          is_live: true,
+        };
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
+      expect(keyInput.value).toBe('********');
+
+      // Switch to OpenAI
+      const providerSelect = screen.getByDisplayValue('Google Gemini');
+      fireEvent.change(providerSelect, { target: { value: 'openai' } });
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+      });
+
+      // OpenAI has no configured key: input should be empty and show "Enter API key" placeholder
+      const openaiKeyInput = screen.getByPlaceholderText('Enter API key') as HTMLInputElement;
+      expect(openaiKeyInput.value).toBe('');
+
+      // Switch back to Google Gemini
+      fireEvent.change(providerSelect, { target: { value: 'gemini' } });
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      // Gemini state restored
+      const restoredKeyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
+      expect(restoredKeyInput.value).toBe('********');
+    });
+
+    it('clears API key from storage when user deletes masked dots and blurs input', async () => {
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
+      expect(keyInput.value).toBe('********');
+
+      // Clear input and blur
+      fireEvent.change(keyInput, { target: { value: '' } });
+      fireEvent.blur(keyInput);
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ai_provider: 'gemini',
+            ai_api_key: '',
+          })
+        );
+      });
+    });
+
+    it('refreshes models with unsaved API key when Refresh Models button is clicked', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'openai',
+        ai_model: 'gpt-4o',
+        ai_api_key: '',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: false,
+      });
+
+      vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+        provider: 'openai',
+        models: [],
+        has_api_key: false,
+        cached_at: null,
+        is_live: true,
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+      });
+
+      const keyInput = screen.getByPlaceholderText('Enter API key');
+      fireEvent.change(keyInput, { target: { value: 'sk-proj-test123456789' } });
+
+      const refreshBtn = screen.getByRole('button', { name: /Refresh Models/i });
+      fireEvent.click(refreshBtn);
+
+      await waitFor(() => {
+        expect(aiApi.getAiModels).toHaveBeenCalledWith('openai', true, 'sk-proj-test123456789', undefined);
+      });
     });
   });
 });

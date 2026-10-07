@@ -16,12 +16,116 @@ import {
 import { LogEntry, LogFilterParams } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
 import { LogDetailModal } from './LogDetailModal.tsx';
-import { fetchLogs, fetchLogFacets } from '../../api/logs.ts';
+import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { LogRow, ProcessedLogEntry, areLogRowPropsEqual } from './LogRow.tsx';
+import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
+import { Modal } from '../common/Modal.tsx';
+import { useAlias } from '../../context/AliasContext.tsx';
+
+export function parseFiltersFromUrl(): LogFilterParams {
+  if (typeof window === 'undefined') return {};
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const initial: LogFilterParams = {};
+
+    const q = params.get('q');
+    if (q) initial.query = q;
+
+    const severity = params.get('severity');
+    if (severity !== null && severity !== '') {
+      const parsedSev = parseInt(severity, 10);
+      if (!isNaN(parsedSev) && parsedSev >= 0 && parsedSev <= 7) {
+        initial.severity_max = parsedSev;
+      }
+    }
+
+    const app = params.get('app');
+    if (app) {
+      const apps = app.split(',').map((s) => s.trim()).filter(Boolean);
+      if (apps.length > 1) {
+        initial.apps = apps;
+      } else if (apps.length === 1) {
+        initial.apps = [apps[0]];
+        initial.app_name = apps[0];
+      }
+    }
+
+    const source = params.get('source');
+    if (source) {
+      const sources = source.split(',').map((s) => s.trim()).filter(Boolean);
+      if (sources.length > 1) {
+        initial.sources = sources;
+      } else if (sources.length === 1) {
+        initial.sources = [sources[0]];
+        initial.source = sources[0];
+      }
+    }
+
+    const time = params.get('time');
+    if (time) {
+      initial.from = time;
+    }
+
+    return initial;
+  } catch {
+    return {};
+  }
+}
+
+export function syncFiltersToUrl(filters: LogFilterParams) {
+  if (typeof window === 'undefined') return;
+  try {
+    const params = new URLSearchParams(window.location.search);
+
+    if (filters.query?.trim()) {
+      params.set('q', filters.query.trim());
+    } else {
+      params.delete('q');
+    }
+
+    if (filters.severity_max !== undefined && filters.severity_max !== null) {
+      params.set('severity', String(filters.severity_max));
+    } else {
+      params.delete('severity');
+    }
+
+    const apps = (filters.apps && filters.apps.length > 0)
+      ? filters.apps
+      : (filters.app_name ? (Array.isArray(filters.app_name) ? filters.app_name : [filters.app_name]) : []);
+    if (apps.length > 0) {
+      params.set('app', apps.join(','));
+    } else {
+      params.delete('app');
+    }
+
+    const sources = (filters.sources && filters.sources.length > 0)
+      ? filters.sources
+      : (filters.source ? (Array.isArray(filters.source) ? filters.source : [filters.source]) : []);
+    if (sources.length > 0) {
+      params.set('source', sources.join(','));
+    } else {
+      params.delete('source');
+    }
+
+    if (filters.from) {
+      params.set('time', filters.from);
+    } else {
+      params.delete('time');
+    }
+
+    const newQuery = params.toString();
+    const newUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
+    if (window.location.search !== (newQuery ? `?${newQuery}` : '')) {
+      window.history.replaceState(null, '', newUrl);
+    }
+  } catch {
+    // Ignore URL manipulation failures in restricted environments
+  }
+}
 
 function cleanIsoString(ts: string): string {
   let parseable = ts.trim();
@@ -78,10 +182,20 @@ export function formatLocalTimestamp(ts: string, fallbackTs?: string): string {
   }
 }
 
-export function prepareLogEntry(entry: LogEntry | ProcessedLogEntry): ProcessedLogEntry {
+export function prepareLogEntry(
+  entry: LogEntry | ProcessedLogEntry,
+  aliases?: Record<string, string>,
+): ProcessedLogEntry {
   const existing = entry as ProcessedLogEntry;
+  const canonical =
+    aliases &&
+    ((entry.source_ip && aliases[entry.source_ip]) ||
+      (entry.source_alias && aliases[entry.source_alias]));
+  const source_alias = canonical || entry.source_alias;
+
   return {
     ...entry,
+    source_alias,
     formattedTimestamp:
       existing.formattedTimestamp ?? formatLocalTimestamp(entry.timestamp, entry.received_at),
     cleanedMessage: existing.cleanedMessage ?? cleanLogMessageForDisplay(entry.message),
@@ -113,19 +227,8 @@ export function matchesSearchQuery(
     return true;
   }
 
-  // 2. Try regex match (using precompiled regex if available, else compiling on demand)
-  const regex =
-    precompiledRegex !== undefined
-      ? precompiledRegex
-      : (() => {
-          try {
-            return new RegExp(q, 'i');
-          } catch {
-            return null;
-          }
-        })();
-
-  if (regex && fields.some((f) => regex.test(f))) {
+  // 2. Precompiled regex match (only if explicitly provided)
+  if (precompiledRegex && fields.some((f) => precompiledRegex.test(f))) {
     return true;
   }
 
@@ -177,8 +280,9 @@ interface LiveLogStreamProps {
   pullTouchHandlers?: PullTouchHandlers;
 }
 
-const MAX_BUFFER_SIZE = 50000;
+const MAX_BUFFER_SIZE = 3000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onDiagnoseAi,
@@ -211,13 +315,24 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   }, [clearSelectionSignal]);
   const [activeLogDetail, setActiveLogDetail] = useState<LogEntry | null>(null);
+  const [dropRuleTargetLog, setDropRuleTargetLog] = useState<LogEntry | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [hasMoreLogs, setHasMoreLogs] = useState<boolean>(true);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [totalCapped, setTotalCapped] = useState<boolean>(false);
   const historicalOffsetRef = useRef<number>(0);
   const isLoadingMoreRef = useRef<boolean>(false);
-  const [filters, setFilters] = useState<LogFilterParams>({});
+  const [filters, setFilters] = useState<LogFilterParams>(() => parseFiltersFromUrl());
+  const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] = useState<boolean>(false);
+  const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
+  const [deleteSelectedError, setDeleteSelectedError] = useState<string | null>(null);
   const [activeAliasesMap, setActiveAliasesMap] = useState<Record<string, string>>({});
+  const { aliasVersion } = useAlias();
+
+  useEffect(() => {
+    syncFiltersToUrl(filters);
+  }, [filters]);
 
   // Decoupled facet accumulation states
   const [accumulatedSources, setAccumulatedSources] = useState<string[]>([]);
@@ -230,21 +345,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filtersRef = useRef<LogFilterParams>(filters);
 
-  // Precompile search pattern / RegExp when filters.query changes
-  const compiledSearchRegex = useMemo(() => {
-    const q = filters.query?.trim();
-    if (!q) return null;
-    try {
-      return new RegExp(q, 'i');
-    } catch {
-      return null;
-    }
-  }, [filters.query]);
-
-  const compiledSearchRegexRef = useRef<RegExp | null>(compiledSearchRegex);
-  useEffect(() => {
-    compiledSearchRegexRef.current = compiledSearchRegex;
-  }, [compiledSearchRegex]);
 
   useEffect(() => {
     filtersRef.current = filters;
@@ -266,6 +366,148 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       });
   }, []);
 
+  // Re-fetch aliases when aliasVersion changes (and is > 0)
+  useEffect(() => {
+    if (aliasVersion <= 0) return;
+    const previousAliases = mergedAliasesRef.current || {};
+    fetchAliases()
+      .then((list) => {
+        const map: Record<string, string> = {};
+        list.forEach((a) => {
+          if (a.ip && a.alias) {
+            map[a.ip] = a.alias;
+          }
+        });
+        const newMerged = { ...map, ...knownAliases };
+        mergedAliasesRef.current = newMerged;
+        setActiveAliasesMap(map);
+
+        // Build mapping of old host identifiers to new canonical hostnames
+        const hostReplacements: Record<string, string> = {};
+        const retiredHosts = new Set<string>();
+
+        Object.entries(previousAliases).forEach(([ip, oldAlias]) => {
+          const newAlias = newMerged[ip];
+          if (!newAlias) {
+            // Alias was deleted: revert to raw IP
+            hostReplacements[oldAlias] = ip;
+            retiredHosts.add(oldAlias);
+          } else if (newAlias !== oldAlias) {
+            // Alias was renamed
+            hostReplacements[oldAlias] = newAlias;
+            retiredHosts.add(oldAlias);
+          }
+        });
+
+        Object.entries(newMerged).forEach(([ip, newAlias]) => {
+          if (newAlias && (!previousAliases[ip] || previousAliases[ip] !== newAlias)) {
+            hostReplacements[ip] = newAlias;
+            retiredHosts.add(ip);
+          }
+        });
+
+        // Update source_alias on matching in-memory logs so displayed log rows reflect alias changes
+        setLogs((prev) =>
+          prev.map((log) => {
+            if (!log.source_ip) return log;
+            if (newMerged[log.source_ip]) {
+              const newAlias = newMerged[log.source_ip];
+              if (log.source_alias !== newAlias) {
+                return { ...log, source_alias: newAlias };
+              }
+            } else if (previousAliases[log.source_ip]) {
+              // Alias was removed; revert to raw IP matching backend behavior
+              if (log.source_alias !== log.source_ip) {
+                return { ...log, source_alias: log.source_ip };
+              }
+            }
+            return log;
+          })
+        );
+
+        // Update accumulatedSources: replace retired aliases/IPs with their new canonical names
+        setAccumulatedSources((prev) => {
+          const aliasedIps = new Set(Object.keys(newMerged));
+          const next = new Set<string>();
+          prev.forEach((s) => {
+            const mapped = hostReplacements[s] || (newMerged[s] ? newMerged[s] : s);
+            if (!retiredHosts.has(mapped) && !aliasedIps.has(mapped)) {
+              next.add(mapped);
+            }
+          });
+          Object.values(newMerged).forEach((alias) => {
+            if (alias && alias.trim()) next.add(alias.trim());
+          });
+          return Array.from(next).sort();
+        });
+
+        // Remap hostToAppsMap keys
+        setHostToAppsMap((prev) => {
+          const next: Record<string, string[]> = {};
+          Object.entries(prev).forEach(([h, apps]) => {
+            const mapped = hostReplacements[h] || (newMerged[h] ? newMerged[h] : h);
+            next[mapped] = Array.from(new Set([...(next[mapped] || []), ...apps])).sort();
+          });
+          return next;
+        });
+
+        // Remap appToHostsMap values
+        setAppToHostsMap((prev) => {
+          const next: Record<string, string[]> = {};
+          Object.entries(prev).forEach(([app, hosts]) => {
+            const mappedHosts = hosts
+              .map((h) => hostReplacements[h] || (newMerged[h] ? newMerged[h] : h))
+              .filter((h) => !retiredHosts.has(h));
+            next[app] = Array.from(new Set(mappedHosts)).sort();
+          });
+          return next;
+        });
+
+        // Update active filter if it is filtering on a retired source/alias
+        setFilters((prev) => {
+          let changed = false;
+          let nextSources = prev.sources;
+          let nextSource = prev.source;
+
+          if (prev.sources && Array.isArray(prev.sources)) {
+            const mapped = prev.sources.map((s) => hostReplacements[s] || s);
+            if (mapped.some((s, idx) => s !== prev.sources![idx])) {
+              nextSources = mapped;
+              changed = true;
+            }
+          }
+
+          if (prev.source) {
+            if (Array.isArray(prev.source)) {
+              const mapped = prev.source.map((s) => hostReplacements[s] || s);
+              if (mapped.some((s, idx) => s !== (prev.source as string[])[idx])) {
+                nextSource = mapped;
+                changed = true;
+              }
+            } else if (typeof prev.source === 'string') {
+              const parts = prev.source.split(',').map((s) => s.trim());
+              const mapped = parts.map((s) => hostReplacements[s] || s);
+              const mappedStr = mapped.join(',');
+              if (mappedStr !== prev.source) {
+                nextSource = mappedStr;
+                changed = true;
+              }
+            }
+          }
+
+          if (!changed) return prev;
+          return {
+            ...prev,
+            sources: nextSources,
+            source: nextSource,
+          };
+        });
+      })
+      .catch((err) => {
+        console.error('Failed to reload host aliases in stream', err);
+      });
+  }, [aliasVersion, knownAliases]);
+
   const mergedAliases = useMemo(() => {
     return { ...activeAliasesMap, ...knownAliases };
   }, [activeAliasesMap, knownAliases]);
@@ -274,6 +516,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     mergedAliasesRef.current = mergedAliases;
   }, [mergedAliases]);
+
+  const processedLogs = useMemo(() => {
+    return logs;
+  }, [logs]);
 
   const isMobile = useMediaQuery('(max-width: 767px)');
   const parentRef = useRef<HTMLDivElement>(null);
@@ -418,9 +664,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // In-flight query cancellation / stale response guard
   const fetchRequestIdRef = useRef<number>(0);
+  // Pending debounced reload scheduled by free-text search edits
+  const searchDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load initial logs on mount or on filter apply
   const loadInitialLogs = useCallback(async (overrideFilters?: LogFilterParams) => {
+    if (searchDebounceTimerRef.current !== null) {
+      clearTimeout(searchDebounceTimerRef.current);
+      searchDebounceTimerRef.current = null;
+    }
     const reqId = ++fetchRequestIdRef.current;
     try {
       setIsLoadingHistory(true);
@@ -446,11 +698,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
 
       // Keep newest logs at the top (res.logs is ordered DESC)
-      const preparedLogs = res.logs.map(prepareLogEntry);
+      const preparedLogs = res.logs.map((entry) => prepareLogEntry(entry, mergedAliasesRef.current));
       setLogs(preparedLogs);
       updateFacetsWithNewLogs(res.logs);
       historicalOffsetRef.current = res.logs.length;
-      if (res.logs.length < 500 || (res.total !== undefined && res.logs.length >= res.total)) {
+      setTotalCount(res.total);
+      setTotalCapped(Boolean(res.total_capped));
+      if (res.logs.length < 500 || (res.total !== undefined && !res.total_capped && res.logs.length >= res.total)) {
         setHasMoreLogs(false);
       }
       setMissedLogsCount(0);
@@ -491,12 +745,16 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
 
       historicalOffsetRef.current = currentOffset + res.logs.length;
-      if (res.logs.length < 500 || (res.total !== undefined && historicalOffsetRef.current >= res.total)) {
+      if (res.total !== undefined) {
+        setTotalCount(res.total);
+        setTotalCapped(Boolean(res.total_capped));
+      }
+      if (res.logs.length < 500 || (res.total !== undefined && !res.total_capped && historicalOffsetRef.current >= res.total)) {
         setHasMoreLogs(false);
       }
       if (res.logs.length > 0) {
         updateFacetsWithNewLogs(res.logs);
-        const preparedLogs = res.logs.map(prepareLogEntry);
+        const preparedLogs = res.logs.map((entry) => prepareLogEntry(entry, mergedAliasesRef.current));
         setLogs((prev) => {
           const existingIds = new Set(prev.map((l) => l.id));
           const uniqueIncoming = preparedLogs.filter((l) => !existingIds.has(l.id));
@@ -519,8 +777,32 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   }, [filters, hasMoreLogs, isLoadingHistory, updateFacetsWithNewLogs]);
 
+  // Reload on filter changes. Free-text query edits are debounced so search-as-you-type does not
+  // dispatch a backend FTS query per keystroke (superseded queries keep running server-side);
+  // structured filter changes (host, app, severity, time) reload immediately.
+  const previousQueryRef = useRef<string | undefined>(filters.query);
   useEffect(() => {
-    loadInitialLogs();
+    const queryChanged = previousQueryRef.current !== filters.query;
+    previousQueryRef.current = filters.query;
+    if (!queryChanged) {
+      loadInitialLogs();
+      return;
+    }
+    searchDebounceTimerRef.current = setTimeout(() => {
+      searchDebounceTimerRef.current = null;
+      loadInitialLogs();
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      if (searchDebounceTimerRef.current !== null) {
+        clearTimeout(searchDebounceTimerRef.current);
+        searchDebounceTimerRef.current = null;
+      }
+    };
+  }, [loadInitialLogs, filters.query]);
+
+  const handleApplySavedView = useCallback((newParams: LogFilterParams) => {
+    setFilters(newParams);
+    loadInitialLogs(newParams);
   }, [loadInitialLogs]);
 
   const sourcesKey = useMemo(() => {
@@ -560,12 +842,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
         // Client-Side Query Filtering on Ingest (Issue #2)
         const currentQuery = filtersRef.current?.query;
-        if (currentQuery && !matchesSearchQuery(entry, currentQuery, compiledSearchRegexRef.current)) {
+        if (currentQuery && !matchesSearchQuery(entry, currentQuery)) {
           return;
         }
 
         // Buffer incoming SSE logs (Issue #1)
-        incomingBufferRef.current.push(prepareLogEntry(entry));
+        incomingBufferRef.current.push(prepareLogEntry(entry, mergedAliasesRef.current));
 
         if (incomingBufferRef.current.length >= 500) {
           if (flushTimerRef.current !== null) {
@@ -639,7 +921,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // Virtualizer with responsive row estimate (74px mobile cards, 28px desktop rows)
   const rowVirtualizer = useVirtualizer({
-    count: logs.length,
+    count: processedLogs.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => (isMobile ? 74 : 28),
     overscan: isMobile ? 12 : 25,
@@ -648,17 +930,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const virtualItems = rowVirtualizer.getVirtualItems();
   const lastVirtualItem = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1] : null;
 
+  const lastVirtualItemIndex = lastVirtualItem?.index;
+
   useEffect(() => {
-    if (!lastVirtualItem) return;
+    if (lastVirtualItemIndex === undefined) return;
     if (
-      lastVirtualItem.index >= logs.length - 15 &&
+      lastVirtualItemIndex >= logs.length - 15 &&
       hasMoreLogs &&
       !isLoadingMoreRef.current &&
       !isLoadingHistory
     ) {
       loadMoreLogs();
     }
-  }, [lastVirtualItem, logs.length, hasMoreLogs, isLoadingHistory, loadMoreLogs]);
+  }, [lastVirtualItemIndex, logs.length, hasMoreLogs, isLoadingHistory, loadMoreLogs]);
 
   // Merge accumulated sources & apps with aliases (ensuring all discovered items remain selectable)
   const allAvailableSources = useMemo(() => {
@@ -908,6 +1192,26 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedLogs.length === 0) return;
+    try {
+      setIsDeletingSelected(true);
+      setDeleteSelectedError(null);
+      const targetIds = Array.from(selectedLogIds);
+      await deleteLogs({ log_ids: targetIds });
+      const targetSet = new Set(targetIds);
+      setLogs((prev) => prev.filter((l) => !targetSet.has(l.id)));
+      setSelectedLogIds(new Set());
+      setLastSelectedLogIndex(null);
+      setShowDeleteSelectedConfirm(false);
+    } catch (err: any) {
+      setDeleteSelectedError(err.message || 'Failed to delete selected logs.');
+    } finally {
+      setIsDeletingSelected(false);
+    }
+  };
+
+
   const clearLogsBuffer = () => {
     fetchRequestIdRef.current += 1;
     if (flushTimerRef.current !== null) {
@@ -921,6 +1225,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     setLastSelectedLogIndex(null);
     setMissedLogsCount(0);
     setHasMoreLogs(false);
+    setTotalCount(0);
+    setTotalCapped(false);
   };
 
   const handleResetFilters = useCallback(() => {
@@ -944,7 +1250,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     <div className="flex flex-col h-full min-h-0 flex-1 bg-dark-950 select-text overflow-hidden">
       {/* Top Filter & Search Controls (Supports Pull-to-Refresh on Mobile) */}
       <div {...(isMobile && pullTouchHandlers ? pullTouchHandlers : {})} className="shrink-0 select-none">
-        {/* Search & Filter Bar */}
+        {/* Search & Filter Bar with Integrated Saved Views */}
         <LogSearchBar
           filters={filters}
           onFilterChange={setFilters}
@@ -952,6 +1258,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onReset={handleResetFilters}
           availableSources={availableSourcesForSelectedApps}
           availableApps={availableAppsForSelectedHosts}
+          onApplySavedView={handleApplySavedView}
+          totalCount={totalCount ?? undefined}
+          totalCapped={totalCapped}
         />
 
         {/* Stream Controls & Filter Pills Bar */}
@@ -1061,7 +1370,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       <div className="flex-1 relative overflow-hidden flex flex-col">
         {/* Table Header (Desktop only) */}
         {!isMobile && (
-          <div className="grid bg-dark-950 border-b border-dark-700 text-slate-400 text-[11px] font-mono font-semibold grid-cols-[36px_165px_65px_130px_130px_1fr_60px] px-3 py-1.5 select-none items-center">
+          <div className="grid bg-dark-950 border-b border-dark-700 border-l-2 border-l-transparent text-slate-400 text-[11px] font-mono font-semibold grid-cols-[36px_165px_65px_130px_130px_1fr_60px] px-3 py-1.5 select-none items-center">
             <div className="flex items-center justify-center">
               <button
                 onClick={selectedLogIds.size > 0 ? deselectAllLogs : selectAllLogs}
@@ -1119,7 +1428,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               }}
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const log = logs[virtualRow.index];
+                const log = processedLogs[virtualRow.index];
                 if (!log) return null;
                 const isSelected = selectedLogIds.has(log.id);
 
@@ -1157,10 +1466,22 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
             <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
-             - Reached beginning of log history ({logs.length.toLocaleString()} log{logs.length === 1 ? '' : 's'} loaded) -
+             - Reached beginning of log history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
             </div>
           )}
         </div>
+
+        {/* Floating Busy Indicator: filter/search reload in flight while previous results remain visible */}
+        {isLoadingHistory && logs.length > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-dark-900/95 border border-dark-700 text-slate-300 text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-in fade-in duration-150"
+          >
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-400" />
+            <span>Updating results...</span>
+          </div>
+        )}
 
         {/* Floating Pause/Resume Banner */}
         {!autoScroll && missedLogsCount > 0 && (
@@ -1225,6 +1546,14 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             </button>
 
             <button
+              onClick={() => setShowDeleteSelectedConfirm(true)}
+              className="text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer bg-red-600 hover:bg-red-500"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete ({selectedLogs.length})</span>
+            </button>
+
+            <button
               onClick={handleLaunchAiAnalysis}
               className={`text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer ${
                 selectedLogs.length > 200
@@ -1249,7 +1578,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
           setLogs((prevLogs) => {
             const existingIds = new Set(prevLogs.map((l) => l.id));
-            const missingLogs = logsToInspect.filter((l) => !existingIds.has(l.id)).map(prepareLogEntry);
+            const missingLogs = logsToInspect
+              .filter((l) => !existingIds.has(l.id))
+              .map((l) => prepareLogEntry(l, mergedAliasesRef.current));
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
               const cmp = b.timestamp.localeCompare(a.timestamp);
@@ -1263,7 +1594,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           setActiveLogDetail(null);
           setLogs((prevLogs) => {
             const existingIds = new Set(prevLogs.map((l) => l.id));
-            const missingLogs = targetAndCtxLogs.filter((l) => !existingIds.has(l.id)).map(prepareLogEntry);
+            const missingLogs = targetAndCtxLogs
+              .filter((l) => !existingIds.has(l.id))
+              .map((l) => prepareLogEntry(l, mergedAliasesRef.current));
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
               const cmp = b.timestamp.localeCompare(a.timestamp);
@@ -1282,7 +1615,107 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               )
             : true
         }
+        onCreateDropRule={(targetLog) => {
+          setActiveLogDetail(null);
+          setDropRuleTargetLog(targetLog);
+        }}
+        onDeleteLog={(deletedLog) => {
+          setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));
+          setSelectedLogIds((prev) => {
+            const next = new Set(prev);
+            next.delete(deletedLog.id);
+            return next;
+          });
+        }}
+        onNavigatePrevious={() => {
+          if (!activeLogDetail) return;
+          const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+          if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
+            setActiveLogDetail(processedLogs[currIdx + 1]);
+          }
+        }}
+        onNavigateNext={() => {
+          if (!activeLogDetail) return;
+          const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+          if (currIdx > 0) {
+            setActiveLogDetail(processedLogs[currIdx - 1]);
+          }
+        }}
+        hasPreviousLog={Boolean(
+          activeLogDetail &&
+          (() => {
+            const idx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+            return idx >= 0 && idx < processedLogs.length - 1;
+          })()
+        )}
+        hasNextLog={Boolean(
+          activeLogDetail &&
+          processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
+        )}
       />
+
+      {/* Create Drop Rule Modal */}
+      {dropRuleTargetLog && (
+        <CreateDropRuleModal
+          isOpen={Boolean(dropRuleTargetLog)}
+          onClose={() => setDropRuleTargetLog(null)}
+          initialSource={dropRuleTargetLog.source_ip}
+          initialApp={dropRuleTargetLog.app_name}
+          initialMessage={cleanLogMessageForDisplay(dropRuleTargetLog.message)}
+          availableSources={availableSourcesForSelectedApps}
+          availableApps={availableAppsForSelectedHosts}
+        />
+      )}
+
+      {/* Delete Selected Confirmation Modal */}
+      {showDeleteSelectedConfirm && (
+        <Modal
+          isOpen={showDeleteSelectedConfirm}
+          onClose={() => !isDeletingSelected && setShowDeleteSelectedConfirm(false)}
+          title="Delete Selected Logs"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4 text-xs text-slate-200">
+            <p className="leading-relaxed">
+              Permanently delete <span className="font-mono font-bold text-red-400">{selectedLogs.length}</span> selected log record{selectedLogs.length === 1 ? '' : 's'}? This action cannot be reversed.
+            </p>
+            {deleteSelectedError && (
+              <div className="p-2.5 bg-red-950/60 border border-red-800 rounded text-xs text-red-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{deleteSelectedError}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">
+              <button
+                type="button"
+                onClick={() => setShowDeleteSelectedConfirm(false)}
+                disabled={isDeletingSelected}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                disabled={isDeletingSelected}
+                className="px-4 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isDeletingSelected ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

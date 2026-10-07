@@ -22,9 +22,15 @@ vi.mock('../components/aliases/HostAliasManager.tsx', () => ({
   HostAliasManager: () => <div data-testid="host-alias-manager">Host Alias Content</div>,
 }));
 
-vi.mock('../components/storage/StoragePanel.tsx', () => ({
-  StoragePanel: () => <div data-testid="storage-panel">Storage Content</div>,
-}));
+vi.mock('../components/storage/StoragePanel.tsx', () => {
+  const StoragePanel = () => <div data-testid="storage-panel">Storage Content</div>;
+  return { StoragePanel, default: StoragePanel };
+});
+
+vi.mock('../components/alerts/AlertsPanel.tsx', () => {
+  const AlertsPanel = () => <div data-testid="alerts-panel">Alerts Content</div>;
+  return { AlertsPanel, default: AlertsPanel };
+});
 
 describe('URL Routing and History API Synchronization', () => {
   beforeEach(() => {
@@ -70,17 +76,25 @@ describe('URL Routing and History API Synchronization', () => {
     it('maps pathname to corresponding AppTab', () => {
       expect(pathToTab('/')).toBe('stream');
       expect(pathToTab('/console')).toBe('stream');
-      expect(pathToTab('/aliases')).toBe('aliases');
-      expect(pathToTab('/aliases/')).toBe('aliases');
+      expect(pathToTab('/aliases')).toBe('settings');
+      expect(pathToTab('/aliases/')).toBe('settings');
       expect(pathToTab('/storage')).toBe('storage');
+      expect(pathToTab('/rules')).toBe('rules');
+      expect(pathToTab('/rules/rules')).toBe('rules');
+      expect(pathToTab('/rules/presets')).toBe('rules');
+      expect(pathToTab('/rules/quick-rules')).toBe('rules');
+      expect(pathToTab('/rules/history')).toBe('rules');
       expect(pathToTab('/settings')).toBe('settings');
+      expect(pathToTab('/settings/app')).toBe('settings');
+      expect(pathToTab('/settings/aliases')).toBe('settings');
+      expect(pathToTab('/settings/advanced')).toBe('settings');
       expect(pathToTab('/unknown-path')).toBe('stream');
     });
 
     it('maps AppTab to canonical URL path', () => {
       expect(tabToPath('stream')).toBe('/');
-      expect(tabToPath('aliases')).toBe('/aliases');
       expect(tabToPath('storage')).toBe('/storage');
+      expect(tabToPath('rules')).toBe('/rules');
       expect(tabToPath('settings')).toBe('/settings');
     });
   });
@@ -105,12 +119,21 @@ describe('URL Routing and History API Synchronization', () => {
       });
     });
 
-    it('initializes on aliases tab when URL pathname is /aliases', async () => {
+    it('initializes on settings aliases sub-tab when URL pathname is /aliases (backward compatibility)', async () => {
       window.history.pushState(null, '', '/aliases');
       render(<App />);
 
       await waitFor(() => {
         expect(screen.getByTestId('host-alias-manager')).toBeInTheDocument();
+      });
+    });
+
+    it('initializes on rules tab when URL pathname is /rules or /rules/history', async () => {
+      window.history.pushState(null, '', '/rules/history');
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('alerts-panel')).toBeInTheDocument();
       });
     });
 
@@ -121,14 +144,14 @@ describe('URL Routing and History API Synchronization', () => {
       render(<App />);
       expect(screen.getByTestId('live-log-stream')).toBeInTheDocument();
 
-      // Click Host Aliases tab
-      const aliasesBtn = screen.getByRole('button', { name: /^Host Aliases$/i });
+      // Click Rules & History tab
+      const rulesBtn = screen.getByRole('button', { name: /^Rules & History$/i });
       await act(async () => {
-        fireEvent.click(aliasesBtn);
+        fireEvent.click(rulesBtn);
       });
 
-      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/aliases');
-      expect(screen.getByTestId('host-alias-manager')).toBeInTheDocument();
+      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules');
+      expect(screen.getByTestId('alerts-panel')).toBeInTheDocument();
 
       // Click Storage tab
       const storageBtn = screen.getByRole('button', { name: /^Storage$/i });
@@ -138,6 +161,15 @@ describe('URL Routing and History API Synchronization', () => {
 
       expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/storage');
       expect(screen.getByTestId('storage-panel')).toBeInTheDocument();
+
+      // Click Settings tab
+      const settingsBtn = screen.getByRole('button', { name: /^Settings$/i });
+      await act(async () => {
+        fireEvent.click(settingsBtn);
+      });
+
+      expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/settings');
+      expect(screen.getByText('System Configuration')).toBeInTheDocument();
 
       // Click Brand logo to return to console stream
       const brandLogo = screen.getByTitle('Go to Console View');
@@ -164,7 +196,7 @@ describe('URL Routing and History API Synchronization', () => {
         expect(screen.getByTestId('storage-panel')).toBeInTheDocument();
       });
 
-      // Simulate user navigating to /aliases
+      // Simulate user navigating to /aliases (backward compatibility redirects to settings aliases)
       act(() => {
         window.history.pushState(null, '', '/aliases');
         window.dispatchEvent(new PopStateEvent('popstate'));
@@ -172,6 +204,36 @@ describe('URL Routing and History API Synchronization', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('host-alias-manager')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Dynamic browser title for beta / prerelease builds', () => {
+    it('sets document.title with version bracketed for prerelease versions', async () => {
+      vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+        current_version: '1.2.0-beta.1',
+        latest_version: '1.2.0-beta.1',
+        update_available: false,
+      });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(document.title).toBe('LogShed [1.2.0-beta.1]');
+      });
+    });
+
+    it('retains clean LogShed title for stable versions without hyphen', async () => {
+      vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+        current_version: '1.2.0',
+        latest_version: '1.2.0',
+        update_available: false,
+      });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(document.title).toBe('LogShed');
       });
     });
   });

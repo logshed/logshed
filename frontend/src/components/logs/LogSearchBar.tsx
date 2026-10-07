@@ -1,9 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Search, RotateCcw, Filter, Clock, X, SlidersHorizontal } from 'lucide-react';
-import { LogFilterParams } from '../../types.ts';
+import { LogFilterParams, SavedView } from '../../types.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { toLocalDatetimeInputString, fromLocalDatetimeInputString } from '../../utils/formatters.ts';
+import { fetchSavedViews, createSavedView, updateSavedView, deleteSavedView } from '../../api/savedViews.ts';
+import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
 
 interface LogSearchBarProps {
   filters: LogFilterParams;
@@ -12,19 +14,100 @@ interface LogSearchBarProps {
   onReset: () => void;
   availableSources?: string[];
   availableApps?: string[];
+  onApplySavedView?: (filters: LogFilterParams) => void;
+  totalCount?: number;
+  totalCapped?: boolean;
 }
 
-export const LogSearchBar: React.FC<LogSearchBarProps> = ({
+export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   filters,
   onFilterChange,
   onSearch,
   onReset,
   availableSources = [],
   availableApps = [],
+  onApplySavedView,
+  totalCount,
+  totalCapped = false,
 }) => {
   const [timePreset, setTimePreset] = useState<string>('all');
   const [showCustomTime, setShowCustomTime] = useState<boolean>(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [isViewsLoading, setIsViewsLoading] = useState<boolean>(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
+
+  const loadSavedViews = useCallback(async () => {
+    try {
+      setIsViewsLoading(true);
+      const data = await fetchSavedViews();
+      setSavedViews(data);
+    } catch {
+      // Non-critical background fetch
+    } finally {
+      setIsViewsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSavedViews();
+  }, [loadSavedViews]);
+
+  const handleTogglePin = useCallback(async (e: React.MouseEvent, view: SavedView) => {
+    e.stopPropagation();
+    try {
+      const updated = await updateSavedView(view.id, { is_pinned: !view.is_pinned });
+      setSavedViews((prev) =>
+        prev
+          .map((v) => (v.id === view.id ? updated : v))
+          .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || a.name.localeCompare(b.name))
+      );
+    } catch {
+      // Ignored
+    }
+  }, []);
+
+  const handleDeleteSavedView = useCallback(async (e: React.MouseEvent, viewId: number) => {
+    e.stopPropagation();
+    try {
+      await deleteSavedView(viewId);
+      setSavedViews((prev) => prev.filter((v) => v.id !== viewId));
+    } catch {
+      // Ignored
+    }
+  }, []);
+
+  const handleSaveViewSubmit = useCallback(async (name: string, isPinned: boolean) => {
+    const cleanParams: Record<string, any> = {};
+    if (filters.query?.trim()) cleanParams.query = filters.query.trim();
+    if (filters.severity_max !== undefined && filters.severity_max !== null) {
+      cleanParams.severity_max = filters.severity_max;
+    }
+    if (filters.sources && filters.sources.length > 0) {
+      cleanParams.sources = filters.sources;
+    } else if (filters.source) {
+      cleanParams.source = filters.source;
+    }
+    if (filters.apps && filters.apps.length > 0) {
+      cleanParams.apps = filters.apps;
+    } else if (filters.app_name) {
+      cleanParams.app_name = filters.app_name;
+    }
+    if (filters.from) cleanParams.from = filters.from;
+    if (filters.to) cleanParams.to = filters.to;
+
+    const created = await createSavedView({
+      name,
+      query_params: cleanParams,
+      is_pinned: isPinned,
+    });
+
+    setSavedViews((prev) =>
+      [...prev, created].sort(
+        (a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || a.name.localeCompare(b.name)
+      )
+    );
+  }, [filters]);
 
   // Compute active sources as an array
   const activeSources: string[] = useMemo(() => {
@@ -59,7 +142,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
 
   const hasActiveFilters = activeFilterCount > 0;
 
-  const handleTimePresetChange = (preset: string) => {
+  const handleTimePresetChange = useCallback((preset: string) => {
     setTimePreset(preset);
     if (preset === 'custom') {
       setShowCustomTime(true);
@@ -85,13 +168,13 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
       from: fromDate.toISOString(),
       to: undefined,
     });
-  };
+  }, [filters, onFilterChange]);
 
-  const handleResetFilters = () => {
+  const handleResetFilters = useCallback(() => {
     setTimePreset('all');
     setShowCustomTime(false);
     onReset();
-  };
+  }, [onReset]);
 
   return (
     <div className="bg-dark-950 border-b border-dark-700 p-2.5 flex flex-col gap-2 select-none text-xs shrink-0">
@@ -144,6 +227,17 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
           <Search className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Filter</span>
         </button>
+
+        {/* Capped or Matched Count Indicator */}
+        {hasActiveFilters && totalCount !== undefined && totalCount !== null && (
+          <span
+            className="text-slate-400 font-mono text-[11px] shrink-0"
+            data-testid="search-bar-total-count"
+            title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} logs matched`}
+          >
+            {totalCapped ? '1,000+ logs' : `${totalCount.toLocaleString()} log${totalCount === 1 ? '' : 's'}`}
+          </span>
+        )}
 
         {/* Conditional Prominent Reset Button with Active Filter Count Indicator */}
         {hasActiveFilters && (
@@ -239,9 +333,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
 
         {/* Custom Datetime Pickers */}
         {showCustomTime && (
-          <div className="flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border border-dark-700">
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 text-[11px]">From:</span>
+          <div className="flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border border-dark-700 w-full max-w-full md:w-auto">
+            <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
+              <span className="text-slate-400 text-[11px] shrink-0">From:</span>
               <input
                 type="datetime-local"
                 value={toLocalDatetimeInputString(filters.from)}
@@ -251,11 +345,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
                     from: fromLocalDatetimeInputString(e.target.value),
                   })
                 }
-                className="bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 text-[11px]">To:</span>
+            <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
+              <span className="text-slate-400 text-[11px] shrink-0">To:</span>
               <input
                 type="datetime-local"
                 value={toLocalDatetimeInputString(filters.to)}
@@ -265,11 +359,28 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
                     to: fromLocalDatetimeInputString(e.target.value),
                   })
                 }
-                className="bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
           </div>
         )}
+
+        {/* Desktop Saved Views Dropdown */}
+        <SavedViewsMenu
+          variant="desktop"
+          views={savedViews}
+          isLoading={isViewsLoading}
+          onApplyView={(params) => {
+            if (onApplySavedView) onApplySavedView(params);
+            else {
+              onFilterChange(params);
+              onSearch();
+            }
+          }}
+          onTogglePin={handleTogglePin}
+          onDeleteView={handleDeleteSavedView}
+          onOpenSaveModal={() => setIsSaveModalOpen(true)}
+        />
       </div>
 
       {/* Mobile Filter SlideOver Drawer */}
@@ -280,6 +391,24 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
         width="max-w-md"
       >
         <div className="space-y-4 text-xs font-sans">
+          {/* Mobile Saved Views Section */}
+          <SavedViewsMenu
+            variant="mobile"
+            views={savedViews}
+            isLoading={isViewsLoading}
+            onApplyView={(params) => {
+              if (onApplySavedView) onApplySavedView(params);
+              else {
+                onFilterChange(params);
+                onSearch();
+              }
+              setIsMobileDrawerOpen(false);
+            }}
+            onTogglePin={handleTogglePin}
+            onDeleteView={handleDeleteSavedView}
+            onOpenSaveModal={() => setIsSaveModalOpen(true)}
+          />
+
           {/* Host / IP Filter */}
           <div>
             <label className="block text-slate-400 font-medium mb-1.5">Host / IP</label>
@@ -359,34 +488,38 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
 
           {/* Custom Time */}
           {showCustomTime && (
-            <div className="space-y-2 p-2.5 bg-dark-950 rounded border border-dark-700">
+            <div className="w-full space-y-2 p-2.5 bg-dark-950 rounded border border-dark-700">
               <div>
                 <label className="block text-slate-400 text-[11px] mb-1">From:</label>
-                <input
-                  type="datetime-local"
-                  value={toLocalDatetimeInputString(filters.from)}
-                  onChange={(e) =>
-                    onFilterChange({
-                      ...filters,
-                      from: fromLocalDatetimeInputString(e.target.value),
-                    })
-                  }
-                  className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 font-mono"
-                />
+                <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
+                  <input
+                    type="datetime-local"
+                    value={toLocalDatetimeInputString(filters.from)}
+                    onChange={(e) =>
+                      onFilterChange({
+                        ...filters,
+                        from: fromLocalDatetimeInputString(e.target.value),
+                      })
+                    }
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-slate-400 text-[11px] mb-1">To:</label>
-                <input
-                  type="datetime-local"
-                  value={toLocalDatetimeInputString(filters.to)}
-                  onChange={(e) =>
-                    onFilterChange({
-                      ...filters,
-                      to: fromLocalDatetimeInputString(e.target.value),
-                    })
-                  }
-                  className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 font-mono"
-                />
+                <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
+                  <input
+                    type="datetime-local"
+                    value={toLocalDatetimeInputString(filters.to)}
+                    onChange={(e) =>
+                      onFilterChange({
+                        ...filters,
+                        to: fromLocalDatetimeInputString(e.target.value),
+                      })
+                    }
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -416,7 +549,19 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = ({
           </div>
         </div>
       </SlideOver>
+
+      {/* Save View Modal */}
+      <SaveViewModal
+        isOpen={isSaveModalOpen}
+        onClose={() => setIsSaveModalOpen(false)}
+        currentFilters={filters}
+        onSave={handleSaveViewSubmit}
+      />
     </div>
   );
-};
+});
+
+LogSearchBar.displayName = 'LogSearchBar';
+
+export default LogSearchBar;
 

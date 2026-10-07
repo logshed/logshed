@@ -46,6 +46,20 @@ const WORD_LEVEL_REGEX =
   /^(?:(?:emerg|emergency|alert|crit|critical|fatal|panic|err|error|warn|warning|notice|info|informational|debug|trace|verbose)\s*:?\s+|log:\s+)/i;
 
 /**
+ * Additional prefix matchers:
+ * - Valkey / Redis server line: "1:M 02 Oct 2026 11:47:57.745 # " or "1:S ... * "
+ * - Application-prefixed pipe: "[maintainerr] | 03/10/2026 16:00:33 "
+ * - Day-first slash date: "03/10/2026 16:00:33 "
+ */
+const VALKEY_PREFIX_REGEX = /^\d+:[a-zA-Z]\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s+[#*.-]\s*/;
+
+const APP_PIPE_DATE_REGEX = /^\[[^\]]+\]\s*\|\s*\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s*/;
+
+const DMY_SLASH_TIMESTAMP_REGEX = /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s*/;
+
+const LOGFMT_MSG_REGEX = /^(?:time|ts)=["']?[^"'\s]+["']?\s+(?:.*?\b)?msg=(?:"([^"]*)"|'([^']*)'|(\S+))/;
+
+/**
  * Trims redundant leading timestamps and repeated severity prefixes from message text
  * for clean display in the live log stream table rows.
  * Preserves the original message content in full if no redundant prefix matches.
@@ -55,16 +69,32 @@ export function cleanLogMessageForDisplay(text: string | null | undefined): stri
   const stripped = stripAnsi(text);
   let clean = stripped.trim();
 
-  // 1. Strip leading redundant timestamps
-  clean = clean.replace(LEADING_TIMESTAMP_REGEX, '');
+  // 1. Check for logfmt format with msg="..."
+  const logfmtMatch = clean.match(LOGFMT_MSG_REGEX);
+  if (logfmtMatch) {
+    const extractedMsg = logfmtMatch[1] ?? logfmtMatch[2] ?? logfmtMatch[3];
+    if (extractedMsg) {
+      return extractedMsg;
+    }
+  }
 
-  // 2. If preceded by a bracketed subsystem tag like [MONITOR] before the level, preserve the subsystem:
+  // 2. Strip Valkey / Redis prefix (<pid>:<role> <date> <time> <level_char>)
+  clean = clean.replace(VALKEY_PREFIX_REGEX, '');
+
+  // 3. Strip [app] | DD/MM/YYYY HH:MM:SS prefix
+  clean = clean.replace(APP_PIPE_DATE_REGEX, '');
+
+  // 4. Strip leading redundant timestamps (including DD/MM/YYYY)
+  clean = clean.replace(LEADING_TIMESTAMP_REGEX, '');
+  clean = clean.replace(DMY_SLASH_TIMESTAMP_REGEX, '');
+
+  // 5. If preceded by a bracketed subsystem tag like [MONITOR] before the level, preserve the subsystem:
   clean = clean.replace(SUBSYSTEM_WITH_LEVEL_REGEX, '$1 ');
 
-  // 3. Match leading bracketed level: [error], [warn], [info], etc.
+  // 6. Match leading bracketed level: [error], [warn], [info], etc.
   clean = clean.replace(BRACKET_LEVEL_REGEX, '');
 
-  // 4. Match leading unbracketed level: "WARN: ...", "INFO   ..."
+  // 7. Match leading unbracketed level: "WARN: ...", "INFO   ..."
   clean = clean.replace(WORD_LEVEL_REGEX, '');
 
   const result = clean.trim();
@@ -109,4 +139,87 @@ export function fromLocalDatetimeInputString(localString?: string | null): strin
   if (isNaN(d.getTime())) return undefined;
   return d.toISOString();
 }
+
+/**
+ * Formats a UTC ISO datetime string into local browser representation: 'YYYY-MM-DD HH:mm:ss' (or 'YYYY-MM-DD HH:mm' if includeSeconds is false).
+ */
+export function formatLocalTimestamp(isoString?: string | null, includeSeconds: boolean = true): string {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  if (includeSeconds) {
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  }
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+/**
+ * Slugifies text into an alphanumeric kebab-cased string suitable for filenames.
+ */
+export function slugify(text: string): string {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '') || 'rule';
+}
+
+/**
+ * Initiates a browser-native file download from a Blob.
+ */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Formats a maintenance window end timestamp into a clean, human-readable time string.
+ */
+export function formatMaintenanceTime(isoString?: string | null): string {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return isoString;
+  const now = new Date();
+  const isSameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isSameDay) {
+    return timeStr;
+  }
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${timeStr}`;
+}
+
+/**
+ * Formats a byte quantity into a human-readable size string (B, KB, MB, GB, TB, PB).
+ * Handles zero and negative values defensively without returning "NaN undefined".
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const unitIndex = Math.min(Math.max(0, i), sizes.length - 1);
+  return `${parseFloat((bytes / Math.pow(k, unitIndex)).toFixed(2))} ${sizes[unitIndex]}`;
+}
+
 

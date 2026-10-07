@@ -12,199 +12,30 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, run_db_query
+from app.core.config import get_db_path
 from app.core.sse import sse_manager
-from app.models import LogContextResponse, LogEntry, LogFacetsResponse, LogListResponse
+from app.models import (
+    LogContextResponse,
+    LogDeletePreviewResponse,
+    LogDeleteRequest,
+    LogDeleteResponse,
+    LogEntry,
+    LogFacetsResponse,
+    LogListResponse,
+)
+from app.core.utils import (
+    escape_fts_tokens,
+    expand_source_aliases,
+    format_fts_query,
+    parse_multi_values,
+)
+from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 
 import sqlite3
 
 logger = logging.getLogger(__name__)
 
-import re
-
 router = APIRouter(prefix="/logs", tags=["Logs"])
-
-# Reserved FTS5 syntax operators
-_FTS_OPERATORS = {"AND", "OR", "NOT", "NEAR"}
-# Strict allowlist of searchable columns in logs_fts virtual table
-_FTS_ALLOWED_COLUMNS = {"app_name", "source_alias", "message"}
-
-
-def _escape_fts_tokens(query_str: str) -> str:
-    """
-    Fallback token cleaner that wraps words in quotes with wildcard suffix
-    to handle malformed user input without causing FTS5 syntax errors.
-    """
-    q = query_str.strip()
-    if not q:
-        return ""
-    words = q.split()
-    tokens = []
-    for w in words:
-        clean = w.replace('"', '').replace("'", '').replace('*', '').replace('\x00', '').strip()
-        if clean:
-            tokens.append(f'"{clean}"*')
-    return " ".join(tokens)
-
-
-def _format_fts_query(query_str: str) -> str:
-    """
-    Format user query for FTS5 search with prefix matching.
-    - Strict allowlist for valid column prefixes (app_name, source_alias, message) and operators.
-    - If search query contains unbalanced quotes or syntax errors, fall back cleanly
-      to escaped token prefix queries so queries never trigger an unhandled OperationalError.
-    - If user entered quoted phrases (e.g. "exact phrase"), preserve them.
-    - If terms do not end in '*' and are not boolean operators (AND, OR, NOT, NEAR),
-      automatically append '*' for search-as-you-type prefix matching.
-    - If column filters are used (e.g. app_name:nginx), apply wildcard to the value.
-    """
-    q = query_str.strip()
-    if not q:
-        return ""
-
-    # Special FTS5 query syntax: queries starting with '*' trigger unknown special query errors
-    if q.startswith("*"):
-        return _escape_fts_tokens(q)
-
-    # Check for unbalanced double or single quotes
-    if q.count('"') % 2 != 0 or q.count("'") % 2 != 0:
-        return _escape_fts_tokens(q)
-
-    # Check for unbalanced or malformed parentheses
-    depth = 0
-    for char in q:
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth < 0:
-                return _escape_fts_tokens(q)
-    if depth != 0:
-        return _escape_fts_tokens(q)
-
-    pattern = re.compile(r'("[^"]*"|\'[^\']*\'|[a-zA-Z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)')
-    tokens = pattern.findall(q)
-    if not tokens:
-        return _escape_fts_tokens(q)
-
-    formatted_tokens = []
-    for token in tokens:
-        token = token.strip()
-        if not token:
-            continue
-
-        if token.startswith(('"', "'")) or token in ("(", ")"):
-            formatted_tokens.append(token)
-            continue
-
-        if token.upper() in _FTS_OPERATORS:
-            formatted_tokens.append(token.upper())
-            continue
-
-        if ":" in token:
-            col, val = token.split(":", 1)
-            col_lower = col.lower()
-            if col_lower in _FTS_ALLOWED_COLUMNS:
-                if not val or val == "*":
-                    # Incomplete column filter while user is typing (e.g. "app_name:" or "app_name:*")
-                    # Fall back cleanly to escaped token search to prevent FTS5 syntax errors
-                    return _escape_fts_tokens(q)
-                if val.startswith(('"', "'")):
-                    formatted_tokens.append(f"{col_lower}:{val}")
-                elif val.startswith("*"):
-                    clean_val = val.replace('"', '""')
-                    formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
-                elif val.endswith("*"):
-                    core = val[:-1]
-                    clean_core = core.replace('"', '""')
-                    if "." in clean_core:
-                        formatted_tokens.append(f'{col_lower}:"{clean_core}"*')
-                    else:
-                        formatted_tokens.append(f"{col_lower}:{clean_core}*")
-                else:
-                    clean_val = val.replace('"', '""')
-                    if "." in clean_val:
-                        formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
-                    else:
-                        formatted_tokens.append(f"{col_lower}:{clean_val}*")
-                continue
-            else:
-                # Column is not allowlisted - treat as literal token wrapped in quotes
-                clean_token = token.replace('"', '""')
-                if clean_token.endswith("*") and not clean_token.startswith("*"):
-                    formatted_tokens.append(f'"{clean_token[:-1]}"*')
-                else:
-                    formatted_tokens.append(f'"{clean_token}"*')
-                continue
-
-        if token.startswith("*"):
-            clean_token = token.replace('"', '""')
-            formatted_tokens.append(f'"{clean_token}"*')
-        elif token.endswith("*"):
-            core = token[:-1]
-            clean_core = core.replace('"', '""')
-            if "." in clean_core:
-                formatted_tokens.append(f'"{clean_core}"*')
-            else:
-                formatted_tokens.append(f"{clean_core}*")
-        else:
-            clean_token = token.replace('"', '""')
-            if "." in clean_token:
-                formatted_tokens.append(f'"{clean_token}"*')
-            else:
-                formatted_tokens.append(f"{clean_token}*")
-
-    if not formatted_tokens:
-        return _escape_fts_tokens(q)
-
-    # Validate token sequence for FTS5 syntax correctness
-    non_parens = [t for t in formatted_tokens if t not in ("(", ")")]
-    if not non_parens:
-        return _escape_fts_tokens(q)
-
-    # First and last non-paren tokens cannot be operators
-    if non_parens[0] in _FTS_OPERATORS or non_parens[-1] in _FTS_OPERATORS:
-        return _escape_fts_tokens(q)
-
-    for i in range(len(formatted_tokens) - 1):
-        t1, t2 = formatted_tokens[i], formatted_tokens[i + 1]
-        # Consecutive operators
-        if t1 in _FTS_OPERATORS and t2 in _FTS_OPERATORS:
-            return _escape_fts_tokens(q)
-        # Operator immediately after '('
-        if t1 == "(" and t2 in _FTS_OPERATORS:
-            return _escape_fts_tokens(q)
-        # Operator immediately before ')'
-        if t1 in _FTS_OPERATORS and t2 == ")":
-            return _escape_fts_tokens(q)
-        # Empty parens
-        if t1 == "(" and t2 == ")":
-            return _escape_fts_tokens(q)
-        # Term directly before '(' without operator
-        if t1 not in _FTS_OPERATORS and t1 != "(" and t2 == "(":
-            return _escape_fts_tokens(q)
-        # Term directly after ')' without operator
-        if t1 == ")" and t2 not in _FTS_OPERATORS and t2 != ")":
-            return _escape_fts_tokens(q)
-
-    return " ".join(formatted_tokens)
-
-
-def _parse_multi_values(values: Optional[list[str]]) -> list[str]:
-    """
-    Parse query parameters that may be passed repeatedly or comma-separated.
-    e.g. ['pve1,pve2', 'pve3'] -> ['pve1', 'pve2', 'pve3']
-    """
-    if not values:
-        return []
-    result: list[str] = []
-    for item in values:
-        if not item:
-            continue
-        for part in item.split(","):
-            part = part.strip()
-            if part and part not in result:
-                result.append(part)
-    return result
 
 
 @router.get("", response_model=LogListResponse)
@@ -247,25 +78,26 @@ async def list_logs(
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         is_fts = bool(query and query.strip())
-        from_table = "logs"
 
         if is_fts:
-            fts_term = _format_fts_query(query)
+            fts_term = format_fts_query(query)
             if not fts_term.strip():
                 where_clauses.append("0")
             else:
-                from_table = "logs JOIN logs_fts ON logs.id = logs_fts.rowid"
-                where_clauses.append("logs_fts MATCH :fts_term")
+                # Uncorrelated subquery: FTS5 evaluates the MATCH exactly once. A JOIN lets the planner
+                # drive from a relational index (e.g. app_name) and re-run the MATCH per candidate row,
+                # rebuilding the full doclist of auto-prefixed terms each time (quadratic cost).
+                where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
                 params["fts_term"] = fts_term
 
-        parsed_sources = _parse_multi_values(source)
+        parsed_sources = expand_source_aliases(source, conn=conn)
         if parsed_sources:
             src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
             where_clauses.append(f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))")
             for i, s in enumerate(parsed_sources):
                 params[f"src_{i}"] = s
 
-        parsed_apps = _parse_multi_values(app_name)
+        parsed_apps = parse_multi_values(app_name)
         if parsed_apps:
             app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
             where_clauses.append(f"logs.app_name IN ({app_placeholders})")
@@ -289,12 +121,12 @@ async def list_logs(
         # Total count query: cap count evaluation to avoid full table scans on broad queries
         count_limit = max(1001, offset + limit + 1)
         params["count_limit"] = count_limit
-        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM {from_table} {where_sql} LIMIT :count_limit)"
+        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
         # Log selection query
         select_sql = f"""
             SELECT logs.id, logs.timestamp, logs.received_at, logs.source_ip, logs.source_alias,
                    logs.app_name, logs.facility, logs.severity, logs.message, logs.raw
-            FROM {from_table}
+            FROM logs
             {where_sql}
             ORDER BY logs.timestamp DESC, logs.id DESC
             LIMIT :limit OFFSET :offset
@@ -309,7 +141,7 @@ async def list_logs(
         except sqlite3.OperationalError as e:
             if is_fts:
                 logger.info(f"FTS5 query '{params.get('fts_term')}' failed ({e}), falling back to escaped token search.")
-                fallback_term = _escape_fts_tokens(query)
+                fallback_term = escape_fts_tokens(query)
                 if not fallback_term.strip():
                     total = 0
                     rows = []
@@ -342,10 +174,17 @@ async def list_logs(
             for r in rows
         ]
 
-        return logs, total
+        total_capped = bool(total >= count_limit)
+        return logs, total, total_capped
 
-    logs, total = await run_db_query(_query_db)
-    return LogListResponse(logs=logs, total=total, limit=limit, offset=offset)
+    logs, total, total_capped = await run_db_query(_query_db)
+    return LogListResponse(
+        logs=logs,
+        total=total,
+        limit=limit,
+        offset=offset,
+        total_capped=total_capped,
+    )
 
 
 @router.get("/stream")
@@ -360,8 +199,10 @@ async def stream_logs(
     """
     Server-Sent Events (SSE) endpoint to stream real-time incoming logs to the browser.
     """
-    parsed_sources = set(_parse_multi_values(source))
-    parsed_apps = set(_parse_multi_values(app_name))
+    parsed_sources = set(
+        await run_db_query(lambda conn: expand_source_aliases(source, conn=conn))
+    )
+    parsed_apps = set(parse_multi_values(app_name))
 
     queue = await sse_manager.subscribe()
 
@@ -436,10 +277,12 @@ async def get_log_facets(
                 FROM distinct_sources s
                 WHERE s.val IS NOT NULL
             )
-            SELECT val FROM distinct_sources WHERE val IS NOT NULL;
+            SELECT s.val, (SELECT source_ip FROM logs WHERE source_alias = s.val LIMIT 1)
+            FROM distinct_sources s
+            WHERE s.val IS NOT NULL;
             """
         )
-        sources = [r[0] for r in cursor.fetchall()]
+        sources = cursor.fetchall()
 
         # 2. Distinct fallback IPs for logs where source_alias is empty
         cursor.execute(
@@ -523,8 +366,10 @@ async def get_log_facets(
                     host_to_apps[alias] = set()
 
         # Add all distinct sources from logs (even if they logged without app_name)
-        for s in sources:
-            canonical = aliases_map.get(s, s)
+        for row in sources:
+            s = row[0]
+            ip = row[1]
+            canonical = (ip and aliases_map.get(ip)) or aliases_map.get(s) or s or ip
             sources_set.add(canonical)
             if canonical not in host_to_apps:
                 host_to_apps[canonical] = set()
@@ -666,3 +511,62 @@ async def get_log_context(
         )
 
     return LogContextResponse(target_id=id, logs=logs)
+
+
+@router.delete("/{id}", response_model=LogDeleteResponse)
+async def delete_single_log(
+    id: int,
+    user: dict = Depends(get_current_user),
+) -> LogDeleteResponse:
+    """
+    Delete a single log entry by its primary key ID.
+    """
+    db_path = get_db_path()
+    req = LogDeleteRequest(log_ids=[id])
+    result = await execute_delete_logs_async(db_path, req)
+    if result["deleted_count"] == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log entry {id} not found.",
+        )
+    return LogDeleteResponse(**result)
+
+
+@router.post("/delete", response_model=LogDeleteResponse)
+async def delete_logs_batch(
+    request: LogDeleteRequest,
+    user: dict = Depends(get_current_user),
+) -> LogDeleteResponse:
+    """
+    Delete logs matching criteria or specific IDs.
+    Guards against unconstrained requests unless delete_all=True.
+    """
+    db_path = get_db_path()
+    try:
+        result = await execute_delete_logs_async(db_path, request)
+        return LogDeleteResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/delete/preview", response_model=LogDeletePreviewResponse)
+async def preview_delete_logs(
+    request: LogDeleteRequest,
+    user: dict = Depends(get_current_user),
+) -> LogDeletePreviewResponse:
+    """
+    Calculate count of logs matching deletion criteria without deleting them.
+    """
+    db_path = get_db_path()
+    try:
+        matched = await count_matching_logs_async(db_path, request)
+        return LogDeletePreviewResponse(matched_count=matched)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+

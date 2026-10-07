@@ -26,12 +26,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set runtime environment variables
+ARG LOGSHED_IMAGE_REPO=logshed/logshed
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/backend \
     PORT=8080 \
     PUID=1000 \
-    PGID=1000
+    PGID=1000 \
+    LOGSHED_IMAGE_REPO=${LOGSHED_IMAGE_REPO}
 
 # Set application directory
 WORKDIR /app/backend

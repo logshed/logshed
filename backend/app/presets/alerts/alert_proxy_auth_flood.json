@@ -1,0 +1,13 @@
+{
+  "id": "proxy_auth_flood",
+  "name": "Web Proxy 401/403 Auth Flood",
+  "description": "Detects high-volume bursts of 401 Unauthorized and 403 Forbidden responses from proxies.",
+  "rule_type": "threshold",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "(?:HTTP/[0-9.]+\"\\s+|status[=:]\\s*|\\b)(?:401\\s+Unauthorized|403\\s+Forbidden)\\b|(?:HTTP/[0-9.]+\"\\s+|status[=:]\\s*)(?:401|403)\\b",
+  "threshold_count": 20,
+  "window_seconds": 60,
+  "cooldown_seconds": 300,
+  "ai_enrichment": true
+}

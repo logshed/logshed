@@ -140,7 +140,7 @@ class TestUnraidTemplate:
         assert name is not None and name.text == "logshed"
 
         network = root.find("Network")
-        assert network is not None and network.text == "br0"
+        assert network is not None and network.text == "bridge"
 
         webui = root.find("WebUI")
         assert webui is not None and "8080" in webui.text
@@ -295,6 +295,7 @@ def built_image(docker_available):
     subprocess.run(["docker", "rmi", "-f", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+@pytest.mark.e2e
 class TestDockerLiveContainer:
 
     def test_container_default_port_and_healthcheck(self, built_image):

@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import sqlite3
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
@@ -17,10 +18,11 @@ from app.api.deps import run_db_query
 from app.core.config import DEFAULT_AI_MODEL, get_all_system_settings
 from app.core.redactor import redact
 from app.core.security import decrypt_value
-from app.models import AiAuditItem
+from app.core.utils import parse_iso_to_utc_datetime
 from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
     build_analysis_prompt,
+    format_prompt_log_line,
     truncate_logs_to_budget,
 )
 
@@ -44,7 +46,7 @@ def fetch_and_validate_logs(
     cursor = conn.cursor()
     cursor.execute(
         f"""
-        SELECT id, timestamp, source_ip, source_alias, app_name, severity, message
+        SELECT id, timestamp, source_ip, source_alias, app_name, severity, message, raw
         FROM logs
         WHERE id IN ({placeholders})
         ORDER BY timestamp ASC, id ASC
@@ -108,16 +110,11 @@ def read_ai_settings(conn: sqlite3.Connection) -> tuple[dict[str, str], dict[str
 
 def is_cache_fresh(updated_at_str: Optional[str], max_age_seconds: int = 86400) -> bool:
     """Check if cached models or settings are within the specified TTL (default 24h)."""
-    if not updated_at_str:
+    dt = parse_iso_to_utc_datetime(updated_at_str)
+    if dt is None:
         return False
-    try:
-        dt = datetime.datetime.fromisoformat(updated_at_str)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.timezone.utc)
-        now = datetime.datetime.now(datetime.timezone.utc)
-        return (now - dt).total_seconds() < max_age_seconds
-    except Exception:
-        return False
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return (now - dt).total_seconds() < max_age_seconds
 
 
 def save_models_cache(conn: sqlite3.Connection, cache_key: str, models_data: list[dict[str, Any]]) -> str:
@@ -182,18 +179,29 @@ async def build_diagnosis_context(
     app_name = ", ".join(unique_apps) if unique_apps else "unknown"
 
     raw_lines = [
-        f"[{r['timestamp']}] [{r['source_alias'] or r['source_ip'] or 'unknown'}] [{r['app_name']}] {r['message']}"
+        format_prompt_log_line(
+            timestamp=r["timestamp"],
+            source=r["source_alias"] or r["source_ip"],
+            app_name=r["app_name"],
+            message=r["message"],
+            severity=r["severity"],
+            raw=r["raw"] if "raw" in r.keys() else None,
+        )
         for r in rows
     ]
     redacted_lines = redact(raw_lines)
     redacted_logs_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
     redacted_logs_text = truncate_logs_to_budget(redacted_logs_text)
 
-    provider = (provider_override or settings.get("ai_provider") or "gemini").lower()
-    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else "llama3.2")
-    model = model_override or settings.get("ai_model") or default_model
-    api_key = settings.get("ai_api_key", "")
-    base_url = settings.get("ai_base_url") or None
+    active_db_provider = (settings.get("ai_provider") or "gemini").lower()
+    provider = (provider_override or active_db_provider).lower()
+    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else ("claude-sonnet-4-6" if provider == "anthropic" else "llama3.2"))
+    model = model_override or settings.get(f"ai_model_{provider}") or (settings.get("ai_model") if provider == active_db_provider else None) or default_model
+    api_key = (
+        settings.get(f"ai_api_key_{provider}")
+        or (settings.get("ai_api_key", "") if provider == active_db_provider else "")
+    )
+    base_url = settings.get(f"ai_base_url_{provider}") or (settings.get("ai_base_url") if provider == active_db_provider else None) or None
 
     system_prompt = (
         system_prompt_override.strip()
@@ -201,7 +209,7 @@ async def build_diagnosis_context(
         else (settings.get("ai_system_prompt") or DEFAULT_SYSTEM_PROMPT)
     )
 
-    fallback_models_str = settings.get("ai_fallback_models") or ""
+    fallback_models_str = settings.get(f"ai_fallback_models_{provider}") or (settings.get("ai_fallback_models", "") if provider == active_db_provider else "")
     configured_fallbacks = [m.strip() for m in fallback_models_str.split(",") if m.strip()]
     fallback_models = (
         fallback_models_override
@@ -229,6 +237,17 @@ async def build_diagnosis_context(
     # Estimate token count (~3.5 characters per token including system prompt and framing overhead)
     estimated_tokens = max(1, int(len(full_prompt) // 3.5 + len(system_prompt) // 3.5 + 50))
 
+    from app.core.config import get_cached_setting, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET
+    ai_timeout = float(get_cached_setting("ai_timeout", DEFAULT_AI_TIMEOUT))
+    ai_thinking_budget = int(get_cached_setting("ai_thinking_budget", DEFAULT_AI_THINKING_BUDGET))
+
+    stored_ai_enabled = settings.get("ai_enabled")
+    if stored_ai_enabled is not None:
+        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        ai_enabled = bool(api_key.strip())
+    has_ai_api_key = bool(api_key.strip())
+
     return {
         "rows": rows,
         "source_alias": source_alias,
@@ -245,6 +264,10 @@ async def build_diagnosis_context(
         "redacted_prompt_override": redacted_prompt_override,
         "full_prompt": full_prompt,
         "estimated_tokens": estimated_tokens,
+        "ai_timeout": ai_timeout,
+        "ai_thinking_budget": ai_thinking_budget,
+        "ai_enabled": ai_enabled,
+        "has_ai_api_key": has_ai_api_key,
     }
 
 
@@ -261,6 +284,8 @@ async def save_diagnosis_audit(
     tokens_thoughts: int,
     tokens_used: int,
     system_prompt: Optional[str],
+    trigger_source: str = "on-demand",
+    custom_db_path: Optional[Path] = None,
 ) -> int:
     """Persist an AI diagnosis result to the ai_audit_log table."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -270,8 +295,8 @@ async def save_diagnosis_audit(
         cursor.execute(
             """
             INSERT INTO ai_audit_log
-            (timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text, tokens_in, tokens_out, tokens_thoughts, tokens_used, system_prompt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text, tokens_in, tokens_out, tokens_thoughts, tokens_used, system_prompt, trigger_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 now,
@@ -287,91 +312,23 @@ async def save_diagnosis_audit(
                 tokens_thoughts,
                 tokens_used,
                 system_prompt,
+                trigger_source,
             ),
         )
         audit_id = cursor.lastrowid
+        if trigger_source == "on-demand":
+            cursor.execute(
+                """
+                INSERT INTO alert_history
+                (rule_id, rule_name, channel_id, trigger_count, sample_log, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
+                VALUES (NULL, 'On-Demand Analysis', NULL, ?, NULL, ?, 1, ?, ?, ?)
+                """,
+                (log_count, raw_response, actual_model, audit_id, now),
+            )
         conn.commit()
         return audit_id
 
-    return await run_db_query(_save)
+    return await run_db_query(_save, custom_db_path=custom_db_path)
 
 
-async def list_ai_audit_logs(limit: int, offset: int) -> tuple[list[AiAuditItem], int]:
-    """Retrieve historical AI audit log entries with pagination."""
-    def _read(conn: sqlite3.Connection):
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM ai_audit_log")
-        total = cursor.fetchone()[0]
 
-        cursor.execute(
-            """
-            SELECT id, timestamp, source_alias, app_name, log_count, user_context, model, prompt_sent, response_text,
-                   COALESCE(tokens_in, 0) AS tokens_in,
-                   COALESCE(tokens_out, 0) AS tokens_out,
-                   COALESCE(tokens_thoughts, MAX(0, tokens_used - (COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)))) AS tokens_thoughts,
-                   tokens_used,
-                   system_prompt
-            FROM ai_audit_log
-            ORDER BY timestamp DESC, id DESC
-            LIMIT ? OFFSET ?
-            """,
-            (limit, offset),
-        )
-        rows = cursor.fetchall()
-        items = []
-        for r in rows:
-            p_sent = r["prompt_sent"]
-            if p_sent and not p_sent.startswith("### System Metadata") and not p_sent.startswith("### Redacted Log Stream"):
-                p_sent = build_analysis_prompt(
-                    source_alias=r["source_alias"],
-                    app_name=r["app_name"],
-                    redacted_logs=p_sent,
-                    log_count=r["log_count"],
-                    user_context=r["user_context"],
-                )
-
-            items.append(
-                AiAuditItem(
-                    id=r["id"],
-                    timestamp=str(r["timestamp"]),
-                    source_alias=r["source_alias"],
-                    app_name=r["app_name"],
-                    log_count=r["log_count"],
-                    user_context=r["user_context"],
-                    model=r["model"],
-                    prompt_sent=p_sent,
-                    response_text=r["response_text"],
-                    tokens_in=r["tokens_in"],
-                    tokens_out=r["tokens_out"],
-                    tokens_thoughts=r["tokens_thoughts"],
-                    tokens_used=r["tokens_used"],
-                    system_prompt=r["system_prompt"] or DEFAULT_SYSTEM_PROMPT,
-                )
-            )
-        return items, total
-
-    return await run_db_query(_read)
-
-
-async def delete_ai_audit_item(audit_id: int) -> bool:
-    """Delete a single AI audit log entry by ID."""
-    def _delete(conn: sqlite3.Connection) -> bool:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM ai_audit_log WHERE id = ?", (audit_id,))
-        affected = cursor.rowcount
-        conn.commit()
-        return affected > 0
-
-    return await run_db_query(_delete)
-
-
-async def clear_ai_audit_logs() -> int:
-    """Delete all AI audit log entries."""
-    def _clear(conn: sqlite3.Connection) -> int:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM ai_audit_log")
-        affected = cursor.rowcount
-        conn.commit()
-        return affected
-
-    return await run_db_query(_clear)

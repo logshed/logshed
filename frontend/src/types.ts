@@ -16,6 +16,28 @@ export interface LogContextResponse {
   logs: LogEntry[];
 }
 
+export interface LogDeleteParams {
+  log_ids?: number[];
+  sources?: string[];
+  apps?: string[];
+  severity_max?: number;
+  from?: string;
+  to?: string;
+  query?: string;
+  delete_all?: boolean;
+}
+
+export interface LogDeleteResponse {
+  status: string;
+  deleted_count: number;
+  message: string;
+}
+
+export interface LogDeletePreviewResponse {
+  matched_count: number;
+}
+
+
 export interface HostAlias {
   ip: string;
   alias: string;
@@ -23,21 +45,55 @@ export interface HostAlias {
   created_at: string;
 }
 
+export interface AiProviderConfig {
+  has_api_key: boolean;
+  ai_api_key: string;
+  ai_model?: string | null;
+  ai_fallback_models?: string | null;
+  ai_base_url?: string | null;
+}
+
 export interface SystemSettings {
-  ai_provider: 'gemini' | 'openai' | 'openai_compatible';
+  ai_enabled?: boolean;
+  ai_provider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
   ai_model: string;
   ai_fallback_models?: string;
   ai_api_key?: string;
+  has_ai_api_key?: boolean;
   ai_base_url?: string | null;
   ai_system_prompt?: string;
+  ai_providers_config?: Record<string, AiProviderConfig>;
   retention_days: number;
   max_retention_days?: number;
   retention_overridden?: boolean;
   internal_log_level?: string;
   check_for_updates?: boolean;
+  maintenance_until?: string | null;
+
+  // Advanced System Settings
+  ai_timeout?: number;
+  ai_thinking_budget?: number;
+  app_url?: string;
+  allow_private_notification_targets?: boolean;
+  enable_docker?: boolean;
+  docker_exclude_containers?: string;
+  docker_source_alias?: string;
+  trusted_proxies?: string;
+  trust_docker_proxies?: boolean;
+  cookie_secure?: boolean;
+  syslog_max_tcp_connections?: number;
+  syslog_tcp_inactivity_timeout?: number;
+
+  // Daily Digest Settings
+  daily_digest_enabled?: boolean;
+  daily_digest_channel_id?: number | null;
+  daily_digest_schedule_time?: string;
+  daily_digest_last_run?: string | null;
 }
 
-export type AppTab = 'stream' | 'aliases' | 'storage' | 'settings';
+export type AppTab = 'stream' | 'storage' | 'rules' | 'settings';
+export type SettingsSubTab = 'app' | 'aliases' | 'advanced';
+
 export interface StorageMetricsSnapshot {
   recorded_at: string;
   db_size_bytes: number;
@@ -70,6 +126,14 @@ export interface PruneResponse {
   metrics: StorageMetricsSnapshot;
 }
 
+export interface VacuumResponse {
+  status: string;
+  previous_size_bytes: number;
+  new_size_bytes: number;
+  reclaimed_bytes: number;
+  metrics: StorageMetricsSnapshot;
+}
+
 export interface AiPreviewRequest {
   log_ids: number[];
   user_context?: string;
@@ -86,6 +150,8 @@ export interface AiPreviewResponse {
   source_alias: string;
   app_name: string;
   system_prompt: string;
+  ai_enabled?: boolean;
+  has_ai_api_key?: boolean;
 }
 
 export interface AiDiagnosisStreamEvent {
@@ -125,23 +191,6 @@ export interface AiDiagnosisResponse {
   tokens_thoughts?: number;
   tokens_used: number;
   audit_id?: number;
-}
-
-export interface AiAuditEntry {
-  id: number;
-  timestamp: string;
-  source_alias: string;
-  app_name: string;
-  log_count: number;
-  user_context?: string | null;
-  model: string;
-  prompt_sent: string;
-  response_text: string;
-  tokens_in?: number;
-  tokens_out?: number;
-  tokens_thoughts?: number;
-  tokens_used: number;
-  system_prompt?: string | null;
 }
 
 export interface AuthStatusResponse {
@@ -192,6 +241,278 @@ export interface VersionInfo {
   update_available: boolean;
   check_enabled?: boolean;
   checked_at?: number | null;
+  repo_deprecated?: boolean;
+}
+
+export interface DropRule {
+  id: number;
+  name?: string | null;
+  source_pattern?: string | null;
+  app_pattern?: string | null;
+  message_pattern: string;
+  is_regex: boolean;
+  is_enabled: boolean;
+  severity_threshold?: number | null;
+  dropped_count: number;
+  created_at: string;
+}
+
+export interface DropRuleCreate {
+  name?: string | null;
+  source_pattern?: string | null;
+  app_pattern?: string | null;
+  message_pattern: string;
+  is_regex?: boolean;
+  is_enabled?: boolean;
+  severity_threshold?: number | null;
+}
+
+export interface DropRuleUpdate {
+  name?: string | null;
+  source_pattern?: string | null;
+  app_pattern?: string | null;
+  message_pattern?: string;
+  is_regex?: boolean;
+  is_enabled?: boolean;
+  severity_threshold?: number | null;
+  reset_counter?: boolean;
+}
+
+export interface DropRuleTestRequest {
+  source_pattern?: string | null;
+  app_pattern?: string | null;
+  message_pattern: string;
+  is_regex?: boolean;
+  severity_threshold?: number | null;
+  sample_message: string;
+  sample_source?: string | null;
+  sample_app?: string | null;
+  sample_severity?: number | null;
+}
+
+export interface DropRuleTestResponse {
+  matched: boolean;
+  error?: string | null;
+}
+
+export interface SavedView {
+  id: number;
+  name: string;
+  query_params: {
+    query?: string;
+    severity_max?: number;
+    source?: string | string[];
+    sources?: string[];
+    app_name?: string | string[];
+    apps?: string[];
+    from?: string;
+    to?: string;
+    [key: string]: any;
+  };
+  is_pinned: boolean;
+  created_at: string;
+}
+
+export interface SavedViewCreate {
+  name: string;
+  query_params: Record<string, any>;
+  is_pinned?: boolean;
+}
+
+export interface SavedViewUpdate {
+  name?: string;
+  query_params?: Record<string, any>;
+  is_pinned?: boolean;
+}
+
+export interface NotificationChannel {
+  id: number;
+  name: string;
+  url: string;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationChannelCreate {
+  name: string;
+  url: string;
+  is_enabled?: boolean;
+}
+
+export interface NotificationChannelUpdate {
+  name?: string;
+  url?: string;
+  is_enabled?: boolean;
+}
+
+export interface NotificationTestRequest {
+  channel_id?: number;
+  url?: string;
+}
+
+export interface NotificationTestResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface DailyDigestRunResponse {
+  status: string;
+  history_id?: number | null;
+  total_logs: number;
+  error_count: number;
+  top_errors: Array<{ entity: string; error_count: number }>;
+  top_services: Array<{ service: string; log_count: number }>;
+  storage_delta: string;
+  ai_summary?: string | null;
+  channel_id?: number | null;
+  notification_sent: boolean;
+  triggered_at?: string | null;
+}
+
+export interface AlertRule {
+  id: number;
+  name: string;
+  rule_type: string;
+  channel_id?: number | null;
+  filter_app?: string | null;
+  filter_severity?: number | null;
+  match_pattern?: string | null;
+  threshold_count: number;
+  window_seconds: number;
+  cooldown_seconds: number;
+  ai_enrichment: boolean;
+  is_enabled: boolean;
+  trigger_count: number;
+  last_triggered_at?: string | null;
+  suppress_until?: string | null;
+  created_at: string;
+}
+
+export interface AlertRuleCreate {
+  name: string;
+  rule_type: string;
+  channel_id?: number | null;
+  filter_app?: string | null;
+  filter_severity?: number | null;
+  match_pattern?: string | null;
+  threshold_count?: number;
+  window_seconds?: number;
+  cooldown_seconds?: number;
+  ai_enrichment?: boolean;
+  is_enabled?: boolean;
+}
+
+export interface AlertRuleUpdate {
+  name?: string;
+  rule_type?: string;
+  channel_id?: number | null;
+  filter_app?: string | null;
+  filter_severity?: number | null;
+  match_pattern?: string | null;
+  threshold_count?: number;
+  window_seconds?: number;
+  cooldown_seconds?: number;
+  ai_enrichment?: boolean;
+  is_enabled?: boolean;
+  reset_cooldown?: boolean;
+}
+
+export interface AlertTestRequest {
+  rule_type: string;
+  filter_app?: string | null;
+  filter_severity?: number | null;
+  match_pattern?: string | null;
+  sample_message: string;
+  sample_app?: string | null;
+  sample_severity?: number | null;
+}
+
+export interface AlertTestResponse {
+  matched: boolean;
+  extracted_ip?: string | null;
+  error?: string | null;
+}
+
+export interface AlertPreset {
+  id: string;
+  name: string;
+  description: string;
+  rule_type: string;
+  filter_app?: string | null;
+  filter_severity?: number | null;
+  match_pattern?: string | null;
+  threshold_count: number;
+  window_seconds: number;
+  cooldown_seconds: number;
+  ai_enrichment: boolean;
+  is_custom?: boolean;
+}
+
+export interface DropPreset {
+  id: string;
+  name: string;
+  description: string;
+  source_pattern?: string | null;
+  app_pattern?: string | null;
+  message_pattern: string;
+  is_regex: boolean;
+  severity_threshold?: number | null;
+  is_custom?: boolean;
 }
 
 
+export interface AlertHistoryItem {
+  id: number;
+  rule_id?: number | null;
+  rule_name: string;
+  channel_id?: number | null;
+  trigger_count: number;
+  sample_log?: string | null;
+  incident_summary?: string | null;
+  ai_enrichment: boolean;
+  ai_model?: string | null;
+  ai_audit_id?: number | null;
+  triggered_at: string;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  tokens_thoughts?: number | null;
+  tokens_used?: number | null;
+  prompt_sent?: string | null;
+  system_prompt?: string | null;
+  response_text?: string | null;
+  source_alias?: string | null;
+  app_name?: string | null;
+  user_context?: string | null;
+}
+
+export interface AlertHistoryResponse {
+  items: AlertHistoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface MaintenanceSchedule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  recurrence: 'daily' | 'weekly' | 'monthly';
+  start_time: string;
+  duration_minutes: number;
+  day_of_week?: number;
+  day_of_month?: number;
+  is_active?: boolean;
+  next_run?: string | null;
+}
+
+export interface MaintenanceWindowResponse {
+  active: boolean;
+  until: string | null;
+  reason?: string | null;
+  schedule_name?: string | null;
+  on_demand_until?: string | null;
+  schedules?: MaintenanceSchedule[];
+  server_time?: string | null;
+  server_timezone?: string | null;
+}

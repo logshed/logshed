@@ -8,7 +8,7 @@ import datetime
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from pathlib import Path
 
@@ -18,13 +18,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import ai, aliases, auth, logs, settings, system
+from app.api import ai, alerts, aliases, auth, drop_rules, logs, notifications, saved_views, settings, system
 from app.api.deps import run_db_query
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.syslog import SyslogServer
 from app.core.config import (
     get_all_system_settings,
     get_cors_origins,
+    get_data_dir,
     get_db_path,
     get_syslog_port,
     get_syslog_max_tcp_connections,
@@ -34,6 +35,8 @@ from app.core.config import (
 from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
 from app.core.security import get_or_create_master_key
+from app.services.daily_digest import DailyDigestWorker
+from app.services.fts_indexer import FTSIndexWorker
 from app.services.retention import PruneWorker
 from app.services.storage_metrics import StorageMetricsWorker
 from app.version import APP_VERSION
@@ -45,13 +48,21 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # Module-level worker references for lifespan management
 _queue_consumer: Optional[QueueConsumer] = None
+_fts_worker: Optional[FTSIndexWorker] = None
 _metrics_worker: Optional[StorageMetricsWorker] = None
 _prune_worker: Optional[PruneWorker] = None
+_daily_digest_worker: Optional[DailyDigestWorker] = None
 _syslog_server: Optional[SyslogServer] = None
 _docker_tailer: Optional[DockerTailer] = None
 _assembler: Optional[KeyedMultilineAssembler] = None
 _internal_log_handler: Optional[InternalLogHandler] = None
+_alert_evaluator: Optional[Any] = None
 _background_tasks: list[asyncio.Task] = []
+
+
+def get_daily_digest_worker() -> Optional[DailyDigestWorker]:
+    """Returns the active DailyDigestWorker instance, or None if uninitialized."""
+    return _daily_digest_worker
 
 
 def get_internal_log_handler() -> Optional[InternalLogHandler]:
@@ -59,7 +70,20 @@ def get_internal_log_handler() -> Optional[InternalLogHandler]:
     return _internal_log_handler
 
 
-def configure_internal_log_handler(level: Optional[Union[int, str]]) -> Optional[InternalLogHandler]:
+def get_syslog_server() -> Optional[SyslogServer]:
+    """Returns the active SyslogServer instance, or None if uninitialized or failed."""
+    return _syslog_server
+
+
+def get_docker_tailer() -> Optional[DockerTailer]:
+    """Returns the active DockerTailer instance, or None if uninitialized or failed."""
+    return _docker_tailer
+
+
+def configure_internal_log_handler(
+    level: Optional[Union[int, str]],
+    alias_cache: Optional[Any] = None,
+) -> Optional[InternalLogHandler]:
     """
     Dynamically configure or disable the active internal log handler on logger 'app'.
     Accepts integer logging levels, string level names ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
@@ -82,11 +106,13 @@ def configure_internal_log_handler(level: Optional[Union[int, str]]) -> Optional
         return None
 
     if _internal_log_handler is None:
-        _internal_log_handler = InternalLogHandler(level=parsed)
+        _internal_log_handler = InternalLogHandler(level=parsed, alias_cache=alias_cache)
         if _internal_log_handler not in app_logger.handlers:
             app_logger.addHandler(_internal_log_handler)
     else:
         _internal_log_handler.set_internal_level(parsed)
+        if alias_cache is not None:
+            _internal_log_handler.set_alias_cache(alias_cache)
         if _internal_log_handler not in app_logger.handlers:
             app_logger.addHandler(_internal_log_handler)
 
@@ -137,8 +163,8 @@ async def _model_refresh_worker(db_path) -> None:
 
             settings = await run_db_query(get_all_system_settings, custom_db_path=Path(db_path))
             provider = (settings.get("ai_provider") or "gemini").lower()
-            api_key = settings.get("ai_api_key", "").strip()
-            base_url = settings.get("ai_base_url")
+            api_key = (settings.get(f"ai_api_key_{provider}") or settings.get("ai_api_key", "")).strip()
+            base_url = settings.get(f"ai_base_url_{provider}") or settings.get("ai_base_url")
 
             if (provider == "openai_compatible") or api_key:
                 try:
@@ -169,13 +195,31 @@ async def _model_refresh_worker(db_path) -> None:
             await asyncio.sleep(3600)
 
 
+async def _drop_filter_flush_worker() -> None:
+    """
+    Background worker that periodically flushes in-memory drop counts
+    to SQLite every 30 seconds to minimize write contention.
+    """
+    from app.services.drop_filter import get_drop_filter
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+            await asyncio.to_thread(get_drop_filter().flush_counts)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Error flushing drop counts: {e}")
+            await asyncio.sleep(10)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Application lifespan manager.
     Sets up database schema, master encryption keys, and starts background workers.
     """
-    global _queue_consumer, _metrics_worker, _prune_worker, _syslog_server, _docker_tailer, _assembler, _background_tasks
+    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _assembler, _alert_evaluator, _background_tasks
 
     db_path = get_db_path()
     logger.info(f"Setting up LogShed database at {db_path}...")
@@ -184,11 +228,27 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(run_migrations, db_path)
     await asyncio.to_thread(get_or_create_master_key)
 
+    # Ensure user presets directories exist in DATA_DIR
+    for preset_sub in ("alerts", "drops"):
+        (Path(get_data_dir()) / "presets" / preset_sub).mkdir(parents=True, exist_ok=True)
+
+    # Initialize in-memory drop filter cache
+    from app.services.drop_filter import init_drop_filter
+    init_drop_filter(db_path)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_drop_filter_flush_worker, "DropFilterWorker")))
+
+    # Initialize in-memory alert evaluator
+    from app.services.alert_evaluator import init_alert_evaluator
+    _alert_evaluator = init_alert_evaluator(db_path)
+
     # 2. Shared KeyedMultilineAssembler for all collectors
     _assembler = KeyedMultilineAssembler()
 
-    # 3. Start QueueConsumer
-    _queue_consumer = QueueConsumer(db_path)
+    # 3. Start FTSIndexWorker and QueueConsumer
+    _fts_worker = FTSIndexWorker(db_path)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_fts_worker.run, "FTSIndexWorker")))
+
+    _queue_consumer = QueueConsumer(db_path, fts_indexer=_fts_worker, alert_evaluator=_alert_evaluator)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_queue_consumer.run, "QueueConsumer")))
 
     # 4. Start StorageMetricsWorker
@@ -199,10 +259,14 @@ async def lifespan(app: FastAPI):
     _prune_worker = PruneWorker(db_path)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_prune_worker.run, "PruneWorker")))
 
-    # 6. Start ModelRefreshWorker (periodically updates available AI models)
+    # 6. Start DailyDigestWorker (runs 24-hour analytical rollup digest)
+    _daily_digest_worker = DailyDigestWorker(db_path)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_daily_digest_worker.run, "DailyDigestWorker")))
+
+    # 7. Start ModelRefreshWorker (periodically updates available AI models)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_model_refresh_worker, "ModelRefreshWorker", db_path)))
 
-    # 7. Start Syslog Server (optional / non-fatal in dev/test)
+    # 8. Start Syslog Server (optional / non-fatal in dev/test)
     try:
         syslog_port = get_syslog_port()
         _syslog_server = SyslogServer(
@@ -218,7 +282,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"SyslogServer could not be started: {e}")
 
-    # 7. Start Docker Tailer (optional / non-fatal if Docker socket is not present)
+    # 9. Start Docker Tailer (optional / non-fatal if Docker socket is not present)
     try:
         shared_cache = _syslog_server.alias_cache if _syslog_server else None
         _docker_tailer = DockerTailer(assembler=_assembler, db_path=db_path, alias_cache=shared_cache)
@@ -226,7 +290,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"DockerTailer could not be started: {e}")
 
-    # 8. Attach internal log handler so application warnings and errors appear in LogShed
+    # 10. Attach internal log handler so application warnings and errors appear in LogShed
     persisted_level = None
     try:
         import sqlite3
@@ -243,8 +307,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    shared_cache = _syslog_server.alias_cache if _syslog_server else None
+    if shared_cache is None and _docker_tailer and hasattr(_docker_tailer, "alias_cache"):
+        shared_cache = _docker_tailer.alias_cache
+    if shared_cache is None:
+        from app.collectors.syslog import AliasCache
+        shared_cache = AliasCache(db_path)
+
     active_level = persisted_level if persisted_level is not None else get_internal_log_level()
-    _internal_log_handler = configure_internal_log_handler(active_level)
+    _internal_log_handler = configure_internal_log_handler(active_level, alias_cache=shared_cache)
     if _internal_log_handler is not None and not _internal_log_handler.is_disabled:
         logger.info(f"InternalLogHandler attached at level {logging.getLevelName(_internal_log_handler.level)}.")
     else:
@@ -275,6 +346,16 @@ async def lifespan(app: FastAPI):
             await _assembler.flush_all()
         except Exception as e:
             logger.warning(f"Error flushing multiline assembler: {e}")
+    if _queue_consumer:
+        try:
+            await _queue_consumer.stop()
+        except Exception as e:
+            logger.error(f"Error stopping QueueConsumer: {e}")
+    if _fts_worker:
+        try:
+            await _fts_worker.stop()
+        except Exception as e:
+            logger.error(f"Error stopping FTSIndexWorker: {e}")
     if _prune_worker:
         try:
             await _prune_worker.stop()
@@ -285,11 +366,34 @@ async def lifespan(app: FastAPI):
             await _metrics_worker.stop()
         except Exception as e:
             logger.warning(f"Error stopping StorageMetricsWorker: {e}")
-    if _queue_consumer:
+    if _alert_evaluator:
         try:
-            await _queue_consumer.stop()
+            await _alert_evaluator.stop()
         except Exception as e:
-            logger.error(f"Error stopping QueueConsumer: {e}")
+            logger.warning(f"Error stopping AlertEvaluator: {e}")
+    if _daily_digest_worker:
+        try:
+            await _daily_digest_worker.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping DailyDigestWorker: {e}")
+
+    try:
+        from app.services.notifier import shutdown_notifier_executor
+        shutdown_notifier_executor(wait=True)
+    except Exception as e:
+        logger.warning(f"Error shutting down notification executor: {e}")
+
+    try:
+        from app.core.regex_validator import shutdown_regex_executor
+        shutdown_regex_executor(wait=False)
+    except Exception as e:
+        logger.warning(f"Error shutting down regex executor: {e}")
+
+    try:
+        from app.services.drop_filter import get_drop_filter
+        get_drop_filter().flush_counts()
+    except Exception as e:
+        logger.warning(f"Error flushing drop filter counts during shutdown: {e}")
 
     for task in _background_tasks:
         task.cancel()
@@ -323,6 +427,17 @@ def create_app() -> FastAPI:
             status_code=422,
             content={"detail": clean_detail},
         )
+
+    # FTS search consistency middleware: ensures pending unindexed logs are caught up
+    # prior to executing full-text search queries by signaling the background worker.
+    @app.middleware("http")
+    async def fts_search_consistency(request: Request, call_next):
+        if request.url.path == "/api/logs" and request.query_params.get("query"):
+            from app.services.fts_indexer import get_fts_worker
+            worker = get_fts_worker()
+            if worker:
+                worker.notify_new_logs()
+        return await call_next(request)
 
     # Security headers middleware
     @app.middleware("http")
@@ -361,10 +476,29 @@ def create_app() -> FastAPI:
     api_router.include_router(logs.router)
     api_router.include_router(settings.router)
     api_router.include_router(aliases.router)
+    api_router.include_router(drop_rules.router)
+    api_router.include_router(saved_views.router)
+    api_router.include_router(notifications.router)
+    api_router.include_router(alerts.router)
     api_router.include_router(system.router)
     api_router.include_router(ai.router)
 
     app.include_router(api_router)
+
+    # API v1 alias router
+    api_v1_router = APIRouter(prefix="/api/v1")
+    api_v1_router.include_router(auth.router)
+    api_v1_router.include_router(logs.router)
+    api_v1_router.include_router(settings.router)
+    api_v1_router.include_router(aliases.router)
+    api_v1_router.include_router(drop_rules.router)
+    api_v1_router.include_router(saved_views.router)
+    api_v1_router.include_router(notifications.router)
+    api_v1_router.include_router(alerts.router)
+    api_v1_router.include_router(system.router)
+    api_v1_router.include_router(ai.router)
+
+    app.include_router(api_v1_router)
 
     # Static files serving with SPA fallback
     static_dir = Path(__file__).resolve().parent / "static"

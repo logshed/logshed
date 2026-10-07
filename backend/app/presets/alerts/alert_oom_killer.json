@@ -1,0 +1,13 @@
+{
+  "id": "oom_killer",
+  "name": "Kernel Out-Of-Memory (OOM) Kill",
+  "description": "Detects Linux kernel out-of-memory killer invocations and terminated container tasks.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "Out of memory:\\s*Kill(?:ed)? process|invoked oom-killer|oom[_-]killer|\\bKilled process \\d+ \\([^)]+\\)",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 300,
+  "ai_enrichment": true
+}

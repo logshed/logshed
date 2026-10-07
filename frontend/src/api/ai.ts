@@ -2,7 +2,6 @@ import { apiFetch, ApiError } from './client.ts';
 import {
   AiDiagnosisRequest,
   AiDiagnosisResponse,
-  AiAuditEntry,
   AiPreviewRequest,
   AiPreviewResponse,
   AiDiagnosisStreamEvent,
@@ -91,30 +90,33 @@ export async function diagnoseLogs(
   });
 }
 
-export const diagnoseLogsStream = diagnoseLogs;
-
-export async function fetchAiAudit(limit: number = 50, offset: number = 0): Promise<{ items: AiAuditEntry[]; total: number }> {
-  return apiFetch<{ items: AiAuditEntry[]; total: number }>(`/api/ai/audit?limit=${limit}&offset=${offset}`);
-}
-
-export async function deleteAiAuditItem(auditId: number): Promise<{ status: string; deleted_id?: number }> {
-  return apiFetch<{ status: string; deleted_id?: number }>(`/api/ai/audit/${auditId}`, {
-    method: 'DELETE',
-  });
-}
-
-export async function clearAiAuditLog(): Promise<{ status: string; deleted_count?: number }> {
-  return apiFetch<{ status: string; deleted_count?: number }>('/api/ai/audit', {
-    method: 'DELETE',
-  });
-}
-
-export async function getAiModels(provider?: string, refresh: boolean = false): Promise<AiModelsResponse> {
+export async function getAiModels(
+  provider?: string,
+  refresh: boolean = false,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<AiModelsResponse> {
   const params = new URLSearchParams();
   if (provider) params.set('provider', provider);
-  if (refresh) params.set('refresh', 'true');
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const res = await apiFetch<AiModelsResponse>(`/api/ai/models${qs}`);
+
+  let res: AiModelsResponse;
+  if (refresh) {
+    const payload: Record<string, string> = {};
+    if (apiKey && apiKey !== '********' && apiKey.trim()) {
+      payload.api_key = apiKey.trim();
+    }
+    if (baseUrl && baseUrl.trim()) {
+      payload.base_url = baseUrl.trim();
+    }
+    res = await apiFetch<AiModelsResponse>(`/api/ai/models/refresh${qs}`, {
+      method: 'POST',
+      body: Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined,
+    });
+  } else {
+    res = await apiFetch<AiModelsResponse>(`/api/ai/models${qs}`);
+  }
+
   if (res && Array.isArray(res.models)) {
     res.models = res.models.filter((m) => isTextModel(m.id));
   }

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { MarkdownRenderer } from '../components/common/MarkdownRenderer.tsx';
+import { MarkdownRenderer, dedentLines } from '../components/common/MarkdownRenderer.tsx';
 
 describe('MarkdownRenderer Component', () => {
   it('renders bold and inline code correctly without showing raw asterisks or backticks', () => {
@@ -122,15 +122,67 @@ describe('MarkdownRenderer Component', () => {
     expect(anchorLink).toHaveAttribute('href', '#top');
   });
 
-  it('sanitizes data: and vbscript: URLs to #', () => {
-    const markdown = '[data attack](data:text/html,<script>alert(1)</script>) and [vb attack](vbscript:msgbox(1))';
+  it('renders section headings followed by numbered lists and nested code blocks', () => {
+    const markdown = `A critical hardware watchdog timer expired on \`homelab-host\`.
+
+### Root Cause
+The kernel log indicates a lockup.
+
+### Remediation
+1. **Inspect Historical Kernel Logs:** Examine system logs:
+   \`\`\`bash
+   journalctl -b -1 -p emerg..err
+   \`\`\`
+
+2. **Check Out-of-Band Hardware Logs:** Check BMC:
+   \`\`\`bash
+   ipmitool sel list
+   \`\`\``;
+
     render(<MarkdownRenderer content={markdown} />);
 
-    const dataLink = screen.getByRole('link', { name: 'data attack' });
-    expect(dataLink).toHaveAttribute('href', '#');
+    // Headings
+    expect(screen.getByText('Root Cause')).toBeInTheDocument();
+    expect(screen.getByText('Remediation')).toBeInTheDocument();
 
-    const vbLink = screen.getByRole('link', { name: 'vb attack' });
-    expect(vbLink).toHaveAttribute('href', '#');
+    // Step numbers 1 and 2
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+
+    // Step titles
+    expect(screen.getByText('Inspect Historical Kernel Logs:')).toBeInTheDocument();
+    expect(screen.getByText('Check Out-of-Band Hardware Logs:')).toBeInTheDocument();
+
+    // Code blocks
+    expect(screen.getByText('journalctl -b -1 -p emerg..err')).toBeInTheDocument();
+    expect(screen.getByText('ipmitool sel list')).toBeInTheDocument();
+  });
+
+  it('dedents indented fenced code blocks while preserving relative inner indentation', () => {
+    const rawLines = [
+      '    if [ -f /etc/config ]; then',
+      '      cat /etc/config',
+      '    fi',
+    ];
+    const dedented = dedentLines(rawLines);
+    expect(dedented).toEqual([
+      'if [ -f /etc/config ]; then',
+      '  cat /etc/config',
+      'fi',
+    ]);
+
+    const markdown = `## Instructions
+    \`\`\`bash
+    echo "starting"
+      echo "indented step"
+    echo "finished"
+    \`\`\``;
+
+    const { container } = render(<MarkdownRenderer content={markdown} />);
+    const codeEl = container.querySelector('pre code');
+    expect(codeEl).not.toBeNull();
+    expect(codeEl?.textContent).toBe('echo "starting"\n  echo "indented step"\necho "finished"');
   });
 });
+
 

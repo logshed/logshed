@@ -1,0 +1,10 @@
+{
+  "id": "docker_healthcheck",
+  "name": "Docker Healthcheck Noise",
+  "description": "Filters repetitive container health checks and status probe messages.",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "healthcheck|health_status",
+  "is_regex": true,
+  "severity_threshold": null
+}

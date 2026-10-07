@@ -47,28 +47,27 @@ def _clean_ip(ip_str: str) -> str:
 
 def _get_trusted_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     """
-    Parse comma-separated IPs/CIDRs from TRUSTED_PROXIES environment variable.
-    If TRUSTED_PROXIES is unset or empty, supports TRUST_DOCKER_PROXIES (or TRUST_DOCKER_NETWORKS)
+    Parse comma-separated IPs/CIDRs from trusted_proxies setting or TRUSTED_PROXIES environment variable.
+    If trusted_proxies is unset or empty, supports trust_docker_proxies (or TRUST_DOCKER_PROXIES / TRUST_DOCKER_NETWORKS)
     to trust standard Docker bridge subnets (172.16.0.0/12).
     """
-    trusted_env = os.environ.get("TRUSTED_PROXIES", "").strip()
-    if trusted_env:
+    from app.core.config import get_cached_setting
+
+    trusted_proxies = str(get_cached_setting("trusted_proxies", "")).strip()
+    if trusted_proxies:
         networks = []
-        for part in trusted_env.split(","):
+        for part in trusted_proxies.split(","):
             cleaned = _clean_ip(part)
             if cleaned:
                 try:
                     networks.append(ipaddress.ip_network(cleaned, strict=False))
                 except ValueError:
                     pass
-        return networks
+        if networks:
+            return networks
 
-    # If TRUSTED_PROXIES is unset or empty, allow configuring standard Docker bridge subnets
-    trust_docker = (
-        os.environ.get("TRUST_DOCKER_PROXIES", "").strip().lower() in ("true", "1", "yes")
-        or os.environ.get("TRUST_DOCKER_NETWORKS", "").strip().lower() in ("true", "1", "yes")
-        or os.environ.get("TRUST_DOCKER_GATEWAY", "").strip().lower() in ("true", "1", "yes")
-    )
+    # If trusted_proxies is unset or empty, check trust_docker_proxies (and legacy aliases)
+    trust_docker = bool(get_cached_setting("trust_docker_proxies", False))
     if trust_docker:
         return [ipaddress.ip_network("172.16.0.0/12", strict=False)]
 
@@ -129,15 +128,33 @@ def _get_client_ip(request: Request) -> str:
 def _is_secure_cookie(request: Request) -> bool:
     """
     Determine whether to set the 'secure' flag on session cookies.
-    Respects COOKIE_SECURE environment variable if set ('true'/'false'),
-    otherwise auto-detects HTTPS request scheme or X-Forwarded-Proto header.
+    Inspects effective cached setting ('cookie_secure') first.
+    If cookie_secure is forced True, returns True.
+    If COOKIE_SECURE environment variable is explicitly set ('true'/'false'), respects it.
+    Otherwise auto-detects HTTPS request scheme or X-Forwarded-Proto header.
     """
+    from app.core.config import get_cached_setting
+
+    cookie_secure = get_cached_setting("cookie_secure", False)
+    if cookie_secure is True:
+        return True
+
     cookie_secure_env = os.environ.get("COOKIE_SECURE", "").strip().lower()
     if cookie_secure_env in ("true", "1", "yes"):
         return True
     if cookie_secure_env in ("false", "0", "no"):
         return False
-    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    if request.url.scheme == "https":
+        return True
+
+    if request.headers.get("x-forwarded-proto", "").lower() == "https":
+        if request.client and request.client.host:
+            peer_ip = _clean_ip(request.client.host)
+            trusted_networks = _get_trusted_networks()
+            if _is_trusted_proxy(peer_ip, trusted_networks):
+                return True
+
+    return False
 
 
 @router.post("/setup", response_model=MessageResponse)

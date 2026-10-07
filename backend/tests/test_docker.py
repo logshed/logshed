@@ -25,6 +25,7 @@ from app.collectors.docker_collector import (
     _make_log_entry,
     _parse_docker_host,
     _parse_docker_log_line,
+    _parse_docker_message_content,
     _should_ignore_container,
     _tail_container_logs,
 )
@@ -628,6 +629,34 @@ class TestDockerTimestampAndAccurateResume:
         assert entry["timestamp"] == ts
         assert entry["message"] == "Worker process started"
         assert entry["raw"] == "Worker process started"
+
+    def test_make_log_entry_custom_raw(self):
+        """_make_log_entry preserves custom raw string while storing parsed message."""
+        raw_line = 'time="2026-10-03T15:56:31Z" level=info msg="Refreshed cache."'
+        entry = _make_log_entry("paperless", "c123", "Refreshed cache.", severity=6, raw=raw_line)
+        assert entry["message"] == "Refreshed cache."
+        assert entry["raw"] == raw_line
+
+    def test_parse_docker_message_content_logfmt(self):
+        """_parse_docker_message_content extracts msg="..." and explicit level."""
+        line = 'time="2026-10-03T15:56:31Z" level=info msg="Successfully refreshed custom fields cache with 0 fields."'
+        msg, sev = _parse_docker_message_content(line, 6)
+        assert msg == "Successfully refreshed custom fields cache with 0 fields."
+        assert sev == 6
+
+    def test_parse_docker_message_content_valkey(self):
+        """_parse_docker_message_content extracts Valkey warning line."""
+        line = "1:M 02 Oct 2026 11:47:57.745 # Warning: No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf"
+        msg, sev = _parse_docker_message_content(line, 6)
+        assert msg == "Warning: No config file specified, using the default config. In order to specify a config file use valkey-server /path/to/valkey.conf"
+        assert sev == 4
+
+    def test_parse_docker_message_content_maintainerr(self):
+        """_parse_docker_message_content extracts Maintainerr pipe line."""
+        line = "[maintainerr] | 03/10/2026 16:00:33  [INFO] [RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+        msg, sev = _parse_docker_message_content(line, 6)
+        assert msg == "[RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+        assert sev == 6
 
     @pytest.mark.asyncio
     async def test_initial_attach_uses_tail_0_and_timestamps_true(self):
@@ -1637,6 +1666,128 @@ class TestDockerDemuxFrameResync:
         assert entries[0]["message"] == "Final unbuffered status"
         assert entries[0]["timestamp"] == ts
 
+    @pytest.mark.asyncio
+    async def test_multiplexed_stream_chunk_line_buffering(self):
+        """In multiplexed mode, line buffer retains incomplete line fragments across frames and chunks."""
+        assembler = KeyedMultilineAssembler()
+        entries = []
+
+        async def capture_feed(key, entry):
+            entries.append(entry)
+
+        assembler.feed = capture_feed
+        cancel_event = asyncio.Event()
+
+        # Frame 1: stdout with incomplete first line fragment
+        msg1 = b"Part 1 of line 1, "
+        frame1 = bytes([1, 0, 0, 0]) + len(msg1).to_bytes(4, "big") + msg1
+
+        # Frame 2: stdout with remainder of line 1, complete line 2, and partial line 3
+        msg2 = b"part 2 completed\nLine 2 complete\nLine 3 starts"
+        frame2 = bytes([1, 0, 0, 0]) + len(msg2).to_bytes(4, "big") + msg2
+
+        # Frame 3: stderr with remainder of line 3
+        msg3 = b" and finished\n"
+        frame3 = bytes([2, 0, 0, 0]) + len(msg3).to_bytes(4, "big") + msg3
+
+        class MockMultiplexedResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                # Yield frame1 first
+                yield frame1
+                # Yield frame2 in two chunks to test chunk-level and frame-level buffering
+                mid = len(frame2) // 2
+                yield frame2[:mid]
+                yield frame2[mid:]
+                # Yield frame3
+                yield frame3
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                return MockMultiplexedResp()
+
+        task = asyncio.create_task(
+            _tail_container_logs(
+                MockClient(),
+                "cid_mux_buf",
+                "app_mux_buf",
+                assembler,
+                cancel_event,
+                heartbeat_interval=0,
+            )
+        )
+        await asyncio.sleep(0.08)
+        cancel_event.set()
+        await task
+
+        assert len(entries) == 3
+        assert entries[0]["message"] == "Part 1 of line 1, part 2 completed"
+        assert entries[1]["message"] == "Line 2 complete"
+        assert entries[2]["message"] == "Line 3 starts and finished"
+
+    @pytest.mark.asyncio
+    async def test_multiplexed_trailing_buffer_without_newline_emitted_at_eof(self):
+        """In multiplexed mode, trailing line fragment without newline is emitted when stream terminates."""
+        assembler = KeyedMultilineAssembler()
+        entries = []
+
+        async def capture_feed(key, entry):
+            entries.append(entry)
+
+        assembler.feed = capture_feed
+        cancel_event = asyncio.Event()
+
+        msg = b"Final multiplexed line without newline"
+        frame = bytes([1, 0, 0, 0]) + len(msg).to_bytes(4, "big") + msg
+
+        class MockMuxResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                yield frame
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                return MockMuxResp()
+
+        task = asyncio.create_task(
+            _tail_container_logs(
+                MockClient(),
+                "cid_mux_eof",
+                "app_mux_eof",
+                assembler,
+                cancel_event,
+                heartbeat_interval=0,
+            )
+        )
+        await asyncio.sleep(0.05)
+        cancel_event.set()
+        await task
+
+        assert len(entries) == 1
+        assert entries[0]["message"] == "Final multiplexed line without newline"
+
     def test_max_tty_buffer_constant(self):
         assert MAX_TTY_BUFFER == 65536
 
@@ -2103,6 +2254,52 @@ class TestDockerHostAliases:
         assert entries[0]["message"] == "Post-restart log entry"
 
         await tailer2.stop()
+
+
+class TestDockerContainerMemoryPruning:
+    @pytest.mark.asyncio
+    async def test_dockertailer_pruning_removes_exited_container_keys(self):
+        """DockerTailer discovery purges exited container IDs from _container_last_seen and _container_last_messages."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        assembler = KeyedMultilineAssembler()
+        tailer = DockerTailer(assembler)
+
+        # Seed tracking state with running and exited containers
+        tailer._container_last_seen = {
+            "running_container_1": "2026-09-30T12:00:00Z",
+            "exited_container_2": "2026-09-30T11:59:00Z",
+            "stopped_container_3": "2026-09-30T11:58:00Z",
+        }
+        tailer._container_last_messages = {
+            "running_container_1": {"msg1", "msg2"},
+            "exited_container_2": {"old_msg"},
+            "stopped_container_3": {"dead_msg"},
+        }
+
+        # Mock client returning only running_container_1
+        mock_containers = [
+            {"Id": "running_container_1", "Names": ["/running_container_1"]},
+        ]
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_containers
+        mock_resp.raise_for_status.return_value = None
+        mock_client.get.return_value = mock_resp
+
+        discovered = await tailer._discover_containers(mock_client)
+        assert len(discovered) == 1
+
+        # Verify running container tracking state is retained
+        assert "running_container_1" in tailer._container_last_seen
+        assert "running_container_1" in tailer._container_last_messages
+
+        # Verify exited containers are purged
+        assert "exited_container_2" not in tailer._container_last_seen
+        assert "stopped_container_3" not in tailer._container_last_seen
+        assert "exited_container_2" not in tailer._container_last_messages
+        assert "stopped_container_3" not in tailer._container_last_messages
 
 
 

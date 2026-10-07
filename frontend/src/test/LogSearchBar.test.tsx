@@ -136,4 +136,55 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
       })
     );
   });
+
+  it('does not display count indicator when no filters are active', () => {
+    const filters: LogFilterParams = {};
+    render(
+      <LogSearchBar
+        filters={filters}
+        onFilterChange={vi.fn()}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        totalCount={1001}
+        totalCapped={true}
+      />
+    );
+
+    expect(screen.queryByTestId('search-bar-total-count')).toBeNull();
+    expect(screen.queryByText('1,000+ logs')).toBeNull();
+  });
+
+  it('displays "1,000+ logs" next to Filter button when filter is active and totalCapped is true rather than literal 1,001', () => {
+    const filters: LogFilterParams = { query: 'timeout' };
+    render(
+      <LogSearchBar
+        filters={filters}
+        onFilterChange={vi.fn()}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        totalCount={1001}
+        totalCapped={true}
+      />
+    );
+
+    expect(screen.getByText('1,000+ logs')).toBeInTheDocument();
+    expect(screen.queryByText('1,001')).toBeNull();
+    expect(screen.queryByText('1,001 logs')).toBeNull();
+  });
+
+  it('displays exact log count next to Filter button when filter is active and totalCapped is false', () => {
+    const filters: LogFilterParams = { query: 'error' };
+    render(
+      <LogSearchBar
+        filters={filters}
+        onFilterChange={vi.fn()}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        totalCount={42}
+        totalCapped={false}
+      />
+    );
+
+    expect(screen.getByText('42 logs')).toBeInTheDocument();
+  });
 });

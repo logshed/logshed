@@ -18,17 +18,18 @@ from typing import Union
 
 logger = logging.getLogger(__name__)
 
-def get_connection(db_path: Union[str, Path]) -> sqlite3.Connection:
+def get_connection(db_path: Union[str, Path], check_same_thread: bool = False) -> sqlite3.Connection:
     """
     Open a SQLite database connection and configure WAL mode pragmas.
 
     Args:
         db_path: Path to the SQLite database file.
+        check_same_thread: If False, allow SQLite connection reuse across threads.
 
     Returns:
         A configured sqlite3.Connection instance.
     """
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=5000;")
@@ -168,8 +169,177 @@ VALUES ('retention_days', '14', datetime('now'), 0);
 
 
 # Registry of migrations to run. Must be ordered by version ascending.
+def migrate_v2(conn: sqlite3.Connection) -> None:
+    """
+    Execute Migration 2: Decoupled asynchronous FTS5 indexing, drop rules, saved views,
+    notification channels, and alert rules (LogShed v1.2.0 upgrade).
+    - Drop synchronous logs_ai trigger on logs.
+    - Create fts_index_state tracking table and initialize last_indexed_id.
+    - Recreate logs_ad and logs_au with WHEN condition guarding against unindexed rows.
+    - Create drop_rules, saved_views, notification_channels, alert_rules, and alert_history tables.
+    - Add trigger_source column to ai_audit_log if not present.
+    - Clamp future-dated log timestamps to received_at.
+    - Backfill historical on-demand ai_audit_log entries into alert_history.
+    """
+    logger.info("Running migration v2...")
+    conn.executescript('''
+DROP TRIGGER IF EXISTS logs_ai;
+
+CREATE TABLE IF NOT EXISTS fts_index_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_indexed_id INTEGER NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL
+);
+
+INSERT OR IGNORE INTO fts_index_state (id, last_indexed_id, updated_at)
+VALUES (1, (SELECT COALESCE(MAX(id), 0) FROM logs), datetime('now'));
+
+DROP TRIGGER IF EXISTS logs_ad;
+CREATE TRIGGER logs_ad AFTER DELETE ON logs
+WHEN old.id <= (SELECT last_indexed_id FROM fts_index_state WHERE id = 1)
+BEGIN
+    INSERT INTO logs_fts(logs_fts, rowid, app_name, source_alias, message)
+    VALUES('delete', old.id, old.app_name, old.source_alias, old.message);
+END;
+
+DROP TRIGGER IF EXISTS logs_au;
+CREATE TRIGGER logs_au AFTER UPDATE ON logs
+WHEN old.id <= (SELECT last_indexed_id FROM fts_index_state WHERE id = 1)
+BEGIN
+    INSERT INTO logs_fts(logs_fts, rowid, app_name, source_alias, message)
+    VALUES('delete', old.id, old.app_name, old.source_alias, old.message);
+    INSERT INTO logs_fts(rowid, app_name, source_alias, message)
+    VALUES (new.id, new.app_name, new.source_alias, new.message);
+END;
+
+CREATE TABLE IF NOT EXISTS drop_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    source_pattern TEXT,
+    app_pattern TEXT,
+    message_pattern TEXT NOT NULL,
+    is_regex BOOLEAN NOT NULL DEFAULT 0,
+    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    severity_threshold INTEGER,
+    dropped_count INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_drop_rules_enabled ON drop_rules(is_enabled);
+
+CREATE TABLE IF NOT EXISTS saved_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    query_params TEXT NOT NULL,
+    is_pinned BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_views_pinned ON saved_views(is_pinned, name);
+
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_channels_enabled ON notification_channels(is_enabled);
+
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    channel_id INTEGER REFERENCES notification_channels(id) ON DELETE SET NULL,
+    filter_app TEXT,
+    filter_severity INTEGER,
+    match_pattern TEXT,
+    threshold_count INTEGER DEFAULT 1,
+    window_seconds INTEGER DEFAULT 60,
+    cooldown_seconds INTEGER DEFAULT 300,
+    ai_enrichment BOOLEAN DEFAULT 0,
+    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    trigger_count INTEGER NOT NULL DEFAULT 0,
+    last_triggered_at DATETIME,
+    suppress_until DATETIME,
+    created_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(is_enabled);
+
+CREATE TABLE IF NOT EXISTS alert_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id INTEGER REFERENCES alert_rules(id) ON DELETE SET NULL,
+    rule_name TEXT NOT NULL,
+    channel_id INTEGER,
+    trigger_count INTEGER NOT NULL DEFAULT 1,
+    sample_log TEXT,
+    incident_summary TEXT,
+    ai_enrichment BOOLEAN DEFAULT 0,
+    ai_model TEXT,
+    ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL,
+    triggered_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON alert_history(rule_id);
+CREATE INDEX IF NOT EXISTS idx_alert_history_rule_time ON alert_history(rule_id, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_audit_id);
+
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('daily_digest_enabled', '0', datetime('now'), 0);
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('daily_digest_schedule_time', '09:00', datetime('now'), 0);
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('retention_days', '14', datetime('now'), 0);
+
+CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);
+''')
+
+    # Add trigger_source column to existing v1 ai_audit_log table if not already present
+    cur = conn.execute("PRAGMA table_info(ai_audit_log);")
+    existing_columns = {row[1] for row in cur.fetchall()}
+    if "trigger_source" not in existing_columns:
+        conn.execute("ALTER TABLE ai_audit_log ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'on-demand'")
+
+    # Defensively clamp future-dated timestamps using indexed timestamp bounds
+    # to avoid expensive full-table scans across historical logs on boot.
+    conn.execute(
+        "UPDATE logs SET timestamp = received_at "
+        "WHERE timestamp > strftime('%Y-%m-%dT%H:%M:%S', 'now', '+1 minute') AND timestamp > received_at;"
+    )
+
+    # Backfill on-demand ai_audit_log entries into alert_history
+    conn.execute("""
+        INSERT INTO alert_history (
+            rule_id, rule_name, channel_id, trigger_count, sample_log,
+            incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at
+        )
+        SELECT
+            NULL,
+            'On-Demand Analysis',
+            NULL,
+            a.log_count,
+            NULL,
+            a.response_text,
+            1,
+            a.model,
+            a.id,
+            a.timestamp
+        FROM ai_audit_log a
+        WHERE (a.trigger_source = 'on-demand' OR a.trigger_source IS NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM alert_history h WHERE h.ai_audit_id = a.id
+          );
+    """)
+
+
 MIGRATIONS = [
     (1, migrate_v1),
+    (2, migrate_v2),
 ]
 
 def run_migrations(db_path: Union[str, Path]) -> None:
@@ -206,36 +376,6 @@ def run_migrations(db_path: Union[str, Path]) -> None:
                     raise
             else:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
-
-        # Startup sanitization: defensively clamp future-dated timestamps using indexed timestamp bounds
-        # to avoid expensive full-table scans across historical logs on boot.
-        try:
-            conn.execute(
-                "UPDATE logs SET timestamp = received_at "
-                "WHERE timestamp > strftime('%Y-%m-%dT%H:%M:%S', 'now', '+1 minute') AND timestamp > received_at;"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure covering index for facets loose index skip-scan exists
-        try:
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-        # Ensure default retention_days setting exists
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted) "
-                "VALUES ('retention_days', '14', datetime('now'), 0);"
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
     finally:
         conn.close()
 

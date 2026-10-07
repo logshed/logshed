@@ -1,7 +1,9 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import React from 'react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HostAliasManager } from '../components/aliases/HostAliasManager.tsx';
 import * as aliasesApi from '../api/aliases.ts';
+import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 
 describe('HostAliasManager Component', () => {
   const mockAliases = [
@@ -19,13 +21,32 @@ describe('HostAliasManager Component', () => {
     },
   ];
 
+  const renderWithContext = (
+    ui: React.ReactElement,
+    contextValue: Partial<AliasContextValue> = {}
+  ) => {
+    const value: AliasContextValue = {
+      aliasVersion: 0,
+      bumpAliasVersion: vi.fn(),
+      ...contextValue,
+    };
+    return {
+      ...render(
+        <AliasContext.Provider value={value}>
+          {ui}
+        </AliasContext.Provider>
+      ),
+      value,
+    };
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue(mockAliases);
   });
 
   it('renders active host aliases in the table', async () => {
-    render(<HostAliasManager />);
+    renderWithContext(<HostAliasManager />);
 
     await waitFor(() => {
       expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();
@@ -38,16 +59,50 @@ describe('HostAliasManager Component', () => {
     expect(screen.getByText('proxmox-01')).toBeInTheDocument();
   });
 
-  it('disables delete button while deletion is pending to prevent double-click race conditions', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls bumpAliasVersion when a host alias is saved', async () => {
+    const bumpAliasVersion = vi.fn();
+    const saveSpy = vi.spyOn(aliasesApi, 'saveAlias').mockResolvedValue({
+      ip: '10.0.0.1',
+      alias: 'gateway',
+      notes: null,
+      created_at: '2026-09-23T12:00:00Z',
+    });
 
+    renderWithContext(<HostAliasManager />, { bumpAliasVersion });
+
+    await waitFor(() => {
+      expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. 192.168.1.50'), {
+      target: { value: '10.0.0.1' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Proxmox-Node-01'), {
+      target: { value: 'gateway' },
+    });
+
+    const submitBtn = screen.getByRole('button', { name: /Add Mapping/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(saveSpy).toHaveBeenCalledWith({
+        ip: '10.0.0.1',
+        alias: 'gateway',
+        notes: null,
+      });
+      expect(bumpAliasVersion).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('opens confirmation modal and disables confirm button while deletion is pending', async () => {
     let resolveDelete: (val: any) => void;
     const deletePromise = new Promise((resolve) => {
       resolveDelete = resolve;
     });
     const deleteSpy = vi.spyOn(aliasesApi, 'deleteAlias').mockImplementation(() => deletePromise as any);
+    const bumpAliasVersion = vi.fn();
 
-    render(<HostAliasManager />);
+    renderWithContext(<HostAliasManager />, { bumpAliasVersion });
 
     await waitFor(() => {
       expect(screen.getByText('192.168.1.1')).toBeInTheDocument();
@@ -56,25 +111,47 @@ describe('HostAliasManager Component', () => {
     const deleteButtons = screen.getAllByTitle('Delete Alias');
     const firstDeleteBtn = deleteButtons[0];
 
-    expect(firstDeleteBtn).not.toBeDisabled();
-
-    // Click delete
+    // Click trash button to trigger confirmation modal
     fireEvent.click(firstDeleteBtn);
 
-    // Button should now be disabled and marked with disabled styling
-    expect(firstDeleteBtn).toBeDisabled();
-    expect(firstDeleteBtn.className).toContain('disabled:opacity-50');
-    expect(firstDeleteBtn.className).toContain('disabled:cursor-not-allowed');
+    // Modal dialog should now be open
+    let dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Delete Host Alias')).toBeInTheDocument();
+    expect(within(dialog).getByText('Remove host alias mapping?')).toBeInTheDocument();
+
+    // Verify Cancel button closes modal without deleting
+    const cancelBtn = within(dialog).getByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelBtn);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(bumpAliasVersion).not.toHaveBeenCalled();
+
+    // Reopen modal and confirm deletion
+    fireEvent.click(firstDeleteBtn);
+    dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Delete Host Alias')).toBeInTheDocument();
+
+    const confirmDeleteBtn = within(dialog).getByRole('button', { name: /Delete Alias/i });
+    expect(confirmDeleteBtn).not.toBeDisabled();
+
+    // Click confirm delete in modal
+    fireEvent.click(confirmDeleteBtn);
+
+    // Button should now be disabled and show deleting state
+    expect(confirmDeleteBtn).toBeDisabled();
+    expect(within(dialog).getByText('Deleting...')).toBeInTheDocument();
 
     // Attempting second click should not trigger another deleteAlias call
-    fireEvent.click(firstDeleteBtn);
+    fireEvent.click(confirmDeleteBtn);
     expect(deleteSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledWith('192.168.1.1');
 
     // Resolve deletion
     resolveDelete!({ status: 'deleted', ip: '192.168.1.1' });
 
     await waitFor(() => {
-      expect(firstDeleteBtn).not.toBeDisabled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(bumpAliasVersion).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -90,7 +167,7 @@ describe('HostAliasManager Component', () => {
       dispatchEvent: vi.fn(),
     }));
 
-    render(<HostAliasManager />);
+    renderWithContext(<HostAliasManager />);
 
     await waitFor(() => {
       expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();

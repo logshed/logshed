@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RetentionSlider } from '../components/storage/RetentionSlider.tsx';
+import { formatBytes } from '../components/storage/StorageCard.tsx';
 import * as systemApi from '../api/system.ts';
 
 describe('RetentionSlider Component', () => {
@@ -257,12 +258,114 @@ describe('RetentionSlider Component', () => {
     );
 
     expect(
-      screen.getByText('Locked by MAX_RETENTION_DAYS environment variable override (14 days)')
-    ).toBeInTheDocument();
-
-    expect(
       screen.queryByText(/Extended retention/i)
     ).toBeNull();
+  });
+
+  it('renders Compact Database button and opens confirmation modal with details', () => {
+    render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
+
+    const compactBtn = screen.getByRole('button', { name: /Compact Database/i });
+    expect(compactBtn).toBeInTheDocument();
+
+    // Clicking Compact Database opens the modal
+    fireEvent.click(compactBtn);
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      screen.getByText('The database will be repacked to return unused space to the host filesystem.')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('SQLite database writes will pause briefly during compaction (incoming logs will buffer in memory).')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Requires temporary free disk space equal to the current database size.')
+    ).toBeInTheDocument();
+
+    // Clicking Cancel closes modal without calling triggerVacuum
+    const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelBtn);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('executes vacuum on confirmation, shows progress, displays reclaimed space, and notifies callback', async () => {
+    const onVacuumMock = vi.fn();
+    const vacuumSpy = vi.spyOn(systemApi, 'triggerVacuum').mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                status: 'ok',
+                previous_size_bytes: 1400000000,
+                new_size_bytes: 400000000,
+                reclaimed_bytes: 1000000000,
+                metrics: {
+                  recorded_at: '2026-09-28T00:00:00Z',
+                  db_size_bytes: 400000000,
+                  disk_free_bytes: 50000000000,
+                  disk_total_bytes: 100000000000,
+                  total_logs_count: 5000,
+                },
+              }),
+            50
+          )
+        )
+    );
+
+    render(
+      <RetentionSlider
+        retentionDays={14}
+        onSaveRetention={vi.fn()}
+        onVacuumCompleted={onVacuumMock}
+      />
+    );
+
+    // Open modal
+    const compactBtn = screen.getByRole('button', { name: /Compact Database/i });
+    fireEvent.click(compactBtn);
+
+    // Click Confirm button inside modal
+    const confirmBtn = screen.getByRole('button', { name: /Confirm & Compact/i });
+    fireEvent.click(confirmBtn);
+
+    // Modal closes and active progress state is shown
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Compacting database... Ingestion writes temporarily paused').length
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    // Wait for completion
+    await waitFor(() => {
+      expect(vacuumSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Database Compaction Completed Successfully:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(formatBytes(1000000000))).toBeInTheDocument();
+    expect(onVacuumMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('displays error banner when compaction fails', async () => {
+    vi.spyOn(systemApi, 'triggerVacuum').mockRejectedValue(
+      new Error('Insufficient temporary disk headroom available for database compaction.')
+    );
+
+    render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
+
+    // Open modal
+    const compactBtn = screen.getByRole('button', { name: /Compact Database/i });
+    fireEvent.click(compactBtn);
+
+    // Confirm
+    const confirmBtn = screen.getByRole('button', { name: /Confirm & Compact/i });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Insufficient temporary disk headroom available for database compaction.')
+      ).toBeInTheDocument();
+    });
   });
 });
 

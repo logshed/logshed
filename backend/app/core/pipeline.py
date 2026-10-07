@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import Optional, Union
+from typing import Any, Optional, Union
 from pathlib import Path
 from collections import defaultdict, deque
 
@@ -37,12 +37,21 @@ class InternalLogHandler(logging.Handler):
         "app.core.migrations",
         "app.services.retention",
         "app.services.storage_metrics",
+        "app.services.alert_evaluator",
+        "app.services.notifier",
+        "app.services.ai_engine",
+        "app.services.ai_service",
     }
 
-    def __init__(self, level: Optional[Union[int, str]] = None):
+    def __init__(
+        self,
+        level: Optional[Union[int, str]] = None,
+        alias_cache: Optional[Any] = None,
+    ):
         super().__init__()
         self._thread_local = threading.local()
         self._is_disabled = False
+        self.alias_cache = alias_cache
         if level is not None:
             self.set_internal_level(level)
         else:
@@ -52,6 +61,10 @@ class InternalLogHandler(logging.Handler):
                 self._is_disabled = True
             else:
                 self.setLevel(configured_level)
+
+    def set_alias_cache(self, alias_cache: Optional[Any]) -> None:
+        """Dynamically attach or update the shared AliasCache."""
+        self.alias_cache = alias_cache
 
     def set_internal_level(self, level: Optional[Union[int, str]]) -> None:
         """
@@ -114,17 +127,54 @@ class InternalLogHandler(logging.Handler):
 
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
             app_subname = record.name.split(".")[-1] if "." in record.name else record.name
+
+            source_ip = "127.0.0.1"
+            source_alias = "logshed"
+            if self.alias_cache is not None:
+                resolved_ip = self.alias_cache.resolve(source_ip)
+                resolved_name = self.alias_cache.resolve("logshed")
+                if resolved_ip != source_ip:
+                    source_alias = resolved_ip
+                elif resolved_name != "logshed":
+                    source_alias = resolved_name
+            else:
+                try:
+                    from app.collectors.syslog import _active_caches
+                    for cache in list(_active_caches):
+                        resolved_ip = cache.resolve(source_ip)
+                        resolved_name = cache.resolve("logshed")
+                        if resolved_ip != source_ip:
+                            source_alias = resolved_ip
+                            break
+                        elif resolved_name != "logshed":
+                            source_alias = resolved_name
+                            break
+                except Exception:
+                    pass
+
             log_entry = {
                 "timestamp": now_iso,
                 "received_at": now_iso,
-                "source_ip": "127.0.0.1",
-                "source_alias": "logshed",
+                "source_ip": source_ip,
+                "source_alias": source_alias,
                 "app_name": app_subname,
                 "facility": 1,
                 "severity": severity,
                 "message": msg,
                 "raw": f"[{now_iso}] [{record.name}] [{record.levelname}] {msg}",
             }
+
+            from app.services.drop_filter import get_drop_filter
+            drop_filter = get_drop_filter()
+            if drop_filter.should_drop(
+                log_entry.get("source_alias"),
+                log_entry.get("source_ip"),
+                log_entry.get("app_name"),
+                log_entry.get("message", ""),
+                severity=log_entry.get("severity"),
+            ) is not None:
+                increment_dropped_by_filter_count(1)
+                return
 
             try:
                 queue = get_queue()
@@ -160,6 +210,8 @@ class InternalLogHandler(logging.Handler):
 _log_queue: Optional[asyncio.Queue] = None
 _dropped_logs_total: int = 0
 _dropped_logs_lock = threading.Lock()
+_dropped_by_filter_total: int = 0
+_dropped_by_filter_lock = threading.Lock()
 _QUEUE_MAXSIZE = 10000
 
 def get_queue() -> asyncio.Queue:
@@ -179,6 +231,17 @@ def get_dropped_count() -> int:
     """Returns the total number of logs dropped due to queue overflow."""
     with _dropped_logs_lock:
         return _dropped_logs_total
+
+def increment_dropped_by_filter_count(amount: int = 1) -> None:
+    """Thread-safe increment of the filtered drop counter."""
+    global _dropped_by_filter_total
+    with _dropped_by_filter_lock:
+        _dropped_by_filter_total += amount
+
+def get_dropped_by_filter_count() -> int:
+    """Returns the total number of logs discarded by drop rules."""
+    with _dropped_by_filter_lock:
+        return _dropped_by_filter_total
 
 
 class IngestionRateTracker:
@@ -531,6 +594,19 @@ class KeyedMultilineAssembler:
             merged_entry['raw'] = merged_raw
             merged_entry['severity'] = min_severity
 
+        # Check drop rules before enqueuing
+        from app.services.drop_filter import get_drop_filter
+        drop_filter = get_drop_filter()
+        if drop_filter.should_drop(
+            merged_entry.get('source_alias'),
+            merged_entry.get('source_ip'),
+            merged_entry.get('app_name'),
+            merged_entry.get('message', ''),
+            severity=merged_entry.get('severity'),
+        ) is not None:
+            increment_dropped_by_filter_count(1)
+            return
+
         queue = get_queue()
         try:
             queue.put_nowait(merged_entry)
@@ -545,14 +621,33 @@ class KeyedMultilineAssembler:
 
 _QUEUE_SENTINEL = object()
 
+_active_queue_consumer: Optional["QueueConsumer"] = None
+
+def get_queue_consumer() -> Optional["QueueConsumer"]:
+    """Returns the currently active QueueConsumer instance, if registered."""
+    return _active_queue_consumer
+
+def set_queue_consumer(consumer: Optional["QueueConsumer"]) -> None:
+    """Sets the active QueueConsumer instance."""
+    global _active_queue_consumer
+    _active_queue_consumer = consumer
+
 
 class QueueConsumer:
     """
     Background task that drains the shared queue and batch-inserts into SQLite.
     """
-    def __init__(self, db_path: str | Path, debounce_seconds: float = 0.05):
+    def __init__(
+        self,
+        db_path: str | Path,
+        debounce_seconds: float = 0.05,
+        fts_indexer: Optional[Any] = None,
+        alert_evaluator: Optional[Any] = None,
+    ):
         self._db_path = Path(db_path)
         self._debounce_seconds = debounce_seconds
+        self._fts_indexer = fts_indexer
+        self._alert_evaluator = alert_evaluator
         self._started = False
         self._running = False
         self._stopping = False
@@ -561,6 +656,43 @@ class QueueConsumer:
         self._drain_lock = asyncio.Lock()
         self._conn: Optional[sqlite3.Connection] = None
         self._conn_lock = threading.Lock()
+        self._paused = False
+        self._resume_event = asyncio.Event()
+        self._resume_event.set()
+        self._write_lock = asyncio.Lock()
+        set_queue_consumer(self)
+
+    @property
+    def is_paused(self) -> bool:
+        """Returns True if database write execution is currently paused."""
+        return self._paused
+
+    async def pause_writes(self) -> None:
+        """
+        Temporarily pause QueueConsumer writes to SQLite.
+        Waits for any in-flight batch write to complete, closes the persistent SQLite connection,
+        and leaves incoming logs to buffer in _log_queue without dropping them.
+        """
+        self._paused = True
+        self._resume_event.clear()
+        async with self._write_lock:
+            await asyncio.to_thread(self._close_conn)
+
+    def resume_writes(self) -> None:
+        """
+        Resume QueueConsumer writes to SQLite.
+        Immediately signals the consumer to wake up and drain all buffered logs from _log_queue.
+        """
+        self._paused = False
+        self._resume_event.set()
+
+    def set_fts_indexer(self, fts_indexer: Any) -> None:
+        """Register FTSIndexWorker instance for immediate post-commit notification."""
+        self._fts_indexer = fts_indexer
+
+    def set_alert_evaluator(self, alert_evaluator: Any) -> None:
+        """Register AlertEvaluator instance for post-commit batch evaluation."""
+        self._alert_evaluator = alert_evaluator
 
     def _get_connection(self) -> sqlite3.Connection:
         """Returns or opens a persistent connection configured with WAL and performance PRAGMAs."""
@@ -597,55 +729,64 @@ class QueueConsumer:
 
         try:
             while self._running and not self._stopping:
-                # Wait for the first item
-                try:
-                    item = await asyncio.wait_for(queue.get(), timeout=0.5)
-                except asyncio.TimeoutError:
-                    continue
-                except asyncio.CancelledError:
-                    break
+                if self._paused:
+                    await self._resume_event.wait()
+                    if not self._running or self._stopping:
+                        break
 
-                if item is _QUEUE_SENTINEL:
-                    queue.task_done()
-                    break
-
-                batch = [item]
-                batch_start = time.monotonic()
-
-                # Drain up to 5000 items
-                while len(batch) < 5000 and self._running and not self._stopping:
-                    # First try immediate drain of available items
-                    try:
-                        next_item = queue.get_nowait()
-                        if next_item is _QUEUE_SENTINEL:
-                            queue.task_done()
-                            self._running = False
-                            break
-                        batch.append(next_item)
+                async with self._write_lock:
+                    if self._paused:
                         continue
-                    except asyncio.QueueEmpty:
-                        pass
 
-                    # If queue is empty, wait for next item up to remaining debounce window
-                    elapsed = time.monotonic() - batch_start
-                    remaining = self._debounce_seconds - elapsed
-                    if remaining <= 0:
-                        break
-
+                    # Wait for the first item
                     try:
-                        next_item = await asyncio.wait_for(queue.get(), timeout=remaining)
-                        if next_item is _QUEUE_SENTINEL:
-                            queue.task_done()
-                            self._running = False
-                            break
-                        batch.append(next_item)
-                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        item = await asyncio.wait_for(queue.get(), timeout=0.2)
+                    except asyncio.TimeoutError:
+                        continue
+                    except asyncio.CancelledError:
                         break
 
-                if batch:
-                    success = await self._flush_batch(batch, queue)
-                    if not success and (not self._running or self._stopping):
+                    if item is _QUEUE_SENTINEL:
+                        queue.task_done()
                         break
+
+                    batch = [item]
+                    batch_start = time.monotonic()
+
+                    # Drain up to 5000 items
+                    while len(batch) < 5000 and self._running and not self._stopping and not self._paused:
+                        # First try immediate drain of available items
+                        try:
+                            next_item = queue.get_nowait()
+                            if next_item is _QUEUE_SENTINEL:
+                                queue.task_done()
+                                self._running = False
+                                break
+                            batch.append(next_item)
+                            continue
+                        except asyncio.QueueEmpty:
+                            pass
+
+                        # If queue is empty, wait for next item up to remaining debounce window
+                        elapsed = time.monotonic() - batch_start
+                        remaining = self._debounce_seconds - elapsed
+                        if remaining <= 0:
+                            break
+
+                        try:
+                            next_item = await asyncio.wait_for(queue.get(), timeout=remaining)
+                            if next_item is _QUEUE_SENTINEL:
+                                queue.task_done()
+                                self._running = False
+                                break
+                            batch.append(next_item)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            break
+
+                    if batch:
+                        success = await self._flush_batch(batch, queue)
+                        if not success and (not self._running or self._stopping):
+                            break
         finally:
             self._running = False
             try:
@@ -710,6 +851,13 @@ class QueueConsumer:
             from app.core.sse import sse_manager
             await sse_manager.broadcast_batch(batch)
 
+            # Evaluate alert rules on ingested batch
+            if self._alert_evaluator is not None:
+                try:
+                    await self._alert_evaluator.evaluate_batch(batch)
+                except Exception as e:
+                    logger.warning(f"Error evaluating alert rules on batch: {e}")
+
             # Mark as done
             for _ in batch:
                 queue.task_done()
@@ -753,6 +901,9 @@ class QueueConsumer:
         logger.info("QueueConsumer stopping: draining pending logs...")
         self._stopping = True
         self._stop_event.set()
+        self._resume_event.set()
+        if _active_queue_consumer is self:
+            set_queue_consumer(None)
         queue = get_queue()
 
         try:
@@ -781,16 +932,9 @@ class QueueConsumer:
         logger.info("QueueConsumer stopped: all pending logs drained and committed.")
 
     def _insert_batch(self, batch: list[dict]) -> None:
-        """Synchronous: insert batch into SQLite in a transaction and assign generated row IDs."""
-        query = '''
-            INSERT INTO logs (
-                timestamp, received_at, source_ip, source_alias,
-                app_name, facility, severity, message, raw
-            ) VALUES (
-                :timestamp, :received_at, :source_ip, :source_alias,
-                :app_name, :facility, :severity, :message, :raw
-            )
-        '''
+        """Synchronous: insert batch into SQLite using chunked multi-row queries and assign generated row IDs."""
+        if not batch:
+            return
 
         conn = self._get_connection()
         utc = datetime.timezone.utc
@@ -839,9 +983,47 @@ class QueueConsumer:
                 except Exception:
                     if entry.get("received_at"):
                         entry["timestamp"] = entry["received_at"]
-                cursor.execute(query, entry)
-                entry["id"] = cursor.lastrowid
+
+            # Chunked multi-row parameterized insert with RETURNING id (chunk size <= 500)
+            chunk_size = 500
+            row_placeholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            for i in range(0, len(batch), chunk_size):
+                chunk = batch[i:i + chunk_size]
+                placeholders = ", ".join([row_placeholder] * len(chunk))
+                sql = f"""
+                    INSERT INTO logs (
+                        timestamp, received_at, source_ip, source_alias,
+                        app_name, facility, severity, message, raw
+                    ) VALUES {placeholders} RETURNING id
+                """
+                params = []
+                for entry in chunk:
+                    params.extend([
+                        entry.get("timestamp"),
+                        entry.get("received_at"),
+                        entry.get("source_ip", ""),
+                        entry.get("source_alias", ""),
+                        entry.get("app_name", ""),
+                        entry.get("facility", 1),
+                        entry.get("severity", 6),
+                        entry.get("message", ""),
+                        entry.get("raw", ""),
+                    ])
+                cursor.execute(sql, params)
+                returned_rows = cursor.fetchall()
+                if len(returned_rows) != len(chunk):
+                    raise RuntimeError(
+                        f"Returned ID count ({len(returned_rows)}) does not match chunk size ({len(chunk)})"
+                    )
+                for entry, (row_id,) in zip(chunk, returned_rows):
+                    entry["id"] = row_id
+
             conn.commit()
+            if self._fts_indexer is not None:
+                try:
+                    self._fts_indexer.notify_new_logs()
+                except Exception as e:
+                    logger.warning(f"Failed to notify FTS indexer: {e}")
         except Exception as e:
             try:
                 conn.rollback()

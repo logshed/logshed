@@ -6,8 +6,10 @@ Manages environment variables, filesystem paths, and defaults.
 import logging
 import os
 import sqlite3
+import threading
+import time
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Callable, Optional, Union
 
 def get_data_dir() -> Path:
     """Returns the configured data directory path."""
@@ -57,33 +59,16 @@ def get_syslog_port() -> int:
 def get_syslog_max_tcp_connections() -> int:
     """
     Returns the maximum concurrent Syslog TCP connections allowed.
-    Reads SYSLOG_MAX_TCP_CONNECTIONS environment variable (default: 250).
-    Validates that the value is an integer >= 1, falling back to 250 if unset or invalid.
+    Resolves using three-tier hierarchy: system_settings -> SYSLOG_MAX_TCP_CONNECTIONS -> 250.
     """
-    raw = os.environ.get("SYSLOG_MAX_TCP_CONNECTIONS", "250")
-    try:
-        val = int(raw.strip())
-        if val >= 1:
-            return val
-    except (ValueError, TypeError):
-        pass
-    return 250
+    return int(get_cached_setting("syslog_max_tcp_connections", 250))
 
 def get_syslog_tcp_inactivity_timeout() -> float:
     """
     Returns the Syslog TCP inactivity timeout in seconds.
-    Reads SYSLOG_TCP_INACTIVITY_TIMEOUT environment variable (default: 0.0, disabled).
-    Validates that the value is a float >= 0.0, falling back to 0.0 if unset or invalid.
-    A value of 0.0 disables TCP inactivity timeouts, keeping connections open indefinitely.
+    Resolves using three-tier hierarchy: system_settings -> SYSLOG_TCP_INACTIVITY_TIMEOUT -> 0.0.
     """
-    raw = os.environ.get("SYSLOG_TCP_INACTIVITY_TIMEOUT", "0.0")
-    try:
-        val = float(raw.strip())
-        if val >= 0.0:
-            return val
-    except (ValueError, TypeError):
-        pass
-    return 0.0
+    return float(get_cached_setting("syslog_tcp_inactivity_timeout", 0.0))
 
 def get_docker_host() -> str:
     """Returns the Docker host socket or proxy address."""
@@ -253,5 +238,247 @@ def get_all_system_settings(conn: sqlite3.Connection) -> dict[str, str]:
         else:
             settings[k] = v or ""
     return settings
+
+
+def _cast_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "1", "yes", "on")
+
+
+def resolve_setting(
+    db_settings: dict[str, str],
+    key: str,
+    env_var: Optional[str] = None,
+    default: Any = None,
+    caster: Callable[[str], Any] = str,
+    env_aliases: Optional[list[str]] = None,
+) -> Any:
+    """
+    Resolves configuration using the three-tier hierarchy:
+    Tier 1: SQLite system_settings table (Web UI configuration)
+    Tier 2: Primary environment variable or legacy aliases
+    Tier 3: Built-in default constant
+    """
+    # Tier 1: Check database configuration
+    if key in db_settings and db_settings[key] is not None and db_settings[key] != "":
+        try:
+            return caster(db_settings[key])
+        except (ValueError, TypeError):
+            pass
+
+    # Tier 2: Check primary environment variable
+    if env_var:
+        env_val = os.environ.get(env_var)
+        if env_val is not None and env_val.strip() != "":
+            try:
+                return caster(env_val.strip())
+            except (ValueError, TypeError):
+                pass
+
+    # Tier 2b: Silent legacy aliases (undocumented, backward compatibility)
+    if env_aliases:
+        for alias in env_aliases:
+            alias_val = os.environ.get(alias)
+            if alias_val is not None and alias_val.strip() != "":
+                try:
+                    return caster(alias_val.strip())
+                except (ValueError, TypeError):
+                    pass
+
+    # Tier 3: Hardcoded default
+    return default
+
+
+def _cast_ai_timeout(v: str) -> float:
+    val = float(v)
+    if val > 0.0:
+        return val
+    raise ValueError("ai_timeout must be > 0.0")
+
+
+def _cast_ai_thinking_budget(v: str) -> int:
+    val = int(v)
+    if val >= 0:
+        return val
+    raise ValueError("ai_thinking_budget must be >= 0")
+
+
+def _cast_syslog_max_connections(v: str) -> int:
+    val = int(v)
+    if val >= 1:
+        return val
+    raise ValueError("syslog_max_tcp_connections must be >= 1")
+
+
+def _cast_syslog_inactivity_timeout(v: str) -> float:
+    val = float(v)
+    if val >= 0.0:
+        return val
+    raise ValueError("syslog_tcp_inactivity_timeout must be >= 0.0")
+
+
+def resolve_all_system_settings(db_settings: dict[str, str]) -> dict[str, Any]:
+    """
+    Resolve all 12 runtime advanced system settings using the three-tier hierarchy.
+    """
+    return {
+        "ai_timeout": resolve_setting(
+            db_settings,
+            key="ai_timeout",
+            env_var="LOGSHED_AI_TIMEOUT",
+            default=45.0,
+            caster=_cast_ai_timeout,
+        ),
+        "ai_thinking_budget": resolve_setting(
+            db_settings,
+            key="ai_thinking_budget",
+            env_var="LOGSHED_AI_THINKING_BUDGET",
+            default=1024,
+            caster=_cast_ai_thinking_budget,
+        ),
+        # Legacy Alias: app_url (lowercase) was supported alongside APP_URL.
+        # Retained silently for backward compatibility with existing configurations.
+        "app_url": resolve_setting(
+            db_settings,
+            key="app_url",
+            env_var="APP_URL",
+            env_aliases=["app_url"],
+            default="",
+            caster=lambda v: v.strip().rstrip("/"),
+        ),
+        "allow_private_notification_targets": resolve_setting(
+            db_settings,
+            key="allow_private_notification_targets",
+            env_var="ALLOW_PRIVATE_NOTIFICATION_TARGETS",
+            default=True,
+            caster=_cast_bool,
+        ),
+        "enable_docker": resolve_setting(
+            db_settings,
+            key="enable_docker",
+            env_var="ENABLE_DOCKER",
+            default=True,
+            caster=_cast_bool,
+        ),
+        "docker_exclude_containers": resolve_setting(
+            db_settings,
+            key="docker_exclude_containers",
+            env_var="DOCKER_EXCLUDE_CONTAINERS",
+            default="",
+            caster=str,
+        ),
+        "docker_source_alias": resolve_setting(
+            db_settings,
+            key="docker_source_alias",
+            env_var="DOCKER_SOURCE_ALIAS",
+            default="docker",
+            caster=str,
+        ),
+        "trusted_proxies": resolve_setting(
+            db_settings,
+            key="trusted_proxies",
+            env_var="TRUSTED_PROXIES",
+            default="",
+            caster=str,
+        ),
+        # Legacy Aliases: TRUST_DOCKER_NETWORKS and TRUST_DOCKER_GATEWAY were used in
+        # early versions as alternates to TRUST_DOCKER_PROXIES. Retained silently for
+        # backward compatibility with existing docker-compose configurations.
+        "trust_docker_proxies": resolve_setting(
+            db_settings,
+            key="trust_docker_proxies",
+            env_var="TRUST_DOCKER_PROXIES",
+            env_aliases=["TRUST_DOCKER_NETWORKS", "TRUST_DOCKER_GATEWAY"],
+            default=False,
+            caster=_cast_bool,
+        ),
+        "cookie_secure": resolve_setting(
+            db_settings,
+            key="cookie_secure",
+            env_var="COOKIE_SECURE",
+            default=False,
+            caster=_cast_bool,
+        ),
+        "syslog_max_tcp_connections": resolve_setting(
+            db_settings,
+            key="syslog_max_tcp_connections",
+            env_var="SYSLOG_MAX_TCP_CONNECTIONS",
+            default=250,
+            caster=_cast_syslog_max_connections,
+        ),
+        "syslog_tcp_inactivity_timeout": resolve_setting(
+            db_settings,
+            key="syslog_tcp_inactivity_timeout",
+            env_var="SYSLOG_TCP_INACTIVITY_TIMEOUT",
+            default=0.0,
+            caster=_cast_syslog_inactivity_timeout,
+        ),
+    }
+
+
+_cached_db_settings: Optional[dict[str, str]] = None
+_cached_resolved_settings: Optional[dict[str, Any]] = None
+_cache_timestamp: float = 0.0
+_cache_lock = threading.Lock()
+SETTINGS_CACHE_TTL = 10.0
+
+
+def invalidate_settings_cache() -> None:
+    """Clear cached system settings, forcing reload on next access."""
+    global _cached_db_settings, _cached_resolved_settings, _cache_timestamp
+    with _cache_lock:
+        _cached_db_settings = None
+        _cached_resolved_settings = None
+        _cache_timestamp = 0.0
+
+
+def _load_db_settings_sync() -> dict[str, str]:
+    db_p = get_db_path()
+    if not db_p.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{db_p}?mode=ro", uri=True, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            return get_all_system_settings(conn)
+        finally:
+            conn.close()
+    except Exception:
+        try:
+            conn = sqlite3.connect(db_p, timeout=5.0)
+            conn.row_factory = sqlite3.Row
+            try:
+                return get_all_system_settings(conn)
+            finally:
+                conn.close()
+        except Exception:
+            return {}
+
+
+def get_cached_system_settings() -> dict[str, Any]:
+    """
+    Returns the cached dictionary of effective system settings.
+    Refreshes database settings and resolves settings if expired (TTL 10s)
+    or explicitly invalidated, returning the cached resolved dictionary.
+    """
+    global _cached_db_settings, _cached_resolved_settings, _cache_timestamp
+    now = time.monotonic()
+    with _cache_lock:
+        if (
+            _cached_resolved_settings is None
+            or _cached_db_settings is None
+            or (now - _cache_timestamp) >= SETTINGS_CACHE_TTL
+        ):
+            _cached_db_settings = _load_db_settings_sync()
+            _cached_resolved_settings = resolve_all_system_settings(_cached_db_settings)
+            _cache_timestamp = now
+        return dict(_cached_resolved_settings)
+
+
+def get_cached_setting(key: str, default: Any = None) -> Any:
+    """Convenience helper to retrieve a single effective system setting."""
+    return get_cached_system_settings().get(key, default)
+
 
 

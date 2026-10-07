@@ -80,8 +80,8 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         data-index={index}
         onClick={() => onClick(log)}
         style={style}
-        className={`log-row flex flex-col justify-between px-3 py-1.5 border-b border-dark-900 cursor-pointer text-[11px] leading-tight space-y-1 ${
-          isSelected ? 'bg-accent-950/40 border-l-2 border-accent-500' : ''
+        className={`log-row flex flex-col justify-between px-3 py-1.5 border-b border-dark-900 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
+          isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
         }`}
       >
         {/* Line 1: Severity Badge + App Name (Host Name) */}
@@ -124,8 +124,8 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       data-index={index}
       onClick={() => onClick(log)}
       style={style}
-      className={`log-row grid grid-cols-[36px_165px_65px_130px_130px_1fr_60px] px-3 items-center border-b border-dark-900 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
-        isSelected ? 'bg-accent-950/40 border-l-2 border-accent-500' : ''
+      className={`log-row grid grid-cols-[36px_165px_65px_130px_130px_1fr_60px] px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
+        isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
       }${isHovered ? ' bg-dark-900/60' : ''}`}
     >
       {/* Checkbox */}

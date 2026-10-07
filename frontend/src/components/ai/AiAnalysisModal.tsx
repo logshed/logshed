@@ -17,24 +17,41 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  ExternalLink,
 } from 'lucide-react';
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels } from '../../api/ai.ts';
+import { fetchSettings } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 
+const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  gemini: DEFAULT_AI_MODEL,
+  openai: 'gpt-4o',
+  anthropic: 'claude-sonnet-4-6',
+  openai_compatible: 'llama3.2',
+};
+
+interface ProviderLocalState {
+  hasKey: boolean;
+  model: string;
+  fallbackModels: string;
+}
+
 interface AiAnalysisModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedLogs: LogEntry[];
+  onNavigateToSettings?: () => void;
 }
 
 export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   isOpen,
   onClose,
   selectedLogs,
+  onNavigateToSettings,
 }) => {
   const [preview, setPreview] = useState<AiPreviewResponse | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
@@ -49,6 +66,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [provider, setProvider] = useState<string>('gemini');
   const [model, setModel] = useState<string>(DEFAULT_AI_MODEL);
   const [fallbackModels, setFallbackModels] = useState<string>('');
+
+  const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
+    gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
+    openai: { hasKey: false, model: 'gpt-4o', fallbackModels: '' },
+    anthropic: { hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '' },
+    openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
+  });
 
   // Model discovery states
   const [availableModels, setAvailableModels] = useState<AiModelInfo[]>([]);
@@ -111,6 +135,20 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     preview && normalizePrompt(fullPromptText) !== normalizePrompt(defaultFullPrompt)
   );
   const isModified = promptViewMode === 'full' ? hasEditedFull : (hasEditedPrompt || hasEditedSystem);
+
+  const handleGoToSettings = () => {
+    onClose();
+    if (onNavigateToSettings) {
+      onNavigateToSettings();
+    } else {
+      window.history.pushState(null, '', '/settings');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
+
+  const isAiDisabled = preview?.ai_enabled === false;
+  const isAiMissingKey = !hasApiKeyForProvider && provider !== 'openai_compatible';
+  const isAiUnavailable = Boolean(isAiDisabled || isAiMissingKey);
 
   useEffect(() => {
     if (isOpen && selectedLogs.length > 0) {
@@ -182,22 +220,58 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     try {
       setIsLoadingPreview(true);
       setPreviewError(null);
-      const res = await previewAiPrompt({
-        log_ids: validLogIds,
-      });
+
+      // Fetch preview and system settings in parallel to initialize provider configs
+      const [res, settRes] = await Promise.all([
+        previewAiPrompt({ log_ids: validLogIds }),
+        fetchSettings().catch(() => null),
+      ]);
+
       setPreview(res);
-      setProvider(res.provider);
-      setModel(res.model);
+      const activeP = res.provider || 'gemini';
+      setProvider(activeP);
+
       const initialFallbacks = res.fallback_models && res.fallback_models.length > 0
         ? res.fallback_models.join(', ')
         : '';
       setFallbackModels(initialFallbacks);
+      setModel(res.model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL);
+
+      // Initialize provider configs from system settings
+      const configs: Record<string, ProviderLocalState> = {
+        gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
+        openai: { hasKey: false, model: 'gpt-4o', fallbackModels: '' },
+        anthropic: { hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '' },
+        openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
+      };
+
+      if (settRes?.ai_providers_config) {
+        for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
+          if (configs[p]) {
+            configs[p] = {
+              hasKey: pCfg.has_api_key,
+              model: pCfg.ai_model || DEFAULT_PROVIDER_MODELS[p] || DEFAULT_AI_MODEL,
+              fallbackModels: pCfg.ai_fallback_models || '',
+            };
+          }
+        }
+      }
+
+      // Ensure active provider matches the preview values
+      configs[activeP] = {
+        hasKey: res.has_ai_api_key ?? configs[activeP]?.hasKey ?? true,
+        model: res.model || configs[activeP]?.model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL,
+        fallbackModels: initialFallbacks,
+      };
+
+      setProviderConfigs(configs);
+
       const initialSys = res.system_prompt || DEFAULT_SYSTEM_PROMPT;
       setSystemPrompt(initialSys);
       const initialUser = buildCombinedPrompt(res.redacted_prompt, userContext);
       setPromptText(initialUser);
       setFullPromptText(buildFullEnvelope(initialSys, initialUser));
-      loadModels(res.provider);
+      loadModels(activeP, res);
     } catch (err: any) {
       setPreviewError(err.message || 'Failed to generate redacted AI preview.');
     } finally {
@@ -205,14 +279,29 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     }
   };
 
-  const loadModels = async (prov: string) => {
+  const loadModels = async (prov: string, currentPreview?: AiPreviewResponse) => {
     try {
       setIsLoadingModels(true);
       setModelsError(null);
       const res = await getAiModels(prov);
-      setAvailableModels(res.models || []);
-      setHasApiKeyForProvider(res.has_api_key);
+      const discovered = res.models || [];
+      setAvailableModels(discovered);
+      const activePrev = currentPreview || preview;
+      const resKey = (activePrev && prov === activePrev.provider && activePrev.has_ai_api_key !== undefined)
+        ? activePrev.has_ai_api_key
+        : res.has_api_key;
+      const effectiveHasKey = resKey !== undefined ? resKey : true;
+      setHasApiKeyForProvider(effectiveHasKey);
       if (res.error) setModelsError(res.error);
+
+      // Keep providerConfigs updated with live key status
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [prov]: {
+          ...prev[prov],
+          hasKey: effectiveHasKey,
+        },
+      }));
     } catch (err: any) {
       setModelsError(err.message || 'Failed to load models.');
       setAvailableModels([]);
@@ -222,10 +311,34 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
   const handleProviderChange = (newProvider: string) => {
+    // 1. Save current provider's model & fallback state
+    const updatedConfigs: Record<string, ProviderLocalState> = {
+      ...providerConfigs,
+      [provider]: {
+        hasKey: hasApiKeyForProvider,
+        model,
+        fallbackModels,
+      },
+    };
+    setProviderConfigs(updatedConfigs);
+
+    // 2. Load target provider's settings
+    const target = updatedConfigs[newProvider] || {
+      hasKey: newProvider === 'openai_compatible',
+      model: DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL,
+      fallbackModels: '',
+    };
+
     setProvider(newProvider);
+    setModel(target.model || DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL);
+    setFallbackModels(target.fallbackModels || '');
+    setHasApiKeyForProvider(target.hasKey);
     setIsCustomModel(false);
     setSelectedFallbackToAdd('');
     setShowCustomFallbackInput(false);
+    setModelsError(null);
+    setAvailableModels([]);
+
     loadModels(newProvider);
   };
 
@@ -305,6 +418,15 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     if (validLogIds.length > 200) {
       setAnalysisError(
         `Cannot analyze more than 200 logs at once (${validLogIds.length} logs selected). Please reduce your selection to 200 logs or fewer.`
+      );
+      return;
+    }
+
+    if (isAiUnavailable) {
+      setAnalysisError(
+        isAiDisabled
+          ? 'AI features are disabled in Settings. Please enable an AI provider to inspect logs.'
+          : 'AI provider is not configured. Please configure an API key in Settings to inspect logs.'
       );
       return;
     }
@@ -474,6 +596,33 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
         {preview && !analysisResult && (
           <div className="space-y-3">
+            {/* AI Disabled / Unconfigured Advisory Banner */}
+            {isAiUnavailable && (
+              <div className="p-3.5 bg-amber-950/40 border border-amber-800/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200 shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-amber-200">
+                      {isAiDisabled ? 'AI Provider Disabled' : 'AI Provider Not Configured'}
+                    </p>
+                    <p className="text-amber-300/80 text-[11px] mt-0.5">
+                      {isAiDisabled
+                        ? 'AI features are disabled in system configuration. Enable an AI provider in Settings to inspect logs.'
+                        : 'An API key is required to query models. Configure your AI provider in Settings to inspect logs.'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGoToSettings}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-900 hover:bg-dark-850 border border-amber-800/60 rounded-lg text-xs font-medium text-amber-200 hover:text-white transition cursor-pointer shrink-0 self-start sm:self-auto"
+                >
+                  <span>Configure in Settings</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-accent-400" />
+                </button>
+              </div>
+            )}
+
             {/* Redacted Preview & Prompt Editor Block */}
             <div>
               <div className="flex flex-wrap items-center justify-between mb-1.5 gap-2">
@@ -543,9 +692,10 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <button
                     type="button"
                     onClick={handleCopyPrompt}
-                    className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                    title="Copy prompt"
                   >
-                    {copiedPrompt ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copiedPrompt ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedPrompt ? 'Copied' : 'Copy Prompt'}</span>
                   </button>
                 </div>
@@ -625,13 +775,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start gap-2 text-amber-300 text-xs font-mono">
                     <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <span>
-                      No API key configured for {provider === 'gemini' ? 'Google Gemini' : 'OpenAI'}. Please configure your API key in Settings to load models and run AI analysis.
+                      No API key configured for {provider === 'gemini' ? 'Google Gemini' : provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'}. Please configure your API key in Settings to load models and run AI analysis.
                     </span>
                   </div>
                 )}
 
                 {/* Models Loading Error Notice */}
-                {modelsError && (
+                {modelsError && (hasApiKeyForProvider || provider === 'openai_compatible') && (
                   <div className="p-2.5 bg-red-950/40 border border-red-800/60 rounded-lg flex items-start gap-2 text-red-300 text-xs font-mono">
                     <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                     <span>{modelsError}</span>
@@ -650,6 +800,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     >
                       <option value="gemini">Google Gemini</option>
                       <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic Claude</option>
                       <option value="openai_compatible">OpenAI-Compatible (Ollama / LocalAI)</option>
                     </select>
                   </div>
@@ -702,9 +853,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                               {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
                             </option>
                           ))}
-                        {!availableModels.some((m) => m.id === model) && model && (
-                          <option value={model}>{model} (Selected / Custom)</option>
-                        )}
                         <option value="__custom__">Custom model name...</option>
                       </select>
                     ) : (
@@ -712,7 +860,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         type="text"
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-4o' : 'llama3.2'}
+                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-4-6' : 'llama3.2'}
                         className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
                       />
                     )}
@@ -974,7 +1122,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             <div className="pt-2 flex justify-end">
               <button
                 onClick={handleRunAnalysis}
-                disabled={isDiagnosing}
+                disabled={isDiagnosing || isAiUnavailable}
                 className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
               >
                 {isDiagnosing ? (
@@ -1124,3 +1272,5 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     </Modal>
   );
 };
+
+export default AiAnalysisModal;

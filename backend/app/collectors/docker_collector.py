@@ -45,10 +45,46 @@ _CONTAINER_INITIAL_BACKOFF = 1.0
 _CONTAINER_MAX_BACKOFF = 15.0
 _CONTAINER_BACKOFF_FACTOR = 2.0
 
+# Internal tuning constants (with optional environment fallbacks preserved for custom builds)
+DEFAULT_DOCKER_READ_TIMEOUT: Optional[float] = None
+if "DOCKER_READ_TIMEOUT" in os.environ:
+    try:
+        DEFAULT_DOCKER_READ_TIMEOUT = float(os.environ["DOCKER_READ_TIMEOUT"])
+    except ValueError:
+        pass
+
+DEFAULT_DOCKER_HEARTBEAT_INTERVAL: float = 30.0
+if "DOCKER_HEARTBEAT_INTERVAL" in os.environ:
+    try:
+        DEFAULT_DOCKER_HEARTBEAT_INTERVAL = float(os.environ["DOCKER_HEARTBEAT_INTERVAL"])
+    except ValueError:
+        pass
+
+DEFAULT_DOCKER_SOCKET_POLL_INTERVAL: float = 5.0
+if "DOCKER_SOCKET_POLL_INTERVAL" in os.environ:
+    try:
+        DEFAULT_DOCKER_SOCKET_POLL_INTERVAL = float(os.environ["DOCKER_SOCKET_POLL_INTERVAL"])
+    except ValueError:
+        pass
+
+DEFAULT_DOCKER_SOCKET_POLL_MAX: float = 60.0
+if "DOCKER_SOCKET_POLL_MAX" in os.environ:
+    try:
+        DEFAULT_DOCKER_SOCKET_POLL_MAX = float(os.environ["DOCKER_SOCKET_POLL_MAX"])
+    except ValueError:
+        pass
+
+DEFAULT_DOCKER_DISCOVERY_INTERVAL: float = 60.0
+if "DOCKER_DISCOVERY_INTERVAL" in os.environ:
+    try:
+        DEFAULT_DOCKER_DISCOVERY_INTERVAL = float(os.environ["DOCKER_DISCOVERY_INTERVAL"])
+    except ValueError:
+        pass
+
 MAX_TTY_BUFFER = 65536  # 64 KB limit to prevent unbounded memory growth in TTY mode
 
 
-def _parse_docker_host() -> tuple[str, Optional[str]]:
+def _parse_docker_host(enable_docker: Optional[bool] = None) -> tuple[str, Optional[str]]:
     """
     Parse DOCKER_HOST env var into (base_url, uds_path).
 
@@ -57,6 +93,16 @@ def _parse_docker_host() -> tuple[str, Optional[str]]:
            - For unix sockets: ("http://localhost/v1.43", "/var/run/docker.sock")
            - For tcp: ("http://proxy:2375/v1.43", None)
     """
+    if enable_docker is None:
+        try:
+            from app.core.config import get_cached_setting
+            enable_docker = bool(get_cached_setting("enable_docker", True))
+        except Exception:
+            enable_docker = os.environ.get("ENABLE_DOCKER", "true").lower() not in ("0", "false", "no", "disabled")
+
+    if not enable_docker:
+        return "", None
+
     docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock").strip()
 
     if not docker_host or docker_host.lower() in ("none", "off", "disabled") or os.environ.get("ENABLE_DOCKER", "true").lower() in ("0", "false", "no", "disabled"):
@@ -95,7 +141,9 @@ def _build_client(
             try:
                 read_timeout = float(env_rt)
             except ValueError:
-                read_timeout = None
+                read_timeout = DEFAULT_DOCKER_READ_TIMEOUT
+        else:
+            read_timeout = DEFAULT_DOCKER_READ_TIMEOUT
 
     timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=10.0)
     limits = httpx.Limits(max_connections=500, max_keepalive_connections=100)
@@ -243,6 +291,48 @@ def _iso_to_unix_timestamp(ts_str: str) -> str:
         return ts_str
 
 
+def _parse_docker_message_content(message: str, default_severity: int) -> tuple[str, int]:
+    """
+    Parse container message content to extract message payload and explicit severity
+    from common formats (logfmt msg="...", Valkey/Redis, Maintainerr app pipe)
+    while keeping the raw line intact.
+    """
+    # 1. Valkey / Redis server line: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
+    m_valkey = re.match(
+        r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)",
+        message,
+    )
+    if m_valkey:
+        level_char = m_valkey.group(6)
+        valkey_sev_map = {"#": 4, "*": 5, ".": 7, "-": 7}
+        return m_valkey.group(7), valkey_sev_map.get(level_char, default_severity)
+
+    # 2. Maintainerr pipe format: [app] | DD/MM/YYYY HH:MM:SS [LEVEL] ...
+    m_app_pipe = re.match(
+        r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)",
+        message,
+    )
+    if m_app_pipe:
+        rem = m_app_pipe.group(4)
+        m_level = re.match(r"^\[([a-zA-Z]+)\]\s*(.*)", rem)
+        if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
+            return m_level.group(2), _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+        return rem, default_severity
+
+    # 3. Logfmt format: time="2026-..." level=info msg="..."
+    if message.startswith(("time=", "ts=")) or re.search(r"""\bmsg=(?:"[^"]*"|'[^']*'|\S+)""", message):
+        m_msg = re.search(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""", message)
+        if m_msg:
+            extracted_msg = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
+            m_level = re.search(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""", message)
+            sev = default_severity
+            if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
+                sev = _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+            return extracted_msg, sev
+
+    return message, default_severity
+
+
 def _make_log_entry(
     container_name: str,
     container_id: str,
@@ -251,35 +341,45 @@ def _make_log_entry(
     timestamp: Optional[str] = None,
     alias_cache: Optional[AliasCache] = None,
     source_ip: str = "docker",
+    source_alias: Optional[str] = None,
+    raw: Optional[str] = None,
 ) -> dict:
     """Build a log entry dict compatible with the shared pipeline."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    default_alias = os.environ.get("DOCKER_SOURCE_ALIAS", source_ip)
-    source_alias = default_alias
+    if source_alias is None:
+        try:
+            from app.core.config import get_cached_setting
+            source_alias = get_cached_setting("docker_source_alias", "docker")
+        except Exception:
+            source_alias = os.environ.get("DOCKER_SOURCE_ALIAS", source_ip)
+
+    default_alias = source_alias or source_ip
+    resolved_alias = default_alias
     if alias_cache is not None:
         if default_alias != source_ip:
             resolved_default = alias_cache.resolve(default_alias)
             if resolved_default != default_alias:
-                source_alias = resolved_default
+                resolved_alias = resolved_default
             else:
                 resolved_source = alias_cache.resolve(source_ip)
                 if resolved_source != source_ip:
-                    source_alias = resolved_source
+                    resolved_alias = resolved_source
         else:
-            source_alias = alias_cache.resolve(source_ip)
+            resolved_alias = alias_cache.resolve(source_ip)
 
     clean_message = _clean_text(message)
+    clean_raw = _clean_text(raw if raw is not None else message)
 
     return {
         "timestamp": timestamp or now,
         "received_at": now,
         "source_ip": source_ip,
-        "source_alias": source_alias,
+        "source_alias": resolved_alias,
         "app_name": container_name,
         "facility": 1,
         "severity": severity,
         "message": clean_message,
-        "raw": clean_message,
+        "raw": clean_raw,
     }
 
 
@@ -294,14 +394,24 @@ async def _get_running_containers(client: httpx.AsyncClient) -> list[dict]:
         raise
 
 
-def _should_ignore_container(container_id: str, container_name: str) -> bool:
+def _should_ignore_container(
+    container_id: str,
+    container_name: str,
+    exclude_containers: Optional[str] = None,
+) -> bool:
     """
     Determine if a container should be excluded from log tailing.
     Prevents self-tailing loops for LogShed itself.
     """
-    # 1. Explicitly configured excluded container names/IDs from env
-    exclude_env = os.environ.get("DOCKER_EXCLUDE_CONTAINERS", "")
-    excluded_names = {n.strip().lower() for n in exclude_env.split(",") if n.strip()}
+    # 1. Explicitly configured excluded container names/IDs
+    if exclude_containers is None:
+        try:
+            from app.core.config import get_cached_setting
+            exclude_containers = get_cached_setting("docker_exclude_containers", "")
+        except Exception:
+            exclude_containers = os.environ.get("DOCKER_EXCLUDE_CONTAINERS", "")
+
+    excluded_names = {n.strip().lower() for n in exclude_containers.split(",") if n.strip()}
     # Always exclude default container names for this app
     excluded_names.update({
         "logshed",
@@ -310,7 +420,7 @@ def _should_ignore_container(container_id: str, container_name: str) -> bool:
     })
 
     name_clean = container_name.lower().lstrip("/")
-    if name_clean in excluded_names:
+    if name_clean in excluded_names or container_id.lower() in excluded_names or container_id[:12].lower() in excluded_names:
         return True
 
     # 2. Check container short ID against HOSTNAME (Docker sets container short ID as hostname inside container)
@@ -410,10 +520,12 @@ async def _tail_container_logs(
 
         if message or ts:
             severity = _detect_severity(message)
+            parsed_message, parsed_sev = _parse_docker_message_content(message, severity)
             return _make_log_entry(
-                container_name, container_id, message,
-                severity=severity, timestamp=ts,
+                container_name, container_id, parsed_message,
+                severity=parsed_sev, timestamp=ts,
                 alias_cache=alias_cache,
+                raw=message,
             )
         return None
 
@@ -444,12 +556,13 @@ async def _tail_container_logs(
                 resp.raise_for_status()
                 backoff = _CONTAINER_INITIAL_BACKOFF
                 buffer = b""
+                line_buffer = ""
 
                 last_activity = asyncio.get_running_loop().time()
                 heartbeat_failed = False
 
                 async def _consume_stream() -> None:
-                    nonlocal buffer, last_activity
+                    nonlocal buffer, line_buffer, last_activity
                     async for chunk in resp.aiter_bytes():
                         if cancel_event.is_set():
                             return
@@ -481,8 +594,10 @@ async def _tail_container_logs(
                             # Multiplexed mode: demux frames with automatic header resynchronization
                             frames, buffer = _demux_stream(buffer)
                             for stream_type, payload in frames:
-                                text = payload.decode("utf-8", errors="replace")
-                                for line in text.splitlines():
+                                text = line_buffer + payload.decode("utf-8", errors="replace")
+                                lines = text.split("\n")
+                                line_buffer = lines.pop()
+                                for line in lines:
                                     line = line.rstrip("\r")
                                     if not line:
                                         continue
@@ -490,7 +605,7 @@ async def _tail_container_logs(
                                     if entry:
                                         await assembler.feed(stream_key, entry)
 
-                    # Flush any trailing TTY bytes on clean stream completion
+                    # Flush any trailing TTY or multiplexed bytes on clean stream completion
                     if is_tty and buffer:
                         while len(buffer) > MAX_TTY_BUFFER:
                             logger.warning(
@@ -505,6 +620,13 @@ async def _tail_container_logs(
                                     await assembler.feed(stream_key, entry)
                         line = buffer.decode("utf-8", errors="replace").rstrip("\r")
                         buffer = b""
+                        if line:
+                            entry = _process_line(line)
+                            if entry:
+                                await assembler.feed(stream_key, entry)
+                    elif not is_tty and line_buffer:
+                        line = line_buffer.rstrip("\r")
+                        line_buffer = ""
                         if line:
                             entry = _process_line(line)
                             if entry:
@@ -609,10 +731,10 @@ class DockerTailer:
     Supervisor that monitors Docker events and tails container logs.
 
     Manages lifecycle:
-   - On start: enumerate running containers and begin tailing each one.
-   - On 'start' event: begin tailing the newly started container.
-   - On 'die' event: cancel the tailer task for that container.
-   - On disconnect: exponential backoff reconnect.
+    - On start: enumerate running containers and begin tailing each one.
+    - On 'start' event: begin tailing the newly started container.
+    - On 'die' event: cancel the tailer task for that container.
+    - On disconnect: exponential backoff reconnect.
     """
 
     def __init__(
@@ -622,10 +744,15 @@ class DockerTailer:
         alias_cache: Optional[AliasCache] = None,
         socket_poll_interval: Optional[float] = None,
         socket_poll_max: Optional[float] = None,
+        enable_docker: Optional[bool] = None,
+        exclude_containers: Optional[str] = None,
+        source_alias: Optional[str] = None,
+        discovery_interval: Optional[float] = None,
     ):
         self._assembler = assembler
         self._running = False
         self._cancel_event = asyncio.Event()
+        self._settings_event = asyncio.Event()
         # container_id -> (task, cancel_event)
         self._tailers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
         # container_id -> latest seen RFC3339 log timestamp string
@@ -635,12 +762,17 @@ class DockerTailer:
         self._socket_poll_interval = (
             socket_poll_interval
             if socket_poll_interval is not None
-            else float(os.environ.get("DOCKER_SOCKET_POLL_INTERVAL", "5.0"))
+            else DEFAULT_DOCKER_SOCKET_POLL_INTERVAL
         )
         self._socket_poll_max = (
             socket_poll_max
             if socket_poll_max is not None
-            else float(os.environ.get("DOCKER_SOCKET_POLL_MAX", "60.0"))
+            else DEFAULT_DOCKER_SOCKET_POLL_MAX
+        )
+        self._discovery_interval = (
+            discovery_interval
+            if discovery_interval is not None
+            else DEFAULT_DOCKER_DISCOVERY_INTERVAL
         )
         self._db_path = Path(db_path) if db_path else None
         if alias_cache is not None:
@@ -650,6 +782,76 @@ class DockerTailer:
             effective_db_path = self._db_path or get_db_path()
             self.alias_cache = AliasCache(effective_db_path)
             self._owns_alias_cache = True
+
+        from app.core.config import get_cached_setting
+        self.enable_docker = (
+            enable_docker
+            if enable_docker is not None
+            else bool(get_cached_setting("enable_docker", True))
+        )
+        self.exclude_containers = (
+            exclude_containers
+            if exclude_containers is not None
+            else str(get_cached_setting("docker_exclude_containers", ""))
+        )
+        self.source_alias = (
+            source_alias
+            if source_alias is not None
+            else str(get_cached_setting("docker_source_alias", "docker"))
+        )
+        self._current_client: Optional[httpx.AsyncClient] = None
+
+    async def update_settings(
+        self,
+        enable_docker: Optional[bool] = None,
+        exclude_containers: Optional[str] = None,
+        source_alias: Optional[str] = None,
+    ) -> None:
+        """
+        Dynamically update Docker collector runtime configuration.
+        Stops or attaches container tailers according to enable_docker and exclusions.
+        """
+        changed = False
+
+        if enable_docker is not None and enable_docker != self.enable_docker:
+            changed = True
+            prev_enabled = self.enable_docker
+            self.enable_docker = enable_docker
+            if not enable_docker and prev_enabled:
+                logger.info("Docker collector disabled via settings. Stopping container tailers.")
+                await self._cleanup_tailers()
+            elif enable_docker and not prev_enabled:
+                logger.info("Docker collector enabled via settings. Resuming container tailing.")
+                self._settings_event.set()
+                if self._current_client and not self._current_client.is_closed:
+                    try:
+                        await self._attach_running_containers(self._current_client)
+                    except Exception as e:
+                        logger.warning(f"Error re-attaching containers on enable: {e}")
+
+        if exclude_containers is not None and exclude_containers != self.exclude_containers:
+            changed = True
+            self.exclude_containers = exclude_containers
+            for cid, (task, cancel) in list(self._tailers.items()):
+                cname = task.get_name().replace("docker-tail-", "")
+                if _should_ignore_container(cid, cname, exclude_containers=self.exclude_containers):
+                    logger.info(f"Stopping container tailer {cname} ({cid[:12]}) due to updated exclusions.")
+                    await self._stop_tailer(cid)
+            if self.enable_docker and self._current_client and not self._current_client.is_closed:
+                try:
+                    await self._attach_running_containers(self._current_client)
+                except Exception as e:
+                    logger.debug(f"Error attaching newly included containers: {e}")
+
+        if source_alias is not None and source_alias != self.source_alias:
+            changed = True
+            self.source_alias = source_alias
+
+        if changed:
+            logger.info(
+                f"DockerTailer settings updated: enable_docker={self.enable_docker}, "
+                f"exclude_containers='{self.exclude_containers}', source_alias='{self.source_alias}'"
+            )
 
     async def run(self) -> None:
         """
@@ -661,16 +863,29 @@ class DockerTailer:
         if self._owns_alias_cache and not self.alias_cache._refresh_task:
             await self.alias_cache.start()
 
-        base_url, uds_path = _parse_docker_host()
-        if not base_url:
+        base_url, uds_path = _parse_docker_host(self.enable_docker)
+        if not base_url or not self.enable_docker:
             logger.info(
                 "Docker container tailing disabled by configuration; operating in syslog-only mode."
             )
-            try:
-                await self._cancel_event.wait()
-            except asyncio.CancelledError:
-                pass
-            return
+            while self._running and not self.enable_docker:
+                self._settings_event.clear()
+                try:
+                    wait_tasks = [
+                        asyncio.create_task(self._cancel_event.wait()),
+                        asyncio.create_task(self._settings_event.wait()),
+                    ]
+                    done, pending = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for t in pending:
+                        t.cancel()
+                    if self._cancel_event.is_set():
+                        return
+                except asyncio.CancelledError:
+                    return
+
+            base_url, uds_path = _parse_docker_host(self.enable_docker)
+            if not base_url or not self.enable_docker:
+                return
 
         if uds_path and not os.path.exists(uds_path):
             logger.warning(
@@ -704,18 +919,43 @@ class DockerTailer:
         backoff = _INITIAL_BACKOFF
 
         while self._running:
+            if not self.enable_docker:
+                self._settings_event.clear()
+                try:
+                    wait_tasks = [
+                        asyncio.create_task(self._cancel_event.wait()),
+                        asyncio.create_task(self._settings_event.wait()),
+                    ]
+                    done, pending = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for t in pending:
+                        t.cancel()
+                    if self._cancel_event.is_set():
+                        return
+                    continue
+                except asyncio.CancelledError:
+                    return
+
+            base_url, uds_path = _parse_docker_host(self.enable_docker)
+            if not base_url:
+                await asyncio.sleep(1.0)
+                continue
+
             target_desc = uds_path if uds_path else base_url
             try:
-                base_url, uds_path = _parse_docker_host()
+                base_url, uds_path = _parse_docker_host(self.enable_docker)
                 target_desc = uds_path if uds_path else base_url
                 async with _build_client(base_url, uds_path) as client:
-                    # Start tailing all currently running containers
-                    await self._attach_running_containers(client)
-                    logger.info(f"Connected to Docker daemon at {target_desc}")
-                    backoff = _INITIAL_BACKOFF  # Reset on successful connect
+                    self._current_client = client
+                    try:
+                        # Start tailing all currently running containers
+                        await self._attach_running_containers(client)
+                        logger.info(f"Connected to Docker daemon at {target_desc}")
+                        backoff = _INITIAL_BACKOFF  # Reset on successful connect
 
-                    # Stream Docker events for start/die
-                    await self._watch_events(client)
+                        # Stream Docker events for start/die
+                        await self._watch_events(client)
+                    finally:
+                        self._current_client = None
 
             except asyncio.CancelledError:
                 raise
@@ -738,14 +978,45 @@ class DockerTailer:
             await self.alias_cache.stop()
         logger.info("Docker tailer stopped")
 
+    async def _discover_containers(
+        self, client: Optional[httpx.AsyncClient] = None
+    ) -> list[dict]:
+        """
+        Enumerate running containers and purge tracking state for containers
+        that are no longer running or discovered.
+        """
+        target_client = client or self._current_client
+        if target_client is None:
+            return []
+
+        containers = await _get_running_containers(target_client)
+        active_ids: set[str] = set()
+        for c in containers:
+            cid = c.get("Id", "")
+            if cid:
+                active_ids.add(cid)
+                if len(cid) >= 12:
+                    active_ids.add(cid[:12])
+
+        # Purge removed container IDs from tracking dictionaries
+        for cid in list(self._container_last_seen.keys()):
+            if cid not in active_ids:
+                self._container_last_seen.pop(cid, None)
+
+        for cid in list(self._container_last_messages.keys()):
+            if cid not in active_ids:
+                self._container_last_messages.pop(cid, None)
+
+        return containers
+
     async def _attach_running_containers(self, client: httpx.AsyncClient) -> None:
         """Enumerate running containers and start a log tailer for each, skipping excluded containers."""
-        containers = await _get_running_containers(client)
+        containers = await self._discover_containers(client)
         for c in containers:
             cid = c.get("Id", "")
             names = c.get("Names", [])
             name = names[0].lstrip("/") if names else cid[:12]
-            if _should_ignore_container(cid, name):
+            if _should_ignore_container(cid, name, exclude_containers=self.exclude_containers):
                 logger.debug(f"Skipping tailing self/excluded container {name} ({cid[:12]})")
                 continue
             self._start_tailer(client, cid, name)
@@ -757,7 +1028,7 @@ class DockerTailer:
         container_name: str,
     ) -> None:
         """Start a log tailer task for a container if not already active and not excluded."""
-        if _should_ignore_container(container_id, container_name):
+        if _should_ignore_container(container_id, container_name, exclude_containers=self.exclude_containers):
             return
 
         if container_id in self._tailers:
@@ -810,7 +1081,10 @@ class DockerTailer:
             "filters": json.dumps({"event": ["start", "die", "restart"], "type": ["container"]}),
         }
 
-        heartbeat_interval = float(os.environ.get("DOCKER_HEARTBEAT_INTERVAL", "30.0"))
+        try:
+            heartbeat_interval = float(os.environ.get("DOCKER_HEARTBEAT_INTERVAL", str(DEFAULT_DOCKER_HEARTBEAT_INTERVAL)))
+        except ValueError:
+            heartbeat_interval = DEFAULT_DOCKER_HEARTBEAT_INTERVAL
 
         async with client.stream("GET", "/events", params=params) as resp:
             resp.raise_for_status()
@@ -876,6 +1150,22 @@ class DockerTailer:
                             events_task.cancel()
                             return
 
+            async def _periodic_discovery() -> None:
+                if self._discovery_interval <= 0:
+                    return
+                while not self._cancel_event.is_set():
+                    try:
+                        await asyncio.sleep(self._discovery_interval)
+                    except asyncio.CancelledError:
+                        return
+                    try:
+                        await self._discover_containers(client)
+                    except asyncio.CancelledError:
+                        return
+                    except Exception as e:
+                        logger.debug(f"Periodic container discovery error: {e}")
+
+            discovery_task = asyncio.create_task(_periodic_discovery())
             monitor_task = asyncio.create_task(_events_heartbeat())
             cancel_task = asyncio.create_task(self._cancel_event.wait())
             try:
@@ -907,6 +1197,12 @@ class DockerTailer:
                     events_task.cancel()
                     try:
                         await events_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                if not discovery_task.done():
+                    discovery_task.cancel()
+                    try:
+                        await discovery_task
                     except (asyncio.CancelledError, Exception):
                         pass
                 monitor_task.cancel()
