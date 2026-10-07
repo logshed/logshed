@@ -150,7 +150,7 @@ describe('NotificationsCard Component', () => {
     expect(builderLink).toHaveAttribute('target', '_blank');
   });
 
-  it('disables daily digest controls when no active notification targets exist', async () => {
+  it('allows daily digest controls when no active notification targets exist (History only)', async () => {
     vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValueOnce([
       {
         id: 1,
@@ -173,11 +173,11 @@ describe('NotificationsCard Component', () => {
     });
 
     const checkbox = screen.getByLabelText(/Enable 24-hour daily digest rollup/i);
-    expect(checkbox).toBeDisabled();
+    expect(checkbox).not.toBeDisabled();
     expect(
-      screen.getByText(/Requires at least one active notification target configured above/i)
+      screen.getByText(/No active notification targets configured\. Digests will still be recorded and viewable in History\./i)
     ).toBeInTheDocument();
-    expect(screen.queryByText('Send Digest Now')).not.toBeInTheDocument();
+    expect(screen.getByText('Send Digest Now')).toBeInTheDocument();
   });
 
   it('allows toggling daily digest, selecting channel, changing schedule time, and dispatching digest', async () => {
@@ -261,7 +261,7 @@ describe('NotificationsCard Component', () => {
     await waitFor(() => {
       expect(notifApi.sendDailyDigest).toHaveBeenCalled();
       expect(
-        screen.getByText(/Daily digest dispatched successfully to Homelab Discord \(1,250 logs analyzed\)\./i)
+        screen.getByText(/Daily digest dispatched successfully to Homelab Discord and saved to History \(1,250 logs analyzed\)\./i)
       ).toBeInTheDocument();
     });
   });

@@ -7,6 +7,7 @@ import {
   slugify,
   downloadBlob,
   formatMaintenanceTime,
+  formatLocalTimestamp,
 } from '../utils/formatters.ts';
 
 describe('stripAnsi', () => {
@@ -245,6 +246,30 @@ describe('formatMaintenanceTime', () => {
 
   it('returns raw string if parsing fails', () => {
     expect(formatMaintenanceTime('invalid-date')).toBe('invalid-date');
+  });
+});
+
+describe('formatLocalTimestamp', () => {
+  it('handles null, undefined, or empty string gracefully', () => {
+    expect(formatLocalTimestamp(null)).toBe('');
+    expect(formatLocalTimestamp(undefined)).toBe('');
+    expect(formatLocalTimestamp('')).toBe('');
+  });
+
+  it('returns raw string if parsing fails', () => {
+    expect(formatLocalTimestamp('not-a-date')).toBe('not-a-date');
+  });
+
+  it('formats a date to local YYYY-MM-DD HH:mm:ss when includeSeconds is true (default)', () => {
+    const d = new Date(2026, 9, 6, 14, 38, 53);
+    const iso = d.toISOString();
+    expect(formatLocalTimestamp(iso)).toBe('2026-10-06 14:38:53');
+  });
+
+  it('formats a date to local YYYY-MM-DD HH:mm when includeSeconds is false', () => {
+    const d = new Date(2026, 9, 6, 14, 38, 53);
+    const iso = d.toISOString();
+    expect(formatLocalTimestamp(iso, false)).toBe('2026-10-06 14:38');
   });
 });
 

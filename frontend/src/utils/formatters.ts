@@ -141,6 +141,25 @@ export function fromLocalDatetimeInputString(localString?: string | null): strin
 }
 
 /**
+ * Formats a UTC ISO datetime string into local browser representation: 'YYYY-MM-DD HH:mm:ss' (or 'YYYY-MM-DD HH:mm' if includeSeconds is false).
+ */
+export function formatLocalTimestamp(isoString?: string | null, includeSeconds: boolean = true): string {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  if (includeSeconds) {
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  }
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+/**
  * Slugifies text into an alphanumeric kebab-cased string suitable for filenames.
  */
 export function slugify(text: string): string {

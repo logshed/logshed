@@ -329,6 +329,10 @@ describe('LiveLogStream Component', () => {
     });
     expect(screen.queryByText(/Log Record #101/i)).toBeNull();
 
+    // Verify row maintains border-l-2 consistently without shifting
+    expect(firstRow).toHaveClass('border-l-2', 'border-l-accent-500');
+    expect(logRows[1]).toHaveClass('border-l-2', 'border-l-transparent');
+
     // Clicking anywhere else on row (e.g. message cell) opens detail modal
     const messageCell = screen.getByText('Nginx upstream connection timeout');
     fireEvent.click(messageCell);

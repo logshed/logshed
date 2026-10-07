@@ -296,16 +296,6 @@ async def run_daily_digest(
     if not force and not daily_digest_enabled:
         return {"status": "skipped", "reason": "daily_digest_disabled"}
 
-    if not active_channels:
-        if force:
-            from fastapi import HTTPException, status
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No active notification targets configured.",
-            )
-        logger.debug("Daily digest skipped: no active notification channels found.")
-        return {"status": "skipped", "reason": "no_active_channels"}
-
     # Resolve target channel: parameter override > configured setting > None (all enabled channels)
     effective_channel_id = target_channel_id
     if effective_channel_id is None:
@@ -330,6 +320,14 @@ async def run_daily_digest(
         top_errors=rollup["top_errors"],
         top_services=rollup["top_services"],
         app_url=app_url,
+        since_iso=rollup.get("since_iso"),
+    )
+    history_body = format_digest_body(
+        total_logs=rollup["total_logs"],
+        storage_delta_str=rollup["storage_delta_str"],
+        top_errors=rollup["top_errors"],
+        top_services=rollup["top_services"],
+        app_url="",
         since_iso=rollup.get("since_iso"),
     )
     notification_title = "LogShed: Daily Digest"
@@ -359,7 +357,7 @@ async def run_daily_digest(
                 effective_channel_id,
                 rollup["total_logs"],
                 sample_preview,
-                digest_body,
+                history_body,
                 now_iso,
             ),
         )
@@ -495,11 +493,6 @@ class DailyDigestWorker:
 
             is_enabled = rows.get("daily_digest_enabled", "0").strip().lower() in ("1", "true", "yes", "on")
             if not is_enabled:
-                return False
-
-            cur.execute("SELECT COUNT(*) FROM notification_channels WHERE is_enabled = 1")
-            active_count = cur.fetchone()[0]
-            if active_count == 0:
                 return False
 
             now_local = datetime.datetime.now().astimezone()

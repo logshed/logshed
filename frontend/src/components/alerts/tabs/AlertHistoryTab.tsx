@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../../types.ts';
 import { extractCleanSummary } from '../../../utils/summary.ts';
+import { formatLocalTimestamp } from '../../../utils/formatters.ts';
 
 export interface AlertHistoryTabProps {
   historyItems: AlertHistoryItem[];
@@ -122,7 +123,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                    {item.triggered_at.slice(0, 16).replace('T', ' ')}
+                    {formatLocalTimestamp(item.triggered_at)}
                   </span>
                 </div>
 
@@ -172,7 +173,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
       ) : (
         /* Desktop Table View */
         <div className="divide-y divide-dark-800 font-mono text-xs">
-          <div className="grid grid-cols-[135px_110px_200px_1fr_95px] px-4 py-2 text-slate-400 font-medium text-xs font-sans bg-dark-950/60 border-b border-dark-700 select-none">
+          <div className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2 text-slate-400 font-medium text-xs font-sans bg-dark-950/60 border-b border-dark-700 select-none">
             <div>Time</div>
             <div>Type</div>
             <div>Target / Rule</div>
@@ -195,10 +196,10 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               <div
                 key={item.id}
                 onClick={() => onSelectHistoryItem(item)}
-                className="grid grid-cols-[135px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
+                className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
               >
                 <div className="text-slate-400 group-hover:text-slate-300 font-mono">
-                  {item.triggered_at.slice(0, 16).replace('T', ' ')}
+                  {formatLocalTimestamp(item.triggered_at)}
                 </div>
                 <div>
                   {isDigest ? (

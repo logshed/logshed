@@ -147,9 +147,14 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
       if (res.status === 'ok') {
         const channelLabel = res.channel_id
           ? (channels.find((c) => c.id === res.channel_id)?.name || `Channel #${res.channel_id}`)
-          : 'All Enabled Channels';
+          : hasActiveChannel
+          ? 'All Enabled Channels'
+          : null;
+        const successMessage = channelLabel
+          ? `Daily digest dispatched successfully to ${channelLabel} and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`
+          : `Daily digest generated and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`;
         setFeedbackMsg({
-          text: `Daily digest dispatched successfully to ${channelLabel} (${res.total_logs.toLocaleString()} logs analyzed).`,
+          text: successMessage,
           isError: false,
         });
         if (res.triggered_at) {
@@ -468,28 +473,26 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             </p>
           </div>
 
-          {hasActiveChannel && (
-            <button
-              type="button"
-              onClick={handleSendDigestNow}
-              disabled={isSendingDigest || isSavingDigest || isSavingSettings}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
-              title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
-            >
-              <Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />
-              <span>{isSendingDigest ? 'Sending...' : 'Send Digest Now'}</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleSendDigestNow}
+            disabled={isSendingDigest || isSavingDigest || isSavingSettings}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
+            title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
+          >
+            <Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />
+            <span>{isSendingDigest ? 'Sending...' : 'Send Digest Now'}</span>
+          </button>
         </div>
 
         <div className="p-3.5 bg-dark-950/60 rounded-lg border border-dark-800 space-y-3">
           {/* Enable checkbox */}
           <div>
-            <label className={`flex items-start gap-2 text-xs select-none ${hasActiveChannel ? 'cursor-pointer text-slate-200' : 'cursor-not-allowed text-slate-500'}`}>
+            <label className="flex items-start gap-2 text-xs select-none cursor-pointer text-slate-200">
               <input
                 type="checkbox"
                 checked={currentDigestEnabled}
-                disabled={!hasActiveChannel || isSavingDigest || isSavingSettings}
+                disabled={isSavingDigest || isSavingSettings}
                 onChange={(e) => {
                   if (isDigestControlled) {
                     onDigestEnabledChange?.(e.target.checked);
@@ -502,8 +505,8 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               <div>
                 <span className="font-medium">Enable 24-hour daily digest rollup</span>
                 {!hasActiveChannel && (
-                  <p className="text-[11px] text-amber-400/80 mt-0.5">
-                    Requires at least one active notification target configured above.
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    No active notification targets configured. Digests will still be recorded and viewable in History.
                   </p>
                 )}
               </div>
@@ -531,7 +534,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 }}
                 className="w-full bg-dark-900 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 disabled:opacity-50"
               >
-                <option value="">All Enabled Channels</option>
+                <option value="">{hasActiveChannel ? 'All Enabled Channels' : 'None (History Only)'}</option>
                 {channels.map((ch) => (
                   <option key={ch.id} value={ch.id}>
                     Channel: {ch.name}{ch.is_enabled ? '' : ' (Disabled)'}
@@ -551,7 +554,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 value={currentDigestScheduleTime}
                 placeholder="HH:MM"
                 maxLength={5}
-                disabled={!currentDigestEnabled || !hasActiveChannel || isSavingDigest || isSavingSettings}
+                disabled={!currentDigestEnabled || isSavingDigest || isSavingSettings}
                 onChange={(e) => {
                   if (isDigestControlled) {
                     onDigestScheduleTimeChange?.(e.target.value);

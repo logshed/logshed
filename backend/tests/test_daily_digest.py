@@ -304,6 +304,7 @@ async def test_run_daily_digest_dispatches_and_records_history(tmp_path: Path):
     channel_id = _create_channel(db_file, "Admin Webhook", is_enabled=True)
     _set_setting(db_file, "daily_digest_enabled", "1")
     _set_setting(db_file, "daily_digest_channel_id", str(channel_id))
+    _set_setting(db_file, "app_url", "http://localhost:8000")
 
     mock_notifier = MagicMock()
     mock_notifier.send_notification = AsyncMock(return_value=True)
@@ -317,16 +318,21 @@ async def test_run_daily_digest_dispatches_and_records_history(tmp_path: Path):
     assert res["channel_id"] == channel_id
     assert res["notification_sent"] is True
 
-    # Verify alert_history table contains the digest
+    # Verify notification body includes the link to LogShed
+    sent_body = mock_notifier.send_notification.call_args[1]["body"]
+    assert "[Link to LogShed (digest filters applied)](http://localhost:8000/" in sent_body
+
+    # Verify alert_history table contains the digest WITHOUT the link to LogShed
     with get_connection(db_file) as conn:
         row = conn.execute(
-            "SELECT rule_name, trigger_count, channel_id FROM alert_history WHERE id = ?",
+            "SELECT rule_name, trigger_count, channel_id, incident_summary FROM alert_history WHERE id = ?",
             (res["history_id"],),
         ).fetchone()
         assert row is not None
         assert row[0] == "Daily Digest"
         assert row[1] == 11
         assert row[2] == channel_id
+        assert "[Link to LogShed" not in row[3]
 
         # Verify daily_digest_last_run was updated in system_settings
         last_run = conn.execute("SELECT value FROM system_settings WHERE key = 'daily_digest_last_run'").fetchone()
@@ -343,6 +349,31 @@ async def test_run_daily_digest_skipped_when_disabled(tmp_path: Path):
     res = await run_daily_digest(db_file, force=False)
     assert res["status"] == "skipped"
     assert res["reason"] == "daily_digest_disabled"
+
+
+@pytest.mark.asyncio
+async def test_run_daily_digest_without_channels_records_history(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    _seed_logs(db_file)
+    _set_setting(db_file, "daily_digest_enabled", "1")
+
+    res = await run_daily_digest(db_file, force=False)
+
+    assert res["status"] == "ok"
+    assert res["total_logs"] == 11
+    assert res["error_count"] == 6
+    assert res["channel_id"] is None
+    assert res["notification_sent"] is False
+
+    with get_connection(db_file) as conn:
+        row = conn.execute(
+            "SELECT rule_name, trigger_count, channel_id FROM alert_history WHERE id = ?",
+            (res["history_id"],),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "Daily Digest"
+        assert row[1] == 11
+        assert row[2] is None
 
 
 @pytest.mark.asyncio

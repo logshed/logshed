@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Sparkles,
   Brain,
@@ -67,6 +67,16 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
       await copyPrompt(textToCopy);
     }
   };
+
+  const displaySummary = useMemo(() => {
+    if (!item.incident_summary) return '';
+    if (isDigest) {
+      return item.incident_summary
+        .replace(/\n*\[Link to LogShed[^\]]*\]\([^)]+\)/gi, '')
+        .trim();
+    }
+    return item.incident_summary;
+  }, [item.incident_summary, isDigest]);
 
   return (
     <div className="space-y-4 font-sans text-xs">
@@ -229,7 +239,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               {item.incident_summary}
             </div>
           ) : (
-            <MarkdownRenderer content={item.incident_summary} />
+            <MarkdownRenderer content={displaySummary} />
           )}
         </div>
       )}
