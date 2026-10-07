@@ -96,6 +96,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   // Form states
+  const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+    gemini: DEFAULT_AI_MODEL,
+    openai: 'gpt-4o',
+    anthropic: 'claude-sonnet-4-6',
+    openai_compatible: 'llama3.2',
+  };
+
+  interface ProviderLocalState {
+    apiKey: string;
+    hasKey: boolean;
+    model: string;
+    fallbackModels: string;
+    baseUrl: string;
+  }
+
+  const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
+    gemini: { apiKey: '', hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '', baseUrl: '' },
+    openai: { apiKey: '', hasKey: false, model: 'gpt-4o', fallbackModels: '', baseUrl: '' },
+    anthropic: { apiKey: '', hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '', baseUrl: '' },
+    openai_compatible: { apiKey: '', hasKey: true, model: 'llama3.2', fallbackModels: '', baseUrl: '' },
+  });
+
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'openai_compatible'>('gemini');
   const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODEL);
@@ -148,7 +170,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       aiProvider !== settings.ai_provider ||
       aiModel !== (settings.ai_model || DEFAULT_AI_MODEL) ||
       aiFallbackModels !== (settings.ai_fallback_models || '') ||
-      aiApiKey !== (settings.ai_api_key || '') ||
+      (aiApiKey !== (settings.ai_api_key || '') && !(aiApiKey === '' && !hasApiKeyForProvider && !settings.has_ai_api_key)) ||
       aiBaseUrl !== (settings.ai_base_url || '') ||
       normalizePrompt(aiSystemPrompt) !== normalizePrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT) ||
       internalLogLevel !== (settings.internal_log_level || 'WARNING') ||
@@ -171,14 +193,108 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // Application version & update state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
 
-  const loadModels = async (provider: string, forceRefresh: boolean = false) => {
+  const applySettingsResponse = (settRes: SettingsResponseData) => {
+    setSettings(settRes);
+
+    const initialConfigs: Record<string, ProviderLocalState> = {
+      gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
+      openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
+      anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
+      openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
+    };
+
+    if (settRes.ai_providers_config) {
+      for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
+        if (initialConfigs[p]) {
+          initialConfigs[p] = {
+            apiKey: pCfg.has_api_key ? (pCfg.ai_api_key || '********') : '',
+            hasKey: pCfg.has_api_key,
+            model: pCfg.ai_model || DEFAULT_PROVIDER_MODELS[p] || DEFAULT_AI_MODEL,
+            fallbackModels: pCfg.ai_fallback_models || '',
+            baseUrl: pCfg.ai_base_url || '',
+          };
+        }
+      }
+    }
+
+    const activeP = (settRes.ai_provider || 'gemini') as 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
+    if (initialConfigs[activeP]) {
+      initialConfigs[activeP] = {
+        apiKey: settRes.has_ai_api_key ? (settRes.ai_api_key || '********') : '',
+        hasKey: settRes.has_ai_api_key,
+        model: settRes.ai_model || initialConfigs[activeP].model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL,
+        fallbackModels: settRes.ai_fallback_models !== undefined ? settRes.ai_fallback_models : initialConfigs[activeP].fallbackModels,
+        baseUrl: settRes.ai_base_url || initialConfigs[activeP].baseUrl,
+      };
+    }
+
+    setProviderConfigs(initialConfigs);
+
+    const curActive = initialConfigs[activeP];
+    const initialAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
+    setAiEnabled(initialAiEnabled);
+    setAiProvider(activeP);
+    setAiModel(curActive.model);
+    setAiFallbackModels(curActive.fallbackModels);
+    setAiApiKey(curActive.apiKey);
+    setHasApiKeyForProvider(curActive.hasKey);
+    setAiBaseUrl(curActive.baseUrl);
+    setAiSystemPrompt(settRes.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
+    setInternalLogLevel(settRes.internal_log_level || 'WARNING');
+    setCheckForUpdates(settRes.check_for_updates ?? true);
+    setDigestEnabled(Boolean(settRes.daily_digest_enabled));
+    setDigestChannelId(settRes.daily_digest_channel_id ?? null);
+    setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
+  };
+
+  const loadModels = async (
+    provider: string,
+    forceRefresh: boolean = false,
+    customApiKey?: string,
+    customBaseUrl?: string,
+  ) => {
     try {
       setIsLoadingModels(true);
       setModelsError(null);
-      const res = await getAiModels(provider, forceRefresh);
-      setAvailableModels(res.models || []);
+      const res = (customApiKey !== undefined || customBaseUrl !== undefined)
+        ? await getAiModels(provider, forceRefresh, customApiKey, customBaseUrl)
+        : await getAiModels(provider, forceRefresh);
+      const discovered = res.models || [];
+      setAvailableModels(discovered);
       setHasApiKeyForProvider(res.has_api_key);
       setModelsCachedAt(res.cached_at || null);
+
+      if (res.has_api_key && customApiKey) {
+        setAiApiKey('********');
+        setProviderConfigs((prev) => ({
+          ...prev,
+          [provider]: {
+            ...prev[provider],
+            apiKey: '********',
+            hasKey: true,
+          },
+        }));
+      }
+
+      if (discovered.length > 0) {
+        setAiModel((currentModel) => {
+          if (!isCustomModel && !discovered.some((m) => m.id === currentModel)) {
+            const defaultForProvider = DEFAULT_PROVIDER_MODELS[provider];
+            const hasDefault = discovered.some((m) => m.id === defaultForProvider);
+            const chosen = hasDefault ? defaultForProvider : discovered[0].id;
+            setProviderConfigs((prev) => ({
+              ...prev,
+              [provider]: {
+                ...prev[provider],
+                model: chosen,
+              },
+            }));
+            return chosen;
+          }
+          return currentModel;
+        });
+      }
+
       if (res.error) {
         setModelsError(res.error);
       }
@@ -191,11 +307,50 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible') => {
+    const updatedConfigs: Record<string, ProviderLocalState> = {
+      ...providerConfigs,
+      [aiProvider]: {
+        apiKey: aiApiKey,
+        hasKey: hasApiKeyForProvider,
+        model: aiModel,
+        fallbackModels: aiFallbackModels,
+        baseUrl: aiBaseUrl,
+      },
+    };
+    setProviderConfigs(updatedConfigs);
+
+    const target = updatedConfigs[newProvider] || {
+      apiKey: '',
+      hasKey: newProvider === 'openai_compatible',
+      model: DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL,
+      fallbackModels: '',
+      baseUrl: '',
+    };
+
     setAiProvider(newProvider);
+    setAiApiKey(target.apiKey);
+    setHasApiKeyForProvider(target.hasKey);
+    setAiModel(target.model || DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL);
+    setAiFallbackModels(target.fallbackModels || '');
+    setAiBaseUrl(target.baseUrl || '');
     setIsCustomModel(false);
     setSelectedFallbackToAdd('');
     setShowCustomFallbackInput(false);
+    setModelsError(null);
+    setAvailableModels([]);
+
     loadModels(newProvider);
+  };
+
+  const updateFallbackModels = (newFallbacks: string) => {
+    setAiFallbackModels(newFallbacks);
+    setProviderConfigs((prev) => ({
+      ...prev,
+      [aiProvider]: {
+        ...prev[aiProvider],
+        fallbackModels: newFallbacks,
+      },
+    }));
   };
 
   // Fallback ordering helpers
@@ -209,26 +364,106 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const copy = [...fallbackList];
     const [removed] = copy.splice(index, 1);
     copy.splice(target, 0, removed);
-    setAiFallbackModels(copy.join(', '));
+    updateFallbackModels(copy.join(', '));
   };
 
   const removeFallback = (index: number) => {
     const copy = fallbackList.filter((_, i) => i !== index);
-    setAiFallbackModels(copy.join(', '));
+    updateFallbackModels(copy.join(', '));
   };
 
   const addFallback = (modelName: string) => {
     const trimmed = modelName.trim();
     if (!trimmed || fallbackList.includes(trimmed)) return;
-    setAiFallbackModels([...fallbackList, trimmed].join(', '));
+    updateFallbackModels([...fallbackList, trimmed].join(', '));
   };
 
   const handlePrimaryModelChange = (newModel: string) => {
     setAiModel(newModel);
+    setProviderConfigs((prev) => ({
+      ...prev,
+      [aiProvider]: {
+        ...prev[aiProvider],
+        model: newModel,
+      },
+    }));
     if (fallbackList.includes(newModel)) {
       const updated = fallbackList.filter((m) => m !== newModel);
-      setAiFallbackModels(updated.join(', '));
+      updateFallbackModels(updated.join(', '));
     }
+  };
+
+  const handleRemoveApiKey = async () => {
+    try {
+      setIsSavingSettings(true);
+      setErrorMsg(null);
+      setSaveInlineError(null);
+
+      const updatedProvidersConfig: Record<string, any> = {};
+      for (const [p, cfg] of Object.entries(providerConfigs)) {
+        const isCurrent = p === aiProvider;
+        updatedProvidersConfig[p] = {
+          has_api_key: isCurrent ? false : cfg.hasKey,
+          ai_api_key: isCurrent ? '' : cfg.apiKey,
+          ai_model: isCurrent ? aiModel : cfg.model,
+          ai_fallback_models: isCurrent ? aiFallbackModels : cfg.fallbackModels,
+          ai_base_url: isCurrent ? (aiBaseUrl || null) : (cfg.baseUrl || null),
+        };
+      }
+
+      await updateSettings({
+        ai_provider: aiProvider,
+        ai_api_key: '',
+        ai_providers_config: updatedProvidersConfig,
+      });
+
+      setAiApiKey('');
+      setHasApiKeyForProvider(false);
+      setAvailableModels([]);
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [aiProvider]: {
+          ...prev[aiProvider],
+          apiKey: '',
+          hasKey: false,
+        },
+      }));
+
+      const settRes = await fetchSettings();
+      applySettingsResponse(settRes);
+
+      setSaveInlineSuccess(true);
+      if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
+      saveSuccessTimeoutRef.current = setTimeout(() => {
+        setSaveInlineSuccess(false);
+      }, 3000);
+    } catch (err: any) {
+      const msg = err.message || 'Failed to remove API key from storage.';
+      setErrorMsg(msg);
+      setSaveInlineError(msg);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleApiKeyBlur = async () => {
+    if (hasApiKeyForProvider && aiApiKey.trim() === '') {
+      await handleRemoveApiKey();
+    }
+  };
+
+  const handleApiKeyEnter = async () => {
+    if (hasApiKeyForProvider && aiApiKey.trim() === '') {
+      await handleRemoveApiKey();
+    } else {
+      await executeSave();
+    }
+  };
+
+  const handleRefreshModels = async () => {
+    const keyToSend = (aiApiKey && aiApiKey !== '********') ? aiApiKey.trim() : undefined;
+    const urlToSend = aiBaseUrl ? aiBaseUrl.trim() : undefined;
+    await loadModels(aiProvider, true, keyToSend, urlToSend);
   };
 
   const loadAllData = async () => {
@@ -237,24 +472,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setErrorMsg(null);
 
       const settRes = await fetchSettings();
-      setSettings(settRes);
-
-      // Populate form
-      const initialAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
-      setAiEnabled(initialAiEnabled);
-      setAiProvider(settRes.ai_provider);
-      setAiModel(settRes.ai_model || DEFAULT_AI_MODEL);
-      setAiFallbackModels(settRes.ai_fallback_models || '');
-      setAiApiKey(settRes.ai_api_key || '');
-      setAiBaseUrl(settRes.ai_base_url || '');
-      setAiSystemPrompt(settRes.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
-      setInternalLogLevel(settRes.internal_log_level || 'WARNING');
-      setCheckForUpdates(settRes.check_for_updates ?? true);
-      setDigestEnabled(Boolean(settRes.daily_digest_enabled));
-      setDigestChannelId(settRes.daily_digest_channel_id ?? null);
-      setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
+      applySettingsResponse(settRes);
 
       // Load models for provider if enabled
+      const initialAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
       if (initialAiEnabled) {
         loadModels(settRes.ai_provider);
       }
@@ -328,24 +549,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleResetChanges = () => {
     if (!settings) return;
-    const resetAiEnabled = settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key);
-    setAiEnabled(resetAiEnabled);
-    setAiProvider(settings.ai_provider);
-    setAiModel(settings.ai_model || DEFAULT_AI_MODEL);
-    setAiFallbackModels(settings.ai_fallback_models || '');
-    setAiApiKey(settings.ai_api_key || '');
-    setAiBaseUrl(settings.ai_base_url || '');
-    setAiSystemPrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
-    setInternalLogLevel(settings.internal_log_level || 'WARNING');
-    setCheckForUpdates(settings.check_for_updates ?? true);
-    setDigestEnabled(Boolean(settings.daily_digest_enabled));
-    setDigestChannelId(settings.daily_digest_channel_id ?? null);
-    setDigestScheduleTime(settings.daily_digest_schedule_time || '09:00');
+    applySettingsResponse(settings);
     setIsCustomModel(false);
     setSelectedFallbackToAdd('');
     setCustomFallbackInput('');
     setShowCustomFallbackInput(false);
 
+    const resetAiEnabled = settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key);
     if (resetAiEnabled && aiProvider !== settings.ai_provider) {
       loadModels(settings.ai_provider);
     }
@@ -367,6 +577,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         return false;
       }
 
+      const updatedProvidersConfig: Record<string, any> = {};
+      for (const [p, cfg] of Object.entries(providerConfigs)) {
+        const isCurrent = p === aiProvider;
+        updatedProvidersConfig[p] = {
+          has_api_key: isCurrent ? (Boolean(aiApiKey) || hasApiKeyForProvider) : cfg.hasKey,
+          ai_api_key: isCurrent ? aiApiKey : cfg.apiKey,
+          ai_model: isCurrent ? aiModel : cfg.model,
+          ai_fallback_models: isCurrent ? aiFallbackModels : cfg.fallbackModels,
+          ai_base_url: isCurrent ? (aiBaseUrl || null) : (cfg.baseUrl || null),
+        };
+      }
+
       await updateSettings({
         ai_enabled: aiEnabled,
         ai_provider: aiProvider,
@@ -375,6 +597,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ai_api_key: aiApiKey,
         ai_base_url: aiBaseUrl || null,
         ai_system_prompt: aiSystemPrompt,
+        ai_providers_config: updatedProvidersConfig,
         internal_log_level: internalLogLevel,
         check_for_updates: checkForUpdates,
         daily_digest_enabled: digestEnabled,
@@ -384,22 +607,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       // Reload updated settings as baseline
       const settRes = await fetchSettings();
-      setSettings(settRes);
-      const savedAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
-      setAiEnabled(savedAiEnabled);
-      setAiProvider(settRes.ai_provider);
-      setAiModel(settRes.ai_model || DEFAULT_AI_MODEL);
-      setAiFallbackModels(settRes.ai_fallback_models || '');
-      setAiApiKey(settRes.ai_api_key || '');
-      setAiBaseUrl(settRes.ai_base_url || '');
-      setAiSystemPrompt(settRes.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
-      setInternalLogLevel(settRes.internal_log_level || 'WARNING');
-      setCheckForUpdates(settRes.check_for_updates ?? true);
-      setDigestEnabled(Boolean(settRes.daily_digest_enabled));
-      setDigestChannelId(settRes.daily_digest_channel_id ?? null);
-      setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
+      applySettingsResponse(settRes);
 
       // Refresh model list with newly saved configuration if AI is enabled
+      const savedAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
       if (savedAiEnabled) {
         loadModels(settRes.ai_provider);
       }
@@ -675,7 +886,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 type="password"
                 value={aiApiKey}
                 onChange={(e) => setAiApiKey(e.target.value)}
-                placeholder="Enter API key or leave ******** to preserve"
+                onBlur={handleApiKeyBlur}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleApiKeyEnter();
+                  }
+                }}
+                placeholder={hasApiKeyForProvider ? 'Enter new API key or leave ******** to preserve' : 'Enter API key'}
                 className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
@@ -717,7 +935,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => loadModels(aiProvider, true)}
+                  onClick={handleRefreshModels}
                   className="text-[10px] text-accent-400 hover:text-accent-300 underline cursor-pointer"
                 >
                   Retry
@@ -737,7 +955,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => loadModels(aiProvider, true)}
+                onClick={handleRefreshModels}
                 disabled={isLoadingModels}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 transition cursor-pointer disabled:opacity-50"
                 title="Query provider API for active models"
@@ -793,9 +1011,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
                       </option>
                     ))}
-                  {!availableModels.some((m) => m.id === aiModel) && aiModel && (
-                    <option value={aiModel}>{aiModel} (Current / Custom)</option>
-                  )}
                   <option value="__custom__">Custom model name...</option>
                 </select>
               ) : (

@@ -117,6 +117,15 @@ class LogDeletePreviewResponse(BaseModel):
 # Settings Models
 # ---------------------------------------------------------------------------
 
+class AiProviderConfig(BaseModel):
+    """Configuration and state for an individual AI provider."""
+    has_api_key: bool = False
+    ai_api_key: str = ""
+    ai_model: Optional[str] = None
+    ai_fallback_models: Optional[str] = ""
+    ai_base_url: Optional[str] = None
+
+
 class SettingsResponse(BaseModel):
     """Application runtime configuration response with masked secrets."""
     ai_enabled: bool = False
@@ -126,6 +135,7 @@ class SettingsResponse(BaseModel):
     ai_api_key: str = ""
     ai_base_url: Optional[str] = None
     ai_system_prompt: str = ""
+    ai_providers_config: dict[str, AiProviderConfig] = Field(default_factory=dict)
     retention_days: int = 14
     max_retention_days: int = Field(default_factory=get_max_retention_days)
     retention_overridden: bool = False
@@ -174,6 +184,7 @@ class SettingsUpdateRequest(BaseModel):
     ai_api_key: Optional[str] = None
     ai_base_url: Optional[str] = None
     ai_system_prompt: Optional[str] = None
+    ai_providers_config: Optional[dict[str, AiProviderConfig]] = None
     retention_days: Optional[int] = Field(
         None,
         description=(
@@ -549,6 +560,12 @@ class AiModelsResponse(BaseModel):
     cached_at: Optional[str] = None
     is_live: bool = True
     error: Optional[str] = None
+
+
+class AiModelRefreshRequest(BaseModel):
+    """Optional request payload for testing or refreshing models with a new API key."""
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

@@ -193,11 +193,15 @@ async def build_diagnosis_context(
     redacted_logs_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
     redacted_logs_text = truncate_logs_to_budget(redacted_logs_text)
 
-    provider = (provider_override or settings.get("ai_provider") or "gemini").lower()
+    active_db_provider = (settings.get("ai_provider") or "gemini").lower()
+    provider = (provider_override or active_db_provider).lower()
     default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else ("claude-sonnet-4-6" if provider == "anthropic" else "llama3.2"))
-    model = model_override or settings.get("ai_model") or default_model
-    api_key = settings.get("ai_api_key", "")
-    base_url = settings.get("ai_base_url") or None
+    model = model_override or settings.get(f"ai_model_{provider}") or (settings.get("ai_model") if provider == active_db_provider else None) or default_model
+    api_key = (
+        settings.get(f"ai_api_key_{provider}")
+        or (settings.get("ai_api_key", "") if provider == active_db_provider else "")
+    )
+    base_url = settings.get(f"ai_base_url_{provider}") or (settings.get("ai_base_url") if provider == active_db_provider else None) or None
 
     system_prompt = (
         system_prompt_override.strip()
@@ -205,7 +209,7 @@ async def build_diagnosis_context(
         else (settings.get("ai_system_prompt") or DEFAULT_SYSTEM_PROMPT)
     )
 
-    fallback_models_str = settings.get("ai_fallback_models") or ""
+    fallback_models_str = settings.get(f"ai_fallback_models_{provider}") or (settings.get("ai_fallback_models", "") if provider == active_db_provider else "")
     configured_fallbacks = [m.strip() for m in fallback_models_str.split(",") if m.strip()]
     fallback_models = (
         fallback_models_override

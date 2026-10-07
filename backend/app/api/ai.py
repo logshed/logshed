@@ -18,6 +18,7 @@ from app.models import (
     AiDiagnosisRequest,
     AiDiagnosisResponse,
     AiModelInfo,
+    AiModelRefreshRequest,
     AiModelsResponse,
     AiPreviewRequest,
     AiPreviewResponse,
@@ -63,8 +64,13 @@ async def list_available_models(
     If no API key is configured, returns has_api_key=False with an empty list.
     """
     stored_settings, updated_map = await run_db_query(read_ai_settings)
-    clean_provider = (provider or stored_settings.get("ai_provider") or "gemini").lower()
-    api_key = stored_settings.get("ai_api_key", "").strip()
+    active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
+    clean_provider = (provider or active_db_provider).lower()
+
+    # Provider-specific key check
+    api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
+    if not api_key and clean_provider == active_db_provider:
+        api_key = stored_settings.get("ai_api_key", "").strip()
 
     # If the provider requires an API key and none is set, prompt user
     if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
@@ -117,17 +123,32 @@ async def list_available_models(
 @router.post("/models/refresh", response_model=AiModelsResponse)
 async def refresh_available_models(
     provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
+    payload: Optional[AiModelRefreshRequest] = None,
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
     """
     Force live refresh of available models from external provider API.
     Updates the cache in system_settings and returns discovered models.
+    Optionally accepts a fresh API key in payload to test and store without a prior save.
     Requires authentication and CSRF header.
     """
     stored_settings, updated_map = await run_db_query(read_ai_settings)
-    clean_provider = (provider or stored_settings.get("ai_provider") or "gemini").lower()
-    api_key = stored_settings.get("ai_api_key", "").strip()
-    base_url = stored_settings.get("ai_base_url")
+    active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
+    clean_provider = (provider or active_db_provider).lower()
+
+    key_from_payload = False
+    if payload and payload.api_key and payload.api_key != "********" and payload.api_key.strip():
+        api_key = payload.api_key.strip()
+        key_from_payload = True
+    else:
+        api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
+        if not api_key and clean_provider == active_db_provider:
+            api_key = stored_settings.get("ai_api_key", "").strip()
+
+    if payload and payload.base_url and payload.base_url.strip():
+        base_url = payload.base_url.strip()
+    else:
+        base_url = stored_settings.get(f"ai_base_url_{clean_provider}") or stored_settings.get("ai_base_url")
 
     # If the provider requires an API key and none is set, prompt user
     if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
@@ -157,7 +178,35 @@ async def refresh_available_models(
             base_url=base_url if base_url else None,
         )
 
-        now_str = await run_db_query(lambda conn: save_models_cache(conn, cache_key, discovered))
+        def _persist_refresh(conn):
+            now_iso = save_models_cache(conn, cache_key, discovered)
+            if key_from_payload:
+                from app.core.security import encrypt_value
+                from app.core.config import invalidate_settings_cache
+                enc = encrypt_value(api_key)
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, is_encrypted = 1
+                    """,
+                    (f"ai_api_key_{clean_provider}", enc, now_iso),
+                )
+                if clean_provider == active_db_provider:
+                    cur.execute(
+                        """
+                        INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+                        VALUES ('ai_api_key', ?, ?, 1)
+                        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, is_encrypted = 1
+                        """,
+                        (enc, now_iso),
+                    )
+                conn.commit()
+                invalidate_settings_cache()
+            return now_iso
+
+        now_str = await run_db_query(_persist_refresh)
         return AiModelsResponse(
             provider=clean_provider,
             models=[AiModelInfo(**m) for m in discovered],

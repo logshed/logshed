@@ -90,15 +90,28 @@ export async function diagnoseLogs(
   });
 }
 
-export async function getAiModels(provider?: string, refresh: boolean = false): Promise<AiModelsResponse> {
+export async function getAiModels(
+  provider?: string,
+  refresh: boolean = false,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<AiModelsResponse> {
   const params = new URLSearchParams();
   if (provider) params.set('provider', provider);
   const qs = params.toString() ? `?${params.toString()}` : '';
 
   let res: AiModelsResponse;
   if (refresh) {
+    const payload: Record<string, string> = {};
+    if (apiKey && apiKey !== '********' && apiKey.trim()) {
+      payload.api_key = apiKey.trim();
+    }
+    if (baseUrl && baseUrl.trim()) {
+      payload.base_url = baseUrl.trim();
+    }
     res = await apiFetch<AiModelsResponse>(`/api/ai/models/refresh${qs}`, {
       method: 'POST',
+      body: Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined,
     });
   } else {
     res = await apiFetch<AiModelsResponse>(`/api/ai/models${qs}`);

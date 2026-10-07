@@ -45,6 +45,14 @@ export interface HostAlias {
   created_at: string;
 }
 
+export interface AiProviderConfig {
+  has_api_key: boolean;
+  ai_api_key: string;
+  ai_model?: string | null;
+  ai_fallback_models?: string | null;
+  ai_base_url?: string | null;
+}
+
 export interface SystemSettings {
   ai_enabled?: boolean;
   ai_provider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
@@ -54,6 +62,7 @@ export interface SystemSettings {
   has_ai_api_key?: boolean;
   ai_base_url?: string | null;
   ai_system_prompt?: string;
+  ai_providers_config?: Record<string, AiProviderConfig>;
   retention_days: number;
   max_retention_days?: number;
   retention_overridden?: boolean;

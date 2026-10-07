@@ -23,12 +23,25 @@ from app.core.config import (
 from app.core.security import decrypt_value, encrypt_value, mask_secret
 from app.core.utils import parse_iso_to_utc_datetime
 
-from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest
+from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest, AiProviderConfig
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
-SENSITIVE_KEYS = {"ai_api_key"}
+SENSITIVE_KEYS = {
+    "ai_api_key",
+    "ai_api_key_gemini",
+    "ai_api_key_openai",
+    "ai_api_key_anthropic",
+    "ai_api_key_openai_compatible",
+}
+
+DEFAULT_AI_MODELS: dict[str, str] = {
+    "gemini": DEFAULT_AI_MODEL,
+    "openai": "gpt-4o",
+    "anthropic": "claude-sonnet-4-6",
+    "openai_compatible": "llama3.2",
+}
 
 
 @router.get("", response_model=SettingsResponse)
@@ -39,7 +52,26 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     """
     stored = await run_db_query(get_all_system_settings)
 
-    ai_api_key_val = stored.get("ai_api_key", "")
+    active_provider = (stored.get("ai_provider") or "gemini").lower()
+
+    providers_config: dict[str, AiProviderConfig] = {}
+    for p in ("gemini", "openai", "anthropic", "openai_compatible"):
+        pkey = stored.get(f"ai_api_key_{p}") or (stored.get("ai_api_key", "") if p == active_provider else "")
+        pmodel = stored.get(f"ai_model_{p}") or (stored.get("ai_model") if p == active_provider else "") or DEFAULT_AI_MODELS.get(p, DEFAULT_AI_MODEL)
+        pfallbacks = stored.get(f"ai_fallback_models_{p}") or (stored.get("ai_fallback_models", "") if p == active_provider else "")
+        pbase = stored.get(f"ai_base_url_{p}") or (stored.get("ai_base_url") if p == active_provider else None)
+        has_pkey = bool(pkey.strip()) if p != "openai_compatible" else True
+        providers_config[p] = AiProviderConfig(
+            has_api_key=has_pkey,
+            ai_api_key=mask_secret(pkey) if pkey else "",
+            ai_model=pmodel,
+            ai_fallback_models=pfallbacks,
+            ai_base_url=pbase,
+        )
+
+    active_config = providers_config.get(active_provider) or providers_config["gemini"]
+    has_active_key = active_config.has_api_key
+    ai_api_key_val = stored.get(f"ai_api_key_{active_provider}") or (stored.get("ai_api_key", "") if active_provider == (stored.get("ai_provider") or "gemini").lower() else "")
 
     retention_raw = stored.get("retention_days", "14")
     try:
@@ -112,7 +144,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     if stored_ai_enabled is not None:
         ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
     else:
-        ai_enabled = bool(ai_api_key_val)
+        ai_enabled = bool(ai_api_key_val) if active_provider != "openai_compatible" else True
 
     daily_digest_enabled_raw = stored.get("daily_digest_enabled")
     daily_digest_enabled = False
@@ -132,16 +164,17 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
 
     return SettingsResponse(
         ai_enabled=ai_enabled,
-        ai_provider=stored.get("ai_provider") or "gemini",
-        ai_model=stored.get("ai_model") or DEFAULT_AI_MODEL,
-        ai_fallback_models=stored.get("ai_fallback_models") or "",
-        ai_api_key=mask_secret(ai_api_key_val),
-        ai_base_url=stored.get("ai_base_url") or None,
+        ai_provider=active_provider,
+        ai_model=active_config.ai_model or DEFAULT_AI_MODELS.get(active_provider, DEFAULT_AI_MODEL),
+        ai_fallback_models=active_config.ai_fallback_models or "",
+        ai_api_key=mask_secret(ai_api_key_val) if ai_api_key_val else "",
+        ai_base_url=active_config.ai_base_url,
         ai_system_prompt=stored.get("ai_system_prompt") or DEFAULT_SYSTEM_PROMPT,
+        ai_providers_config=providers_config,
         retention_days=retention_days,
         max_retention_days=max_days,
         retention_overridden=retention_overridden,
-        has_ai_api_key=bool(ai_api_key_val),
+        has_ai_api_key=has_active_key,
         internal_log_level=internal_log_level,
         check_for_updates=check_for_updates,
         maintenance_until=maintenance_until,
@@ -189,23 +222,61 @@ async def update_settings(
 
         updates: list[tuple[str, str, int]] = []
 
+        cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_provider'")
+        current_db_provider_row = cursor.fetchone()
+        current_db_provider = current_db_provider_row[0] if current_db_provider_row else "gemini"
+        target_provider = (req.ai_provider or current_db_provider or "gemini").lower()
+
         if req.ai_enabled is not None:
             updates.append(("ai_enabled", "1" if req.ai_enabled else "0", 0))
 
         if req.ai_provider is not None:
-            updates.append(("ai_provider", req.ai_provider, 0))
+            updates.append(("ai_provider", target_provider, 0))
 
         if req.ai_model is not None:
             updates.append(("ai_model", req.ai_model, 0))
+            updates.append((f"ai_model_{target_provider}", req.ai_model, 0))
 
         if req.ai_fallback_models is not None:
             updates.append(("ai_fallback_models", req.ai_fallback_models, 0))
+            updates.append((f"ai_fallback_models_{target_provider}", req.ai_fallback_models, 0))
 
         if req.ai_base_url is not None:
             updates.append(("ai_base_url", req.ai_base_url, 0))
+            updates.append((f"ai_base_url_{target_provider}", req.ai_base_url, 0))
 
         if req.ai_system_prompt is not None:
             updates.append(("ai_system_prompt", req.ai_system_prompt, 0))
+
+        if req.ai_providers_config:
+            for p, p_cfg in req.ai_providers_config.items():
+                p_clean = (p or "").lower().strip()
+                if not p_clean:
+                    continue
+                if p_cfg.ai_model is not None:
+                    updates.append((f"ai_model_{p_clean}", p_cfg.ai_model, 0))
+                    if p_clean == target_provider and req.ai_model is None:
+                        updates.append(("ai_model", p_cfg.ai_model, 0))
+                if p_cfg.ai_fallback_models is not None:
+                    updates.append((f"ai_fallback_models_{p_clean}", p_cfg.ai_fallback_models, 0))
+                    if p_clean == target_provider and req.ai_fallback_models is None:
+                        updates.append(("ai_fallback_models", p_cfg.ai_fallback_models, 0))
+                if p_cfg.ai_base_url is not None:
+                    updates.append((f"ai_base_url_{p_clean}", p_cfg.ai_base_url, 0))
+                    if p_clean == target_provider and req.ai_base_url is None:
+                        updates.append(("ai_base_url", p_cfg.ai_base_url, 0))
+                if p_cfg.ai_api_key is not None:
+                    if p_cfg.ai_api_key == "********":
+                        pass
+                    elif p_cfg.ai_api_key == "":
+                        updates.append((f"ai_api_key_{p_clean}", "", 1))
+                        if p_clean == target_provider and req.ai_api_key is None:
+                            updates.append(("ai_api_key", "", 1))
+                    else:
+                        enc = encrypt_value(p_cfg.ai_api_key)
+                        updates.append((f"ai_api_key_{p_clean}", enc, 1))
+                        if p_clean == target_provider and req.ai_api_key is None:
+                            updates.append(("ai_api_key", enc, 1))
 
         if req.retention_days is not None:
             updates.append(("retention_days", str(req.retention_days), 0))
@@ -277,18 +348,16 @@ async def update_settings(
                 updates.append(("maintenance_until", stored_iso, 0))
 
         # Handle sensitive fields
-        for sensitive_key in ("ai_api_key",):
-            val = getattr(req, sensitive_key)
-            if val is not None:
-                # If value is masked placeholder ("********"), do not overwrite existing key
-                if val == "********":
-                    continue
-                elif val == "":
-                    # Empty string clears the secret
-                    updates.append((sensitive_key, "", 1))
-                else:
-                    encrypted = encrypt_value(val)
-                    updates.append((sensitive_key, encrypted, 1))
+        if req.ai_api_key is not None:
+            if req.ai_api_key == "********":
+                pass
+            elif req.ai_api_key == "":
+                updates.append(("ai_api_key", "", 1))
+                updates.append((f"ai_api_key_{target_provider}", "", 1))
+            else:
+                encrypted = encrypt_value(req.ai_api_key)
+                updates.append(("ai_api_key", encrypted, 1))
+                updates.append((f"ai_api_key_{target_provider}", encrypted, 1))
 
         for key, val, is_enc in updates:
             cursor.execute(

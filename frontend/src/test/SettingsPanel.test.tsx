@@ -898,6 +898,160 @@ describe('SettingsPanel Component', () => {
       });
     });
   });
+
+  describe('AI Provider State Preservation and Key Management', () => {
+    it('shows empty API key and placeholder when switching to an unconfigured provider, and restores previous provider state when switching back', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+        ai_providers_config: {
+          gemini: {
+            has_api_key: true,
+            ai_api_key: '********',
+            ai_model: 'gemini-3.7-flash',
+            ai_fallback_models: 'gemini-2.5-flash',
+            ai_base_url: null,
+          },
+          openai: {
+            has_api_key: false,
+            ai_api_key: '',
+            ai_model: 'gpt-4o',
+            ai_fallback_models: '',
+            ai_base_url: null,
+          },
+        },
+      });
+
+      vi.spyOn(aiApi, 'getAiModels').mockImplementation(async (provider) => {
+        if (provider === 'openai') {
+          return {
+            provider: 'openai',
+            models: [],
+            has_api_key: false,
+            cached_at: null,
+            is_live: true,
+          };
+        }
+        return {
+          provider: 'gemini',
+          models: [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+          has_api_key: true,
+          cached_at: null,
+          is_live: true,
+        };
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
+      expect(keyInput.value).toBe('********');
+
+      // Switch to OpenAI
+      const providerSelect = screen.getByDisplayValue('Google Gemini');
+      fireEvent.change(providerSelect, { target: { value: 'openai' } });
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+      });
+
+      // OpenAI has no configured key: input should be empty and show "Enter API key" placeholder
+      const openaiKeyInput = screen.getByPlaceholderText('Enter API key') as HTMLInputElement;
+      expect(openaiKeyInput.value).toBe('');
+
+      // Switch back to Google Gemini
+      fireEvent.change(providerSelect, { target: { value: 'gemini' } });
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      // Gemini state restored
+      const restoredKeyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
+      expect(restoredKeyInput.value).toBe('********');
+    });
+
+    it('clears API key from storage when user deletes masked dots and blurs input', async () => {
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
+      expect(keyInput.value).toBe('********');
+
+      // Clear input and blur
+      fireEvent.change(keyInput, { target: { value: '' } });
+      fireEvent.blur(keyInput);
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ai_provider: 'gemini',
+            ai_api_key: '',
+          })
+        );
+      });
+    });
+
+    it('refreshes models with unsaved API key when Refresh Models button is clicked', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_enabled: true,
+        ai_provider: 'openai',
+        ai_model: 'gpt-4o',
+        ai_api_key: '',
+        ai_base_url: null,
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: false,
+      });
+
+      vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+        provider: 'openai',
+        models: [],
+        has_api_key: false,
+        cached_at: null,
+        is_live: true,
+      });
+
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+      });
+
+      const keyInput = screen.getByPlaceholderText('Enter API key');
+      fireEvent.change(keyInput, { target: { value: 'sk-proj-test123456789' } });
+
+      const refreshBtn = screen.getByRole('button', { name: /Refresh Models/i });
+      fireEvent.click(refreshBtn);
+
+      await waitFor(() => {
+        expect(aiApi.getAiModels).toHaveBeenCalledWith('openai', true, 'sk-proj-test123456789', undefined);
+      });
+    });
+  });
 });
 
 

@@ -21,10 +21,24 @@ import {
 } from 'lucide-react';
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels } from '../../api/ai.ts';
+import { fetchSettings } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
+
+const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  gemini: DEFAULT_AI_MODEL,
+  openai: 'gpt-4o',
+  anthropic: 'claude-sonnet-4-6',
+  openai_compatible: 'llama3.2',
+};
+
+interface ProviderLocalState {
+  hasKey: boolean;
+  model: string;
+  fallbackModels: string;
+}
 
 interface AiAnalysisModalProps {
   isOpen: boolean;
@@ -52,6 +66,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [provider, setProvider] = useState<string>('gemini');
   const [model, setModel] = useState<string>(DEFAULT_AI_MODEL);
   const [fallbackModels, setFallbackModels] = useState<string>('');
+
+  const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
+    gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
+    openai: { hasKey: false, model: 'gpt-4o', fallbackModels: '' },
+    anthropic: { hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '' },
+    openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
+  });
 
   // Model discovery states
   const [availableModels, setAvailableModels] = useState<AiModelInfo[]>([]);
@@ -126,7 +147,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
   const isAiDisabled = preview?.ai_enabled === false;
-  const isAiMissingKey = preview ? (preview.has_ai_api_key === false && provider !== 'openai_compatible') : false;
+  const isAiMissingKey = !hasApiKeyForProvider && provider !== 'openai_compatible';
   const isAiUnavailable = Boolean(isAiDisabled || isAiMissingKey);
 
   useEffect(() => {
@@ -199,22 +220,58 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     try {
       setIsLoadingPreview(true);
       setPreviewError(null);
-      const res = await previewAiPrompt({
-        log_ids: validLogIds,
-      });
+
+      // Fetch preview and system settings in parallel to initialize provider configs
+      const [res, settRes] = await Promise.all([
+        previewAiPrompt({ log_ids: validLogIds }),
+        fetchSettings().catch(() => null),
+      ]);
+
       setPreview(res);
-      setProvider(res.provider);
-      setModel(res.model);
+      const activeP = res.provider || 'gemini';
+      setProvider(activeP);
+
       const initialFallbacks = res.fallback_models && res.fallback_models.length > 0
         ? res.fallback_models.join(', ')
         : '';
       setFallbackModels(initialFallbacks);
+      setModel(res.model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL);
+
+      // Initialize provider configs from system settings
+      const configs: Record<string, ProviderLocalState> = {
+        gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
+        openai: { hasKey: false, model: 'gpt-4o', fallbackModels: '' },
+        anthropic: { hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '' },
+        openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
+      };
+
+      if (settRes?.ai_providers_config) {
+        for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
+          if (configs[p]) {
+            configs[p] = {
+              hasKey: pCfg.has_api_key,
+              model: pCfg.ai_model || DEFAULT_PROVIDER_MODELS[p] || DEFAULT_AI_MODEL,
+              fallbackModels: pCfg.ai_fallback_models || '',
+            };
+          }
+        }
+      }
+
+      // Ensure active provider matches the preview values
+      configs[activeP] = {
+        hasKey: res.has_ai_api_key ?? configs[activeP]?.hasKey ?? true,
+        model: res.model || configs[activeP]?.model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL,
+        fallbackModels: initialFallbacks,
+      };
+
+      setProviderConfigs(configs);
+
       const initialSys = res.system_prompt || DEFAULT_SYSTEM_PROMPT;
       setSystemPrompt(initialSys);
       const initialUser = buildCombinedPrompt(res.redacted_prompt, userContext);
       setPromptText(initialUser);
       setFullPromptText(buildFullEnvelope(initialSys, initialUser));
-      loadModels(res.provider);
+      loadModels(activeP, res);
     } catch (err: any) {
       setPreviewError(err.message || 'Failed to generate redacted AI preview.');
     } finally {
@@ -222,14 +279,29 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     }
   };
 
-  const loadModels = async (prov: string) => {
+  const loadModels = async (prov: string, currentPreview?: AiPreviewResponse) => {
     try {
       setIsLoadingModels(true);
       setModelsError(null);
       const res = await getAiModels(prov);
-      setAvailableModels(res.models || []);
-      setHasApiKeyForProvider(res.has_api_key);
+      const discovered = res.models || [];
+      setAvailableModels(discovered);
+      const activePrev = currentPreview || preview;
+      const resKey = (activePrev && prov === activePrev.provider && activePrev.has_ai_api_key !== undefined)
+        ? activePrev.has_ai_api_key
+        : res.has_api_key;
+      const effectiveHasKey = resKey !== undefined ? resKey : true;
+      setHasApiKeyForProvider(effectiveHasKey);
       if (res.error) setModelsError(res.error);
+
+      // Keep providerConfigs updated with live key status
+      setProviderConfigs((prev) => ({
+        ...prev,
+        [prov]: {
+          ...prev[prov],
+          hasKey: effectiveHasKey,
+        },
+      }));
     } catch (err: any) {
       setModelsError(err.message || 'Failed to load models.');
       setAvailableModels([]);
@@ -239,10 +311,34 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
   const handleProviderChange = (newProvider: string) => {
+    // 1. Save current provider's model & fallback state
+    const updatedConfigs: Record<string, ProviderLocalState> = {
+      ...providerConfigs,
+      [provider]: {
+        hasKey: hasApiKeyForProvider,
+        model,
+        fallbackModels,
+      },
+    };
+    setProviderConfigs(updatedConfigs);
+
+    // 2. Load target provider's settings
+    const target = updatedConfigs[newProvider] || {
+      hasKey: newProvider === 'openai_compatible',
+      model: DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL,
+      fallbackModels: '',
+    };
+
     setProvider(newProvider);
+    setModel(target.model || DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL);
+    setFallbackModels(target.fallbackModels || '');
+    setHasApiKeyForProvider(target.hasKey);
     setIsCustomModel(false);
     setSelectedFallbackToAdd('');
     setShowCustomFallbackInput(false);
+    setModelsError(null);
+    setAvailableModels([]);
+
     loadModels(newProvider);
   };
 
@@ -704,6 +800,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     >
                       <option value="gemini">Google Gemini</option>
                       <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic Claude</option>
                       <option value="openai_compatible">OpenAI-Compatible (Ollama / LocalAI)</option>
                     </select>
                   </div>
@@ -756,9 +853,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                               {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
                             </option>
                           ))}
-                        {!availableModels.some((m) => m.id === model) && model && (
-                          <option value={model}>{model} (Selected / Custom)</option>
-                        )}
                         <option value="__custom__">Custom model name...</option>
                       </select>
                     ) : (

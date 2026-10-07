@@ -2253,6 +2253,129 @@ class TestPromptFormattingAndStructuredData:
         assert "No PONG received after 15.0 seconds" in prompt_text
 
 
+class TestAiProviderStateAndKeyManagement:
+    """Tests for multi-provider configuration isolation, per-provider keys, and live refresh."""
+
+    @pytest.mark.asyncio
+    async def test_per_provider_settings_isolation_and_restoration(self, auth_client):
+        # 1. Initially configure Gemini
+        res1 = await auth_client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "gemini",
+                "ai_api_key": "gemini-test-secret-key-12345",
+                "ai_model": "gemini-2.5-flash",
+                "ai_fallback_models": "gemini-2.0-flash",
+            },
+        )
+        assert res1.status_code == 200
+
+        # Query GET /api/settings to verify persisted multi-provider state
+        get1 = await auth_client.get("/api/settings")
+        assert get1.status_code == 200
+        data1 = get1.json()
+        assert "ai_providers_config" in data1
+        gemini_cfg = data1["ai_providers_config"]["gemini"]
+        assert gemini_cfg["has_api_key"] is True
+        assert gemini_cfg["ai_model"] == "gemini-2.5-flash"
+        assert gemini_cfg["ai_fallback_models"] == "gemini-2.0-flash"
+
+        # OpenAI should not have an API key configured
+        openai_cfg = data1["ai_providers_config"]["openai"]
+        assert openai_cfg["has_api_key"] is False
+
+        # 2. Switch provider to OpenAI and configure it
+        res2 = await auth_client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "openai",
+                "ai_api_key": "openai-test-secret-key-67890",
+                "ai_model": "gpt-4o",
+                "ai_fallback_models": "gpt-4o-mini",
+            },
+        )
+        assert res2.status_code == 200
+        get2 = await auth_client.get("/api/settings")
+        data2 = get2.json()
+        assert data2["ai_provider"] == "openai"
+        assert data2["ai_model"] == "gpt-4o"
+        assert data2["ai_providers_config"]["openai"]["has_api_key"] is True
+        assert data2["ai_providers_config"]["openai"]["ai_model"] == "gpt-4o"
+
+        # Gemini settings should remain preserved in storage
+        assert data2["ai_providers_config"]["gemini"]["has_api_key"] is True
+        assert data2["ai_providers_config"]["gemini"]["ai_model"] == "gemini-2.5-flash"
+        assert data2["ai_providers_config"]["gemini"]["ai_fallback_models"] == "gemini-2.0-flash"
+
+        # 3. Switch back to Gemini without sending key or model
+        res3 = await auth_client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "gemini",
+            },
+        )
+        assert res3.status_code == 200
+        get3 = await auth_client.get("/api/settings")
+        data3 = get3.json()
+        assert data3["ai_provider"] == "gemini"
+        assert data3["ai_model"] == "gemini-2.5-flash"
+        assert data3["has_ai_api_key"] is True
+
+    @pytest.mark.asyncio
+    async def test_remove_api_key_clears_storage(self, auth_client):
+        # Configure Anthropic key
+        res = await auth_client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "anthropic",
+                "ai_api_key": "sk-ant-test-key-12345",
+                "ai_model": "claude-sonnet-4-6",
+            },
+        )
+        assert res.status_code == 200
+        get1 = await auth_client.get("/api/settings")
+        assert get1.json()["ai_providers_config"]["anthropic"]["has_api_key"] is True
+
+        # Now remove Anthropic key by sending empty string
+        res_del = await auth_client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "anthropic",
+                "ai_api_key": "",
+            },
+        )
+        assert res_del.status_code == 200
+        get_del = await auth_client.get("/api/settings")
+        data_del = get_del.json()
+        assert data_del["has_ai_api_key"] is False
+        assert data_del["ai_providers_config"]["anthropic"]["has_api_key"] is False
+
+    @pytest.mark.asyncio
+    async def test_refresh_models_with_unsaved_key(self, auth_client):
+        # Test refreshing models with a newly entered key in the POST request body
+        mock_discovered = [
+            {"id": "gpt-4o", "name": "GPT-4o", "supports_thinking": False},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "supports_thinking": False},
+        ]
+        with patch("app.api.ai.fetch_available_models", new=AsyncMock(return_value=mock_discovered)):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai",
+                json={"api_key": "sk-proj-live-test-key-999"},
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["provider"] == "openai"
+            assert data["has_api_key"] is True
+            assert len(data["models"]) == 2
+
+            # The key should also be securely persisted to settings
+            settings_res = await auth_client.get("/api/settings")
+            assert settings_res.status_code == 200
+            s_data = settings_res.json()
+            assert s_data["ai_providers_config"]["openai"]["has_api_key"] is True
+
+
+
 
 
 

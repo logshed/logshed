@@ -163,8 +163,8 @@ async def _model_refresh_worker(db_path) -> None:
 
             settings = await run_db_query(get_all_system_settings, custom_db_path=Path(db_path))
             provider = (settings.get("ai_provider") or "gemini").lower()
-            api_key = settings.get("ai_api_key", "").strip()
-            base_url = settings.get("ai_base_url")
+            api_key = (settings.get(f"ai_api_key_{provider}") or settings.get("ai_api_key", "")).strip()
+            base_url = settings.get(f"ai_base_url_{provider}") or settings.get("ai_base_url")
 
             if (provider == "openai_compatible") or api_key:
                 try:

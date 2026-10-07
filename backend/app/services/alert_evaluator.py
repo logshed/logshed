@@ -615,10 +615,10 @@ class AlertEvaluator:
                 else:
                     ai_provider = (ai_settings.get("ai_provider") or "gemini").lower()
                     default_model = DEFAULT_AI_MODEL if ai_provider == "gemini" else ("gpt-4o" if ai_provider == "openai" else ("claude-sonnet-4-6" if ai_provider == "anthropic" else "llama3.2"))
-                    ai_model = ai_settings.get("ai_model") or default_model
-                    ai_key = ai_settings.get("ai_api_key", "")
-                    ai_base = ai_settings.get("ai_base_url")
-                    fallback_str = ai_settings.get("ai_fallback_models") or ""
+                    ai_model = ai_settings.get(f"ai_model_{ai_provider}") or ai_settings.get("ai_model") or default_model
+                    ai_key = ai_settings.get(f"ai_api_key_{ai_provider}") or ai_settings.get("ai_api_key", "")
+                    ai_base = ai_settings.get(f"ai_base_url_{ai_provider}") or ai_settings.get("ai_base_url")
+                    fallback_str = ai_settings.get(f"ai_fallback_models_{ai_provider}") or ai_settings.get("ai_fallback_models", "")
                     fallback_models = [m.strip() for m in fallback_str.split(",") if m.strip()]
 
                     # Format and redact log window
