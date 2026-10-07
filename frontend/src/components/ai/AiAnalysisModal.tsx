@@ -781,7 +781,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 )}
 
                 {/* Models Loading Error Notice */}
-                {modelsError && (
+                {modelsError && (hasApiKeyForProvider || provider === 'openai_compatible') && (
                   <div className="p-2.5 bg-red-950/40 border border-red-800/60 rounded-lg flex items-start gap-2 text-red-300 text-xs font-mono">
                     <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                     <span>{modelsError}</span>

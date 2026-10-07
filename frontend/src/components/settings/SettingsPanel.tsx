@@ -915,19 +915,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             {/* API Key Missing Notice */}
             {!hasApiKeyForProvider && aiProvider !== 'openai_compatible' && (
-              <div className="sm:col-span-2 p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start gap-2.5 text-amber-300 text-xs font-mono">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-semibold text-amber-200">API Key Required to Discover Models:</span>
-                  <p className="text-[11px] text-amber-300/80 mt-0.5">
-                    Enter and save your API key above to query {aiProvider === 'gemini' ? 'Google Gemini' : aiProvider === 'openai' ? 'OpenAI' : aiProvider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'} and populate available text models.
-                  </p>
+              <div className="sm:col-span-2 p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start justify-between gap-3 text-amber-300 text-xs font-mono">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-amber-200">API Key Required to Discover Models:</span>
+                    <p className="text-[11px] text-amber-300/80 mt-0.5">
+                      Enter and save your API key above to query {aiProvider === 'gemini' ? 'Google Gemini' : aiProvider === 'openai' ? 'OpenAI' : aiProvider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'} and populate available text models.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleRefreshModels}
+                  disabled={isLoadingModels}
+                  className="shrink-0 text-xs text-amber-200 hover:text-amber-100 underline cursor-pointer disabled:opacity-50 mt-0.5"
+                >
+                  Retry
+                </button>
               </div>
             )}
 
             {/* Models Error Banner */}
-            {modelsError && (
+            {modelsError && (hasApiKeyForProvider || aiProvider === 'openai_compatible') && (
               <div className="sm:col-span-2 p-2.5 bg-dark-950 border border-dark-700 rounded-lg flex items-center justify-between text-xs font-mono text-slate-400">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -936,7 +946,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <button
                   type="button"
                   onClick={handleRefreshModels}
-                  className="text-[10px] text-accent-400 hover:text-accent-300 underline cursor-pointer"
+                  disabled={isLoadingModels}
+                  className="text-[10px] text-accent-400 hover:text-accent-300 underline cursor-pointer disabled:opacity-50"
                 >
                   Retry
                 </button>
