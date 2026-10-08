@@ -24,7 +24,7 @@ LogShed separates configuration into **bootstrap primitives** (required before t
 #### Bootstrap Primitives (Container Environment Only)
 The following environment variables are supplied at container start and are strictly container-level primitives:
 - `PUID` and `PGID` - User and group IDs for the application to run as via `gosu` privilege reduction (defaults to `1000:1000`).
-- `TZ` - Container runtime timezone (defaults to `UTC`).
+- `TZ` - Container runtime timezone (defaults to `UTC`). Resolved at runtime and exposed through `/api/settings` to align UI presentation and AI timeline analysis with the homelab host or container clock.
 - `PORT` - Web/API HTTP port (defaults to `8080`).
 - `SYSLOG_PORT` - Syslog listening port for UDP and TCP (defaults to `1514`).
 - `DATA_DIR` - Mount path for persistent SQLite database, master key, and presets (defaults to `/data`).
@@ -415,7 +415,7 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
 ### 4.1 Analysis Modes
 
 #### 1. On-Demand Analysis (User-Initiated)
-- **Selection:** User selects one or multiple log entries in the UI across single or multiple hosts. Cross-host log selection is supported. The prompt builder annotates each dispatched log line with its originating host/source alias (`[{timestamp}] [{source_alias}] [{app_name}] {message}`) and aggregates notes for all unique hosts present in the batch.
+- **Selection:** User selects one or multiple log entries in the UI across single or multiple hosts. Cross-host log selection is supported. The prompt builder annotates each dispatched log line with its severity code and dual timestamps citation (`[{time_utc} UTC ({time_local} {tz_name})] [{source_alias}] [{app_name}] [{severity}] {message}`), alongside originating host and alias metadata.
 - **On-Demand Redaction Pass:** The backend filters selected logs through `redactor.py` (scrubbing tokens, passwords, JWTs, cloud API keys, and credentials) before returning the preview payload to the UI.
 - **Payload Inspection & User Context:**
   - UI opens an analysis modal displaying:
@@ -439,9 +439,10 @@ Unified client supporting Google Gemini (`google-genai` SDK), Anthropic Claude (
 - **Model Configuration:** Configurable default model per provider (e.g., `gemini-3.7-flash`, `gpt-4o`, `claude-sonnet-4-6`, `llama3.2`), with fallback model lists and optional per-request overrides in the UI modal.
 - **Dynamic Model Discovery:** Discovers available models from the configured provider, cached in SQLite for 24 hours. A background worker (`ModelRefreshWorker`) refreshes the cache every 12 hours, and manual refresh can be triggered via `/api/ai/models/refresh`.
 - **Prompt Construction:**
-  - System prompt establishes role as an expert systems engineer and Linux/Docker administrator.
+  - System prompt establishes role as an expert systems engineer and Linux/Docker administrator, guiding the model to cite both UTC and local homelab timestamps when referencing event timelines.
   - Context includes:
     * System metadata (Host alias, container/app name).
+    * Timeline reference context (UTC baseline and operator local timezone offset).
     * Sequenced log block in chronological order.
     * User-provided notes/context (or alert incident parameters).
   - Model generates a structured Markdown response containing:
@@ -544,8 +545,8 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `PUT` | `/api/saved_views/{view_id}` | Update a saved view (rename, update query parameters, pin/unpin) | `{"name": "...", "query_params": "...", "is_pinned": bool}` |
 | `DELETE` | `/api/saved_views/{view_id}` | Delete a saved view | None |
 | **AI Analysis Engine** |  |  |  |
-| `POST` | `/api/ai/preview` | Generate redacted preview and token estimate | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "..."}` |
-| `POST` | `/api/ai/diagnose` | Execute user-confirmed AI diagnosis (rate-limited) | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "system_prompt_override": "...", "provider": "...", "model": "...", "fallback_models": ["..."]}` |
+| `POST` | `/api/ai/preview` | Generate redacted preview and token estimate | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "client_timezone": "...", "client_utc_offset_minutes": ...}` |
+| `POST` | `/api/ai/diagnose` | Execute user-confirmed AI diagnosis (rate-limited) | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "system_prompt_override": "...", "provider": "...", "model": "...", "fallback_models": ["..."], "client_timezone": "...", "client_utc_offset_minutes": ...}` |
 | `POST` | `/api/ai/diagnose/stream` | Stream live diagnosis stages, failover events, and tokens via SSE | Same payload as `/api/ai/diagnose` |
 | `GET` | `/api/ai/models` | Discover available models from configured or requested provider (cached in SQLite for 24h) | Query params: `provider`, `refresh: bool` |
 | `POST` | `/api/ai/models/refresh` | Force immediate live refresh and cache update of available AI models from the provider | None |
@@ -554,7 +555,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/aliases` | Upsert host alias mapping (retroactively updates existing logs) | `{"ip": "...", "alias": "...", "notes": "..."}` |
 | `DELETE` | `/api/aliases/{ip}` | Remove host alias (reverts existing logs to raw IP) | None |
 | **Settings** |  |  |  |
-| `GET` | `/api/settings` | Read application configuration (keys masked) | None |
+| `GET` | `/api/settings` | Read application configuration (keys masked) and container timezone metadata | None |
 | `POST` | `/api/settings` | Update settings (encrypted at rest) | `{"ai_provider": "...", "ai_model": "...", "ai_fallback_models": "...", "ai_api_key": "...", "ai_base_url": "...", "ai_system_prompt": "...", "retention_days": 14, "internal_log_level": "WARNING", "check_for_updates": true}` |
 | **System & Maintenance** |  |  |  |
 | `GET` | `/api/health` | Container healthcheck (unauthenticated returns minimal `{"status": "ok"}`; authenticated returns DB status, queue depth, dropped count, ingest rate) | Returns HTTP 503 if database check fails |
@@ -586,7 +587,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * Checkbox multi-select mode with a floating action bar: `"Run Analysis (N)"` or `"Delete Selected (N)"`.
   * Search & Filter Bar: Full-text search with SQLite FTS5 syntax, timestamp and date-range picker, multi-select dropdown filters for Host Alias (`source_alias`), Source IP, and Container/App Name (`app_name`), and severity threshold filter slider/pills (RFC 5424 numerical priorities 0 = Emergency through 7 = Debug).
   * Saved Views Menu: Quick-load saved search filters, save current query parameters with custom names, and pin frequently used views directly to the filter bar.
-  * Log Detail & Context Inspector: Slide-over panel displaying parsed metadata, source IP, facility, exact timestamp, and raw unparsed syslog payload, with one-click action to load surrounding context logs (symmetric 10 entries around selected record).
+  * Log Detail & Context Inspector: Slide-over panel displaying parsed metadata, source IP, facility, formatted homelab timestamp (with timezone abbreviation badge), secondary database UTC reference line, and raw unparsed syslog payload, with one-click action to load surrounding context logs formatted in the configured homelab timezone (symmetric 10 entries around selected record).
   * Targeted Log Deletion Modal: Allows deletion of selected records, filtered ranges, or all historical logs with confirmation guards and count preview.
 
 * **Rules & Alerts Hub (`/rules`):**
