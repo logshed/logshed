@@ -8,6 +8,7 @@ endpoints, as required by SPEC §4.2 and AGENTS.md.
 """
 
 import asyncio
+import datetime
 import logging
 import re
 from typing import Any, Callable, Optional
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = """You are an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator.
 Review the following redacted server/container logs and provide a structured diagnosis in Markdown format.
+
+Log timestamps cite both UTC and the operator homelab local time (for example, 01:05:00 UTC (02:05:00 local)). When referencing specific event times or advising the operator to inspect logs on host systems, cite both the UTC time and the corresponding local time to avoid confusion across server and host timezones.
 
 Your response MUST include the following three sections with exact headers:
 ## Summary
@@ -383,15 +386,40 @@ def format_prompt_log_line(
     message: str,
     severity: Optional[int] = None,
     raw: Optional[str] = None,
+    tz_name: Optional[str] = None,
+    tz_offset_minutes: Optional[int] = None,
 ) -> str:
     """
     Format a single log record for inclusion in AI analysis prompt streams.
     Combines chronological timestamp, resolved source host/alias, application name,
     explicit severity code, and diagnostic structured data payload.
+    When tz_offset_minutes is provided, formats dual timestamps with both UTC and local homelab time.
     """
     ts_str = str(timestamp) if timestamp else "unknown"
     source_str = source or "unknown"
     app_str = app_name or "unknown"
+
+    ts_display = ts_str
+    if tz_offset_minutes is not None and timestamp:
+        try:
+            clean_ts = str(timestamp).strip()
+            if clean_ts.endswith("Z"):
+                clean_ts = clean_ts[:-1] + "+00:00"
+            dt_utc = datetime.datetime.fromisoformat(clean_ts)
+            if dt_utc.tzinfo is None:
+                dt_utc = dt_utc.replace(tzinfo=datetime.timezone.utc)
+            else:
+                dt_utc = dt_utc.astimezone(datetime.timezone.utc)
+            dt_local = dt_utc + datetime.timedelta(minutes=tz_offset_minutes)
+            tz_label = tz_name or "local"
+            utc_time = dt_utc.strftime("%H:%M:%S")
+            local_time = dt_local.strftime("%H:%M:%S")
+            if dt_utc.date() != dt_local.date():
+                ts_display = f"{dt_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC ({dt_local.strftime('%Y-%m-%d %H:%M:%S')} {tz_label})"
+            else:
+                ts_display = f"{utc_time} UTC ({local_time} {tz_label})"
+        except Exception:
+            ts_display = ts_str
 
     sev_part = ""
     if severity is not None:
@@ -409,7 +437,7 @@ def format_prompt_log_line(
     else:
         payload = msg_str
 
-    return f"[{ts_str}] [{source_str}] [{app_str}] {sev_part}{payload}"
+    return f"[{ts_display}] [{source_str}] [{app_str}] {sev_part}{payload}"
 
 
 def build_analysis_prompt(
@@ -419,6 +447,8 @@ def build_analysis_prompt(
     log_count: int,
     user_context: Optional[str] = None,
     host_notes: Optional[str] = None,
+    tz_name: Optional[str] = None,
+    tz_offset_minutes: Optional[int] = None,
 ) -> str:
     """
     Construct the full prompt payload sent to the LLM.
@@ -430,6 +460,15 @@ def build_analysis_prompt(
         f"- Container / Service: {app_name}",
         f"- Total Selected Logs: {log_count}",
     ]
+
+    if tz_name or tz_offset_minutes is not None:
+        tz_label = tz_name or "local"
+        if tz_offset_minutes is not None:
+            sign = "+" if tz_offset_minutes >= 0 else "-"
+            hours = abs(tz_offset_minutes) // 60
+            mins = abs(tz_offset_minutes) % 60
+            tz_label += f" (UTC{sign}{hours:02d}:{mins:02d})"
+        parts.append(f"- Timeline Reference: UTC (+00:00) with Homelab Local Time: {tz_label}")
 
     if host_notes and host_notes.strip():
         stripped_notes = str(redact(host_notes.strip()))

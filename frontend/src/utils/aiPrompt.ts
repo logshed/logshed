@@ -7,6 +7,8 @@ export const DEFAULT_AI_MODEL = 'gemini-3.7-flash';
 export const DEFAULT_SYSTEM_PROMPT = `You are an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator.
 Review the following redacted server/container logs and provide a structured diagnosis in Markdown format.
 
+Log timestamps cite both UTC and the operator homelab local time (for example, 01:05:00 UTC (02:05:00 local)). When referencing specific event times or advising the operator to inspect logs on host systems, cite both the UTC time and the corresponding local time to avoid confusion across server and host timezones.
+
 Your response MUST include the following three sections with exact headers:
 ## Summary
 A concise 1-2 sentence overview of the issue.

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels } from '../../api/ai.ts';
-import { fetchSettings } from '../../api/settings.ts';
+import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { Modal } from '../common/Modal.tsx';
@@ -221,9 +221,16 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       setIsLoadingPreview(true);
       setPreviewError(null);
 
+      const client_timezone = getCachedServerTimezone() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const client_utc_offset_minutes = getCachedServerTzOffset() ?? -new Date().getTimezoneOffset();
+
       // Fetch preview and system settings in parallel to initialize provider configs
       const [res, settRes] = await Promise.all([
-        previewAiPrompt({ log_ids: validLogIds }),
+        previewAiPrompt({
+          log_ids: validLogIds,
+          client_timezone,
+          client_utc_offset_minutes,
+        }),
         fetchSettings().catch(() => null),
       ]);
 
@@ -469,6 +476,9 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         }
       }
 
+      const client_timezone = getCachedServerTimezone() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const client_utc_offset_minutes = getCachedServerTzOffset() ?? -new Date().getTimezoneOffset();
+
       const res = await diagnoseLogs({
         log_ids: validLogIds,
         user_context: userContext.trim() || undefined,
@@ -477,6 +487,8 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         provider,
         model,
         fallback_models: parsedFallbacks.length > 0 ? parsedFallbacks : undefined,
+        client_timezone,
+        client_utc_offset_minutes,
         onEvent: (evt) => {
           if (evt.stage === 'calling') {
             setStreamProgress((prev) => ({

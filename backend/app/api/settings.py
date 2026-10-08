@@ -4,6 +4,7 @@ Provides secure storage with encryption at rest for API keys.
 """
 
 import datetime
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -162,6 +163,11 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     daily_digest_schedule_time = stored.get("daily_digest_schedule_time") or "09:00"
     daily_digest_last_run = stored.get("daily_digest_last_run") or None
 
+    now_local = datetime.datetime.now().astimezone()
+    server_timezone = os.environ.get("TZ") or now_local.tzname() or "UTC"
+    server_tz_name = now_local.tzname() or "UTC"
+    server_tz_offset_minutes = int(now_local.utcoffset().total_seconds() // 60) if now_local.utcoffset() else 0
+
     return SettingsResponse(
         ai_enabled=ai_enabled,
         ai_provider=active_provider,
@@ -194,6 +200,9 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         daily_digest_channel_id=daily_digest_channel_id,
         daily_digest_schedule_time=daily_digest_schedule_time,
         daily_digest_last_run=daily_digest_last_run,
+        server_timezone=server_timezone,
+        server_tz_name=server_tz_name,
+        server_tz_offset_minutes=server_tz_offset_minutes,
     )
 
 

@@ -8,6 +8,7 @@ shared diagnosis context preparation, model cache management, and audit log pers
 import datetime
 import json
 import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
@@ -141,6 +142,8 @@ async def build_diagnosis_context(
     provider_override: Optional[str] = None,
     model_override: Optional[str] = None,
     fallback_models_override: Optional[list[str]] = None,
+    client_timezone: Optional[str] = None,
+    client_utc_offset_minutes: Optional[int] = None,
 ) -> dict[str, Any]:
     """
     Shared context preparation routine reused by preview_ai_prompt, diagnose_logs,
@@ -172,6 +175,12 @@ async def build_diagnosis_context(
 
     rows, settings, host_notes = result
 
+    now_local = datetime.datetime.now().astimezone()
+    eff_tz_name = client_timezone or os.environ.get("TZ") or now_local.tzname() or "UTC"
+    eff_tz_offset = client_utc_offset_minutes
+    if eff_tz_offset is None and now_local.utcoffset():
+        eff_tz_offset = int(now_local.utcoffset().total_seconds() // 60)
+
     unique_aliases = sorted(list({r["source_alias"] for r in rows if r["source_alias"]}))
     source_alias = ", ".join(unique_aliases) if unique_aliases else (rows[0]["source_ip"] or "unknown")
 
@@ -186,6 +195,8 @@ async def build_diagnosis_context(
             message=r["message"],
             severity=r["severity"],
             raw=r["raw"] if "raw" in r.keys() else None,
+            tz_name=eff_tz_name,
+            tz_offset_minutes=eff_tz_offset,
         )
         for r in rows
     ]
@@ -231,6 +242,8 @@ async def build_diagnosis_context(
             log_count=len(rows),
             user_context=redacted_user_context,
             host_notes=redacted_host_notes,
+            tz_name=eff_tz_name,
+            tz_offset_minutes=eff_tz_offset,
         )
         redacted_prompt_override = None
 

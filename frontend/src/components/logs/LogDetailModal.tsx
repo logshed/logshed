@@ -4,8 +4,9 @@ import { LogEntry } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
+import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp } from '../../utils/formatters.ts';
+import { getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
-import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 
 interface LogDetailModalProps {
   log: LogEntry | null;
@@ -21,6 +22,8 @@ interface LogDetailModalProps {
   onNavigateNext?: () => void;
   hasPreviousLog?: boolean;
   hasNextLog?: boolean;
+  timeZone?: string;
+  tzName?: string;
 }
 
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
@@ -37,7 +40,11 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   onNavigateNext,
   hasPreviousLog,
   hasNextLog,
+  timeZone,
+  tzName,
 }) => {
+  const effectiveTimezone = timeZone || getCachedServerTimezone();
+  const effectiveTzName = tzName || getCachedServerTzName();
   const hostIsAliased = Boolean(
     isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip)
   );
@@ -279,12 +286,26 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
         {/* Structured Metadata Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
           <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
-            <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Timestamp</span>
-            <span className="font-mono text-slate-200 text-xs break-all select-all">{log.timestamp}</span>
+            <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
+              Timestamp {effectiveTzName ? `(${effectiveTzName})` : ''}
+            </span>
+            <span className="font-mono text-slate-200 text-xs break-all select-all block">
+              {formatFullTimestamp(log.timestamp, effectiveTimezone)}
+            </span>
+            <span className="text-[10px] font-mono text-slate-500 break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
+              UTC: {log.timestamp}
+            </span>
           </div>
           <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
-            <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Received At</span>
-            <span className="font-mono text-slate-200 text-xs break-all select-all">{log.received_at}</span>
+            <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
+              Received At {effectiveTzName ? `(${effectiveTzName})` : ''}
+            </span>
+            <span className="font-mono text-slate-200 text-xs break-all select-all block">
+              {formatFullTimestamp(log.received_at, effectiveTimezone)}
+            </span>
+            <span className="text-[10px] font-mono text-slate-500 break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
+              UTC: {log.received_at}
+            </span>
           </div>
           <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Facility</span>
@@ -395,7 +416,9 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                         }`}
                       >
                         <span className="text-slate-500 shrink-0 select-none">#{ctxLog.id}</span>
-                        <span className="text-slate-400 shrink-0 select-none">{ctxLog.timestamp.slice(11, 19)}</span>
+                        <span className="text-slate-400 shrink-0 select-none">
+                          {formatLocalTimestamp(ctxLog.timestamp, true, effectiveTimezone).slice(11, 19)}
+                        </span>
                         <SeverityBadge severity={ctxLog.severity} className="shrink-0" />
                         <span className={`break-all ${isTarget ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>
                           {stripAnsi(ctxLog.message)}

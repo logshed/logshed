@@ -2225,6 +2225,31 @@ class TestPromptFormattingAndStructuredData:
         assert line.count('[meta tag="auth"]') == 1
         assert "[WARN]" in line
 
+    def test_format_prompt_log_line_with_dual_timezone(self):
+        # When tz_offset_minutes is provided, formats dual timestamps
+        line = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-08T01:05:00.041000+00:00",
+            source="plex",
+            app_name="plex",
+            message="Beginning scan",
+            severity=6,
+            tz_name="BST",
+            tz_offset_minutes=60,
+        )
+        assert line == "[01:05:00 UTC (02:05:00 BST)] [plex] [plex] [INFO] Beginning scan"
+
+        # Across midnight transition, date is included
+        line_midnight = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-07T23:30:00+00:00",
+            source="plex",
+            app_name="plex",
+            message="Midnight scan",
+            severity=6,
+            tz_name="BST",
+            tz_offset_minutes=60,
+        )
+        assert line_midnight == "[2026-10-07 23:30:00 UTC (2026-10-08 00:30:00 BST)] [plex] [plex] [INFO] Midnight scan"
+
     @pytest.mark.asyncio
     async def test_preview_prompt_includes_severity_and_structured_data_end_to_end(self, populated_db, auth_client):
         # Insert a log with RFC 5424 structured data into populated_db

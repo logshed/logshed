@@ -83,7 +83,9 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     );
 
     await waitFor(() => {
-      expect(aiApi.previewAiPrompt).toHaveBeenCalledWith({ log_ids: [1, 2] });
+      expect(aiApi.previewAiPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ log_ids: [1, 2] })
+      );
     });
 
     // The prompt is rendered inside an editable textarea

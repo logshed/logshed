@@ -259,6 +259,8 @@ async def preview_ai_prompt(
         log_ids=req.log_ids,
         user_context=req.user_context,
         prompt_override=req.prompt_override,
+        client_timezone=req.client_timezone,
+        client_utc_offset_minutes=req.client_utc_offset_minutes,
     )
 
     return AiPreviewResponse(
@@ -298,6 +300,8 @@ async def diagnose_logs(
             provider_override=req.provider,
             model_override=req.model,
             fallback_models_override=req.fallback_models,
+            client_timezone=req.client_timezone,
+            client_utc_offset_minutes=req.client_utc_offset_minutes,
         )
 
         if not ctx.get("ai_enabled", True):
@@ -411,6 +415,8 @@ async def diagnose_logs_stream(
         provider_override=req.provider,
         model_override=req.model,
         fallback_models_override=req.fallback_models,
+        client_timezone=req.client_timezone,
+        client_utc_offset_minutes=req.client_utc_offset_minutes,
     )
 
     if not ctx.get("ai_enabled", True):

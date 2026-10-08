@@ -5,6 +5,18 @@ All notable changes to LogShed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-08
+
+### Added
+- **Container Timezone Propagation to UI & AI Prompts**: Resolves the container's configured `TZ` environment variable (defaulting to UTC) to expose the IANA timezone name, local abbreviation (such as BST, EDT, or UTC), and minute offset via the system settings API.
+- **Dual UTC & Local Timeline Annotations in AI Prompts**: Formats AI analysis prompt log lines with dual timestamps `[HH:MM:SS UTC (HH:MM:SS Local)]` alongside explicit timeline context in system instructions, ensuring AI root-cause diagnosis references match both UTC database records and local homelab container clocks without operator confusion.
+
+### Fixed
+- **Log Detail Modal Timestamp Discrepancy**: Corrected the timestamp offset in the Log Detail slide-over modal where raw UTC strings were rendered without local offset conversion. Structured metadata cards now display the formatted local/homelab timestamp with timezone abbreviation badge alongside an explicit secondary UTC reference line.
+- **Surrounding Context Log Timestamps**: Surrounding context log snippets in the detail view are now formatted in the configured homelab timezone instead of displaying raw UTC slices.
+
+---
+
 ## [1.2.0] - 2026-10-07
 
 ### Added
@@ -120,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native multi-architecture container images (`linux/amd64` and `linux/arm64`).
 - Unraid Community Applications template (`unraid-template.xml`) with cache-pool POSIX locking recommendations.
 
+[1.2.1]: https://github.com/logshed/logshed/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/logshed/logshed/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/logshed/logshed/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/logshed/logshed/releases/tag/v1.0.0

@@ -164,6 +164,11 @@ class SettingsResponse(BaseModel):
     daily_digest_schedule_time: str = "09:00"
     daily_digest_last_run: Optional[str] = None
 
+    # Timezone Settings
+    server_timezone: str = "UTC"
+    server_tz_name: str = "UTC"
+    server_tz_offset_minutes: int = 0
+
     @model_validator(mode="after")
     def clamp_retention_days(self) -> "SettingsResponse":
         if self.retention_overridden:
@@ -499,6 +504,8 @@ class AiPreviewRequest(BaseModel):
     log_ids: list[int] = Field(..., min_length=1, max_length=200)
     user_context: Optional[str] = None
     prompt_override: Optional[str] = None
+    client_timezone: Optional[str] = None
+    client_utc_offset_minutes: Optional[int] = None
 
 
 class AiPreviewResponse(BaseModel):
@@ -525,6 +532,8 @@ class AiDiagnosisRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     fallback_models: Optional[list[str]] = None
+    client_timezone: Optional[str] = None
+    client_utc_offset_minutes: Optional[int] = None
 
 
 class AiDiagnosisResponse(BaseModel):

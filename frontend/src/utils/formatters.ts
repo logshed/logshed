@@ -140,13 +140,56 @@ export function fromLocalDatetimeInputString(localString?: string | null): strin
   return d.toISOString();
 }
 
+function cleanIsoString(ts: string): string {
+  let parseable = ts.trim();
+  if (!parseable.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(parseable)) {
+    parseable = parseable.replace(' ', 'T') + 'Z';
+  }
+  return parseable;
+}
+
 /**
- * Formats a UTC ISO datetime string into local browser representation: 'YYYY-MM-DD HH:mm:ss' (or 'YYYY-MM-DD HH:mm' if includeSeconds is false).
+ * Formats a UTC ISO datetime string into local or configured timezone representation: 'YYYY-MM-DD HH:mm:ss' (or 'YYYY-MM-DD HH:mm' if includeSeconds is false).
  */
-export function formatLocalTimestamp(isoString?: string | null, includeSeconds: boolean = true): string {
+export function formatLocalTimestamp(
+  isoString?: string | null,
+  includeSeconds: boolean = true,
+  timeZone?: string
+): string {
   if (!isoString) return '';
-  const date = new Date(isoString);
+  const clean = cleanIsoString(isoString);
+  const date = new Date(clean);
   if (isNaN(date.getTime())) return isoString;
+
+  if (timeZone) {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+      const parts = formatter.formatToParts(date);
+      const getPart = (pType: string) => parts.find((p) => p.type === pType)?.value || '';
+      const year = getPart('year');
+      const month = getPart('month').padStart(2, '0');
+      const day = getPart('day').padStart(2, '0');
+      const hours = getPart('hour').padStart(2, '0');
+      const minutes = getPart('minute').padStart(2, '0');
+      const seconds = getPart('second').padStart(2, '0');
+      if (includeSeconds) {
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      }
+      return `${year}-${month}-${day} ${hours}:${minutes}`;
+    } catch {
+      // Fall through to local browser time if invalid timeZone
+    }
+  }
+
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -157,6 +200,24 @@ export function formatLocalTimestamp(isoString?: string | null, includeSeconds: 
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
   return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+/**
+ * Formats a timestamp into a full representation with milliseconds: 'YYYY-MM-DD HH:mm:ss.SSS'
+ * respecting an optional configured timezone.
+ */
+export function formatFullTimestamp(
+  isoString?: string | null,
+  timeZone?: string
+): string {
+  if (!isoString) return '';
+  const clean = cleanIsoString(isoString);
+  const date = new Date(clean);
+  if (isNaN(date.getTime())) return isoString;
+
+  const millis = String(date.getMilliseconds()).padStart(3, '0');
+  const base = formatLocalTimestamp(clean, true, timeZone);
+  return `${base}.${millis}`;
 }
 
 /**

@@ -89,6 +89,11 @@ export interface SystemSettings {
   daily_digest_channel_id?: number | null;
   daily_digest_schedule_time?: string;
   daily_digest_last_run?: string | null;
+
+  // Timezone Settings
+  server_timezone?: string;
+  server_tz_name?: string;
+  server_tz_offset_minutes?: number;
 }
 
 export type AppTab = 'stream' | 'storage' | 'rules' | 'settings';
@@ -138,6 +143,8 @@ export interface AiPreviewRequest {
   log_ids: number[];
   user_context?: string;
   prompt_override?: string;
+  client_timezone?: string;
+  client_utc_offset_minutes?: number;
 }
 
 export interface AiPreviewResponse {
@@ -176,6 +183,8 @@ export interface AiDiagnosisRequest {
   provider?: string;
   model?: string;
   fallback_models?: string[];
+  client_timezone?: string;
+  client_utc_offset_minutes?: number;
   onEvent?: (event: AiDiagnosisStreamEvent) => void;
 }
 

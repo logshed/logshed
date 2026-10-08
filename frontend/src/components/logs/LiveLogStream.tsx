@@ -18,6 +18,7 @@ import { LogSearchBar } from './LogSearchBar.tsx';
 import { LogDetailModal } from './LogDetailModal.tsx';
 import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
 import { fetchAliases } from '../../api/aliases.ts';
+import { fetchSettings, getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
@@ -140,7 +141,7 @@ const MONTH_NAMES = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-export function formatLocalTimestamp(ts: string, fallbackTs?: string): string {
+export function formatLocalTimestamp(ts: string, fallbackTs?: string, timeZone?: string): string {
   if (!ts && !fallbackTs) return '';
   try {
     let target = ts || fallbackTs || '';
@@ -159,24 +160,65 @@ export function formatLocalTimestamp(ts: string, fallbackTs?: string): string {
       return target;
     }
 
-    const now = new Date();
-    const isToday =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
+    const effectiveTz = timeZone || getCachedServerTimezone();
+    let year = d.getFullYear();
+    let month = d.getMonth();
+    let date = d.getDate();
+    let hours = String(d.getHours()).padStart(2, '0');
+    let minutes = String(d.getMinutes()).padStart(2, '0');
+    let seconds = String(d.getSeconds()).padStart(2, '0');
 
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    const seconds = String(d.getSeconds()).padStart(2, '0');
+    let isToday = false;
+    const now = new Date();
+
+    if (effectiveTz) {
+      try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: effectiveTz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        });
+        const parts = formatter.formatToParts(d);
+        const getPart = (pType: string) => parts.find((p) => p.type === pType)?.value || '';
+        year = parseInt(getPart('year'), 10);
+        month = parseInt(getPart('month'), 10) - 1;
+        date = parseInt(getPart('day'), 10);
+        hours = getPart('hour').padStart(2, '0');
+        minutes = getPart('minute').padStart(2, '0');
+        seconds = getPart('second').padStart(2, '0');
+
+        const nowParts = formatter.formatToParts(now);
+        const getNowPart = (pType: string) => nowParts.find((p) => p.type === pType)?.value || '';
+        const nowYear = parseInt(getNowPart('year'), 10);
+        const nowMonth = parseInt(getNowPart('month'), 10) - 1;
+        const nowDate = parseInt(getNowPart('day'), 10);
+        isToday = year === nowYear && month === nowMonth && date === nowDate;
+      } catch {
+        isToday =
+          d.getFullYear() === now.getFullYear() &&
+          d.getMonth() === now.getMonth() &&
+          d.getDate() === now.getDate();
+      }
+    } else {
+      isToday =
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+    }
 
     if (isToday) {
       const millis = String(d.getMilliseconds()).padStart(3, '0');
       return `${hours}:${minutes}:${seconds}.${millis}`;
     }
 
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = MONTH_NAMES[d.getMonth()];
-    return `${day} ${month} ${hours}:${minutes}:${seconds}`;
+    const day = String(date).padStart(2, '0');
+    const monthName = MONTH_NAMES[month];
+    return `${day} ${monthName} ${hours}:${minutes}:${seconds}`;
   } catch {
     return ts || fallbackTs || '';
   }
@@ -185,6 +227,7 @@ export function formatLocalTimestamp(ts: string, fallbackTs?: string): string {
 export function prepareLogEntry(
   entry: LogEntry | ProcessedLogEntry,
   aliases?: Record<string, string>,
+  timeZone?: string,
 ): ProcessedLogEntry {
   const existing = entry as ProcessedLogEntry;
   const canonical =
@@ -197,7 +240,7 @@ export function prepareLogEntry(
     ...entry,
     source_alias,
     formattedTimestamp:
-      existing.formattedTimestamp ?? formatLocalTimestamp(entry.timestamp, entry.received_at),
+      existing.formattedTimestamp ?? formatLocalTimestamp(entry.timestamp, entry.received_at, timeZone),
     cleanedMessage: existing.cleanedMessage ?? cleanLogMessageForDisplay(entry.message),
     strippedMessage: existing.strippedMessage ?? stripAnsi(entry.message),
   };
@@ -328,7 +371,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
   const [deleteSelectedError, setDeleteSelectedError] = useState<string | null>(null);
   const [activeAliasesMap, setActiveAliasesMap] = useState<Record<string, string>>({});
+  const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
+  const [serverTzName, setServerTzName] = useState<string>(() => getCachedServerTzName() || '');
   const { aliasVersion } = useAlias();
+
+  useEffect(() => {
+    fetchSettings()
+      .then((s) => {
+        if (s.server_timezone) setServerTimezone(s.server_timezone);
+        if (s.server_tz_name) setServerTzName(s.server_tz_name);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     syncFiltersToUrl(filters);
@@ -1573,6 +1627,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         log={activeLogDetail}
         isOpen={Boolean(activeLogDetail)}
         onClose={() => setActiveLogDetail(null)}
+        timeZone={serverTimezone}
+        tzName={serverTzName}
         onExplainWithAi={(log, ctxLogs) => {
           setActiveLogDetail(null);
           const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];

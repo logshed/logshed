@@ -8,6 +8,7 @@ import {
   downloadBlob,
   formatMaintenanceTime,
   formatLocalTimestamp,
+  formatFullTimestamp,
 } from '../utils/formatters.ts';
 
 describe('stripAnsi', () => {
@@ -270,6 +271,30 @@ describe('formatLocalTimestamp', () => {
     const d = new Date(2026, 9, 6, 14, 38, 53);
     const iso = d.toISOString();
     expect(formatLocalTimestamp(iso, false)).toBe('2026-10-06 14:38');
+  });
+
+  it('respects explicitly provided timeZone option', () => {
+    const iso = '2026-10-06T14:38:53.000Z';
+    expect(formatLocalTimestamp(iso, true, 'UTC')).toBe('2026-10-06 14:38:53');
+    expect(formatLocalTimestamp(iso, true, 'America/New_York')).toBe('2026-10-06 10:38:53');
+  });
+});
+
+describe('formatFullTimestamp', () => {
+  it('handles null, undefined, or empty string gracefully', () => {
+    expect(formatFullTimestamp(null)).toBe('');
+    expect(formatFullTimestamp(undefined)).toBe('');
+    expect(formatFullTimestamp('')).toBe('');
+  });
+
+  it('returns raw string if parsing fails', () => {
+    expect(formatFullTimestamp('invalid-date')).toBe('invalid-date');
+  });
+
+  it('formats full timestamp with milliseconds and respects timeZone', () => {
+    const iso = '2026-10-06T14:38:53.421Z';
+    expect(formatFullTimestamp(iso, 'UTC')).toBe('2026-10-06 14:38:53.421');
+    expect(formatFullTimestamp(iso, 'America/New_York')).toBe('2026-10-06 10:38:53.421');
   });
 });
 

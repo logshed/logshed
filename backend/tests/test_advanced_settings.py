@@ -269,6 +269,19 @@ class TestSettingsCache:
             assert mock_resolve.call_count == 2
             assert settings_3 == settings_1
 
+    @pytest.mark.asyncio
+    async def test_settings_includes_server_timezone(self, client: AsyncClient, auth_cookie: dict):
+        """GET /api/settings includes container server_timezone, server_tz_name, and offset."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        res = await client.get("/api/settings")
+        assert res.status_code == 200
+        data = res.json()
+        assert "server_timezone" in data
+        assert "server_tz_name" in data
+        assert "server_tz_offset_minutes" in data
+        assert isinstance(data["server_timezone"], str)
+        assert isinstance(data["server_tz_offset_minutes"], int)
+
 
 
 # ===================================================================
