@@ -34,6 +34,7 @@ from app.models import (
     MaintenanceWindowRequest,
     MaintenanceWindowResponse,
     MessageResponse,
+    RuleReorderRequest,
 )
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
@@ -47,6 +48,13 @@ router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
     """Map a raw database row tuple from alert_rules into an AlertRuleResponse."""
+    if len(r) > 16:
+        display_order = r[15]
+        created_at = str(r[16])
+    else:
+        display_order = 0
+        created_at = str(r[15])
+
     return AlertRuleResponse(
         id=r[0],
         name=r[1],
@@ -63,7 +71,8 @@ def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
         trigger_count=r[12] or 0,
         last_triggered_at=str(r[13]) if r[13] else None,
         suppress_until=str(r[14]) if r[14] else None,
-        created_at=str(r[15]),
+        display_order=display_order,
+        created_at=created_at,
     )
 
 
@@ -164,9 +173,9 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
             SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                    match_pattern, threshold_count, window_seconds, cooldown_seconds,
                    ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, created_at
+                   suppress_until, display_order, created_at
             FROM alert_rules
-            ORDER BY id ASC
+            ORDER BY display_order ASC, id ASC
             """
         )
         rows = cur.fetchall()
@@ -184,9 +193,10 @@ async def export_alert_rules(user: dict = Depends(get_current_user)) -> Response
         cur.execute(
             """
             SELECT name, rule_type, filter_app, filter_severity, match_pattern,
-                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled
+                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
+                   display_order
             FROM alert_rules
-            ORDER BY id ASC
+            ORDER BY display_order ASC, id ASC
             """
         )
         rows = cur.fetchall()
@@ -202,6 +212,7 @@ async def export_alert_rules(user: dict = Depends(get_current_user)) -> Response
                 cooldown_seconds=r["cooldown_seconds"] or 300,
                 ai_enrichment=bool(r["ai_enrichment"]),
                 is_enabled=bool(r["is_enabled"]),
+                display_order=r["display_order"] if "display_order" in r.keys() else 0,
             )
             for r in rows
         ]
@@ -231,7 +242,8 @@ async def export_single_alert_rule(
         cur.execute(
             """
             SELECT name, rule_type, filter_app, filter_severity, match_pattern,
-                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled
+                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
+                   display_order
             FROM alert_rules
             WHERE id = ?
             """,
@@ -251,6 +263,7 @@ async def export_single_alert_rule(
             cooldown_seconds=row["cooldown_seconds"] or 300,
             ai_enrichment=bool(row["ai_enrichment"]),
             is_enabled=bool(row["is_enabled"]),
+            display_order=row["display_order"] if "display_order" in row.keys() else 0,
         )
 
     item = await run_db_query(_query)
@@ -400,14 +413,16 @@ async def import_alert_rules(
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         def _insert_all(conn):
             cur = conn.cursor()
-            for rule in to_insert:
+            cur.execute("SELECT COALESCE(MAX(display_order), 0) FROM alert_rules")
+            max_order = cur.fetchone()[0]
+            for idx_rule, rule in enumerate(to_insert, start=1):
                 cur.execute(
                     """
                     INSERT INTO alert_rules
                     (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
                      threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
-                     is_enabled, trigger_count, created_at)
-                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                     is_enabled, trigger_count, display_order, created_at)
+                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                     """,
                     (
                         rule["name"],
@@ -420,6 +435,7 @@ async def import_alert_rules(
                         rule["cooldown_seconds"],
                         int(rule["ai_enrichment"]),
                         int(rule["is_enabled"]),
+                        max_order + idx_rule,
                         now_iso,
                     ),
                 )
@@ -458,13 +474,16 @@ async def create_alert_rule(
                     detail=f"Notification channel {rule_in.channel_id} does not exist.",
                 )
 
+        cur.execute("SELECT COALESCE(MAX(display_order), 0) + 1 FROM alert_rules")
+        next_order = cur.fetchone()[0]
+
         cur.execute(
             """
             INSERT INTO alert_rules
             (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
              threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
-             is_enabled, trigger_count, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+             is_enabled, trigger_count, display_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
             """,
             (
                 rule_in.name.strip(),
@@ -478,14 +497,15 @@ async def create_alert_rule(
                 rule_in.cooldown_seconds,
                 int(rule_in.ai_enrichment),
                 int(rule_in.is_enabled),
+                next_order,
                 now_iso,
             ),
         )
         rule_id = cur.lastrowid
         conn.commit()
-        return rule_id
+        return rule_id, next_order
 
-    rule_id = await run_db_query(_insert)
+    rule_id, next_order = await run_db_query(_insert)
     await asyncio.to_thread(get_alert_evaluator().reload_rules)
 
     return AlertRuleResponse(
@@ -502,6 +522,7 @@ async def create_alert_rule(
         ai_enrichment=rule_in.ai_enrichment,
         is_enabled=rule_in.is_enabled,
         trigger_count=0,
+        display_order=next_order,
         last_triggered_at=None,
         suppress_until=None,
         created_at=now_iso,
@@ -521,7 +542,7 @@ async def get_alert_rule(
             SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                    match_pattern, threshold_count, window_seconds, cooldown_seconds,
                    ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, created_at
+                   suppress_until, display_order, created_at
             FROM alert_rules
             WHERE id = ?
             """,
@@ -539,6 +560,38 @@ async def get_alert_rule(
     return _row_to_alert_rule_response(row)
 
 
+@router.put("/rules/reorder", response_model=list[AlertRuleResponse])
+async def reorder_alert_rules(
+    payload: RuleReorderRequest,
+    user: dict = Depends(get_current_user),
+) -> list[AlertRuleResponse]:
+    """Atomically update the evaluation and display order of alert rules."""
+    rule_ids = payload.rule_ids
+    if len(rule_ids) != len(set(rule_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duplicate rule IDs in reorder request",
+        )
+
+    def _reorder(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM alert_rules")
+        existing_ids = {r[0] for r in cur.fetchall()}
+        if set(rule_ids) != existing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reorder payload must match all configured alert rule IDs",
+            )
+
+        for order_idx, r_id in enumerate(rule_ids, start=1):
+            cur.execute("UPDATE alert_rules SET display_order = ? WHERE id = ?", (order_idx, r_id))
+        conn.commit()
+
+    await run_db_query(_reorder)
+    get_alert_evaluator().reload_rules()
+    return await list_alert_rules(user=user)
+
+
 @router.put("/rules/{rule_id}", response_model=AlertRuleResponse)
 async def update_alert_rule(
     rule_id: int,
@@ -553,7 +606,7 @@ async def update_alert_rule(
             SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                    match_pattern, threshold_count, window_seconds, cooldown_seconds,
                    ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, created_at
+                   suppress_until, display_order, created_at
             FROM alert_rules
             WHERE id = ?
             """,
@@ -648,7 +701,7 @@ async def update_alert_rule(
             SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                    match_pattern, threshold_count, window_seconds, cooldown_seconds,
                    ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, created_at
+                   suppress_until, display_order, created_at
             FROM alert_rules
             WHERE id = ?
             """,
@@ -789,13 +842,16 @@ async def install_preset(
                     detail=f"Notification channel {channel_id} does not exist.",
                 )
 
+        cur.execute("SELECT COALESCE(MAX(display_order), 0) + 1 FROM alert_rules")
+        next_order = cur.fetchone()[0]
+
         cur.execute(
             """
             INSERT INTO alert_rules
             (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
              threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
-             is_enabled, trigger_count, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
+             is_enabled, trigger_count, display_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
             """,
             (
                 preset["name"],
@@ -808,14 +864,15 @@ async def install_preset(
                 preset["window_seconds"],
                 preset["cooldown_seconds"],
                 int(preset["ai_enrichment"]),
+                next_order,
                 now_iso,
             ),
         )
         rule_id = cur.lastrowid
         conn.commit()
-        return rule_id
+        return rule_id, next_order
 
-    rule_id = await run_db_query(_insert)
+    rule_id, next_order = await run_db_query(_insert)
     await asyncio.to_thread(get_alert_evaluator().reload_rules)
 
     return AlertRuleResponse(
@@ -832,10 +889,12 @@ async def install_preset(
         ai_enrichment=preset["ai_enrichment"],
         is_enabled=True,
         trigger_count=0,
+        display_order=next_order,
         last_triggered_at=None,
         suppress_until=None,
         created_at=now_iso,
     )
+
 
 
 # ---------------------------------------------------------------------------

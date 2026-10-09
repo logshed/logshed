@@ -231,6 +231,35 @@ class TestDropFilterUnit:
         assert flt2 is flt1
         assert flt2.get_pending_count(rule_id) == 1
 
+    def test_drop_rule_ordering_first_match(self, tmp_path: Path):
+        """Rules are evaluated in ascending display_order order, returning first matching rule."""
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        cur = conn.cursor()
+        # Rule 1 has higher display_order (20)
+        cur.execute(
+            """
+            INSERT INTO drop_rules (name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, display_order, dropped_count, created_at)
+            VALUES ('Second Evaluated', NULL, NULL, 'order_test', 0, 1, 20, 0, datetime('now'))
+            """
+        )
+        rule1_id = cur.lastrowid
+        # Rule 2 has lower display_order (10)
+        cur.execute(
+            """
+            INSERT INTO drop_rules (name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, display_order, dropped_count, created_at)
+            VALUES ('First Evaluated', NULL, NULL, 'order_test', 0, 1, 10, 0, datetime('now'))
+            """
+        )
+        rule2_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        flt = DropFilter(db_file)
+        matched_id = flt.should_drop("host", "10.0.0.1", "app", "order_test message")
+        assert matched_id == rule2_id
+
+
 
 # ===================================================================
 # 2. Drop Rules API Endpoints Tests
@@ -590,6 +619,57 @@ class TestDropRulesApi:
 
         # 4. Clean up
         await client.delete(f"/api/drop-rules/{rule_id}")
+
+    @pytest.mark.asyncio
+    async def test_reorder_drop_rules(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+
+        # 1. Create three drop rules
+        r1 = (await client.post("/api/drop-rules", json={"name": "Rule One", "message_pattern": "p1"})).json()
+        r2 = (await client.post("/api/drop-rules", json={"name": "Rule Two", "message_pattern": "p2"})).json()
+        r3 = (await client.post("/api/drop-rules", json={"name": "Rule Three", "message_pattern": "p3"})).json()
+        r1_id, r2_id, r3_id = r1["id"], r2["id"], r3["id"]
+
+        # Fetch current list of all rule IDs
+        cur_list = (await client.get("/api/drop-rules")).json()
+        all_ids = [r["id"] for r in cur_list]
+
+        # 2. Duplicate rule IDs rejected with 400
+        bad_dup = [r1_id, r1_id] + [i for i in all_ids if i not in (r1_id,)]
+        res_dup = await client.put("/api/drop-rules/reorder", json={"rule_ids": bad_dup})
+        assert res_dup.status_code == 400
+
+        # 3. Partial / missing rule IDs rejected with 400
+        res_partial = await client.put("/api/drop-rules/reorder", json={"rule_ids": [r1_id, r2_id]})
+        assert res_partial.status_code == 400
+
+        # 4. Unknown rule ID rejected with 400
+        bad_unknown = all_ids[:-1] + [999999]
+        res_unk = await client.put("/api/drop-rules/reorder", json={"rule_ids": bad_unknown})
+        assert res_unk.status_code == 400
+
+        # 5. Successful reorder: move r3 to the front
+        other_ids = [i for i in all_ids if i not in (r1_id, r2_id, r3_id)]
+        new_order = [r3_id, r1_id, r2_id] + other_ids
+        reorder_res = await client.put("/api/drop-rules/reorder", json={"rule_ids": new_order})
+        assert reorder_res.status_code == 200
+        reordered_items = reorder_res.json()
+        assert [r["id"] for r in reordered_items] == new_order
+
+        # Verify display_order values are sequential 1, 2, 3...
+        for idx, item in enumerate(reordered_items, start=1):
+            assert item["display_order"] == idx
+
+        # 6. GET /api/drop-rules returns the updated order
+        get_res = await client.get("/api/drop-rules")
+        assert get_res.status_code == 200
+        assert [r["id"] for r in get_res.json()] == new_order
+
+        # 7. In-memory drop filter rules are synchronized
+        filter_rules = get_drop_filter()._rules
+        filter_ids = [r.id for r in filter_rules]
+        assert filter_ids.index(r3_id) < filter_ids.index(r1_id) < filter_ids.index(r2_id)
+
 
 
 # ===================================================================

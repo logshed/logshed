@@ -604,6 +604,11 @@ class DropRuleUpdate(BaseModel):
     reset_counter: Optional[bool] = None
 
 
+class RuleReorderRequest(BaseModel):
+    """Payload specifying the complete ordered list of rule IDs."""
+    rule_ids: list[int]
+
+
 class DropRuleResponse(BaseModel):
     """Drop rule response representation."""
     id: int
@@ -615,6 +620,7 @@ class DropRuleResponse(BaseModel):
     is_enabled: bool = True
     severity_threshold: Optional[int] = None
     dropped_count: int = 0
+    display_order: int = 0
     created_at: str
 
 
@@ -660,6 +666,7 @@ class DropRuleExportItem(BaseModel):
     is_regex: bool = False
     is_enabled: bool = True
     severity_threshold: Optional[int] = None
+    display_order: int = 0
 
 
 class DropRuleExportBundle(BaseModel):
@@ -815,6 +822,7 @@ class AlertRuleResponse(BaseModel):
     ai_enrichment: bool = False
     is_enabled: bool = True
     trigger_count: int = 0
+    display_order: int = 0
     last_triggered_at: Optional[str] = None
     suppress_until: Optional[str] = None
     created_at: str
@@ -871,6 +879,7 @@ class AlertRuleExportItem(BaseModel):
     cooldown_seconds: int = 300
     ai_enrichment: bool = False
     is_enabled: bool = True
+    display_order: int = 0
 
 
 class AlertRuleExportBundle(BaseModel):

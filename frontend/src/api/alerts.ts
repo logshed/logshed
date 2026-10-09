@@ -98,6 +98,13 @@ export async function importAlertRules(
   });
 }
 
+export async function reorderAlertRules(ruleIds: number[]): Promise<AlertRule[]> {
+  return apiFetch<AlertRule[]>('/api/alerts/rules/reorder', {
+    method: 'PUT',
+    body: JSON.stringify({ rule_ids: ruleIds }),
+  });
+}
+
 export async function fetchMaintenanceWindow(): Promise<MaintenanceWindowResponse> {
   return apiFetch<MaintenanceWindowResponse>('/api/alerts/maintenance');
 }

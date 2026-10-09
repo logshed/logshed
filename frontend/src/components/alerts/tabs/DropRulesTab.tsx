@@ -9,6 +9,9 @@ import {
   Zap,
   Download,
   Upload,
+  GripVertical,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { DropPreset, DropRule } from '../../../types.ts';
 import {
@@ -20,6 +23,7 @@ import {
   exportAllDropRules,
   exportSingleDropRule,
   importDropRules,
+  reorderDropRules,
 } from '../../../api/dropRules.ts';
 import { fetchLogFacets } from '../../../api/logs.ts';
 import { downloadBlob, slugify } from '../../../utils/formatters.ts';
@@ -83,6 +87,53 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
   useEffect(() => {
     onRulesChange?.(rules);
   }, [rules, onRulesChange]);
+
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const handleReorder = async (newRules: DropRule[]) => {
+    const previousRules = [...rules];
+    setRules(newRules);
+    try {
+      const updated = await reorderDropRules(newRules.map((r) => r.id));
+      setRules(updated);
+    } catch (err: any) {
+      setRules(previousRules);
+      setFeedbackMsg({ text: err.message || 'Failed to update rule order.', isError: true });
+    }
+  };
+
+  const handleMoveRule = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= rules.length) return;
+    const newRules = [...rules];
+    const [moved] = newRules.splice(index, 1);
+    newRules.splice(targetIndex, 0, moved);
+    handleReorder(newRules);
+  };
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) {
+      setDraggedIndex(null);
+      return;
+    }
+    const newRules = [...rules];
+    const [moved] = newRules.splice(draggedIndex, 1);
+    newRules.splice(targetIndex, 0, moved);
+    setDraggedIndex(null);
+    handleReorder(newRules);
+  };
 
   const handleInstallPreset = async (preset: DropPreset) => {
     setInstallingPresetId(preset.id);
@@ -309,54 +360,92 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
         </div>
       ) : (
         <div className="divide-y divide-dark-800">
-          {rules.map((rule) => {
+          {rules.map((rule, index) => {
             const ruleDisplayName = rule.name || rule.app_pattern || rule.source_pattern || 'Drop Rule';
             return (
               <div
                 key={rule.id}
                 data-testid={`drop-rule-row-${rule.id}`}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, index)}
                 className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                  draggedIndex === index ? 'opacity-40 bg-dark-800/60' : ''
+                } ${
                   rule.is_enabled ? 'hover:bg-dark-850/40' : 'opacity-60 bg-dark-950/20'
                 }`}
               >
-                <div className="space-y-1.5 min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-slate-200">{ruleDisplayName}</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
-                      {rule.is_regex ? 'Regex' : 'Substring'}
-                    </span>
-                    {(rule.dropped_count || 0) > 0 && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
-                        {(rule.dropped_count || 0).toLocaleString()} dropped
-                      </span>
-                    )}
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  {/* Drag Handle and Up/Down Chevrons */}
+                  <div className="flex flex-col items-center gap-2 sm:gap-0.5 shrink-0 pt-0.5 text-slate-500">
+                    <button
+                      type="button"
+                      onClick={() => handleMoveRule(index, 'up')}
+                      disabled={index === 0}
+                      aria-label={`Move rule ${rule.id} up`}
+                      title="Move up"
+                      className="w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <ChevronUp className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                    </button>
+                    <div
+                      className="hidden sm:flex cursor-grab active:cursor-grabbing p-0.5 text-slate-500 hover:text-slate-300"
+                      title="Drag to reorder"
+                    >
+                      <GripVertical className="w-4 h-4" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveRule(index, 'down')}
+                      disabled={index === rules.length - 1}
+                      aria-label={`Move rule ${rule.id} down`}
+                      title="Move down"
+                      className="w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <ChevronDown className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                    </button>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                    <span>
-                      Host:{' '}
-                      {rule.source_pattern ? (
-                        <span className="font-mono text-slate-300">{rule.source_pattern}</span>
-                      ) : (
-                        <span className="text-slate-400 italic">Any</span>
-                      )}
-                    </span>
-                    <span>
-                      App:{' '}
-                      {rule.app_pattern ? (
-                        <span className="font-mono text-slate-300">{rule.app_pattern}</span>
-                      ) : (
-                        <span className="text-slate-400 italic">Any</span>
-                      )}
-                    </span>
-                    <span>
-                      Severity:{' '}
-                      <span className="text-slate-300">
-                        {rule.severity_threshold != null
-                          ? `${getSeverityInfo(rule.severity_threshold).label} and below`
-                          : 'Any'}
+                  <div className="space-y-1.5 min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-slate-200">{ruleDisplayName}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
+                        {rule.is_regex ? 'Regex' : 'Substring'}
                       </span>
-                    </span>
+                      {(rule.dropped_count || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                          {(rule.dropped_count || 0).toLocaleString()} dropped
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                      <span>
+                        Host:{' '}
+                        {rule.source_pattern ? (
+                          <span className="font-mono text-slate-300">{rule.source_pattern}</span>
+                        ) : (
+                          <span className="text-slate-400 italic">Any</span>
+                        )}
+                      </span>
+                      <span>
+                        App:{' '}
+                        {rule.app_pattern ? (
+                          <span className="font-mono text-slate-300">{rule.app_pattern}</span>
+                        ) : (
+                          <span className="text-slate-400 italic">Any</span>
+                        )}
+                      </span>
+                      <span>
+                        Severity:{' '}
+                        <span className="text-slate-300">
+                          {rule.severity_threshold != null
+                            ? `${getSeverityInfo(rule.severity_threshold).label} and below`
+                            : 'Any'}
+                        </span>
+                      </span>
+                    </div>
                   </div>
                 </div>
 

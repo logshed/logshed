@@ -78,6 +78,7 @@ class CompiledAlertRule:
         trigger_count: int = 0,
         last_triggered_at: Optional[str] = None,
         suppress_until: Optional[str] = None,
+        display_order: int = 0,
     ):
         self.id = id
         self.name = name
@@ -94,6 +95,7 @@ class CompiledAlertRule:
         self.trigger_count = trigger_count
         self.last_triggered_at = last_triggered_at
         self.suppress_until = suppress_until
+        self.display_order = display_order
         self.suppress_until_epoch: Optional[float] = None
         self._recompute_suppress_epoch()
 
@@ -234,10 +236,11 @@ class AlertEvaluator:
                 """
                 SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                        match_pattern, threshold_count, window_seconds, cooldown_seconds,
-                       ai_enrichment, is_enabled, trigger_count, last_triggered_at, suppress_until
+                       ai_enrichment, is_enabled, trigger_count, last_triggered_at, suppress_until,
+                       display_order
                 FROM alert_rules
                 WHERE is_enabled = 1
-                ORDER BY id ASC
+                ORDER BY display_order ASC, id ASC
                 """
             )
             return cur.fetchall()
@@ -271,6 +274,7 @@ class AlertEvaluator:
                 trigger_count=r[12] or 0,
                 last_triggered_at=r[13],
                 suppress_until=r[14],
+                display_order=r[15] if len(r) > 15 else 0,
             )
             compiled.append(rule)
             active_ids.add(rule.id)

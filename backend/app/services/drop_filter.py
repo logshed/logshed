@@ -32,6 +32,7 @@ class CompiledDropRule:
     is_enabled: bool
     severity_threshold: Optional[int] = None
     compiled_regex: Optional[re.Pattern] = None
+    display_order: int = 0
 
     def match_message(self, message: str) -> bool:
         """
@@ -235,8 +236,8 @@ class DropFilter:
         def _load(c: sqlite3.Connection):
             cur = c.cursor()
             cur.execute(
-                "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold "
-                "FROM drop_rules WHERE is_enabled = 1 ORDER BY id ASC"
+                "SELECT id, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, display_order "
+                "FROM drop_rules WHERE is_enabled = 1 ORDER BY display_order ASC, id ASC"
             )
             return cur.fetchall()
 
@@ -260,6 +261,7 @@ class DropFilter:
             is_regex = bool(r[4])
             is_enabled = bool(r[5])
             sev_thresh = r[6] if len(r) > 6 else None
+            disp_ord = r[7] if len(r) > 7 else 0
 
             compiled_re = None
             if is_regex:
@@ -279,6 +281,7 @@ class DropFilter:
                     is_enabled=is_enabled,
                     severity_threshold=sev_thresh,
                     compiled_regex=compiled_re,
+                    display_order=disp_ord,
                 )
             )
 

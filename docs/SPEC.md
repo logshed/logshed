@@ -330,7 +330,17 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
      ```
    - Backfills historical on-demand `ai_audit_log` records into `alert_history`.
 
-### 2.3 Asynchronous FTS5 Indexing Model & Worker Architecture
+### 2.3 Schema Migration v3 (Configurable Rule Ordering)
+- **Version Stamp:** `PRAGMA user_version = 3;`.
+- **Display Order Columns:** Adds `display_order INTEGER NOT NULL DEFAULT 0` to both `drop_rules` and `alert_rules`.
+- **Backfill Existing Rows:** Sets `display_order = id` for existing records in both tables where `display_order = 0`.
+- **Composite Indexes:**
+  ```sql
+  CREATE INDEX IF NOT EXISTS idx_drop_rules_order ON drop_rules(is_enabled, display_order ASC, id ASC);
+  CREATE INDEX IF NOT EXISTS idx_alert_rules_order ON alert_rules(is_enabled, display_order ASC, id ASC);
+  ```
+
+### 2.4 Asynchronous FTS5 Indexing Model & Worker Architecture
 - **Supervised Background Task:** `FTSIndexWorker` (`backend/app/services/fts_indexer.py`) runs as a supervised task under `_supervise_worker` in `backend/app/main.py`. Worker failures are isolated, logged, and restarted with exponential backoff.
 - **Decoupled Ingestion Pipeline:** Ingestion tasks (`QueueConsumer`) commit raw log rows directly to the `logs` table without waiting for FTS tokenization.
 - **Catch-Up Latency Target:** Catch-up latency target is <= 1000ms (empirically measured < 250ms).
@@ -348,7 +358,7 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
 - **Retention Coordination:** Retention pruning (`backend/app/services/retention.py`) coordinates with `fts_index_state.last_indexed_id`. During retention pruning (`execute_prune`), pending unindexed logs are indexed first (`index_pending_logs`), and deletions enforce `AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)` to guarantee no unindexed log records are ever purged without being indexed, preventing orphaned FTS records or unindexed log deletion.
 - **Graceful Shutdown Sequencing:** Lifespan shutdown stops log collectors (`SyslogServer`, `DockerTailer`), flushes the multiline assembler, stops `QueueConsumer` (drains queue to DB), then stops `FTSIndexWorker` (flushes pending unindexed logs to `logs_fts`), followed by `PruneWorker`, `StorageMetricsWorker`, `AlertEvaluator`, `DailyDigestWorker`, notification executor, regex executor, and flushes drop filter counts.
 
-### 2.4 Thread-Local Connection Model & Concurrency
+### 2.5 Thread-Local Connection Model & Concurrency
 - **Thread-Local Read Connection Reuse:** In `backend/app/api/deps.py`, synchronous database queries are dispatched to worker threads via `run_db_query(fn, custom_db_path)` using `asyncio.to_thread()`. `get_thread_read_connection(db_path: Path) -> sqlite3.Connection` maintains a thread-local dictionary `_thread_local.connections` keyed by resolved database path, reusing connections across sequential queries on worker threads.
 - **One-Time Pragma Execution:** Pragmas and row factory are configured only once per newly opened thread connection:
   `PRAGMA journal_mode=WAL;`
@@ -368,7 +378,7 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
   This rollback guard prevents shared read locks on the WAL index (`-shm`) from blocking write checkpoints, allowing `PRAGMA wal_checkpoint(TRUNCATE)` to complete without contention.
 - **Connection Teardown Hook:** `close_thread_local_connections()` closes all cached connections on the calling thread and clears the dictionary, ensuring clean test fixture teardown and process exit.
 
-### 2.5 Retention Pruning
+### 2.6 Retention Pruning
 Daily task runs iterative batch pruning coordinated with the FTS indexing watermark to prevent WAL expansion, lock contention, and orphaned FTS rows:
 1. Drain unindexed logs via `index_pending_logs(db_path)` to ensure all historical records are searchable prior to purge.
 2. Loop batch deletions until no matching rows remain, guarded by `last_indexed_id`:
@@ -378,7 +388,7 @@ Daily task runs iterative batch pruning coordinated with the FTS indexing waterm
 4. Checkpoint and truncate the WAL:
    `PRAGMA wal_checkpoint(TRUNCATE);`
 
-### 2.6 Storage Metrics & Disk Monitoring
+### 2.7 Storage Metrics & Disk Monitoring
 - **Sampling Strategy:** Background worker samples metrics hourly and immediately following any manual/automated prune event.
  - Compute total database disk footprint via `os.path.getsize()` across `/data/logs.db`, `/data/logs.db-wal`, and `/data/logs.db-shm`.
  - Read host mount capacity and free space using `shutil.disk_usage("/data")`.
@@ -405,6 +415,8 @@ Daily task runs iterative batch pruning coordinated with the FTS indexing waterm
 * **Raw Log Storage:** Logs are committed to SQLite in their original unredacted format. Redaction is not applied at ingestion.
 * **Bounded Buffer & Batch Flusher:** `asyncio.Queue(maxsize=10000)`. If saturated, increment atomic `dropped_logs_total` counter. Flusher commits batches to SQLite after a **50ms debounce window** or when the batch reaches 5000 records. The flusher aggressively drains pending items using `queue.get_nowait()` during each cycle to boost throughput, prevent artificial bottlenecks, and provide low-latency real-time streaming to UI and SSE subscribers.
 * **Chunked Batch Inserts with RETURNING id:** In `QueueConsumer._insert_batch`, drained items are partitioned into chunks of <= 500 records to respect SQLite parameter limits (9 columns * 500 = 4,500 parameters << 32,766 limit). Each chunk is inserted using a single multi-row parameterized `INSERT INTO logs (...) VALUES (...), ... RETURNING id` statement. The returned database auto-increment IDs are sequentially mapped to in-memory entries, broadcast to live SSE subscribers (`/api/logs/stream`), and `fts_indexer.notify_new_logs()` is signaled immediately upon transaction commit for sub-second FTS search catch-up.
+* **Ingestion Drop Filtering Evaluation Order:** Drop rules evaluate in user-configured sequence (`ORDER BY display_order ASC, id ASC`). Drop evaluation short-circuits upon the first matching rule, immediately discarding the incoming log line and attributing the drop counter to that specific rule.
+* **Alert Rules Evaluation Order:** Alert rules evaluate sequentially in user-configured sequence (`ORDER BY display_order ASC, id ASC`). Each rule evaluates within its own sliding window, and dispatch ordering within a batch deterministically follows this configured order.
 
 ---
 
@@ -507,6 +519,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/alerts/rules` | Create a new alert rule | `{"name": "...", "rule_type": "...", "channel_id": ..., "filter_app": "...", "filter_severity": ..., "match_pattern": "...", "threshold_count": 1, "window_seconds": 60, "cooldown_seconds": 300, "ai_enrichment": false, "is_enabled": true}` |
 | `GET` | `/api/alerts/rules/{rule_id}` | Retrieve a single alert rule by ID | None |
 | `PUT` | `/api/alerts/rules/{rule_id}` | Update an existing alert rule | Partial or complete rule fields |
+| `PUT` | `/api/alerts/rules/reorder` | Atomically update evaluation and display ordering of alert rules | `{"rule_ids": [...]}` |
 | `DELETE` | `/api/alerts/rules/{rule_id}` | Delete an alert rule | None |
 | `POST` | `/api/alerts/test` | Test alert rule match pattern against historical logs (dry-run) | `{"rule_type": "...", "match_pattern": "...", "filter_app": "...", "filter_severity": ..., "window_seconds": ..., "threshold_count": ..., "sample_size": ...}` |
 | `GET` | `/api/alerts/export` | Export all alert rules as JSON bundle | None |
@@ -524,6 +537,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `GET` | `/api/drop_rules` | List all configured drop rules with drop counters | None |
 | `POST` | `/api/drop_rules` | Create a new drop rule | `{"name": "...", "source_pattern": "...", "app_pattern": "...", "message_pattern": "...", "is_regex": false, "severity_threshold": ..., "is_enabled": true}` |
 | `PUT` | `/api/drop_rules/{rule_id}` | Update an existing drop rule | Partial or complete drop rule fields |
+| `PUT` | `/api/drop_rules/reorder` | Atomically update evaluation and display ordering of drop rules | `{"rule_ids": [...]}` |
 | `DELETE` | `/api/drop_rules/{rule_id}` | Delete a drop rule | None |
 | `POST` | `/api/drop_rules/{rule_id}/reset` | Reset dropped counter for a specific drop rule to zero | None |
 | `POST` | `/api/drop_rules/test` | Dry-run test a drop rule pattern against recent logs | `{"source_pattern": "...", "app_pattern": "...", "message_pattern": "...", "is_regex": false, "severity_threshold": ..., "sample_size": ...}` |

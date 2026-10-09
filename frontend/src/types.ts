@@ -253,6 +253,10 @@ export interface VersionInfo {
   repo_deprecated?: boolean;
 }
 
+export interface RuleReorderRequest {
+  rule_ids: number[];
+}
+
 export interface DropRule {
   id: number;
   name?: string | null;
@@ -263,6 +267,7 @@ export interface DropRule {
   is_enabled: boolean;
   severity_threshold?: number | null;
   dropped_count: number;
+  display_order?: number;
   created_at: string;
 }
 
@@ -393,6 +398,7 @@ export interface AlertRule {
   ai_enrichment: boolean;
   is_enabled: boolean;
   trigger_count: number;
+  display_order?: number;
   last_triggered_at?: string | null;
   suppress_until?: string | null;
   created_at: string;

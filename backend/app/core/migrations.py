@@ -337,9 +337,34 @@ CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name
     """)
 
 
+def migrate_v3(conn: sqlite3.Connection) -> None:
+    """
+    Execute Migration 3: Configurable rule ordering for drop_rules and alert_rules
+    (LogShed v1.3.0 upgrade).
+    - Add display_order column to drop_rules and alert_rules.
+    - Backfill display_order from existing rule IDs.
+    - Create composite indexes for ordered evaluation.
+    """
+    logger.info("Running migration v3...")
+    cur = conn.execute("PRAGMA table_info(drop_rules);")
+    drop_cols = {row[1] for row in cur.fetchall()}
+    if "display_order" not in drop_cols:
+        conn.execute("ALTER TABLE drop_rules ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("UPDATE drop_rules SET display_order = id WHERE display_order = 0;")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_drop_rules_order ON drop_rules(is_enabled, display_order ASC, id ASC);")
+
+    cur = conn.execute("PRAGMA table_info(alert_rules);")
+    alert_cols = {row[1] for row in cur.fetchall()}
+    if "display_order" not in alert_cols:
+        conn.execute("ALTER TABLE alert_rules ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("UPDATE alert_rules SET display_order = id WHERE display_order = 0;")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_rules_order ON alert_rules(is_enabled, display_order ASC, id ASC);")
+
+
 MIGRATIONS = [
     (1, migrate_v1),
     (2, migrate_v2),
+    (3, migrate_v3),
 ]
 
 def run_migrations(db_path: Union[str, Path]) -> None:
@@ -378,4 +403,5 @@ def run_migrations(db_path: Union[str, Path]) -> None:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
     finally:
         conn.close()
+
 

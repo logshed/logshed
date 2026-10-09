@@ -517,3 +517,52 @@ class TestMaintenanceWindowApi:
         assert get_data["server_time"] is not None
         assert get_data["server_timezone"] is not None
 
+    @pytest.mark.asyncio
+    async def test_reorder_alert_rules(self, client: AsyncClient, auth_headers: dict):
+        # 1. Create three alert rules
+        r1 = (await client.post("/api/alerts/rules", json={"name": "Alert Alpha", "rule_type": "threshold"}, headers=auth_headers)).json()
+        r2 = (await client.post("/api/alerts/rules", json={"name": "Alert Beta", "rule_type": "threshold"}, headers=auth_headers)).json()
+        r3 = (await client.post("/api/alerts/rules", json={"name": "Alert Gamma", "rule_type": "threshold"}, headers=auth_headers)).json()
+        r1_id, r2_id, r3_id = r1["id"], r2["id"], r3["id"]
+
+        cur_rules = (await client.get("/api/alerts/rules", headers=auth_headers)).json()
+        all_ids = [r["id"] for r in cur_rules]
+
+        # 2. Duplicate rule IDs rejected with 400
+        bad_dup = [r1_id, r1_id] + [i for i in all_ids if i not in (r1_id,)]
+        res_dup = await client.put("/api/alerts/rules/reorder", json={"rule_ids": bad_dup}, headers=auth_headers)
+        assert res_dup.status_code == 400
+
+        # 3. Partial rule IDs rejected with 400
+        res_partial = await client.put("/api/alerts/rules/reorder", json={"rule_ids": [r1_id, r2_id]}, headers=auth_headers)
+        assert res_partial.status_code == 400
+
+        # 4. Unknown rule ID rejected with 400
+        bad_unk = all_ids[:-1] + [999999]
+        res_unk = await client.put("/api/alerts/rules/reorder", json={"rule_ids": bad_unk}, headers=auth_headers)
+        assert res_unk.status_code == 400
+
+        # 5. Successful reorder: move r3 to front
+        other_ids = [i for i in all_ids if i not in (r1_id, r2_id, r3_id)]
+        new_order = [r3_id, r1_id, r2_id] + other_ids
+        reorder_res = await client.put("/api/alerts/rules/reorder", json={"rule_ids": new_order}, headers=auth_headers)
+        assert reorder_res.status_code == 200
+        reordered_items = reorder_res.json()
+        assert [r["id"] for r in reordered_items] == new_order
+
+        # Verify display_order values are sequential 1, 2, 3...
+        for idx, item in enumerate(reordered_items, start=1):
+            assert item["display_order"] == idx
+
+        # 6. GET /api/alerts/rules returns the updated order
+        get_res = await client.get("/api/alerts/rules", headers=auth_headers)
+        assert get_res.status_code == 200
+        assert [r["id"] for r in get_res.json()] == new_order
+
+        # 7. In-memory alert evaluator rules are synchronized
+        from app.services.alert_evaluator import get_alert_evaluator
+        evaluator_rules = get_alert_evaluator()._rules
+        eval_ids = [r.id for r in evaluator_rules]
+        assert eval_ids.index(r3_id) < eval_ids.index(r1_id) < eval_ids.index(r2_id)
+
+

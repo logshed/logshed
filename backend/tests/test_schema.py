@@ -30,12 +30,12 @@ def db_path(tmp_path: Path) -> Path:
 
 class TestSchemaIntegrity:
 
-    def test_user_version_set_to_two(self, db_path: Path):
-        """After migration runner finishes, user_version should be exactly 2."""
+    def test_user_version_set_to_three(self, db_path: Path):
+        """After migration runner finishes, user_version should be exactly 3."""
         conn = get_connection(db_path)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == 2
+        assert version == 3
 
     def test_wal_mode_enabled(self, db_path: Path):
         """WAL journal mode and performance pragmas should be active."""
@@ -142,6 +142,7 @@ class TestSchemaIntegrity:
             "is_regex",
             "is_enabled",
             "dropped_count",
+            "display_order",
             "created_at",
         }
         assert expected.issubset(set(cols.keys()))
@@ -184,9 +185,11 @@ class TestSchemaIntegrity:
             "idx_logs_source_app_ip",
             "idx_storage_metrics_time",
             "idx_drop_rules_enabled",
+            "idx_drop_rules_order",
             "idx_saved_views_pinned",
             "idx_notification_channels_enabled",
             "idx_alert_rules_enabled",
+            "idx_alert_rules_order",
             "idx_alert_history_triggered_at",
             "idx_alert_history_rule_id",
             "idx_alert_history_rule_time",
@@ -230,6 +233,7 @@ class TestSchemaIntegrity:
             "trigger_count",
             "last_triggered_at",
             "suppress_until",
+            "display_order",
             "created_at",
         }
         assert expected.issubset(set(cols.keys()))
@@ -326,34 +330,34 @@ class TestMigrationRunner:
         conn = get_connection(p)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == 2
+        assert version == 3
 
     def test_sequential_future_migration_execution(self, tmp_path: Path, monkeypatch):
         """Sequential runner executes newly added migrations in ascending order."""
         p = tmp_path / "future_mig.db"
         run_migrations(p)
 
-        # Confirm v2
+        # Confirm v3
         conn = get_connection(p)
-        assert get_user_version(conn) == 2
+        assert get_user_version(conn) == 3
         conn.close()
 
-        # Simulate adding a future migration v3
-        migration_v3_ran = False
+        # Simulate adding a future migration v4
+        migration_v4_ran = False
 
-        def mock_migrate_v3(conn: sqlite3.Connection) -> None:
-            nonlocal migration_v3_ran
-            migration_v3_ran = True
+        def mock_migrate_v4(conn: sqlite3.Connection) -> None:
+            nonlocal migration_v4_ran
+            migration_v4_ran = True
             conn.execute("CREATE TABLE future_test (id INTEGER PRIMARY KEY);")
 
-        extended_migrations = list(MIGRATIONS) + [(3, mock_migrate_v3)]
+        extended_migrations = list(MIGRATIONS) + [(4, mock_migrate_v4)]
         monkeypatch.setattr("app.core.migrations.MIGRATIONS", extended_migrations)
 
         run_migrations(p)
-        assert migration_v3_ran is True
+        assert migration_v4_ran is True
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == 4
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "future_test" in tables
         conn.close()
@@ -384,11 +388,11 @@ class TestMigrationRunner:
         assert max_id >= 1
         conn.close()
 
-        # Run migration runner to upgrade through all pending migrations to v2
+        # Run migration runner to upgrade through all pending migrations to v3
         run_migrations(p)
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 2
+        assert get_user_version(conn) == 3
         triggers = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()}
         assert "logs_ai" not in triggers
         assert "logs_ad" in triggers
@@ -421,6 +425,52 @@ class TestMigrationRunner:
         history = conn.execute("SELECT rule_name, incident_summary FROM alert_history WHERE rule_name = 'On-Demand Analysis'").fetchone()
         assert history is not None
         assert history[1] == "analysis result"
+        conn.close()
+
+    def test_migration_from_v2_to_v3(self, tmp_path: Path):
+        """Upgrading an existing v2 database to v3 adds display_order and creates indexes."""
+        p = tmp_path / "v2_to_v3.db"
+        conn = get_connection(p)
+        from app.core.migrations import migrate_v1, migrate_v2, set_user_version
+        migrate_v1(conn)
+        migrate_v2(conn)
+        set_user_version(conn, 2)
+
+        # Insert drop_rules and alert_rules as they existed in v2
+        conn.execute(
+            """INSERT INTO drop_rules (name, message_pattern, is_regex, is_enabled, dropped_count, created_at)
+               VALUES ('Drop 1', 'drop_pat_1', 0, 1, 0, datetime('now')),
+                      ('Drop 2', 'drop_pat_2', 0, 1, 0, datetime('now'))"""
+        )
+        conn.execute(
+            """INSERT INTO alert_rules (name, rule_type, is_enabled, created_at)
+               VALUES ('Alert 1', 'threshold', 1, datetime('now')),
+                      ('Alert 2', 'threshold', 1, datetime('now'))"""
+        )
+        conn.commit()
+        conn.close()
+
+        # Run migration runner to upgrade to v3
+        run_migrations(p)
+
+        conn = get_connection(p)
+        assert get_user_version(conn) == 3
+
+        # Verify display_order column and backfill display_order = id
+        drop_rows = conn.execute("SELECT id, display_order FROM drop_rules ORDER BY id ASC").fetchall()
+        assert len(drop_rows) == 2
+        for r in drop_rows:
+            assert r[0] == r[1]
+
+        alert_rows = conn.execute("SELECT id, display_order FROM alert_rules ORDER BY id ASC").fetchall()
+        assert len(alert_rows) == 2
+        for r in alert_rows:
+            assert r[0] == r[1]
+
+        # Verify composite indexes
+        indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        assert "idx_drop_rules_order" in indexes
+        assert "idx_alert_rules_order" in indexes
         conn.close()
 
 

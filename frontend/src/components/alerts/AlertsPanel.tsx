@@ -29,6 +29,7 @@ import {
   exportAllAlertRules,
   exportSingleAlertRule,
   importAlertRules,
+  reorderAlertRules,
   fetchMaintenanceWindow,
   setMaintenanceWindow,
   updateMaintenanceSchedules,
@@ -484,6 +485,18 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     }
   };
 
+  const handleReorderRules = async (newRules: AlertRule[]) => {
+    const previousRules = [...rules];
+    setRules(newRules);
+    try {
+      const updated = await reorderAlertRules(newRules.map((r) => r.id));
+      setRules(updated);
+    } catch (err: any) {
+      setRules(previousRules);
+      setFeedbackMsg({ text: err.message || 'Failed to update rule order.', isError: true });
+    }
+  };
+
   // Toggle rule status
   const handleToggleRule = async (rule: AlertRule) => {
     try {
@@ -803,6 +816,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onOpenEditModal={handleOpenEditModal}
           onDeleteRule={(rule) => setRuleToDelete(rule)}
           onNavigateToSettings={handleNavigateToSettings}
+          onReorderRules={handleReorderRules}
           getChannelStatus={getChannelStatus}
         />
       )}

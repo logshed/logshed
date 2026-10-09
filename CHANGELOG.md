@@ -5,6 +5,14 @@ All notable changes to LogShed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0-beta.1] - 2026-10-09
+
+### Added
+- **Configurable Rule Ordering for Drop Rules and Alert Rules**: User-configurable evaluation priority ordering for ingestion drop rules (`drop_rules`) and alert rules (`alert_rules`) backed by SQLite schema migration v3 (`display_order`), dedicated REST reordering endpoints (`PUT /api/drop-rules/reorder`, `PUT /api/alerts/rules/reorder`), and in-memory engine synchronization.
+- **Accessible & Drag-and-Drop Rule Reordering UI**: Desktop drag-and-drop reordering with grip handles alongside touch-friendly single-tap Up/Down chevron controls with WCAG-compliant touch targets on mobile devices.
+
+---
+
 ## [1.2.1] - 2026-10-08
 
 ### Added
@@ -132,6 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native multi-architecture container images (`linux/amd64` and `linux/arm64`).
 - Unraid Community Applications template (`unraid-template.xml`) with cache-pool POSIX locking recommendations.
 
+[1.3.0-beta.1]: https://github.com/logshed/logshed/compare/v1.2.1...v1.3.0-beta.1
 [1.2.1]: https://github.com/logshed/logshed/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/logshed/logshed/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/logshed/logshed/compare/v1.0.0...v1.1.0

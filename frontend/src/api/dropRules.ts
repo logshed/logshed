@@ -77,3 +77,10 @@ export async function importDropRules(
   });
 }
 
+export async function reorderDropRules(ruleIds: number[]): Promise<DropRule[]> {
+  return apiFetch<DropRule[]>('/api/drop-rules/reorder', {
+    method: 'PUT',
+    body: JSON.stringify({ rule_ids: ruleIds }),
+  });
+}
+
