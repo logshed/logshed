@@ -156,7 +156,6 @@ def test_compute_daily_digest_rollup_empty(tmp_path: Path):
     assert rollup["total_errors"] == 0
     assert rollup["top_errors"] == []
     assert rollup["top_services"] == []
-    assert rollup["sample_lines"] == []
     assert isinstance(rollup["storage_delta_str"], str)
 
 

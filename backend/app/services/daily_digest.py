@@ -161,26 +161,6 @@ def compute_daily_digest_rollup(
     else:
         storage_delta_str = "0 B"
 
-    # Sample logs for AI synthesis (prioritize errors, then recent logs)
-    cursor.execute(
-        """
-        SELECT timestamp, source_alias, source_ip, app_name, severity, message
-        FROM logs
-        WHERE timestamp >= ?
-        ORDER BY (CASE WHEN severity <= 3 THEN 0 ELSE 1 END) ASC, timestamp DESC
-        LIMIT 100
-        """,
-        (since_iso,),
-    )
-    raw_sample_rows = cursor.fetchall()
-    sample_lines = []
-    for r in raw_sample_rows:
-        src = r[1] or r[2] or "unknown"
-        app = r[3] or "unknown"
-        sev = r[4]
-        msg = r[5] or ""
-        sample_lines.append(f"[{r[0]}] [{src}] [{app}] [severity {sev}] {msg}")
-
     return {
         "since_iso": since_iso,
         "now_iso": now_utc.isoformat(),
@@ -191,7 +171,6 @@ def compute_daily_digest_rollup(
         "current_db_bytes": current_db_bytes,
         "delta_bytes": delta_bytes,
         "storage_delta_str": storage_delta_str,
-        "sample_lines": sample_lines,
     }
 
 
