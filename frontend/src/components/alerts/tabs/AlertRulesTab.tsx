@@ -131,7 +131,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            {maintenance.on_demand_until && (
+            {(maintenance.on_demand_until || (maintenance.sessions && maintenance.sessions.length > 0)) && (
               <button
                 type="button"
                 onClick={onClearMaintenance}

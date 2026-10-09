@@ -269,7 +269,8 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
      ```
    - Backfills historical on-demand `ai_audit_log` records into `alert_history`.
 
-### 2.3 Schema Migration v3 (Configurable Rule Ordering)
+### 2.3 Schema Migration v3 (Rule Ordering, API Tokens & Multi-Session Maintenance Tracking)
+Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3.0, advancing the schema version to `PRAGMA user_version = 3;`:
 - **Version Stamp:** `PRAGMA user_version = 3;`.
 - **Display Order Columns:** Adds `display_order INTEGER NOT NULL DEFAULT 0` to both `drop_rules` and `alert_rules`.
 - **Backfill Existing Rows:** Sets `display_order = id` for existing records in both tables where `display_order = 0`.
@@ -278,6 +279,42 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
   CREATE INDEX IF NOT EXISTS idx_drop_rules_order ON drop_rules(is_enabled, display_order ASC, id ASC);
   CREATE INDEX IF NOT EXISTS idx_alert_rules_order ON alert_rules(is_enabled, display_order ASC, id ASC);
   ```
+- **API Tokens Table:**
+  ```sql
+  CREATE TABLE IF NOT EXISTS api_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_prefix TEXT NOT NULL,
+      scopes TEXT NOT NULL DEFAULT '["maintenance:write"]',
+      created_at DATETIME NOT NULL,
+      expires_at DATETIME,
+      last_used_at DATETIME,
+      created_by TEXT DEFAULT 'admin'
+  );
+  CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_api_tokens_expires ON api_tokens(expires_at);
+  ```
+- **Maintenance Sessions Table (Multi-Session Tracking):**
+  ```sql
+  CREATE TABLE IF NOT EXISTS maintenance_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL UNIQUE,
+      token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL,
+      initiated_by TEXT NOT NULL,
+      reason TEXT,
+      log_handling TEXT NOT NULL DEFAULT 'silence_alerts',
+      target_app TEXT,
+      target_host TEXT,
+      created_at DATETIME NOT NULL,
+      expires_at DATETIME NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);
+  ```
+- **System Identity Setup:**
+  - `server_name` defaults to `'LogShed'` in `system_settings` table.
+  - `instance_id` set to persistent UUID4 if not already present.
 
 ### 2.4 Asynchronous FTS5 Indexing Model & Worker Architecture
 - **Supervised Background Task:** `FTSIndexWorker` ([`backend/app/services/fts_indexer.py`](file:///home/ben/workspace/logshed/backend/app/services/fts_indexer.py)) runs as a supervised task under `_supervise_worker` in [`backend/app/main.py`](file:///home/ben/workspace/logshed/backend/app/main.py). Worker failures are isolated, logged, and restarted with exponential backoff.

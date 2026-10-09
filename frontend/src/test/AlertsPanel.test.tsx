@@ -872,6 +872,13 @@ describe('AlertsPanel Component', () => {
     const clearBtn = screen.getByRole('button', { name: 'Clear' });
     fireEvent.click(clearBtn);
 
+    // Confirm in modal
+    await waitFor(() => {
+      expect(screen.getByText('Clear All Maintenance Sessions')).toBeInTheDocument();
+    });
+    const confirmBtn = screen.getByRole('button', { name: 'Clear All Sessions' });
+    fireEvent.click(confirmBtn);
+
     await waitFor(() => {
       expect(setMaintSpy).toHaveBeenCalledWith(null);
       expect(screen.queryByText('Maintenance Window Active')).toBeNull();
@@ -895,7 +902,7 @@ describe('AlertsPanel Component', () => {
     await waitFor(() => {
       expect(screen.getByText('On-Demand Maintenance')).toBeInTheDocument();
       expect(screen.getByText('Scheduled Maintenance Windows')).toBeInTheDocument();
-      expect(screen.getByText('On-Demand Inactive')).toBeInTheDocument();
+      expect(screen.getByText('Inactive')).toBeInTheDocument();
     });
 
     // Click +1h preset
@@ -904,7 +911,7 @@ describe('AlertsPanel Component', () => {
 
     await waitFor(() => {
       expect(setMaintSpy).toHaveBeenCalled();
-      expect(screen.getByText('On-Demand Active')).toBeInTheDocument();
+      expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
     });
   });
 
@@ -933,7 +940,7 @@ describe('AlertsPanel Component', () => {
 
     await waitFor(() => {
       expect(setMaintSpy).toHaveBeenCalled();
-      expect(screen.getByText('On-Demand Active')).toBeInTheDocument();
+      expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
     });
   });
 

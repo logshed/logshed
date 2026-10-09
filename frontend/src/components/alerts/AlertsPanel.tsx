@@ -33,6 +33,7 @@ import {
   fetchMaintenanceWindow,
   setMaintenanceWindow,
   updateMaintenanceSchedules,
+  deleteMaintenanceSession,
 } from '../../api/alerts.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
@@ -133,6 +134,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     schedules: [],
   });
   const [customUntil, setCustomUntil] = useState<string>('');
+  const [appUrl, setAppUrl] = useState<string>('');
 
   const handleNavigateToSettings = () => {
     if (onNavigateToSettings) {
@@ -157,6 +159,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState<boolean>(false);
   const [scheduleToEdit, setScheduleToEdit] = useState<MaintenanceSchedule | null>(null);
   const [scheduleToDelete, setScheduleToDelete] = useState<MaintenanceSchedule | null>(null);
+  const [isClearMaintenanceModalOpen, setIsClearMaintenanceModalOpen] = useState<boolean>(false);
   const [scheduleFormName, setScheduleFormName] = useState<string>('');
   const [scheduleFormRecurrence, setScheduleFormRecurrence] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [scheduleFormStartTime, setScheduleFormStartTime] = useState<string>('02:00');
@@ -227,6 +230,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         setAvailableApps(facetsData.apps);
       }
       if (settingsData) {
+        if (settingsData.app_url) {
+          setAppUrl(settingsData.app_url);
+        }
         setIsAiConfigured(
           Boolean(
             settingsData.ai_enabled &&
@@ -274,7 +280,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   }, [maintenance.until]);
 
   const isMaintenanceActiveNow = Boolean(maintenance.active);
-  const isOnDemandActiveNow = Boolean(maintenance.on_demand_until);
+  const isOnDemandActiveNow = Boolean(
+    maintenance.on_demand_until || (maintenance.sessions && maintenance.sessions.length > 0)
+  );
 
   useEffect(() => {
     const onMaintenanceUpdated = (e: Event) => {
@@ -307,22 +315,45 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     }
   };
 
-  const handleClearMaintenance = async () => {
+  const handleClearMaintenance = () => {
+    setIsClearMaintenanceModalOpen(true);
+  };
+
+  const handleConfirmClearMaintenance = async () => {
+    setIsClearMaintenanceModalOpen(false);
     try {
       const res = await setMaintenanceWindow(null);
       setMaintenance(res);
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
       setFeedbackMsg({
-        text: 'Maintenance window cleared.',
+        text: 'All maintenance sessions cleared.',
         isError: false,
       });
     } catch (err: any) {
       setFeedbackMsg({
-        text: err.message || 'Failed to clear maintenance window.',
+        text: err.message || 'Failed to clear maintenance sessions.',
         isError: true,
       });
     }
   };
+
+  const handleDisableSession = async (sessionId: string) => {
+    try {
+      const res = await deleteMaintenanceSession(sessionId);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      setFeedbackMsg({
+        text: 'Maintenance session terminated.',
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to terminate maintenance session.',
+        isError: true,
+      });
+    }
+  };
+
 
   const handleSetPreset = async (hours: number) => {
     const targetDate = new Date(Date.now() + hours * 3600 * 1000);
@@ -842,6 +873,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       {/* TAB 4: Maintenance */}
       {activeSubTab === 'maintenance' && (
         <MaintenanceWindowTab
+          appUrl={appUrl}
           maintenance={maintenance}
           isOnDemandActiveNow={isOnDemandActiveNow}
           customUntil={customUntil}
@@ -853,6 +885,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onOpenEditScheduleModal={handleOpenEditScheduleModal}
           onToggleScheduleEnabled={handleToggleScheduleEnabled}
           onDeleteSchedule={(sched) => setScheduleToDelete(sched)}
+          onDisableSession={handleDisableSession}
         />
       )}
 
@@ -1211,6 +1244,36 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
               className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
             >
               Delete Schedule
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* CLEAR ALL MAINTENANCE SESSIONS CONFIRMATION MODAL */}
+      <Modal
+        isOpen={isClearMaintenanceModalOpen}
+        onClose={() => setIsClearMaintenanceModalOpen(false)}
+        title="Clear All Maintenance Sessions"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-300 leading-relaxed">
+            Are you sure you want to terminate all active on-demand and API maintenance sessions? Alert notifications will immediately resume.
+          </p>
+          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsClearMaintenanceModalOpen(false)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmClearMaintenance}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
+            >
+              Clear All Sessions
             </button>
           </div>
         </div>

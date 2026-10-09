@@ -176,6 +176,16 @@ class InternalLogHandler(logging.Handler):
                 increment_dropped_by_filter_count(1)
                 return
 
+            from app.services.maintenance_service import should_drop_maintenance_error
+            if should_drop_maintenance_error(
+                log_entry.get("source_alias"),
+                log_entry.get("source_ip"),
+                log_entry.get("app_name"),
+                log_entry.get("severity"),
+            ):
+                increment_dropped_by_filter_count(1)
+                return
+
             try:
                 queue = get_queue()
                 try:
@@ -604,6 +614,16 @@ class KeyedMultilineAssembler:
             merged_entry.get('message', ''),
             severity=merged_entry.get('severity'),
         ) is not None:
+            increment_dropped_by_filter_count(1)
+            return
+
+        from app.services.maintenance_service import should_drop_maintenance_error
+        if should_drop_maintenance_error(
+            merged_entry.get('source_alias'),
+            merged_entry.get('source_ip'),
+            merged_entry.get('app_name'),
+            merged_entry.get('severity'),
+        ):
             increment_dropped_by_filter_count(1)
             return
 

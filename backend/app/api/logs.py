@@ -420,10 +420,12 @@ async def get_log_facets(
                         hosts.remove(ip)
                         hosts.add(alias)
 
+        mapping = {h: sorted(apps) for h, apps in sorted(host_to_apps.items())}
         return {
             "sources": sorted(sources_set),
             "apps": sorted(apps_set),
-            "host_to_apps": {h: sorted(apps) for h, apps in sorted(host_to_apps.items())},
+            "host_to_apps": mapping,
+            "source_app_mapping": mapping,
             "app_to_hosts": {a: sorted(hosts) for a, hosts in sorted(app_to_hosts.items())},
         }
 

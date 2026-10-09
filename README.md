@@ -57,7 +57,8 @@ LogShed is a compact, self-hosted log hub designed for home labs and personal se
 - **Intelligent Alerting & Rate Spike Protection**: Catch critical error bursts, security patterns, or sudden runaway log storms. Real-time in-memory velocity tracking identifies top culprit containers and repeat patterns during storms and sends notifications straight to Discord, Telegram, Pushover, Gotify, or custom webhooks.
 - **On-Demand & Alert AI Diagnosis**: Get human-readable root-cause explanations and practical fix commands when deciphering a cryptic stack trace. All passwords, tokens, and sensitive network addresses are automatically masked before reaching your chosen model (Gemini, OpenAI, or local Ollama).
 - **Daily Digest Summaries**: Receive an automated 24-hour analytical rollup delivered to your notification channels, detailing recurring error counts, top logging containers, and storage trends.
-- **Maintenance Windows**: Silence notification channels with one click during planned package updates, homelab restarts, or scheduled system backups.
+- **Maintenance Windows & Automation**: Silence notification channels or drop error chatter during planned package updates, homelab restarts, or scheduled backups. Trigger on-demand windows programmatically via external scripts.
+- **Programmatic External API**: Generate scoped Bearer tokens for external automation, Home Assistant integrations, backup runners (Proxmox VE, cron), and AI agents with fine-grained permissions and sliding rate limits.
 - **Unified Incident & AI History**: Review past alert triggers alongside full AI diagnostic logs, token usage statistics, and prompt history in a single chronological timeline.
 - **Targeted Deletion & Database Compaction**: Prune specific noisy records on demand and compact your SQLite database to reclaim disk space immediately.
 - **Homelab Ready**: Assign friendly host aliases to router and switch IP addresses, save custom filter views with bidirectional URL sync, and run comfortably on modest hardware (~150 to 250 MB RAM).
@@ -91,7 +92,8 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 | [Configuration Reference](docs/CONFIGURATION.md) | Complete environment variable reference, settings hierarchy, and storage paths |
 | [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Linux, and Docker |
 | [Rules Guide](docs/RULES_GUIDE.md) | In-depth guide to real-time threshold, pattern, and rate spike alert rules, plus ingestion drop rules |
-| [Technical Specification](docs/SPEC.md) | Architecture, SQLite schema, FTS5 triggers, and API specifications |
+| [Technical Specification](docs/SPEC.md) | Architecture, SQLite schema, FTS5 triggers, and system design |
+| [API Specification](docs/spec/api.md) | REST API endpoint catalog covering internal routes and external programmatic v1 endpoints |
 
 ---
 

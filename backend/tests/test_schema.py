@@ -53,7 +53,7 @@ class TestSchemaIntegrity:
         assert fk == 1
 
     def test_all_tables_exist(self, db_path: Path):
-        """All baseline v1.0.0 and v2 tables should exist."""
+        """All baseline v1.0.0, v2, and v3 tables should exist."""
         conn = get_connection(db_path)
         tables = {
             r[0]
@@ -75,6 +75,8 @@ class TestSchemaIntegrity:
             "notification_channels",
             "alert_rules",
             "alert_history",
+            "api_tokens",
+            "maintenance_sessions",
         }
         assert expected.issubset(tables)
 
@@ -428,7 +430,7 @@ class TestMigrationRunner:
         conn.close()
 
     def test_migration_from_v2_to_v3(self, tmp_path: Path):
-        """Upgrading an existing v2 database to v3 adds display_order and creates indexes."""
+        """Upgrading an existing v2 database to v3 adds display_order, creates indexes, api_tokens, maintenance_sessions, and instance_id."""
         p = tmp_path / "v2_to_v3.db"
         conn = get_connection(p)
         from app.core.migrations import migrate_v1, migrate_v2, set_user_version
@@ -471,7 +473,51 @@ class TestMigrationRunner:
         indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
         assert "idx_drop_rules_order" in indexes
         assert "idx_alert_rules_order" in indexes
+
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        assert "api_tokens" in tables
+        assert "maintenance_sessions" in tables
+
+        assert "idx_api_tokens_hash" in indexes
+        assert "idx_api_tokens_expires" in indexes
+        assert "idx_maint_sessions_active" in indexes
+
+        # Verify system_settings server_name and instance_id
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = 'server_name'")
+        assert cur.fetchone()[0] == "LogShed"
+
+        cur.execute("SELECT value FROM system_settings WHERE key = 'instance_id'")
+        instance_id = cur.fetchone()[0]
+        assert len(instance_id) > 10
         conn.close()
+
+    def test_migration_v2_to_v3_preserves_existing_identity(self, tmp_path: Path):
+        """Upgrading v2 to v3 preserves existing custom server_name and instance_id if already present."""
+        p = tmp_path / "v2_preserve_identity.db"
+        conn = get_connection(p)
+        from app.core.migrations import migrate_v1, migrate_v2, set_user_version
+        migrate_v1(conn)
+        migrate_v2(conn)
+        set_user_version(conn, 2)
+
+        # Pre-seed custom server_name and instance_id in v2
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('server_name', 'Production-Node-01', datetime('now'), 0)")
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('instance_id', 'custom-uuid-12345', datetime('now'), 0)")
+        conn.commit()
+        conn.close()
+
+        run_migrations(p)
+
+        conn = get_connection(p)
+        assert get_user_version(conn) == 3
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = 'server_name'")
+        assert cur.fetchone()[0] == "Production-Node-01"
+        cur.execute("SELECT value FROM system_settings WHERE key = 'instance_id'")
+        assert cur.fetchone()[0] == "custom-uuid-12345"
+        conn.close()
+
 
 
 # ===================================================================

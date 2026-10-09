@@ -19,6 +19,7 @@ import {
   Server,
   Shield,
   AlertTriangle,
+  Key,
 } from 'lucide-react';
 import { AiModelInfo, VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
@@ -30,6 +31,7 @@ import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuf
 import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
+import { ApiTokensTab } from './ApiTokensTab.tsx';
 
 export type { SettingsSubTab };
 
@@ -43,6 +45,14 @@ export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
   ) {
     return 'aliases';
   }
+  if (
+    clean === '/settings/api-tokens' ||
+    clean.startsWith('/settings/api-tokens/') ||
+    clean === '/settings/tokens' ||
+    clean.startsWith('/settings/tokens/')
+  ) {
+    return 'tokens';
+  }
   if (clean === '/settings/advanced' || clean.startsWith('/settings/advanced/')) {
     return 'advanced';
   }
@@ -53,6 +63,8 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
   switch (subTab) {
     case 'aliases':
       return '/settings/aliases';
+    case 'tokens':
+      return '/settings/api-tokens';
     case 'advanced':
       return '/settings/advanced';
     case 'app':
@@ -717,43 +729,56 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       )}
 
       {/* Section Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-dark-700 pb-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-dark-700 pb-2">
         <button
           type="button"
           onClick={() => handleSubTabChange('app')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer border ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'app'
-              ? 'bg-dark-800 text-accent-400 border-dark-600'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
-          <Settings className="w-3.5 h-3.5" />
+          <Settings className="w-3.5 h-3.5 shrink-0" />
           <span>Application</span>
         </button>
 
         <button
           type="button"
           onClick={() => handleSubTabChange('aliases')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer border ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'aliases'
-              ? 'bg-dark-800 text-accent-400 border-dark-600'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
-          <Server className="w-3.5 h-3.5" />
+          <Server className="w-3.5 h-3.5 shrink-0" />
           <span>Host Aliases</span>
         </button>
 
         <button
           type="button"
-          onClick={() => handleSubTabChange('advanced')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer border ${
-            activeSubTab === 'advanced'
-              ? 'bg-dark-800 text-accent-400 border-dark-600'
+          onClick={() => handleSubTabChange('tokens')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
+            activeSubTab === 'tokens'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
-          <Shield className="w-3.5 h-3.5" />
+          <Key className="w-3.5 h-3.5 shrink-0" />
+          <span>API Access</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('advanced')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
+            activeSubTab === 'advanced'
+              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+          }`}
+        >
+          <Shield className="w-3.5 h-3.5 shrink-0" />
           <span>Advanced</span>
         </button>
       </div>
@@ -1424,7 +1449,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
       )}
 
-      {/* Sub-tab 3: Advanced */}
+      {/* Sub-tab 3: API Access */}
+      {activeSubTab === 'tokens' && (
+        <ApiTokensTab />
+      )}
+
+      {/* Sub-tab 4: Advanced */}
       {activeSubTab === 'advanced' && (
         <div className="space-y-6">
           {/* Advanced System Settings */}

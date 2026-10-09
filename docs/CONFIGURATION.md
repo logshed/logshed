@@ -172,6 +172,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 | **Alert Rules & Presets** | **Rules & History > Alert Rules** | Define threshold, pattern, or rate spike detection rules and link them to notification channels. |
 | **Ingestion Drop Rules** | **Rules & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |
 | **Maintenance Windows** | **Rules & History > Maintenance** | Set on-demand or recurring schedules to silence notifications during planned downtime. |
+| **API Access Tokens** | **Settings > API Access** | Generate and revoke scoped Bearer tokens for external backup runners, Home Assistant, and AI agents. |
 
 ---
 

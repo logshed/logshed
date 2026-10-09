@@ -92,3 +92,20 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/system/vacuum` | Execute SQLite database VACUUM to reclaim disk space after large deletions (guarded by lock, requires 2x free disk space) | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `409`, `507` |
 | `GET` | `/api/system/storage` | Fetch live disk usage & 30-day history | None | `StorageMetricsResponse` (`{"db_size_bytes": ..., "disk_free_bytes": ..., "disk_total_bytes": ..., "history": [...]}`) | `200` |
 | `GET` | `/api/system/version` | Read installed version and check GHCR for stable release updates | Query params: `refresh: bool` | `VersionResponse` | `200` |
+| **API Token Management (Web UI)** | | | | | |
+| `GET` | `/api/tokens` | List all created API tokens with masked identifiers, scopes, and expiration | None | `list[ApiTokenListItem]` | `200`, `401` |
+| `POST` | `/api/tokens` | Create a new API token and receive one-time raw Bearer secret | `{"name": "...", "scopes": [...], "expires_days": 90}` | `ApiTokenCreateResponse` | `201`, `400`, `401` |
+| `DELETE` | `/api/tokens/{id}` | Revoke an API token immediately | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `401`, `404` |
+| **External Programmatic API v1 (`Authorization: Bearer ls_live_...`)** | | | | | |
+| `GET` | `/api/v1/auth/verify` | Verify token validity and inspect granted scopes | None (any valid token) | `ApiTokenVerifyResponse` (`{"valid": true, "name": "...", "scopes": [...]}`) | `200`, `401` |
+| `POST` | `/api/v1/maintenance/enable` | Start on-demand multi-session maintenance window | `{"duration_minutes": 30, "reason": "...", "log_handling": "silence_alerts" \| "drop_errors", "target_app": "...", "target_host": "..."}` | `ExternalMaintenanceEnableResponse` | `200`, `400`, `401`, `403` |
+| `POST` | `/api/v1/maintenance/disable` | End specific maintenance session or clear all active sessions | `{"session_id": "..."}` (optional) | `ExternalMaintenanceDisableResponse` | `200`, `401`, `403` |
+| `GET` | `/api/v1/maintenance/status` | Read active maintenance status, remaining seconds, and session breakdown | None (`maintenance:read`) | `ExternalMaintenanceStatusResponse` | `200`, `401`, `403` |
+| `GET` | `/api/v1/system/metrics` | Read system telemetry, ingest rates, sliding alert state, and cached error breakdown | None (`system:read`) | `SystemMetricsResponse` | `200`, `401`, `403`, `429` |
+| `POST` | `/api/v1/system/prune` | Trigger retention pruning and compaction (5-minute cooldown) | None (`system:write`) | `PruneResponse` | `200`, `401`, `403`, `429` |
+| `POST` | `/api/v1/system/vacuum` | Trigger SQLite VACUUM compaction (5-minute cooldown) | None (`system:write`) | `VacuumResponse` | `200`, `400`, `401`, `403`, `429` |
+| `GET` | `/api/v1/logs` | Query logs with FTS5, source/app filters, and datetime bounds | `query`, `source`, `app_name`, `severity_max`, `from`, `to`, `limit`, `offset` (`logs:read`) | `LogListResponse` | `200`, `400`, `401`, `403` |
+| `GET` | `/api/v1/logs/{id}/context` | Fetch surrounding log lines before and after target log | `lines` (1-50), `same_app: bool` (`logs:read`) | `LogContextResponse` | `200`, `401`, `403`, `404` |
+| `GET` | `/api/v1/logs/facets` | Fetch host aliases, applications, and source-app mapping | None (`logs:read`) | `LogFacetsResponse` | `200`, `401`, `403` |
+| `GET` | `/api/v1/alerts/history` | Fetch incident history firings and trigger summaries | Query params: `rule_id`, `limit`, `offset` (`alerts:read`) | `list[IncidentHistoryItem]` | `200`, `401`, `403` |
+

@@ -283,4 +283,20 @@ export function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, unitIndex)).toFixed(2))} ${sizes[unitIndex]}`;
 }
 
+/**
+ * Formats an ISO datetime string into human-readable date (e.g. "Oct 9, 2026").
+ * Returns "Never" when input is empty or null.
+ */
+export function formatDate(isoString?: string | null): string {
+  if (!isoString) return 'Never';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return String(isoString);
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+
 

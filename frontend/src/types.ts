@@ -97,7 +97,7 @@ export interface SystemSettings {
 }
 
 export type AppTab = 'stream' | 'storage' | 'rules' | 'settings';
-export type SettingsSubTab = 'app' | 'aliases' | 'advanced';
+export type SettingsSubTab = 'app' | 'aliases' | 'tokens' | 'advanced';
 
 export interface StorageMetricsSnapshot {
   recorded_at: string;
@@ -521,6 +521,16 @@ export interface MaintenanceSchedule {
   next_run?: string | null;
 }
 
+export interface MaintenanceSessionDetail {
+  session_id: string;
+  reason?: string | null;
+  log_handling: string;
+  target_app?: string | null;
+  target_host?: string | null;
+  initiated_by: string;
+  expires_at: string;
+}
+
 export interface MaintenanceWindowResponse {
   active: boolean;
   until: string | null;
@@ -530,4 +540,30 @@ export interface MaintenanceWindowResponse {
   schedules?: MaintenanceSchedule[];
   server_time?: string | null;
   server_timezone?: string | null;
+  remaining_seconds?: number;
+  active_sessions_count?: number;
+  sessions?: MaintenanceSessionDetail[];
+  log_handling?: string;
+}
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  token_prefix: string;
+  scopes: string[];
+  created_at: string;
+  expires_at?: string | null;
+  last_used_at?: string | null;
+  created_by?: string;
+}
+
+export interface ApiTokenCreateRequest {
+  name: string;
+  scopes: string[];
+  expires_days?: number | null;
+}
+
+export interface ApiTokenCreateResponse {
+  token: ApiToken;
+  raw_token: string;
 }

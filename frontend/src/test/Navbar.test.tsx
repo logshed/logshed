@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Navbar } from '../components/common/Navbar.tsx';
+import { Navbar, getMaintenanceBannerText } from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
 import * as alertsApi from '../api/alerts.ts';
 
@@ -352,6 +352,76 @@ describe('Navbar Component', () => {
     });
 
     expect(screen.queryByText(/Maintenance window active/i)).not.toBeInTheDocument();
+  });
+
+  it('renders multi-session maintenance banner with session count and drop errors text', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+      active_sessions_count: 3,
+      log_handling: 'drop_errors',
+      sessions: [
+        {
+          session_id: 's-1',
+          initiated_by: 'api_token: Backup Runner',
+          reason: 'Nightly backup',
+          log_handling: 'drop_errors',
+          target_app: null,
+          target_host: null,
+          expires_at: '2026-09-26T14:30:00Z',
+        },
+      ],
+    });
+
+    render(
+      <Navbar
+        activeTab="stream"
+        onTabChange={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Maintenance active \(3 sessions\) - errors filtered until/i)).toBeInTheDocument();
+    });
+  });
+
+  it('correctly constructs maintenance banner text via getMaintenanceBannerText', () => {
+    // Single session via API
+    const singleApi = getMaintenanceBannerText({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+      active_sessions_count: 1,
+      log_handling: 'silence_alerts',
+      sessions: [
+        {
+          session_id: 's-1',
+          initiated_by: 'api_token: Home Assistant',
+          reason: 'Snapshot',
+          log_handling: 'silence_alerts',
+          target_app: null,
+          target_host: null,
+          expires_at: '2026-09-26T14:30:00Z',
+        },
+      ],
+    });
+    expect(singleApi).toContain('Maintenance active (API: Home Assistant) - alerts silenced until');
+
+    // Multiple sessions
+    const multi = getMaintenanceBannerText({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+      active_sessions_count: 2,
+      log_handling: 'drop_errors',
+      sessions: [],
+    });
+    expect(multi).toContain('Maintenance active (2 sessions) - errors filtered until');
   });
 });
 

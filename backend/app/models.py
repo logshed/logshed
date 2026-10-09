@@ -76,6 +76,9 @@ class LogContextResponse(BaseModel):
     """Surrounding context lines for a given log ID."""
     target_id: int
     logs: list[LogEntry]
+    target_log: Optional[LogEntry] = None
+    before_logs: list[LogEntry] = Field(default_factory=list)
+    after_logs: list[LogEntry] = Field(default_factory=list)
 
 
 class LogFacetsResponse(BaseModel):
@@ -84,6 +87,7 @@ class LogFacetsResponse(BaseModel):
     apps: list[str]
     host_to_apps: dict[str, list[str]]
     app_to_hosts: dict[str, list[str]]
+    source_app_mapping: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class LogDeleteRequest(BaseModel):
@@ -965,6 +969,17 @@ class MaintenanceSchedulesUpdateRequest(BaseModel):
     schedules: list[MaintenanceSchedule]
 
 
+class MaintenanceSessionDetail(BaseModel):
+    """Details of an active on-demand maintenance session."""
+    session_id: str
+    reason: Optional[str] = None
+    log_handling: str = "silence_alerts"
+    target_app: Optional[str] = None
+    target_host: Optional[str] = None
+    initiated_by: str
+    expires_at: str
+
+
 class MaintenanceWindowResponse(BaseModel):
     """Current status of the global alert maintenance window."""
     active: bool
@@ -975,6 +990,146 @@ class MaintenanceWindowResponse(BaseModel):
     schedules: list[MaintenanceSchedule] = Field(default_factory=list)
     server_time: Optional[str] = None
     server_timezone: Optional[str] = None
+    remaining_seconds: int = 0
+    active_sessions_count: int = 0
+    sessions: list[MaintenanceSessionDetail] = Field(default_factory=list)
+    log_handling: str = "silence_alerts"
+
+
+class ExternalMaintenanceEnableRequest(BaseModel):
+    """Payload to start an on-demand external maintenance window."""
+    duration_minutes: int = Field(..., ge=1, le=1440, description="Duration in minutes (1 - 1440)")
+    reason: Optional[str] = Field(None, max_length=255, description="Reason for maintenance window")
+    log_handling: str = Field("silence_alerts", description="'silence_alerts' or 'drop_errors'")
+    target_app: Optional[str] = Field(None, description="Optional application filter for error dropping")
+    target_host: Optional[str] = Field(None, description="Optional host filter for error dropping")
+
+    @field_validator("log_handling")
+    @classmethod
+    def validate_log_handling(cls, v: str) -> str:
+        if v not in ("silence_alerts", "drop_errors"):
+            raise ValueError("log_handling must be either 'silence_alerts' or 'drop_errors'")
+        return v
+
+
+class ExternalMaintenanceEnableResponse(BaseModel):
+    """Response returned upon starting an on-demand maintenance session."""
+    session_id: str
+    active: bool
+    until: str
+    duration_minutes: int
+    reason: Optional[str] = None
+    log_handling: str = "silence_alerts"
+    target_app: Optional[str] = None
+    target_host: Optional[str] = None
+    initiated_by: str
+    server_time: str
+
+
+class ExternalMaintenanceDisableRequest(BaseModel):
+    """Optional payload to terminate a specific maintenance session."""
+    session_id: Optional[str] = Field(None, description="Session ID to terminate, or omit to clear all")
+
+
+class ExternalMaintenanceDisableResponse(BaseModel):
+    """Response returned upon stopping maintenance window sessions."""
+    active: bool
+    terminated_sessions: int
+    remaining_active_sessions: int
+    server_time: str
+
+
+class ExternalMaintenanceStatusResponse(BaseModel):
+    """Response returned when querying external maintenance status."""
+    active: bool
+    until: Optional[str] = None
+    remaining_seconds: int = 0
+    log_handling: str = "silence_alerts"
+    active_sessions_count: int = 0
+    sessions: list[MaintenanceSessionDetail] = Field(default_factory=list)
+
+
+# API Token Models
+class ApiTokenListItem(BaseModel):
+    """Metadata for an existing API token displayed in the management interface."""
+    id: int
+    name: str
+    token_prefix: str
+    scopes: list[str]
+    created_at: str
+    expires_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    created_by: Optional[str] = "admin"
+
+
+class ApiTokenCreateRequest(BaseModel):
+    """Payload to generate a new API token."""
+    name: str = Field(..., min_length=1, max_length=100)
+    scopes: list[str] = Field(default_factory=lambda: ["maintenance:write"])
+    expires_days: Optional[int] = Field(None, ge=1, le=3650)
+
+
+class ApiTokenCreateResponse(BaseModel):
+    """Response returned on API token creation containing the one-time raw secret."""
+    token: ApiTokenListItem
+    raw_token: str
+
+
+class ApiTokenVerifyResponse(BaseModel):
+    """Verification response returned to external Bearer token callers."""
+    valid: bool
+    name: str
+    scopes: list[str]
+    expires_at: Optional[str] = None
+
+
+# System Telemetry & Metrics Models
+class TopErrorEntity(BaseModel):
+    name: str
+    count: int
+
+
+class TopErrorBreakdown(BaseModel):
+    top_apps: list[TopErrorEntity] = Field(default_factory=list)
+    top_hosts: list[TopErrorEntity] = Field(default_factory=list)
+
+
+class SystemAlertState(BaseModel):
+    active: bool
+    recent_firing_count: int = 0
+    last_triggered_at: Optional[str] = None
+    last_rule_name: Optional[str] = None
+
+
+class SystemMaintenanceMetrics(BaseModel):
+    active: bool
+    until: Optional[str] = None
+    remaining_seconds: int = 0
+    active_sessions_count: int = 0
+    log_handling: str = "silence_alerts"
+
+
+class SystemMetricsResponse(BaseModel):
+    """Comprehensive system telemetry and performance metrics for external monitoring."""
+    status: str = "ok"
+    version: str
+    instance_id: str
+    server_name: str
+    ingest_rate: float
+    error_count_24h: int
+    error_count_1h: int
+    top_error_breakdown: TopErrorBreakdown
+    alert_state: SystemAlertState
+    queue_depth: int
+    dropped_logs: int
+    dropped_by_filter: int
+    db_size_bytes: int
+    db_size_mb: float
+    total_logs_count: int
+    disk_free_bytes: int
+    disk_total_bytes: int
+    disk_used_percent: float
+    maintenance: SystemMaintenanceMetrics
 
 
 

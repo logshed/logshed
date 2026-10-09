@@ -97,12 +97,15 @@ async def set_maintenance_window(
     """
     Set or clear the on-demand alert maintenance window.
     Pass { "until": "<ISO 8601 datetime>" } to activate or { "until": null } to clear.
+    Clearing terminates all active on-demand and API maintenance sessions.
     """
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     now_iso = now_dt.isoformat()
 
     if payload.until is None or not payload.until.strip():
         def _clear(conn):
+            from app.services.maintenance_service import disable_maintenance_sessions
+            disable_maintenance_sessions(conn, session_id=None)
             cur = conn.cursor()
             cur.execute(
                 """
@@ -126,6 +129,8 @@ async def set_maintenance_window(
         stored_iso = dt.isoformat()
 
         def _save(conn):
+            from app.services.maintenance_service import create_maintenance_session
+            # Also update system_settings for backwards compatibility
             cur = conn.cursor()
             cur.execute(
                 """
@@ -135,12 +140,35 @@ async def set_maintenance_window(
                 """,
                 (stored_iso, now_iso),
             )
+            create_maintenance_session(
+                conn,
+                expires_at=dt,
+                reason="Web Console",
+                initiated_by="web_ui",
+            )
             conn.commit()
 
         await run_db_query(_save)
 
     from app.services.maintenance_service import get_maintenance_status
     return await run_db_query(get_maintenance_status)
+
+
+@router.delete("/maintenance/sessions/{session_id}", response_model=MaintenanceWindowResponse)
+@router.post("/maintenance/sessions/{session_id}/disable", response_model=MaintenanceWindowResponse, include_in_schema=False)
+async def disable_single_maintenance_session(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+) -> MaintenanceWindowResponse:
+    """Terminate an active maintenance session by session ID."""
+    from app.services.maintenance_service import disable_maintenance_sessions, get_maintenance_status
+
+    def _disable(conn):
+        disable_maintenance_sessions(conn, session_id=session_id)
+
+    await run_db_query(_disable)
+    return await run_db_query(get_maintenance_status)
+
 
 
 @router.post("/maintenance/schedules", response_model=MaintenanceWindowResponse)

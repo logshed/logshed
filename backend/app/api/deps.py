@@ -205,3 +205,140 @@ async def get_optional_user(request: Request) -> Optional[dict[str, Any]]:
     if await _is_session_revoked(payload):
         return None
     return payload
+
+
+def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
+    """
+    FastAPI dependency factory enforcing valid Bearer API token and required scopes.
+    Validates token SHA-256 hash against SQLite api_tokens table, checks expiration,
+    enforces 120 req/min token rate limiting, and verifies scope permissions.
+    """
+    import json
+    from app.core.api_tokens import (
+        api_token_rate_limiter,
+        has_scope_permission,
+        hash_token,
+        should_update_last_used,
+    )
+    from app.core.utils import parse_iso_to_utc_datetime
+
+    async def _dependency(request: Request) -> dict[str, Any]:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization Bearer token required.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        raw_token = auth_header[7:].strip()
+        if not raw_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bearer token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        token_hash_val = hash_token(raw_token)
+
+        def _lookup(conn: sqlite3.Connection):
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, name, token_prefix, scopes, created_at, expires_at, last_used_at, created_by
+                FROM api_tokens
+                WHERE token_hash = ?
+                """,
+                (token_hash_val,),
+            )
+            return cur.fetchone()
+
+        row = await run_db_query(_lookup)
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or unrecognized API token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        expires_at_str = row["expires_at"]
+        if expires_at_str:
+            exp_dt = parse_iso_to_utc_datetime(expires_at_str)
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            if exp_dt and exp_dt <= now_utc:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="API token has expired.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+        token_id = int(row["id"])
+        if not api_token_rate_limiter.record_request(f"token_{token_id}"):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="API token rate limit exceeded (maximum 120 requests per minute).",
+            )
+
+        try:
+            scopes_list = json.loads(row["scopes"]) if isinstance(row["scopes"], str) else row["scopes"]
+        except Exception:
+            scopes_list = []
+
+        if not has_scope_permission(scopes_list, required_scopes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Insufficient token scope. Required: {', '.join(required_scopes)}",
+            )
+
+        if should_update_last_used(token_id):
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            def _update_last_used(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+                    (now_iso, token_id),
+                )
+                conn.commit()
+
+            asyncio.create_task(run_db_query(_update_last_used))
+
+        return {
+            "id": token_id,
+            "name": row["name"],
+            "token_prefix": row["token_prefix"],
+            "scopes": scopes_list,
+            "created_at": row["created_at"],
+            "expires_at": expires_at_str,
+            "created_by": row["created_by"],
+            "auth_type": "api_token",
+        }
+
+    return _dependency
+
+
+def require_auth_or_token(required_scopes: list[str]) -> Callable[[Request], Any]:
+    """
+    Unified dependency: accepts either a valid admin session cookie (full access)
+    or a Bearer API token with the required scopes.
+    """
+    token_dep = require_api_token(required_scopes)
+
+    async def _dependency(request: Request) -> dict[str, Any]:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            return await token_dep(request)
+
+        user = await get_optional_user(request)
+        if user:
+            user_dict = dict(user)
+            user_dict["auth_type"] = "session_cookie"
+            user_dict["scopes"] = ["*"]
+            return user_dict
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Provide a valid session cookie or Bearer token.",
+        )
+
+    return _dependency
+

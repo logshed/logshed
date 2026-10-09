@@ -4,10 +4,38 @@ import { LogShedLogo } from './LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
 import { fetchMaintenanceWindow, setMaintenanceWindow } from '../../api/alerts.ts';
-import { HealthResponse, AppTab, VersionInfo } from '../../types.ts';
+import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '../../types.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { formatMaintenanceTime } from '../../utils/formatters.ts';
+import { apiFetch } from '../../api/client.ts';
+
+export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse): string => {
+  const untilFormatted = formatMaintenanceTime(maintenance.until);
+  const isDropErrors = maintenance.log_handling === 'drop_errors';
+  const actionText = isDropErrors ? 'errors filtered' : 'alerts silenced';
+
+  const sessions = maintenance.sessions || [];
+  const activeCount = maintenance.active_sessions_count ?? sessions.length;
+
+  if (activeCount === 1) {
+    const singleSession = sessions[0];
+    let initiator = singleSession?.initiated_by || '';
+    if (initiator.startsWith('api_token: ')) {
+      initiator = initiator.replace('api_token: ', '');
+    } else if (initiator.startsWith('cookie: ') || initiator.startsWith('admin: ')) {
+      initiator = 'Web UI';
+    }
+    const label = initiator ? ` (API: ${initiator})` : '';
+    return `Maintenance active${label} - ${actionText} until ${untilFormatted}`;
+  }
+
+  if (activeCount > 1) {
+    return `Maintenance active (${activeCount} sessions) - ${actionText} until ${untilFormatted}`;
+  }
+
+  return `Maintenance window active - alerts silenced until ${untilFormatted}`;
+};
 
 interface NavbarProps {
   activeTab: AppTab;
@@ -26,7 +54,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { logout } = useAuth();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
-  const [maintenance, setMaintenance] = useState<{ active: boolean; until: string | null } | null>(null);
+  const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse | null>(null);
   const [migrationBannerDismissed, setMigrationBannerDismissed] = useState(false);
   const isMobile = useMediaQuery('(max-width: 767px)');
 
@@ -86,6 +114,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const handleClearMaintenance = async () => {
     try {
       const res = await setMaintenanceWindow(null);
+      await apiFetch('/api/v1/maintenance/disable', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }).catch(() => {});
       setMaintenance(res);
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
     } catch {
@@ -264,7 +296,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center space-x-2">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>
-              Maintenance window active - alerts silenced until {formatMaintenanceTime(maintenance.until)}
+              {getMaintenanceBannerText(maintenance)}
             </span>
           </div>
           <button

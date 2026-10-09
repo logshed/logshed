@@ -456,6 +456,39 @@ class TestMaintenanceWindowApi:
         assert get_res2.json()["until"] is None
 
     @pytest.mark.asyncio
+    async def test_clear_maintenance_and_session_deactivation(self, client: AsyncClient, auth_headers: dict):
+        from app.services.maintenance_service import create_maintenance_session
+
+        # Create active sessions
+        def _add_sessions(conn):
+            create_maintenance_session(conn, duration_minutes=60, reason="Session 1", initiated_by="test-user")
+            create_maintenance_session(conn, duration_minutes=60, reason="Session 2", initiated_by="test-user")
+
+        from app.api.deps import run_db_query
+        await run_db_query(_add_sessions)
+
+        # Confirm active
+        get_res = await client.get("/api/alerts/maintenance", headers=auth_headers)
+        assert get_res.status_code == 200
+        sessions = get_res.json()["sessions"]
+        assert len(sessions) == 2
+
+        # Terminate single session via DELETE endpoint
+        target_id = sessions[0]["session_id"]
+        del_res = await client.delete(f"/api/alerts/maintenance/sessions/{target_id}", headers=auth_headers)
+        assert del_res.status_code == 200
+        remaining_sessions = del_res.json()["sessions"]
+        assert len(remaining_sessions) == 1
+        assert remaining_sessions[0]["session_id"] != target_id
+
+        # Clear on-demand window should terminate all remaining sessions
+        clear_res = await client.post("/api/alerts/maintenance", json={"until": None}, headers=auth_headers)
+        assert clear_res.status_code == 200
+        assert clear_res.json()["active"] is False
+        assert len(clear_res.json()["sessions"]) == 0
+
+
+    @pytest.mark.asyncio
     async def test_set_maintenance_invalid_format(self, client: AsyncClient, auth_headers: dict):
         res = await client.post(
             "/api/v1/alerts/maintenance",

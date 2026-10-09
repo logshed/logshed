@@ -127,3 +127,11 @@ export async function updateMaintenanceSchedules(
   });
 }
 
+export async function deleteMaintenanceSession(
+  sessionId: string
+): Promise<MaintenanceWindowResponse> {
+  return apiFetch<MaintenanceWindowResponse>(`/api/alerts/maintenance/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+}
+

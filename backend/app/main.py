@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import ai, alerts, aliases, auth, drop_rules, logs, notifications, saved_views, settings, system
+from app.api import ai, alerts, aliases, auth, drop_rules, external_v1, logs, notifications, saved_views, settings, system, tokens
 from app.api.deps import run_db_query
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.syslog import SyslogServer
@@ -454,11 +454,13 @@ def create_app() -> FastAPI:
         if request.url.path.startswith("/api/") and request.method.upper() in ("POST", "PUT", "DELETE", "PATCH"):
             # Health checks and log stream (GET) are exempted
             if not request.url.path.startswith("/api/health") and request.url.path != "/api/logs/stream":
-                if not request.headers.get("x-requested-with"):
-                    return JSONResponse(
-                        status_code=403,
-                        content={"detail": "Forbidden: missing required X-Requested-With header."},
-                    )
+                auth_header = request.headers.get("authorization", "")
+                if not (auth_header.lower().startswith("bearer ") or request.url.path.startswith("/api/v1/")):
+                    if not request.headers.get("x-requested-with"):
+                        return JSONResponse(
+                            status_code=403,
+                            content={"detail": "Forbidden: missing required X-Requested-With header."},
+                        )
         return await call_next(request)
 
     # CORS Middleware allowing credentials for Vite frontend development
@@ -482,8 +484,12 @@ def create_app() -> FastAPI:
     api_router.include_router(alerts.router)
     api_router.include_router(system.router)
     api_router.include_router(ai.router)
+    api_router.include_router(tokens.router)
 
     app.include_router(api_router)
+
+    # External API v1 endpoints (mounted before alias router so dedicated v1 routes take priority)
+    app.include_router(external_v1.router, prefix="/api")
 
     # API v1 alias router
     api_v1_router = APIRouter(prefix="/api/v1")

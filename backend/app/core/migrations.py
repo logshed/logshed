@@ -13,6 +13,7 @@ mode and other performance pragmas enabled.
 
 import logging
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Union
 
@@ -339,11 +340,15 @@ CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name
 
 def migrate_v3(conn: sqlite3.Connection) -> None:
     """
-    Execute Migration 3: Configurable rule ordering for drop_rules and alert_rules
+    Execute Migration 3: Configurable rule ordering, external API tokens,
+    multi-session maintenance tracking, and persistent system identity settings
     (LogShed v1.3.0 upgrade).
     - Add display_order column to drop_rules and alert_rules.
     - Backfill display_order from existing rule IDs.
     - Create composite indexes for ordered evaluation.
+    - Create api_tokens table for Bearer token authentication.
+    - Create maintenance_sessions table for concurrent maintenance tracking.
+    - Ensure persistent server_name and instance_id in system_settings.
     """
     logger.info("Running migration v3...")
     cur = conn.execute("PRAGMA table_info(drop_rules);")
@@ -359,6 +364,50 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE alert_rules ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
         conn.execute("UPDATE alert_rules SET display_order = id WHERE display_order = 0;")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_rules_order ON alert_rules(is_enabled, display_order ASC, id ASC);")
+
+    conn.executescript('''
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL,
+    scopes TEXT NOT NULL DEFAULT '["maintenance:write"]',
+    created_at DATETIME NOT NULL,
+    expires_at DATETIME,
+    last_used_at DATETIME,
+    created_by TEXT DEFAULT 'admin'
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_expires ON api_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS maintenance_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL,
+    initiated_by TEXT NOT NULL,
+    reason TEXT,
+    log_handling TEXT NOT NULL DEFAULT 'silence_alerts',
+    target_app TEXT,
+    target_host TEXT,
+    created_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);
+
+INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
+VALUES ('server_name', 'LogShed', datetime('now'), 0);
+''')
+    cur = conn.execute("SELECT value FROM system_settings WHERE key = 'instance_id';")
+    row = cur.fetchone()
+    if not row or not row[0]:
+        inst_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('instance_id', ?, datetime('now'), 0);",
+            (inst_id,),
+        )
 
 
 MIGRATIONS = [

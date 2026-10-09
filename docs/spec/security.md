@@ -33,13 +33,14 @@ LogShed provides self-contained native authentication and protection controls wi
   * `Path`: `/`
   * `Secure`: Automatically set when requests arrive over HTTPS, when forwarded through trusted reverse proxies (`X-Forwarded-Proto: https`), or when enforced via the `cookie_secure` configuration setting (`COOKIE_SECURE=true`).
 
-## 5. Cross-Site Request Forgery (CSRF) Protection
+### 5. Cross-Site Request Forgery (CSRF) Protection
 * **Header Requirement:** Mutating API endpoints (`POST`, `PUT`, `DELETE`, `PATCH`) under `/api/` require the custom `X-Requested-With` header (e.g. `X-Requested-With: XMLHttpRequest`).
 * **Validation Middleware:** Inbound mutating requests lacking the `X-Requested-With` header are rejected immediately with `403 Forbidden` (`detail: "Forbidden: missing required X-Requested-With header."`).
-* **Exemptions:** Safe read-only methods (`GET`, `HEAD`, `OPTIONS`), container health check endpoints (`/api/health`), and Server-Sent Events streams (`/api/logs/stream`).
+* **Exemptions:** Safe read-only methods (`GET`, `HEAD`, `OPTIONS`), container health check endpoints (`/api/health`), Server-Sent Events streams (`/api/logs/stream`), requests bearing an `Authorization: Bearer` header, and external `/api/v1/*` routes.
 
 ## 6. Rate Limiting
 * **Authentication Endpoint:** In-memory sliding window on `/api/auth/login` (5 failed attempts per IP per minute). Exceeding this threshold returns `429 Too Many Requests`.
+* **API Token Sliding Window:** 120 requests per minute sliding window per token for programmatic external endpoints.
 * **AI Diagnosis Endpoints:** In-memory sliding window on `/api/ai/diagnose` and `/api/ai/diagnose/stream` (10 requests per minute per user/session) to prevent runaway LLM consumption.
 
 ## 7. Secret Key Generation & Key Derivation
@@ -51,7 +52,28 @@ LogShed provides self-contained native authentication and protection controls wi
   * Master key can be supplied via the `LOGSHED_SECRET_KEY` environment variable.
   * If an arbitrary string is supplied instead of a 32-byte urlsafe-base64 key, key derivation computes a 32-byte SHA-256 digest and base64-urlsafe encodes the result (`_derive_fernet_key`).
 
-## 8. CLI Password Recovery
+## 8. External API Tokens & Permissions
+* **Bearer Token Format:** Raw token string formatted as `ls_live_<40 hex characters>` (entropy 160 bits via `secrets.token_hex(20)`).
+* **Storage & Hashing:** Stored exclusively as SHA-256 hash (`token_hash`) in the `api_tokens` database table with unique index. The raw secret is returned to the caller exactly once upon creation and cannot be retrieved again.
+* **Masked Display Identifiers:** In UI and non-sensitive responses, tokens are identified via prefix and suffix format: `ls_live_<first 4 chars>...<last 4 chars>`.
+* **Scope-Based Permissions:**
+  * Supported individual scopes:
+    - `maintenance:write`: Start, update, and terminate on-demand maintenance windows and sessions (`POST /api/v1/maintenance/enable`, `POST /api/v1/maintenance/disable`).
+    - `maintenance:read`: Inspect active maintenance window status and session details (`GET /api/v1/maintenance/status`).
+    - `logs:read`: Execute FTS5 log queries, fetch surrounding log context, and inspect source/application facets (`GET /api/v1/logs`, `GET /api/v1/logs/{id}/context`, `GET /api/v1/logs/facets`).
+    - `alerts:read`: Review incident history firings and trigger audit summaries (`GET /api/v1/alerts/history`).
+    - `system:read`: Read telemetry metrics, sliding alert state, and cached error distributions (`GET /api/v1/system/metrics`).
+    - `system:write`: Trigger storage retention pruning and database compaction (`POST /api/v1/system/prune`, `POST /api/v1/system/vacuum`).
+    - `*`: Full administrative wildcard matching all existing and future programmatic endpoints.
+  * **Preset Bundles:**
+    - **Maintenance Only** (`["maintenance:write", "maintenance:read"]`): Intended for home automation runners, Proxmox update hooks, or backup scripts that silence notifications or drop errors during host restarts.
+    - **Read Only** (`["logs:read", "alerts:read", "system:read"]`): Intended for external monitoring dashboards, status monitors, or telemetry aggregators that need log and metric visibility without modification rights.
+    - **AI Assistant / MCP** (`["logs:read", "alerts:read", "system:read", "maintenance:write"]`): Intended for Model Context Protocol (MCP) clients, Claude Desktop, or Cursor agents that investigate anomalies, query log context, and toggle maintenance during automated remediations.
+    - **Full Access** (`["*"]`): Full administrative access across all endpoints, including storage vacuum and retention pruning.
+* **Throttled Last Used Tracking:** Updates to `last_used_at` in SQLite are throttled to at most once per 5 minutes per token to avoid database write amplification.
+* **Exempt from CSRF:** Bearer token requests are cryptographically bound to HTTP Authorization headers and immune to browser CSRF.
+
+## 9. CLI Password Recovery
 * Single-command rescue executable inside container (accepts `--password` or prompts securely via terminal):
 ```bash
 python -m app.cli reset-admin [--password <new_password>]

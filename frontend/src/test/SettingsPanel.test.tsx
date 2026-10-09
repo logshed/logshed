@@ -6,6 +6,7 @@ import * as aiApi from '../api/ai.ts';
 import * as authApi from '../api/auth.ts';
 import * as systemApi from '../api/system.ts';
 import * as notifApi from '../api/notifications.ts';
+import * as tokensApi from '../api/tokens.ts';
 import { DEFAULT_SYSTEM_PROMPT } from '../utils/aiPrompt.ts';
 
 const mockLogout = vi.fn();
@@ -52,6 +53,7 @@ describe('SettingsPanel Component', () => {
       is_live: true,
     });
     vi.spyOn(notifApi, 'fetchNotificationChannels').mockResolvedValue([]);
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
   });
 
   it('renders AI System Instructions card, allows editing and saving ai_system_prompt', async () => {
@@ -674,10 +676,12 @@ describe('SettingsPanel Component', () => {
       expect(pathToSettingsSubTab('/aliases')).toBe('aliases');
       expect(pathToSettingsSubTab('/aliases/')).toBe('aliases');
       expect(pathToSettingsSubTab('/settings/advanced')).toBe('advanced');
+      expect(pathToSettingsSubTab('/settings/api-tokens')).toBe('tokens');
 
       expect(settingsSubTabToPath('app')).toBe('/settings/app');
       expect(settingsSubTabToPath('aliases')).toBe('/settings/aliases');
       expect(settingsSubTabToPath('advanced')).toBe('/settings/advanced');
+      expect(settingsSubTabToPath('tokens')).toBe('/settings/api-tokens');
     });
 
     it('switches between sub-tabs when tab buttons are clicked', async () => {
@@ -696,6 +700,15 @@ describe('SettingsPanel Component', () => {
       });
       expect(screen.queryByText('Internal Application Logging')).toBeNull();
 
+      // Switch to API Access tab
+      const tokensTab = screen.getByRole('button', { name: /^API Access$/i });
+      fireEvent.click(tokensTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('External API Access')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Host Alias Manager')).toBeNull();
+
       // Switch to Advanced tab
       const advancedTab = screen.getByRole('button', { name: /^Advanced$/i });
       fireEvent.click(advancedTab);
@@ -705,6 +718,7 @@ describe('SettingsPanel Component', () => {
       });
       expect(screen.queryByText('About LogShed')).toBeNull();
       expect(screen.queryByText('Host Alias Manager')).toBeNull();
+      expect(screen.queryByText('External API Access')).toBeNull();
 
       // Switch back to Application tab
       const appTab = screen.getByRole('button', { name: /^Application$/i });
@@ -714,6 +728,12 @@ describe('SettingsPanel Component', () => {
         expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
         expect(screen.getByText('About LogShed')).toBeInTheDocument();
       });
+
+      // Verify responsive wrapping and button sizing
+      const tabContainer = tokensTab.closest('div.border-b');
+      expect(tabContainer).toHaveClass('flex-wrap');
+      expect(tokensTab).toHaveClass('shrink-0');
+      expect(advancedTab).toHaveClass('shrink-0');
     });
 
     it('initializes on given initialSubTab prop', async () => {
