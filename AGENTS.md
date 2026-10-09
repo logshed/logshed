@@ -26,7 +26,7 @@
   * Database & Migrations: SQLite (WAL mode + FTS5 external content table) versioned via `PRAGMA user_version = 2`. Asynchronous FTS5 indexing decoupled from raw ingestion via supervised `FTSIndexWorker` (target catch-up latency <= 1000ms), durable state tracking in `fts_index_state` (last_indexed_id), conditional triggers guarding against unindexed row deletions, and thread-local read connection reuse via `run_db_query` in `backend/app/api/deps.py`. No external database servers.
 
 ## Workflow Protocol
-1. Consult `docs/SPEC.md` for technical schemas, endpoints, and exact trigger definitions.
+1. Consult `docs/SPEC.md` (or targeted domain modules in `docs/spec/`) for technical schemas, endpoints, and exact trigger definitions.
 2. At the end of every phase, run the phase verification test suite.
 
 ## Dependency & Performance Guardrails
