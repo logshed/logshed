@@ -28,8 +28,14 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 
 - **Implementation Reference:** [backend/app/collectors/docker_collector.py](file:///home/ben/workspace/logshed/backend/app/collectors/docker_collector.py)
 - **Endpoint Connectivity:** Connects through the Docker Engine API via `DOCKER_HOST` environment variable (`unix:///var/run/docker.sock` or `tcp://proxy:2375` for `tecnativa/docker-socket-proxy`). Connects using `httpx` with Unix domain socket transport (`httpx.HTTPTransport(uds=...)`) or standard HTTP proxy transport without external Docker SDKs.
-- **Log Streaming & Event Monitoring:** Tails running container stdout and stderr streams while listening for Docker lifecycle events (`start` and `die`).
-- **Metadata Tagging:** Assigns `source_alias="docker"` (or the configured value of `DOCKER_SOURCE_ALIAS`) and `app_name=container_name`.
+- **Metadata Tagging & App Label Resolution:** Assigns `source_alias="docker"` (or the configured value of `DOCKER_SOURCE_ALIAS`) and resolves `app_name` using container labels and metadata in descending priority:
+  1. `Labels["logshed.alias"]` or `Labels["logshed.name"]` (explicit user override)
+  2. `Labels["com.docker.compose.service"]` (Docker Compose service name)
+  3. `Labels["com.docker.swarm.service.name"]` (Docker Swarm service name)
+  4. Primary container name (`Names[0]` or event `Attributes["name"]`)
+  5. Fallback 12-character container ID (`cid[:12]`)
+- **Retroactive App Alias Updates:** When an aliased container resolves to a display name differing from its raw container name, a background batch task updates historical log records (`source_ip='docker'` and `app_name=raw_name`) in chunked batches (1000 rows with brief pauses) to avoid table lock contention. Session deduplication prevents redundant database queries on periodic discovery loops.
+- **Exclusion Matching:** `_should_ignore_container` evaluates raw container name, resolved display name, and container ID against `DOCKER_EXCLUDE_CONTAINERS`.
 - **Reconnection Backoff:** Implements automated exponential backoff for socket reconnects:
   - Supervisor backoff: Initial backoff of `1.0s`, doubling on consecutive connection errors up to a maximum ceiling of `60.0s` (`DOCKER_SOCKET_POLL_MAX`), resetting to `1.0s` on successful connection.
   - Container tailer backoff: Initial backoff of `1.0s`, doubling up to `15.0s`, automatically reconnecting when containers restart.

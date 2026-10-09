@@ -18,6 +18,7 @@ from app.core.pipeline import KeyedMultilineAssembler
 from app.collectors.docker_collector import (
     MAX_TTY_BUFFER,
     DockerTailer,
+    _batch_update_app_aliases,
     _build_client,
     _demux_stream,
     _detect_severity,
@@ -28,6 +29,7 @@ from app.collectors.docker_collector import (
     _parse_docker_message_content,
     _should_ignore_container,
     _tail_container_logs,
+    resolve_container_display_name,
 )
 
 
@@ -164,6 +166,12 @@ class TestDockerLogParsing:
         assert _should_ignore_container("111222333444", "my-db") is True
         assert _should_ignore_container("111222333444", "/custom_redis") is True
         assert _should_ignore_container("111222333444", "plex") is False
+
+        # Match resolved display_name against exclusion list
+        assert _should_ignore_container("111222333444", "raw_service_1", display_name="my-db") is True
+        assert _should_ignore_container("111222333444", "logshed", display_name="some_service") is True
+        assert _should_ignore_container("111222333444", "raw_service_2", display_name="logshed") is True
+        assert _should_ignore_container("111222333444", "plex_raw", display_name="plex_alias") is False
 
 
 # ===================================================================
@@ -2300,6 +2308,207 @@ class TestDockerContainerMemoryPruning:
         assert "stopped_container_3" not in tailer._container_last_seen
         assert "exited_container_2" not in tailer._container_last_messages
         assert "stopped_container_3" not in tailer._container_last_messages
+
+
+class TestContainerDisplayResolution:
+    """Tests for resolve_container_display_name hierarchy."""
+
+    def test_resolve_logshed_alias_override(self):
+        """logshed.alias label takes highest priority."""
+        labels = {
+            "logshed.alias": "Accounting Service",
+            "com.docker.compose.service": "accounting",
+            "com.docker.swarm.service.name": "swarm-acc",
+        }
+        res = resolve_container_display_name("c1234567890123", raw_name="my_acc_container", labels=labels)
+        assert res == "Accounting Service"
+
+    def test_resolve_logshed_name_override(self):
+        """logshed.name label acts as explicit user override."""
+        labels = {
+            "logshed.name": "Billing Service",
+            "com.docker.compose.service": "billing",
+        }
+        res = resolve_container_display_name("c1234567890123", raw_name="my_billing_container", labels=labels)
+        assert res == "Billing Service"
+
+    def test_resolve_compose_service_label(self):
+        """com.docker.compose.service takes priority over swarm, raw container name, and id."""
+        labels = {
+            "com.docker.compose.service": "radarr",
+            "com.docker.compose.project": "homelab",
+            "com.docker.swarm.service.name": "swarm-radarr",
+        }
+        res = resolve_container_display_name("c1234567890123", raw_name="homelab_radarr_1", labels=labels)
+        assert res == "radarr"
+
+    def test_resolve_swarm_service_label(self):
+        """com.docker.swarm.service.name takes priority over raw container name when no compose label."""
+        labels = {
+            "com.docker.swarm.service.name": "web-cluster-worker",
+        }
+        res = resolve_container_display_name("c1234567890123", raw_name="web-cluster-worker.1.xyz", labels=labels)
+        assert res == "web-cluster-worker"
+
+    def test_resolve_raw_container_name_fallback(self):
+        """Fallback to raw container name when no labels are present."""
+        res = resolve_container_display_name("c1234567890123", raw_name="/custom-unraid-app", labels={})
+        assert res == "custom-unraid-app"
+
+    def test_resolve_fallback_to_short_cid(self):
+        """Fallback to 12-char container ID when no name or labels exist."""
+        res = resolve_container_display_name("abcdef1234567890", raw_name="", labels={})
+        assert res == "abcdef123456"
+
+    def test_resolve_strip_slashes_and_whitespace(self):
+        """Leading slashes and whitespace are cleanly stripped from resolved names."""
+        labels = {"logshed.alias": "  /my-aliased-app  "}
+        res = resolve_container_display_name("c123", raw_name="/raw", labels=labels)
+        assert res == "my-aliased-app"
+
+
+class TestBatchUpdateAppAliases:
+    """Tests for _batch_update_app_aliases and DockerTailer app alias scheduling."""
+
+    def test_batch_update_app_aliases_updates_existing_docker_logs(self, db_path: Path):
+        """_batch_update_app_aliases retroactively modifies app_name for existing docker logs."""
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            for i in range(5):
+                cursor.execute(
+                    """
+                    INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                    VALUES (?, ?, 'docker', 'docker', 'homelab_radarr_1', 1, 6, ?, ?)
+                    """,
+                    (now, now, f"msg {i}", f"msg {i}"),
+                )
+            # Insert a non-docker log with the same app_name
+            cursor.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '192.168.1.10', 'server', 'homelab_radarr_1', 1, 6, 'syslog msg', 'syslog msg')
+                """,
+                (now, now),
+            )
+            conn.commit()
+
+            _batch_update_app_aliases(conn, "homelab_radarr_1", "radarr", batch_size=2)
+
+            cursor.execute("SELECT app_name, source_ip FROM logs ORDER BY id ASC")
+            rows = cursor.fetchall()
+
+            # First 5 docker rows should be updated to 'radarr'
+            for row in rows[:5]:
+                assert row[0] == "radarr"
+                assert row[1] == "docker"
+
+            # The 6th non-docker row should retain 'homelab_radarr_1'
+            assert rows[5][0] == "homelab_radarr_1"
+            assert rows[5][1] == "192.168.1.10"
+
+    @pytest.mark.asyncio
+    async def test_schedule_app_alias_update_deduplication(self, db_path: Path):
+        """DockerTailer._schedule_app_alias_update deduplicates calls for the same pair."""
+        assembler = KeyedMultilineAssembler()
+        tailer = DockerTailer(assembler, db_path=db_path)
+
+        assert len(tailer._updated_app_aliases) == 0
+
+        # No-op when raw_name == display_name
+        tailer._schedule_app_alias_update("radarr", "radarr")
+        assert len(tailer._updated_app_aliases) == 0
+
+        # No-op when empty
+        tailer._schedule_app_alias_update("", "radarr")
+        assert len(tailer._updated_app_aliases) == 0
+
+        # First dispatch schedules update and registers in deduplication set
+        tailer._schedule_app_alias_update("homelab_radarr_1", "radarr")
+        assert ("homelab_radarr_1", "radarr") in tailer._updated_app_aliases
+        assert len(tailer._updated_app_aliases) == 1
+
+        # Second dispatch for identical pair is ignored
+        tailer._schedule_app_alias_update("homelab_radarr_1", "radarr")
+        assert len(tailer._updated_app_aliases) == 1
+
+        # Give background thread brief moment to complete
+        await asyncio.sleep(0.05)
+        await tailer.stop()
+
+    @pytest.mark.asyncio
+    async def test_docker_tailer_attaches_and_emits_with_resolved_display_name(self, db_path: Path):
+        """_attach_running_containers resolves container labels and feeds entries with resolved display_name."""
+        assembler = KeyedMultilineAssembler()
+        tailer = DockerTailer(assembler, db_path=db_path)
+
+        entries = []
+        async def capture_feed(key, entry):
+            entries.append(entry)
+        assembler.feed = capture_feed
+
+        cid = "c_compose_12345"
+        raw_name = "/prod_web_1"
+        compose_service = "web"
+
+        mock_containers = [
+            {
+                "Id": cid,
+                "Names": [raw_name],
+                "Labels": {"com.docker.compose.service": compose_service},
+            }
+        ]
+
+        cancel_event = asyncio.Event()
+        ts = "2026-10-09T11:00:00.000000000Z"
+        msg = f"{ts} Web request completed\n".encode("utf-8")
+        payload = b"\x01\x00\x00\x00" + len(msg).to_bytes(4, "big") + msg
+
+        class MockResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                yield payload
+                cancel_event.set()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            is_closed = False
+            async def get(self, url, **kwargs):
+                if "/containers/json" in url:
+                    class ListResp:
+                        status_code = 200
+                        def json(self):
+                            return mock_containers
+                        def raise_for_status(self):
+                            pass
+                    return ListResp()
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                return MockResp()
+
+        mock_client = MockClient()
+        await tailer._attach_running_containers(mock_client)
+
+        # Allow tailer to consume stream
+        await asyncio.sleep(0.05)
+
+        assert len(entries) >= 1
+        assert entries[0]["app_name"] == "web"
+        assert entries[0]["message"] == "Web request completed"
+
+        # Check deduplication tracking set recorded the update
+        assert ("prod_web_1", "web") in tailer._updated_app_aliases
+
+        await tailer.stop()
+
 
 
 

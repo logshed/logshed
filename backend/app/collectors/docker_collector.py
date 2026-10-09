@@ -15,6 +15,8 @@ import logging
 import os
 import re
 import socket
+import sqlite3
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -23,6 +25,7 @@ import httpx
 
 from app.collectors.syslog import AliasCache
 from app.core.config import get_db_path
+from app.core.migrations import get_connection
 from app.core.pipeline import (
     KeyedMultilineAssembler,
     detect_severity,
@@ -394,9 +397,77 @@ async def _get_running_containers(client: httpx.AsyncClient) -> list[dict]:
         raise
 
 
+def resolve_container_display_name(
+    cid: str,
+    raw_name: Optional[str] = None,
+    labels: Optional[dict[str, str]] = None,
+) -> str:
+    """
+    Resolve human-friendly container display name using metadata and labels hierarchy:
+    1. Labels.get("logshed.alias") or Labels.get("logshed.name")
+    2. Labels.get("com.docker.compose.service")
+    3. Labels.get("com.docker.swarm.service.name")
+    4. Primary Docker container name (raw_name)
+    5. Fallback 12-character container ID (cid[:12])
+    """
+    labels = labels or {}
+    # 1. Custom LogShed labels
+    custom_alias = labels.get("logshed.alias") or labels.get("logshed.name")
+    if custom_alias and custom_alias.strip():
+        return custom_alias.strip().lstrip("/")
+
+    # 2. Docker Compose service label
+    compose_service = labels.get("com.docker.compose.service")
+    if compose_service and compose_service.strip():
+        return compose_service.strip().lstrip("/")
+
+    # 3. Docker Swarm service label
+    swarm_service = labels.get("com.docker.swarm.service.name")
+    if swarm_service and swarm_service.strip():
+        return swarm_service.strip().lstrip("/")
+
+    # 4. Primary Docker container name
+    if raw_name and raw_name.strip():
+        return raw_name.strip().lstrip("/")
+
+    # 5. Fallback container ID
+    return cid[:12] if cid else "unknown"
+
+
+def _batch_update_app_aliases(
+    conn,
+    raw_name: str,
+    target_alias: str,
+    source_ip: str = "docker",
+    batch_size: int = 1000,
+) -> None:
+    """
+    Retroactively update app_name for existing logs in chunked batches.
+    Prevents long table locks on large datasets while interleaving concurrent writes.
+    """
+    cursor = conn.cursor()
+    update_query = """
+        UPDATE logs SET app_name = ?
+        WHERE source_ip = ? AND app_name = ? AND id IN (
+            SELECT id FROM logs
+            WHERE source_ip = ? AND app_name = ?
+            ORDER BY id DESC
+            LIMIT ?
+        )
+    """
+    while True:
+        cursor.execute(update_query, (target_alias, source_ip, raw_name, source_ip, raw_name, batch_size))
+        count = cursor.rowcount
+        conn.commit()
+        if count < batch_size:
+            break
+        time.sleep(0.005)
+
+
 def _should_ignore_container(
     container_id: str,
     container_name: str,
+    display_name: Optional[str] = None,
     exclude_containers: Optional[str] = None,
 ) -> bool:
     """
@@ -420,7 +491,13 @@ def _should_ignore_container(
     })
 
     name_clean = container_name.lower().lstrip("/")
-    if name_clean in excluded_names or container_id.lower() in excluded_names or container_id[:12].lower() in excluded_names:
+    disp_clean = display_name.lower().lstrip("/") if display_name else ""
+    if (
+        name_clean in excluded_names
+        or (disp_clean and disp_clean in excluded_names)
+        or container_id.lower() in excluded_names
+        or container_id[:12].lower() in excluded_names
+    ):
         return True
 
     # 2. Check container short ID against HOSTNAME (Docker sets container short ID as hostname inside container)
@@ -800,6 +877,36 @@ class DockerTailer:
             else str(get_cached_setting("docker_source_alias", "docker"))
         )
         self._current_client: Optional[httpx.AsyncClient] = None
+        self._updated_app_aliases: set[tuple[str, str]] = set()
+
+    def _schedule_app_alias_update(self, raw_name: str, display_name: str) -> None:
+        """
+        Schedule chunked background database update for app_name if alias differs from raw name.
+        Uses in-memory deduplication set to avoid redundant batch queries across discovery cycles.
+        """
+        if not raw_name or not display_name or raw_name == display_name:
+            return
+
+        pair = (raw_name, display_name)
+        if pair in self._updated_app_aliases:
+            return
+        self._updated_app_aliases.add(pair)
+
+        effective_db_path = self._db_path or get_db_path()
+
+        def _run_batch() -> None:
+            try:
+                conn = get_connection(effective_db_path)
+                try:
+                    _batch_update_app_aliases(conn, raw_name, display_name)
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning(
+                    f"Background retroactive app alias update failed for {raw_name} -> {display_name}: {e}"
+                )
+
+        asyncio.create_task(asyncio.to_thread(_run_batch))
 
     async def update_settings(
         self,
@@ -1015,11 +1122,16 @@ class DockerTailer:
         for c in containers:
             cid = c.get("Id", "")
             names = c.get("Names", [])
-            name = names[0].lstrip("/") if names else cid[:12]
-            if _should_ignore_container(cid, name, exclude_containers=self.exclude_containers):
-                logger.debug(f"Skipping tailing self/excluded container {name} ({cid[:12]})")
+            raw_name = names[0].lstrip("/") if names else ""
+            labels = c.get("Labels", {})
+            display_name = resolve_container_display_name(cid, raw_name=raw_name, labels=labels)
+            if _should_ignore_container(
+                cid, raw_name, display_name=display_name, exclude_containers=self.exclude_containers
+            ):
+                logger.debug(f"Skipping tailing self/excluded container {display_name} ({cid[:12]})")
                 continue
-            self._start_tailer(client, cid, name)
+            self._schedule_app_alias_update(raw_name, display_name)
+            self._start_tailer(client, cid, display_name)
 
     def _start_tailer(
         self,
@@ -1109,17 +1221,21 @@ class DockerTailer:
                     actor = event.get("Actor", {})
                     cid = actor.get("ID", event.get("id", ""))
                     attrs = actor.get("Attributes", {})
-                    name = attrs.get("name", cid[:12])
+                    raw_name = attrs.get("name", "")
+                    display_name = resolve_container_display_name(cid, raw_name=raw_name, labels=attrs)
 
                     if action in ("start", "restart"):
-                        if _should_ignore_container(cid, name):
+                        if _should_ignore_container(
+                            cid, raw_name, display_name=display_name, exclude_containers=self.exclude_containers
+                        ):
                             continue
-                        logger.info(f"Container {action}: {name} ({cid[:12]})")
+                        self._schedule_app_alias_update(raw_name, display_name)
+                        logger.info(f"Container {action}: {display_name} ({cid[:12]})")
                         if action == "restart":
                             await self._stop_tailer(cid)
-                        self._start_tailer(client, cid, name)
+                        self._start_tailer(client, cid, display_name)
                     elif action == "die":
-                        logger.info(f"Container died: {name} ({cid[:12]})")
+                        logger.info(f"Container died: {display_name} ({cid[:12]})")
                         await self._stop_tailer(cid)
 
             events_task = asyncio.create_task(_consume_events())

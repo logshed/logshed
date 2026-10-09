@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0-beta.1] - 2026-10-09
 
 ### Added
+- **Docker Container Label Aliasing & Display Resolution**: Priority-based resolution of Docker container display names (`app_name`) inspecting custom labels (`logshed.alias`, `logshed.name`), Docker Compose service metadata (`com.docker.compose.service`), Swarm service attributes, and raw container names, alongside chunked retroactive updates on historical log records without table lock contention.
 - **Configurable Rule Ordering for Drop Rules and Alert Rules**: User-configurable evaluation priority ordering for ingestion drop rules (`drop_rules`) and alert rules (`alert_rules`) backed by SQLite schema migration v3 (`display_order`), dedicated REST reordering endpoints (`PUT /api/drop-rules/reorder`, `PUT /api/alerts/rules/reorder`), and in-memory engine synchronization.
 - **Accessible & Drag-and-Drop Rule Reordering UI**: Desktop drag-and-drop reordering with grip handles alongside touch-friendly single-tap Up/Down chevron controls with WCAG-compliant touch targets on mobile devices.
 
