@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Prune Vestigial Log Sampling in Daily Digest**: Pruned an unused query and dead `sample_lines` field in `compute_daily_digest_rollup()` that previously scanned up to 100 rows with a computed severity sort on every daily digest run.
 - **Modular Technical Specifications**: Partitioned the monolithic `docs/SPEC.md` specification into domain-bounded modules under `docs/spec/` (`architecture.md`, `database.md`, `pipeline.md`, `ai-engine.md`, `security.md`, `api.md`, `frontend.md`, `deployment.md`) while maintaining `docs/SPEC.md` as a lightweight navigation hub. Streamlines documentation lookups and reduces token consumption when developing with AI coding assistants.
 
+### Fixed
+- **MCP SSE Endpoint Base URL Resolution**: Resolved the MCP Server-Sent Events URL and client configuration snippets against the configured `app_url` from Advanced settings, ensuring reverse-proxy and LAN hosts point to the operator's designated instance URL.
+
 ---
 
 ## [1.2.1] - 2026-10-08

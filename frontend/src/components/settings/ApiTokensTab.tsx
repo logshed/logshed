@@ -143,7 +143,8 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
     }
   };
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080';
+  const configuredAppUrl = settings?.app_url?.trim().replace(/\/+$/, '');
+  const origin = configuredAppUrl || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
   const sseUrl = `${origin}/api/v1/mcp/sse`;
 
   const claudeProxyConfigSnippet = JSON.stringify(

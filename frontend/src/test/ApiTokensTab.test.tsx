@@ -294,5 +294,29 @@ describe('ApiTokensTab Component', () => {
     expect(screen.getByRole('heading', { name: /Generate API Token/i })).toBeInTheDocument();
     expect(screen.getAllByText(/AI Assistant \/ MCP/i).length).toBeGreaterThanOrEqual(2);
   });
+
+  it('uses configured app_url for SSE endpoint and client snippet when present', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+
+    render(
+      <ApiTokensTab
+        settings={{
+          enable_mcp: true,
+          app_url: 'https://logs.example.com/',
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByDisplayValue('https://logs.example.com/api/v1/mcp/sse')).toBeInTheDocument();
+
+    // Expand Cursor SSE accordion to verify snippet uses app_url
+    const cursorBtn = screen.getByRole('button', { name: /Remote SSE/i });
+    fireEvent.click(cursorBtn);
+    expect(screen.getByText((content) => content.includes('https://logs.example.com/api/v1/mcp/sse'))).toBeInTheDocument();
+  });
 });
 
