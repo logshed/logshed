@@ -5,7 +5,7 @@
 ## 1. System Architecture & Process Model
 Single Docker container running Python 3.12 (`asyncio`) + FastAPI backend serving a pre-built React SPA, with background ingestion workers managed under isolated supervisors.
 
-- **Process Boundaries:** Main thread runs `uvicorn` and supervised background tasks (`SyslogServer`, `DockerTailer`, `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`, `DropFilterWorker`, and `DailyDigestWorker`). SQLite operations must use stdlib `sqlite3` and offload synchronous queries via `asyncio.to_thread()` (per AGENTS.md, `aiosqlite` is not used). Thread-local read connection reuse (`get_thread_read_connection` in [`backend/app/api/deps.py`](file:///home/ben/workspace/logshed/backend/app/api/deps.py)) eliminates connection setup overhead across queries in worker threads with defensive rollback guards in `finally` blocks preventing WAL lock leaks.
+- **Process Boundaries:** Main thread runs `uvicorn` and supervised background tasks (`SyslogServer`, `DockerTailer`, `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`, `DropFilterWorker`, and `DailyDigestWorker`). SQLite operations must use stdlib `sqlite3` and offload synchronous queries via `asyncio.to_thread()` (per AGENTS.md, `aiosqlite` is not used). Thread-local read connection reuse (`get_thread_read_connection` in [`backend/app/api/deps.py`](file:///home/ben/workspace/logshed/backend/app/api/deps.py)) eliminates connection setup overhead across queries in worker threads with defensive rollback guards in `finally` blocks preventing WAL lock leaks. Lifespan shutdown coordinates termination across background supervisors and active Model Context Protocol (MCP) client sessions (`stop_mcp_session_manager`).
 - **Supervised Background Workers:** The application maintains 9 supervised background tasks isolated by supervisor wrappers (`_supervise_worker`) that catch exceptions, log diagnostics, and restart failing tasks with exponential backoff without disrupting the event loop:
   1. `SyslogServer`: Asynchronous UDP and TCP syslog listener on port 1514 (supporting RFC 3164, RFC 5424, and RFC 6587 framing).
   2. `DockerTailer`: Streams logs from container stdout/stderr sockets via local Unix domain socket or remote Docker HTTP socket proxy.
@@ -44,9 +44,10 @@ Runtime operational settings follow a resilient three-tier resolution hierarchy:
 2. **Tier 2 (Fallback):** Environment variable set on container (including silent legacy aliases).
 3. **Tier 3 (Default):** Built-in hardcoded constant.
 
-Settings updates apply dynamically to in-memory workers (`SyslogServer`, `DockerTailer`, `AlertEvaluator`, `NotifierService`, and `Auth`) without requiring container recreation. An in-memory thread-safe cache (`get_cached_system_settings` with 10-second TTL fallback) ensures high-throughput request evaluation without redundant SQLite I/O.
+Settings updates apply dynamically to in-memory workers (`SyslogServer`, `DockerTailer`, `AlertEvaluator`, `NotifierService`, `Auth`, and `MCP`) without requiring container recreation. An in-memory thread-safe cache (`get_cached_system_settings` with 10-second TTL fallback) ensures high-throughput request evaluation without redundant SQLite I/O.
 
-The 12 runtime advanced settings are:
+The runtime operational and advanced settings are:
+- `enable_mcp`: Master toggle for the embedded Model Context Protocol (MCP) server (Env: `ENABLE_MCP`, default: `False`). Managed via the API & MCP Access tab.
 - `ai_timeout`: Outbound AI request timeout in seconds (Env: `LOGSHED_AI_TIMEOUT`, default: `45.0`).
 - `ai_thinking_budget`: Reasoning token budget for extended thinking models (Env: `LOGSHED_AI_THINKING_BUDGET`, default: `1024`, 0 disables).
 - `app_url`: Public base instance URL for action links in push notifications (Env: `APP_URL`, legacy alias: `app_url`, default: `""`).

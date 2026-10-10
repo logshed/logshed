@@ -83,6 +83,7 @@ export interface SystemSettings {
   cookie_secure?: boolean;
   syslog_max_tcp_connections?: number;
   syslog_tcp_inactivity_timeout?: number;
+  enable_mcp?: boolean;
 
   // Daily Digest Settings
   daily_digest_enabled?: boolean;

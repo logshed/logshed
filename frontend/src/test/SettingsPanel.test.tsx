@@ -535,9 +535,11 @@ describe('SettingsPanel Component', () => {
     expect(sessionStorage.getItem('login_notice')).toBe(
       'Admin password changed successfully. Please sign in with your new password.'
     );
-    expect(
-      screen.getByText('Admin password changed successfully. Redirecting to sign in...')
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByText('Admin password changed successfully. Redirecting to sign in...')
+      ).toBeInTheDocument();
+    });
 
     await waitFor(
       () => {
@@ -700,8 +702,8 @@ describe('SettingsPanel Component', () => {
       });
       expect(screen.queryByText('Internal Application Logging')).toBeNull();
 
-      // Switch to API Access tab
-      const tokensTab = screen.getByRole('button', { name: /^API Access$/i });
+      // Switch to API & MCP Access tab
+      const tokensTab = screen.getByRole('button', { name: /^API & MCP Access$/i });
       fireEvent.click(tokensTab);
 
       await waitFor(() => {

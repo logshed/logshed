@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ApiTokensTab, getPresetName } from '../components/settings/ApiTokensTab.tsx';
 import * as tokensApi from '../api/tokens.ts';
+import * as settingsApi from '../api/settings.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 import { ApiToken } from '../types.ts';
 
@@ -183,4 +184,115 @@ describe('ApiTokensTab Component', () => {
     expect(getPresetName(['maintenance:write', 'maintenance:read'])).toBe('Maintenance Only');
     expect(getPresetName(['custom:read'])).toBe('custom:read');
   });
+
+  it('renders MCP section disabled by default and shows disabled message', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+
+    render(<ApiTokensTab settings={{ enable_mcp: false }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeInTheDocument();
+    });
+
+    const mcpToggle = screen.getByLabelText(/Enable Model Context Protocol/i);
+    expect(mcpToggle).not.toBeChecked();
+    expect(screen.getByText('Disabled')).toBeInTheDocument();
+    expect(screen.getByText(/MCP server is currently disabled/i)).toBeInTheDocument();
+  });
+
+  it('renders MCP section with SSE endpoint and collapsible client configuration options when enabled', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+
+    render(<ApiTokensTab settings={{ enable_mcp: true }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeInTheDocument();
+    });
+
+    const mcpToggle = screen.getByLabelText(/Enable Model Context Protocol/i);
+    expect(mcpToggle).toBeChecked();
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/api\/v1\/mcp\/sse/)).toBeInTheDocument();
+
+    // Verify all 3 collapsible options are present and collapsed by default
+    const claudeProxyBtn = screen.getByRole('button', { name: /Remote via mcp-proxy/i });
+    const cursorBtn = screen.getByRole('button', { name: /Remote SSE/i });
+    const claudeDockerBtn = screen.getByRole('button', { name: /Local Docker Stdio/i });
+
+    expect(claudeProxyBtn).toBeInTheDocument();
+    expect(cursorBtn).toBeInTheDocument();
+    expect(claudeDockerBtn).toBeInTheDocument();
+
+    expect(claudeProxyBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(cursorBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(claudeDockerBtn).toHaveAttribute('aria-expanded', 'false');
+
+    // Snippet content is not visible while collapsed
+    expect(screen.queryByText((content) => content.includes('"command": "mcp-proxy"'))).not.toBeInTheDocument();
+    expect(screen.queryByText((content) => content.includes('"python", "-m", "app.cli", "mcp"'))).not.toBeInTheDocument();
+
+    // Expand the Claude Proxy accordion
+    fireEvent.click(claudeProxyBtn);
+    expect(claudeProxyBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText((content) => content.includes('"command": "mcp-proxy"'))).toBeInTheDocument();
+
+    // Expand the Cursor SSE accordion
+    fireEvent.click(cursorBtn);
+    expect(cursorBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText((content) => content.includes('"Authorization": "Bearer ls_live_YOUR_TOKEN_HERE"'))).toBeInTheDocument();
+
+    // Expand the Claude Docker accordion
+    fireEvent.click(claudeDockerBtn);
+    expect(claudeDockerBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText((content) => content.includes('"python", "-m", "app.cli", "mcp"'))).toBeInTheDocument();
+
+    // Collapse Claude Proxy accordion again
+    fireEvent.click(claudeProxyBtn);
+    expect(claudeProxyBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText((content) => content.includes('"command": "mcp-proxy"'))).not.toBeInTheDocument();
+  });
+
+  it('toggles MCP setting on and calls updateSettings and onSettingsSaved', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+    const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+    const onSaved = vi.fn();
+
+    render(
+      <ApiTokensTab
+        settings={{ enable_mcp: false }}
+        onSettingsSaved={onSaved}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeInTheDocument();
+    });
+
+    const mcpToggle = screen.getByLabelText(/Enable Model Context Protocol/i);
+    expect(mcpToggle).not.toBeChecked();
+
+    fireEvent.click(mcpToggle);
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith({ enable_mcp: true });
+      expect(onSaved).toHaveBeenCalled();
+    });
+  });
+
+  it('opens generate token modal when clicking Generate API Token in MCP helper', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+
+    render(<ApiTokensTab settings={{ enable_mcp: true }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeInTheDocument();
+    });
+
+    const mcpGenBtn = screen.getByRole('button', { name: /Generate API Token/i });
+    fireEvent.click(mcpGenBtn);
+
+    expect(screen.getByRole('heading', { name: /Generate API Token/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/AI Assistant \/ MCP/i).length).toBeGreaterThanOrEqual(2);
+  });
 });
+

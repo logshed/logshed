@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import ai, alerts, aliases, auth, drop_rules, external_v1, logs, notifications, saved_views, settings, system, tokens
+from app.api import ai, alerts, aliases, auth, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
 from app.api.deps import run_db_query
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.syslog import SyslogServer
@@ -325,6 +325,11 @@ async def lifespan(app: FastAPI):
 
     # Shutdown sequence
     logger.info("Shutting down background workers...")
+    try:
+        from app.api.mcp import stop_mcp_session_manager
+        await stop_mcp_session_manager()
+    except Exception as e:
+        logger.warning(f"Error stopping MCP session manager: {e}")
     if _internal_log_handler is not None:
         try:
             logging.getLogger("app").removeHandler(_internal_log_handler)
@@ -485,6 +490,7 @@ def create_app() -> FastAPI:
     api_router.include_router(system.router)
     api_router.include_router(ai.router)
     api_router.include_router(tokens.router)
+    api_router.include_router(mcp.router)
 
     app.include_router(api_router)
 
@@ -503,6 +509,7 @@ def create_app() -> FastAPI:
     api_v1_router.include_router(alerts.router)
     api_v1_router.include_router(system.router)
     api_v1_router.include_router(ai.router)
+    api_v1_router.include_router(mcp.router)
 
     app.include_router(api_v1_router)
 

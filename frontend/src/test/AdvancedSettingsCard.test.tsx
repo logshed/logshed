@@ -33,6 +33,7 @@ const mockBaseSettings: SystemSettings = {
   cookie_secure: false,
   syslog_max_tcp_connections: 250,
   syslog_tcp_inactivity_timeout: 0.0,
+  enable_mcp: true,
 };
 
 describe('AdvancedSettingsCard Component', () => {

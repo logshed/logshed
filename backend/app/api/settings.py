@@ -196,6 +196,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         cookie_secure=resolved["cookie_secure"],
         syslog_max_tcp_connections=resolved["syslog_max_tcp_connections"],
         syslog_tcp_inactivity_timeout=resolved["syslog_tcp_inactivity_timeout"],
+        enable_mcp=resolved["enable_mcp"],
         daily_digest_enabled=daily_digest_enabled,
         daily_digest_channel_id=daily_digest_channel_id,
         daily_digest_schedule_time=daily_digest_schedule_time,
@@ -332,6 +333,9 @@ async def update_settings(
 
         if req.syslog_tcp_inactivity_timeout is not None:
             updates.append(("syslog_tcp_inactivity_timeout", str(req.syslog_tcp_inactivity_timeout), 0))
+
+        if req.enable_mcp is not None:
+            updates.append(("enable_mcp", "1" if req.enable_mcp else "0", 0))
 
         if req.daily_digest_enabled is not None:
             updates.append(("daily_digest_enabled", "1" if req.daily_digest_enabled else "0", 0))

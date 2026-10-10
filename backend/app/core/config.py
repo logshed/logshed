@@ -414,6 +414,13 @@ def resolve_all_system_settings(db_settings: dict[str, str]) -> dict[str, Any]:
             default=0.0,
             caster=_cast_syslog_inactivity_timeout,
         ),
+        "enable_mcp": resolve_setting(
+            db_settings,
+            key="enable_mcp",
+            env_var="LOGSHED_ENABLE_MCP",
+            default=False,
+            caster=_cast_bool,
+        ),
     }
 
 

@@ -151,6 +151,18 @@ def seed_logs(
         conn.close()
 
 
+def run_mcp_stdio(db_path: str = _DEFAULT_DB_PATH) -> None:
+    """Run built-in MCP server over stdio transport."""
+    from app.core.config import get_cached_setting
+    if not get_cached_setting("enable_mcp", False):
+        print("Error: Model Context Protocol (MCP) is disabled in system settings.", file=sys.stderr)
+        sys.exit(1)
+
+    from app.mcp.server import create_mcp_server
+    server = create_mcp_server()
+    server.run(transport="stdio")
+
+
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -158,6 +170,17 @@ def main() -> None:
         description="LogShed CLI administration tool",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # mcp subcommand
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="Run built-in MCP server over stdio transport",
+    )
+    mcp_parser.add_argument(
+        "--db-path",
+        default=_DEFAULT_DB_PATH,
+        help=f"Path to SQLite database (default: {_DEFAULT_DB_PATH})",
+    )
 
     # reset-admin subcommand
     reset_parser = subparsers.add_parser(
@@ -201,7 +224,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "reset-admin":
+    if args.command == "mcp":
+        run_mcp_stdio(args.db_path)
+    elif args.command == "reset-admin":
         password = args.password
         if not password:
             password = getpass.getpass("Enter new admin password: ")

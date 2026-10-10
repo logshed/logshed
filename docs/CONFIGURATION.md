@@ -70,6 +70,7 @@ services:
 - [Docker Log Tailing](#docker-log-tailing)
 - [Storage and Retention](#storage-and-retention)
 - [AI Provider](#ai-provider)
+- [Model Context Protocol (MCP)](#model-context-protocol-mcp)
 - [Security](#security)
 - [Advanced](#advanced)
 - [Settings Configured Strictly in the Web UI](#settings-configured-strictly-in-the-web-ui)
@@ -135,6 +136,14 @@ services:
 
 ---
 
+## Model Context Protocol (MCP)
+
+| Variable | Default | Where to Configure | Description | Since |
+|---|---|---|---|:---:|
+| `ENABLE_MCP` | `false` | Web UI or Compose | Master switch to activate the integrated Model Context Protocol (MCP) server endpoints and tools (`true` or `false`). | 1.3.0 |
+
+---
+
 ## Security
 
 | Variable | Default | Where to Configure | Description | Since |
@@ -172,7 +181,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 | **Alert Rules & Presets** | **Rules & History > Alert Rules** | Define threshold, pattern, or rate spike detection rules and link them to notification channels. |
 | **Ingestion Drop Rules** | **Rules & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |
 | **Maintenance Windows** | **Rules & History > Maintenance** | Set on-demand or recurring schedules to silence notifications during planned downtime. |
-| **API Access Tokens** | **Settings > API Access** | Generate and revoke scoped Bearer tokens for external backup runners, Home Assistant, and AI agents. |
+| **API Tokens & MCP Access** | **Settings > API & MCP Access** | Generate scoped Bearer tokens, toggle the Model Context Protocol (MCP) server, and inspect client configuration guides (Claude Desktop, Cursor, Antigravity). |
 
 ---
 

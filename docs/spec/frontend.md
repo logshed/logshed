@@ -10,7 +10,7 @@ The frontend implements single-page HTML5 History API routing across four top-le
 - **`/` (Logs / Console):** Live streaming log console with virtual scrolling, search, filters, saved views, and context inspection.
 - **`/rules` (Rules & Alerts Hub):** Unified hub managing alert rules, ingestion drop rules, incident history, maintenance windows, and built-in canary presets.
 - **`/storage` (Storage Metrics):** Storage metrics dashboard displaying database file sizes, host mount disk usage, 30-day volume trends, manual prune triggers, and database vacuum utilities.
-- **`/settings` (Settings & Aliases):** Application settings, AI provider configuration, notification channels, advanced runtime options, and IP-to-Host alias management located at `/settings/aliases`. Top-level requests to `/aliases` automatically redirect to `/settings/aliases`.
+- **`/settings` (Settings & Aliases):** Application settings, AI provider configuration, notification channels, API & MCP access, advanced runtime options, and IP-to-Host alias management located at `/settings/aliases`. Top-level requests to `/aliases` automatically redirect to `/settings/aliases`.
 
 Unsaved changes detection and browser exit guards prevent accidental loss of form inputs across settings tabs and modal dialogs.
 
@@ -75,6 +75,10 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 ### 3.5 Settings Panel (`/settings`)
 * **Application Settings:** Encrypted API key management (Google Gemini, Anthropic Claude, OpenAI / custom OpenAI-compatible endpoint like Ollama/vLLM), dynamic model discovery with 24-hour cache, multi-model failover configuration, custom system prompt, retention slider (1 to 30 days, capped by `MAX_RETENTION_DAYS`), internal log level, and GHCR release update check toggle.
 * **Notification Channels Card:** Configure Apprise push notification targets (Discord, Telegram, Slack, Pushover, email, webhook, etc.) with live test dispatch, and schedule daily analytical digests (`NotificationsCard.tsx`).
+* **API & MCP Access (`/settings/api`):** Scoped Bearer token lifecycle management (create, copy raw secret once, and revoke) alongside Model Context Protocol (MCP) server administration (`ApiTokensTab.tsx`). Features master server activation toggle (off by default), live SSE endpoint display, and three collapsible accordion client configuration guides with one-click copy blocks:
+  1. Claude Desktop (Remote via `mcp-proxy`) for remote Proxmox, NAS, or external servers.
+  2. Cursor / Windsurf / Antigravity (Remote SSE) for direct network SSE IDE integrations.
+  3. Claude Desktop (Local Docker Stdio) for local single-machine Docker deployments.
 * **Host Alias Manager (`/settings/aliases`):** Dedicated table to manage IP-to-Hostname mappings (e.g., `192.168.1.1` -> `OPNsense Firewall`) with quick-add prompts for newly detected, unmapped IP addresses.
 * **Advanced Settings (`/settings/advanced`):** Runtime controls for AI timeout, reasoning token budget, base application URL, private IP webhook targets, Docker collector toggle and exclusions, trusted proxy headers, cookie security, and Syslog TCP connection ceilings (`AdvancedSettingsCard.tsx`).
 

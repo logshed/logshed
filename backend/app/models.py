@@ -161,6 +161,7 @@ class SettingsResponse(BaseModel):
     cookie_secure: bool = False
     syslog_max_tcp_connections: int = 250
     syslog_tcp_inactivity_timeout: float = 0.0
+    enable_mcp: bool = False
 
     # Daily Digest Settings
     daily_digest_enabled: bool = False
@@ -261,6 +262,10 @@ class SettingsUpdateRequest(BaseModel):
     syslog_tcp_inactivity_timeout: Optional[float] = Field(
         None,
         description="Syslog TCP client inactivity timeout in seconds (float >= 0.0, 0 disables).",
+    )
+    enable_mcp: Optional[bool] = Field(
+        None,
+        description="Enable Model Context Protocol (MCP) server integration.",
     )
     daily_digest_enabled: Optional[bool] = Field(
         None,

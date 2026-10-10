@@ -766,7 +766,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           }`}
         >
           <Key className="w-3.5 h-3.5 shrink-0" />
-          <span>API Access</span>
+          <span>API & MCP Access</span>
         </button>
 
         <button
@@ -1449,16 +1449,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
       )}
 
-      {/* Sub-tab 3: API Access */}
+      {/* Sub-tab 3: API & MCP Access */}
       {activeSubTab === 'tokens' && (
-        <ApiTokensTab />
+        <ApiTokensTab
+          settings={settings}
+          onSettingsSaved={loadAllData}
+        />
       )}
 
       {/* Sub-tab 4: Advanced */}
       {activeSubTab === 'advanced' && (
         <div className="space-y-6">
           {/* Advanced System Settings */}
-          <AdvancedSettingsCard settings={settings} onSettingsSaved={loadAllData} />
+          <AdvancedSettingsCard
+            settings={settings}
+            onSettingsSaved={loadAllData}
+          />
 
           {/* Admin Password Reset Section */}
           <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
