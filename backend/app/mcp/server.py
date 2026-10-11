@@ -15,12 +15,14 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from app.api.deps import run_db_query
 from app.api.external_v1 import (
+    count_logs_v1,
     get_log_context_v1,
     get_system_metrics as fetch_system_metrics_v1,
     list_alert_history_v1,
     search_logs_v1,
 )
 from app.api.logs import get_log_facets
+from app.core.utils import format_severity_label, resolve_severity
 from app.services.maintenance_service import (
     create_maintenance_session,
     disable_maintenance_sessions,
@@ -28,6 +30,32 @@ from app.services.maintenance_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _project_log_entry(
+    entry: dict[str, Any],
+    include_raw: bool = False,
+    fields: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """
+    Project and format a log entry for token-efficient MCP responses.
+    Adds human-readable severity_label, omits raw syslog packets by default,
+    and filters to requested fields when specified.
+    """
+    out = dict(entry)
+    sev = out.get("severity")
+    out["severity_label"] = format_severity_label(sev)
+
+    if fields:
+        allowed = set(fields)
+        return {k: v for k, v in out.items() if k in allowed}
+
+    if not include_raw:
+        out.pop("raw", None)
+        out.pop("facility", None)
+        out.pop("received_at", None)
+
+    return out
 
 
 def create_mcp_server() -> FastMCP:
@@ -79,47 +107,108 @@ def create_mcp_server() -> FastMCP:
         }
 
     @server.tool(
+        name="count_logs",
+        description=(
+            "Count homelab logs matching filters with optional grouping. "
+            "Very fast and token-efficient for checking error volume, trends, or verifying issue presence. "
+            "Accepts relative time ('1h', '24h', 'since_midnight') and named severity ('error', 'warning', 'info'). "
+            "group_by supports 'severity', 'app', or 'source'."
+        ),
+    )
+    async def count_logs(
+        query: Optional[str] = None,
+        apps: Optional[list[str]] = None,
+        sources: Optional[list[str]] = None,
+        severity: Optional[str | int] = None,
+        severity_max: Optional[int] = None,
+        from_time: Optional[str] = None,
+        to_time: Optional[str] = None,
+        group_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Count logs matching filters with optional grouping by severity, app, or source."""
+        effective_sev = None
+        if severity is not None:
+            effective_sev = resolve_severity(severity)
+        elif severity_max is not None:
+            effective_sev = resolve_severity(severity_max)
+
+        res = await count_logs_v1(
+            query=query,
+            source=sources,
+            app_name=apps,
+            severity_max=effective_sev,
+            severity=None,
+            from_=from_time,
+            to=to_time,
+            group_by=group_by,
+            token={"scopes": ["logs:read"]},
+        )
+        return res.model_dump()
+
+    @server.tool(
         name="query_logs",
         description=(
             "Search homelab logs using full-text search (FTS5 syntax), application filters, "
-            "host filters, severity limits, and time bounds."
+            "host filters, severity thresholds, and time bounds. "
+            "Returns compact log entries by default (omits redundant raw syslog packets to minimize token usage). "
+            "Accepts relative time ('1h', '24h', 'since_midnight') and named severities ('error', 'warning', 'info'). "
+            "Set include_raw=True or specify fields list to customize output."
         ),
     )
     async def query_logs(
         query: Optional[str] = None,
         apps: Optional[list[str]] = None,
         sources: Optional[list[str]] = None,
+        severity: Optional[str | int] = None,
         severity_max: Optional[int] = None,
         from_time: Optional[str] = None,
         to_time: Optional[str] = None,
         limit: int = 50,
+        include_raw: bool = False,
+        fields: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Search logs matching query filters, returning structured log entries and totals."""
         clamped_limit = min(max(1, limit), 200)
+        effective_sev = None
+        if severity is not None:
+            effective_sev = resolve_severity(severity)
+        elif severity_max is not None:
+            effective_sev = resolve_severity(severity_max)
+
         res = await search_logs_v1(
             query=query,
             source=sources,
             app_name=apps,
-            severity_max=severity_max,
+            severity_max=effective_sev,
+            severity=None,
             from_=from_time,
             to=to_time,
             limit=clamped_limit,
             offset=0,
             token={"scopes": ["logs:read"]},
         )
-        return res.model_dump()
+        data = res.model_dump()
+        projected_logs = [
+            _project_log_entry(l, include_raw=include_raw, fields=fields)
+            for l in data.get("logs", [])
+        ]
+        data["logs"] = projected_logs
+        return data
 
     @server.tool(
         name="get_log_context",
         description=(
             "Fetch surrounding log lines before and after a specific log ID "
-            "to inspect full stack trace and incident context."
+            "to inspect full stack trace and incident context. "
+            "By default returns compact log entries without redundant raw syslog packets."
         ),
     )
     async def get_log_context(
         log_id: int,
         lines: int = 10,
         same_app: bool = False,
+        include_raw: bool = False,
+        fields: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Fetch chronological log lines surrounding a target log identifier."""
         clamped_lines = min(max(1, lines), 50)
@@ -129,7 +218,24 @@ def create_mcp_server() -> FastMCP:
             same_app=same_app,
             token={"scopes": ["logs:read"]},
         )
-        return res.model_dump()
+        data = res.model_dump()
+        if data.get("target_log"):
+            data["target_log"] = _project_log_entry(
+                data["target_log"], include_raw=include_raw, fields=fields
+            )
+        data["before_logs"] = [
+            _project_log_entry(l, include_raw=include_raw, fields=fields)
+            for l in data.get("before_logs", [])
+        ]
+        data["after_logs"] = [
+            _project_log_entry(l, include_raw=include_raw, fields=fields)
+            for l in data.get("after_logs", [])
+        ]
+        data["logs"] = [
+            _project_log_entry(l, include_raw=include_raw, fields=fields)
+            for l in data.get("logs", [])
+        ]
+        return data
 
     @server.tool(
         name="get_recent_alerts",

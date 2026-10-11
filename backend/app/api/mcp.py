@@ -109,7 +109,22 @@ async def _run_session_manager_worker(
 
 async def ensure_session_manager_started() -> StreamableHTTPSessionManager:
     """Ensure the StreamableHTTP session manager task group is running and ready."""
-    global _session_manager_task, _session_manager_stop_event, _session_manager_started_event
+    global _session_manager, _session_manager_task, _session_manager_stop_event, _session_manager_started_event
+    current_loop = asyncio.get_running_loop()
+    if _session_manager_task is not None:
+        try:
+            task_loop = _session_manager_task.get_loop()
+            if task_loop is not current_loop or task_loop.is_closed():
+                _session_manager = None
+                _session_manager_task = None
+                _session_manager_stop_event = None
+                _session_manager_started_event = None
+        except Exception:
+            _session_manager = None
+            _session_manager_task = None
+            _session_manager_stop_event = None
+            _session_manager_started_event = None
+
     sm = get_mcp_session_manager()
     if sm._task_group is None:
         if _session_manager_task is None or _session_manager_task.done():

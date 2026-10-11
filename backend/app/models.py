@@ -116,6 +116,14 @@ class LogDeletePreviewResponse(BaseModel):
     matched_count: int
 
 
+class LogCountResponse(BaseModel):
+    """Aggregated log count matching criteria."""
+    total: int
+    grouped_by: Optional[str] = None
+    breakdown: dict[str, int] = Field(default_factory=dict)
+    time_range: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
 
 # ---------------------------------------------------------------------------
 # Settings Models

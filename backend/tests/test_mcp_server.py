@@ -81,6 +81,8 @@ async def client():
         headers={"x-requested-with": "XMLHttpRequest"},
     ) as ac:
         yield ac
+    from app.api.mcp import stop_mcp_session_manager
+    await stop_mcp_session_manager()
 
 
 @pytest.fixture
@@ -230,6 +232,113 @@ class TestMCPServer:
         # Verify deactivated
         metrics_res_after = await metrics_tool.fn()
         assert metrics_res_after["maintenance"]["active"] is False
+
+    @pytest.mark.asyncio
+    async def test_mcp_token_efficiency_and_projections(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+
+        query_tool = server._tool_manager._tools.get("query_logs")
+        context_tool = server._tool_manager._tools.get("get_log_context")
+
+        # 1. Verify default compact projection omits raw, facility, received_at
+        res_default = await query_tool.fn(limit=5)
+        assert len(res_default["logs"]) >= 1
+        entry = res_default["logs"][0]
+        assert "raw" not in entry
+        assert "facility" not in entry
+        assert "received_at" not in entry
+        assert "message" in entry
+        assert "severity" in entry
+        assert "severity_label" in entry
+        assert entry["severity_label"] in ("error", "info", "warning")
+
+        # 2. Verify include_raw=True restores raw packet
+        res_raw = await query_tool.fn(limit=5, include_raw=True)
+        assert len(res_raw["logs"]) >= 1
+        assert "raw" in res_raw["logs"][0]
+
+        # 3. Verify fields projection returns only requested attributes
+        res_fields = await query_tool.fn(
+            limit=5, fields=["app_name", "message", "severity_label"]
+        )
+        assert len(res_fields["logs"]) >= 1
+        first_log = res_fields["logs"][0]
+        assert set(first_log.keys()) == {"app_name", "message", "severity_label"}
+
+        # 4. Verify get_log_context compact projection
+        res_ctx = await context_tool.fn(log_id=2, lines=2)
+        assert "target_log" in res_ctx
+        assert "raw" not in res_ctx["target_log"]
+        assert "severity_label" in res_ctx["target_log"]
+        for b_log in res_ctx["before_logs"]:
+            assert "raw" not in b_log
+            assert "severity_label" in b_log
+
+    @pytest.mark.asyncio
+    async def test_mcp_count_logs_tool(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+
+        count_tool = server._tool_manager._tools.get("count_logs")
+        assert count_tool is not None
+
+        # 1. Total count without grouping
+        res_total = await count_tool.fn()
+        assert res_total["total"] == 3
+        assert res_total["grouped_by"] is None
+
+        # 2. Group by severity
+        res_sev = await count_tool.fn(group_by="severity")
+        assert res_sev["total"] == 3
+        assert res_sev["grouped_by"] == "severity"
+        assert res_sev["breakdown"]["error"] == 2
+        assert res_sev["breakdown"]["info"] == 1
+
+        # 3. Group by app
+        res_app = await count_tool.fn(group_by="app")
+        assert res_app["total"] == 3
+        assert res_app["grouped_by"] == "app"
+        assert res_app["breakdown"]["traefik"] == 2
+        assert res_app["breakdown"]["zfs"] == 1
+
+        # 4. Group by source
+        res_src = await count_tool.fn(group_by="source")
+        assert res_src["total"] == 3
+        assert res_src["grouped_by"] == "source"
+        assert res_src["breakdown"]["k3s-master"] == 2
+        assert res_src["breakdown"]["truenas"] == 1
+
+        # 5. Filter by app and named severity
+        res_filtered = await count_tool.fn(apps=["traefik"], severity="error")
+        assert res_filtered["total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_mcp_ergonomics_named_severity_and_relative_time(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+
+        query_tool = server._tool_manager._tools.get("query_logs")
+
+        # 1. Named severity filter ("error" matches severity <= 3)
+        res_error = await query_tool.fn(severity="error")
+        assert res_error["total"] == 2
+        for log in res_error["logs"]:
+            assert log["severity"] <= 3
+
+        # 2. Named severity filter ("warning" matches severity <= 4)
+        res_warn = await query_tool.fn(severity="warning")
+        assert res_warn["total"] == 2
+
+        # 3. Relative time bounds ("1h", "24h", "since_midnight")
+        res_1h = await query_tool.fn(from_time="1h")
+        assert res_1h["total"] == 3
+
+        res_midnight = await query_tool.fn(from_time="since_midnight")
+        assert res_midnight["total"] == 3
 
     @pytest.mark.asyncio
     async def test_mcp_resources(self, tmp_path: Path):
@@ -555,6 +664,75 @@ class TestMCPApiAndTransport:
         )
         assert res_tool.status_code == 200
         assert "db_size_bytes" in res_tool.text
+
+    @pytest.mark.asyncio
+    async def test_mcp_root_endpoint_streamable_http(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
+        token_res = await client.post(
+            "/api/tokens",
+            json={
+                "name": "Root MCP Token",
+                "scopes": ["logs:read", "alerts:read", "system:read", "maintenance:write"],
+            },
+            headers=auth_headers,
+        )
+        raw_token = token_res.json()["raw_token"]
+
+        init_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1.0.0"},
+            },
+        }
+
+        # Directly hit root /mcp (Streamable HTTP spec)
+        res = await client.post(
+            "/mcp",
+            headers={
+                "Authorization": f"Bearer {raw_token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            json=init_payload,
+        )
+        assert res.status_code == 200
+        assert "mcp-session-id" in res.headers
+        assert "LogShed" in res.text
+
+    @pytest.mark.asyncio
+    async def test_rest_api_logs_count_endpoint(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+
+        token_res = await client.post(
+            "/api/tokens",
+            json={
+                "name": "Count API Token",
+                "scopes": ["logs:read"],
+            },
+            headers=auth_headers,
+        )
+        raw_token = token_res.json()["raw_token"]
+
+        # Call /api/v1/logs/count
+        res = await client.get(
+            "/api/v1/logs/count?group_by=severity",
+            headers={"Authorization": f"Bearer {raw_token}"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total"] == 3
+        assert data["grouped_by"] == "severity"
+        assert data["breakdown"]["error"] == 2
+
 
 
 class TestMCPCli:

@@ -513,6 +513,9 @@ def create_app() -> FastAPI:
 
     app.include_router(api_v1_router)
 
+    # Direct Model Context Protocol root mount (Streamable HTTP /mcp per MCP specification)
+    app.include_router(mcp.router)
+
     # Static files serving with SPA fallback
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists():
@@ -522,7 +525,7 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
-            if full_path.startswith("api"):
+            if full_path.startswith("api") or full_path.startswith("mcp"):
                 raise HTTPException(status_code=404, detail="Not Found")
             resolved_file = (static_dir / full_path).resolve()
             if not resolved_file.is_relative_to(static_dir.resolve()):

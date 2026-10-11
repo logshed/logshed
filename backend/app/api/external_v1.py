@@ -25,8 +25,11 @@ from app.core.pipeline import (
 from app.core.utils import (
     expand_source_aliases,
     format_fts_query,
+    format_severity_label,
     parse_iso_to_utc_datetime,
     parse_multi_values,
+    parse_relative_or_iso_time,
+    resolve_severity,
 )
 from app.models import (
     ApiTokenVerifyResponse,
@@ -36,6 +39,7 @@ from app.models import (
     ExternalMaintenanceEnableResponse,
     ExternalMaintenanceStatusResponse,
     LogContextResponse,
+    LogCountResponse,
     LogEntry,
     LogFacetsResponse,
     LogListResponse,
@@ -453,79 +457,111 @@ async def trigger_vacuum_v1(
 # Log & Incident Query Endpoints
 # ---------------------------------------------------------------------------
 
+def build_log_where_clause(
+    conn: Any,
+    query: Optional[str] = None,
+    source: Optional[list[str]] = None,
+    app_name: Optional[list[str]] = None,
+    severity_max: Optional[int] = None,
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build shared WHERE clause and parameter map for log search and count queries."""
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    is_fts = bool(query and query.strip())
+    if is_fts:
+        fts_term = format_fts_query(query)
+        if not fts_term.strip():
+            where_clauses.append("0")
+        else:
+            where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
+            params["fts_term"] = fts_term
+
+    parsed_sources = expand_source_aliases(source, conn=conn)
+    if parsed_sources:
+        src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
+        where_clauses.append(
+            f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))"
+        )
+        for i, s in enumerate(parsed_sources):
+            params[f"src_{i}"] = s
+
+    parsed_apps = parse_multi_values(app_name)
+    if parsed_apps:
+        app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
+        where_clauses.append(f"logs.app_name IN ({app_placeholders})")
+        for i, a in enumerate(parsed_apps):
+            params[f"app_{i}"] = a
+
+    if severity_max is not None:
+        where_clauses.append("logs.severity <= :severity_max")
+        params["severity_max"] = severity_max
+
+    if from_ts:
+        where_clauses.append("logs.timestamp >= :from_ts")
+        params["from_ts"] = from_ts
+
+    if to_ts:
+        where_clauses.append("logs.timestamp <= :to_ts")
+        params["to_ts"] = to_ts
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    return where_sql, params
+
+
 @router.get("/logs", response_model=LogListResponse)
 async def search_logs_v1(
     query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
     source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
     app_name: Optional[list[str]] = Query(None, description="Filter by application name"),
     severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
-    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter"),
-    to: Optional[str] = Query(None, description="ISO datetime end filter"),
+    severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
+    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
+    to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
     limit: int = Query(50, ge=1, le=1000, description="Max logs to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogListResponse:
     """Search and filter logs with FTS5 expressions, source and app filters, and time ranges."""
+    effective_severity_max = severity_max
+    if severity is not None:
+        try:
+            effective_severity_max = resolve_severity(severity)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
     if from_:
         try:
-            datetime.datetime.fromisoformat(from_)
+            from_ = parse_relative_or_iso_time(from_)
         except (ValueError, TypeError):
             raise HTTPException(
                 status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string.",
+                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
             )
 
     if to:
         try:
-            datetime.datetime.fromisoformat(to)
+            to = parse_relative_or_iso_time(to)
         except (ValueError, TypeError):
             raise HTTPException(
                 status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string.",
+                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
             )
 
     def _query_db(conn):
-        where_clauses: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-
-        is_fts = bool(query and query.strip())
-        if is_fts:
-            fts_term = format_fts_query(query)
-            if not fts_term.strip():
-                where_clauses.append("0")
-            else:
-                where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
-                params["fts_term"] = fts_term
-
-        parsed_sources = expand_source_aliases(source, conn=conn)
-        if parsed_sources:
-            src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
-            where_clauses.append(
-                f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))"
-            )
-            for i, s in enumerate(parsed_sources):
-                params[f"src_{i}"] = s
-
-        parsed_apps = parse_multi_values(app_name)
-        if parsed_apps:
-            app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
-            where_clauses.append(f"logs.app_name IN ({app_placeholders})")
-            for i, a in enumerate(parsed_apps):
-                params[f"app_{i}"] = a
-
-        if severity_max is not None:
-            where_clauses.append("logs.severity <= :severity_max")
-            params["severity_max"] = severity_max
-
-        if from_:
-            where_clauses.append("logs.timestamp >= :from_ts")
-            params["from_ts"] = from_
-
-        if to:
-            where_clauses.append("logs.timestamp <= :to_ts")
-            params["to_ts"] = to
-
-        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        where_sql, params = build_log_where_clause(
+            conn=conn,
+            query=query,
+            source=source,
+            app_name=app_name,
+            severity_max=effective_severity_max,
+            from_ts=from_,
+            to_ts=to,
+        )
+        params["limit"] = limit
+        params["offset"] = offset
 
         # Total count query
         count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
@@ -569,6 +605,127 @@ async def search_logs_v1(
         offset=offset,
         total_capped=False,
     )
+
+
+@router.get("/logs/count", response_model=LogCountResponse)
+async def count_logs_v1(
+    query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
+    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
+    app_name: Optional[list[str]] = Query(None, description="Filter by application name"),
+    severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
+    severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
+    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
+    to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
+    group_by: Optional[str] = Query(None, description="Group breakdown by 'severity', 'app', or 'source'"),
+    token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
+) -> LogCountResponse:
+    """Count logs matching filters with optional grouping by severity, app, or source."""
+    effective_severity_max = severity_max
+    if severity is not None:
+        try:
+            effective_severity_max = resolve_severity(severity)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    if from_:
+        try:
+            from_ = parse_relative_or_iso_time(from_)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
+            )
+
+    if to:
+        try:
+            to = parse_relative_or_iso_time(to)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
+            )
+
+    def _count_db(conn):
+        where_sql, params = build_log_where_clause(
+            conn=conn,
+            query=query,
+            source=source,
+            app_name=app_name,
+            severity_max=effective_severity_max,
+            from_ts=from_,
+            to_ts=to,
+        )
+        cursor = conn.cursor()
+        valid_group = (group_by or "").lower().strip()
+
+        if valid_group in ("severity", "level"):
+            group_sql = f"""
+                SELECT logs.severity, COUNT(*) as cnt
+                FROM logs
+                {where_sql}
+                GROUP BY logs.severity
+                ORDER BY logs.severity ASC
+            """
+            cursor.execute(group_sql, params)
+            rows = cursor.fetchall()
+            breakdown: dict[str, int] = {}
+            total = 0
+            for r in rows:
+                sev_int = r["severity"]
+                cnt = r["cnt"]
+                total += cnt
+                label = format_severity_label(sev_int)
+                breakdown[label] = cnt
+            return total, "severity", breakdown
+
+        elif valid_group in ("app", "app_name"):
+            group_sql = f"""
+                SELECT logs.app_name, COUNT(*) as cnt
+                FROM logs
+                {where_sql}
+                GROUP BY logs.app_name
+                ORDER BY cnt DESC
+                LIMIT 25
+            """
+            cursor.execute(group_sql, params)
+            rows = cursor.fetchall()
+            breakdown = {r["app_name"]: r["cnt"] for r in rows}
+            count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
+            cursor.execute(count_sql, params)
+            total = cursor.fetchone()[0]
+            return total, "app", breakdown
+
+        elif valid_group in ("source", "source_alias", "host"):
+            group_sql = f"""
+                SELECT COALESCE(logs.source_alias, logs.source_ip, 'unknown') as src, COUNT(*) as cnt
+                FROM logs
+                {where_sql}
+                GROUP BY src
+                ORDER BY cnt DESC
+                LIMIT 25
+            """
+            cursor.execute(group_sql, params)
+            rows = cursor.fetchall()
+            breakdown = {r["src"]: r["cnt"] for r in rows}
+            count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
+            cursor.execute(count_sql, params)
+            total = cursor.fetchone()[0]
+            return total, "source", breakdown
+
+        else:
+            count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
+            cursor.execute(count_sql, params)
+            total = cursor.fetchone()[0]
+            return total, None, {}
+
+    total, grouped_by_out, breakdown_out = await run_db_query(_count_db)
+    return LogCountResponse(
+        total=total,
+        grouped_by=grouped_by_out,
+        breakdown=breakdown_out,
+        time_range={"from": from_, "to": to},
+    )
+
 
 
 @router.get("/logs/{log_id}/context", response_model=LogContextResponse)

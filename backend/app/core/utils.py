@@ -297,4 +297,144 @@ def format_fts_query(query_str: str) -> str:
     return " ".join(formatted_tokens)
 
 
+SEVERITY_NAME_MAP: dict[str, int] = {
+    "emerg": 0,
+    "emergency": 0,
+    "alert": 1,
+    "crit": 2,
+    "critical": 2,
+    "fatal": 2,
+    "panic": 2,
+    "err": 3,
+    "error": 3,
+    "warn": 4,
+    "warning": 4,
+    "notice": 5,
+    "info": 6,
+    "informational": 6,
+    "log": 6,
+    "debug": 7,
+    "trace": 7,
+    "verbose": 7,
+}
 
+SEVERITY_LABELS: dict[int, str] = {
+    0: "emergency",
+    1: "alert",
+    2: "critical",
+    3: "error",
+    4: "warning",
+    5: "notice",
+    6: "info",
+    7: "debug",
+}
+
+
+def resolve_severity(val: Any) -> Optional[int]:
+    """
+    Resolve a severity parameter (integer 0-7, numeric string, or name such as
+    'error', 'warning', 'info', 'crit', 'debug') to an RFC 5424 integer level (0-7).
+    Returns None if val is None or empty. Raises ValueError if invalid.
+    """
+    if val is None or type(val).__name__ == "Query":
+        return None
+    if isinstance(val, int):
+        if 0 <= val <= 7:
+            return val
+        raise ValueError(f"Severity integer must be between 0 and 7, got {val}")
+    s = str(val).strip().lower()
+    if not s:
+        return None
+    if s.isdigit():
+        iv = int(s)
+        if 0 <= iv <= 7:
+            return iv
+        raise ValueError(f"Severity integer must be between 0 and 7, got {iv}")
+    if s in SEVERITY_NAME_MAP:
+        return SEVERITY_NAME_MAP[s]
+    raise ValueError(
+        f"Unrecognized severity name '{val}'. Valid options: emergency, alert, critical, error, warning, notice, info, debug"
+    )
+
+
+def format_severity_label(severity: Optional[int]) -> str:
+    """Format numeric RFC 5424 severity (0-7) to a standard human-readable lowercase label."""
+    if severity is None or type(severity).__name__ == "Query":
+        return "unknown"
+    return SEVERITY_LABELS.get(severity, "unknown")
+
+
+_RE_RELATIVE_TIME = re.compile(
+    r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$",
+    re.IGNORECASE,
+)
+
+
+def parse_relative_or_iso_time(val: Any) -> Optional[str]:
+    """
+    Parse a relative time string (e.g. '15m', '1h', '24h', '7d', 'since_midnight', 'today', 'yesterday')
+    or an ISO-8601 string into an ISO-8601 UTC string.
+    Returns None if val is None or empty. Raises ValueError if format is unrecognized.
+    """
+    if val is None or type(val).__name__ == "Query":
+        return None
+    if isinstance(val, (int, float)):
+        dt = datetime.datetime.fromtimestamp(float(val), tz=datetime.timezone.utc)
+        return dt.isoformat()
+    if isinstance(val, datetime.datetime):
+        if val.tzinfo is None:
+            val = val.replace(tzinfo=datetime.timezone.utc)
+        return val.astimezone(datetime.timezone.utc).isoformat()
+
+    clean = str(val).strip()
+    if not clean:
+        return None
+
+    clean_lower = clean.lower()
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+    # Human relative keywords
+    if clean_lower in ("since_midnight", "today"):
+        midnight = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight.isoformat()
+    if clean_lower == "yesterday":
+        yesterday_midnight = (now_utc - datetime.timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return yesterday_midnight.isoformat()
+
+    # Relative duration pattern (e.g., "1h", "30m", "24h", "7d")
+    m = _RE_RELATIVE_TIME.match(clean)
+    if m:
+        num = int(m.group(1))
+        unit = m.group(2).lower()
+        if unit.startswith("s"):
+            delta = datetime.timedelta(seconds=num)
+        elif unit.startswith("m"):
+            delta = datetime.timedelta(minutes=num)
+        elif unit.startswith("h"):
+            delta = datetime.timedelta(hours=num)
+        elif unit.startswith("d"):
+            delta = datetime.timedelta(days=num)
+        elif unit.startswith("w"):
+            delta = datetime.timedelta(weeks=num)
+        else:
+            delta = datetime.timedelta(minutes=num)
+        return (now_utc - delta).isoformat()
+
+    # Check ISO-8601 parsing
+    parsed_dt = parse_iso_to_utc_datetime(clean)
+    if parsed_dt is not None:
+        return parsed_dt.isoformat()
+
+    try:
+        clean_std = clean.replace(" ", "T").replace("Z", "+00:00")
+        dt = datetime.datetime.fromisoformat(clean_std)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc).isoformat()
+    except Exception:
+        raise ValueError(
+            f"Invalid time format '{val}'. Expected relative duration (e.g. '1h', '24h', 'since_midnight') "
+            "or ISO-8601 timestamp."
+        )

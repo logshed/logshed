@@ -161,9 +161,9 @@ Because Claude Desktop communicates strictly through local command-line processe
 
 ---
 
-### Cursor / Windsurf / Antigravity (Remote SSE)
+### Cursor / Windsurf / Antigravity (Remote Streamable HTTP & SSE)
 
-Use this method for modern AI coding editors with native network SSE support (such as Cursor, Windsurf, or Google Antigravity). These clients connect directly over HTTP without intermediary proxy tools.
+Use this method for modern AI coding editors with native network MCP support (such as Cursor, Windsurf, or Google Antigravity). These clients connect directly over HTTP without intermediary proxy tools. LogShed supports both standard Streamable HTTP (at `/mcp`) and Server-Sent Events (at `/api/v1/mcp/sse`).
 
 1. Open your project or global MCP configuration:
    - In Cursor: Go to **Cursor Settings > Features > MCP**, or edit `.cursor/mcp.json`.
@@ -174,7 +174,7 @@ Use this method for modern AI coding editors with native network SSE support (su
    {
      "mcpServers": {
        "logshed": {
-         "url": "http://<YOUR_LOGSHED_IP_OR_HOST>:8080/api/v1/mcp/sse",
+         "url": "http://<YOUR_LOGSHED_IP_OR_HOST>:8080/mcp",
          "headers": {
            "Authorization": "Bearer ls_live_YOUR_ACTUAL_TOKEN_HERE"
          }
@@ -182,6 +182,7 @@ Use this method for modern AI coding editors with native network SSE support (su
      }
    }
    ```
+   *(For clients requiring dedicated SSE endpoints, use `http://<YOUR_LOGSHED_IP_OR_HOST>:8080/api/v1/mcp/sse`)*
 3. Save and refresh the server list.
 
 ---
@@ -215,17 +216,19 @@ Use this method when Claude Desktop runs on the exact same physical workstation 
 
 ## Available MCP Tools Reference
 
-LogShed registers seven dedicated tools with your AI assistant:
+LogShed registers eight dedicated tools with your AI assistant:
 
 | Tool Name | Parameters | Purpose |
 |---|---|---|
 | `get_system_metrics` | None | Retrieves live homelab telemetry: current log ingestion rate, 1-hour and 24-hour error totals, top error applications and hosts, active alert rule states, disk usage, and maintenance status. |
 | `list_services` | None | Returns distinct application names (`app_name`) and host sources (`source_alias` / `source_ip`) currently sending logs to LogShed, along with host-to-app relationship maps. |
-| `query_logs` | `query`, `apps`, `sources`, `severity_max`, `from_time`, `to_time`, `limit` | Searches logs using SQLite FTS5 syntax. Supports multi-application and multi-source filtering, RFC 5424 severity thresholds (0 = Emergency to 7 = Debug), and ISO-8601 time bounds. |
-| `get_log_context` | `log_id`, `lines`, `same_app` | Fetches surrounding chronological log entries (up to 50 lines before and after) around a specific log ID to inspect complete stack traces and request flows. |
+| `count_logs` | `query`, `apps`, `sources`, `severity`, `from_time`, `to_time`, `group_by` | Counts logs matching filters with optional grouping (`severity`, `app`, `source`). Fast and token-efficient for checking error volume and trends without fetching full payloads. Supports relative time (`"1h"`, `"24h"`, `"since_midnight"`) and named severity (`"error"`, `"warning"`). |
+| `query_logs` | `query`, `apps`, `sources`, `severity`, `severity_max`, `from_time`, `to_time`, `limit`, `include_raw`, `fields` | Searches logs using SQLite FTS5 syntax. Compact by default (omits redundant raw syslog packets to minimize token usage). Supports field projection (`fields`), named severities (`"error"`, `"warning"`, `"info"`), and relative time bounds (`"1h"`, `"24h"`, `"since_midnight"`). |
+| `get_log_context` | `log_id`, `lines`, `same_app`, `include_raw`, `fields` | Fetches surrounding chronological log entries (up to 50 lines before and after) around a specific log ID to inspect complete stack traces and request flows. Compact by default. |
 | `get_recent_alerts` | `limit` | Retrieves historical incident firing records, triggering sample log lines, and previous AI root-cause summaries. |
 | `enable_maintenance` | `duration_minutes`, `reason`, `log_handling`, `target_app`, `target_host` | Starts an on-demand maintenance window to suppress notifications or drop error chatter during planned restarts. Returns a tracking `session_id`. |
 | `disable_maintenance` | `session_id` | Deactivates an active maintenance session (or all active sessions if `session_id` is omitted). |
+
 
 ---
 

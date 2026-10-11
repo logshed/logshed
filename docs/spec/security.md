@@ -73,9 +73,9 @@ LogShed provides self-contained native authentication and protection controls wi
 * **Throttled Last Used Tracking:** Updates to `last_used_at` in SQLite are throttled to at most once per 5 minutes per token to avoid database write amplification.
 * **Exempt from CSRF:** Bearer token requests are cryptographically bound to HTTP Authorization headers and immune to browser CSRF.
 * **Model Context Protocol (MCP) Authentication:**
-  * Network SSE connections (`GET /api/v1/mcp/sse`) and JSON-RPC message calls (`POST /api/v1/mcp/messages`) require authentication with a valid token possessing the `AI Assistant / MCP` scope bundle (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) or wildcard `*`.
+  * Streamable HTTP connections (`/mcp` and `/api/v1/mcp`), network SSE connections (`GET /api/v1/mcp/sse`), and JSON-RPC message calls (`POST /api/v1/mcp/messages`) require authentication with a valid token possessing the `AI Assistant / MCP` scope bundle (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) or wildcard `*`.
   * Tokens can be supplied via standard `Authorization: Bearer <token>` or `API_ACCESS_TOKEN` headers/environment variables (supported by `mcp-proxy`).
-  * Sessions establish verified mapping between SSE stream channels and message dispatchers with automatic expiration and cleanup.
+  * Sessions establish verified mapping between client streams and message dispatchers with automatic expiration and cleanup.
 
 ## 9. CLI Password Recovery
 * Single-command rescue executable inside container (accepts `--password` or prompts securely via terminal):

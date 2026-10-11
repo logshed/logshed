@@ -627,7 +627,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                         Cursor / Windsurf / Antigravity
                       </span>
                       <span className="text-[11px] text-slate-400 font-normal">
-                        (Remote SSE)
+                        (Remote SSE / Streamable HTTP)
                       </span>
                     </div>
                   </div>
