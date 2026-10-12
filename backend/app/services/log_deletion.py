@@ -57,7 +57,9 @@ def build_deletion_filter(
     if parsed_sources:
         has_filter = True
         src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
-        where_clauses.append(f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))")
+        where_clauses.append(
+            f"(logs.source_alias IN ({src_placeholders}) OR (logs.source_ip IN ({src_placeholders}) AND (logs.source_alias IS NULL OR logs.source_alias NOT IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)) AND logs.source_ip != 'docker'))"
+        )
         for i, s in enumerate(parsed_sources):
             params[f"src_{i}"] = s
 

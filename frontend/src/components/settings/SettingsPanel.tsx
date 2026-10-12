@@ -32,18 +32,23 @@ import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
 import { ApiTokensTab } from './ApiTokensTab.tsx';
+import { DockerHostsTab } from './DockerHostsTab.tsx';
 
 export type { SettingsSubTab };
 
 export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
   if (
+    clean === '/sources' ||
+    clean.startsWith('/sources/') ||
+    clean === '/settings/sources' ||
+    clean.startsWith('/settings/sources/') ||
     clean === '/aliases' ||
     clean.startsWith('/aliases/') ||
     clean === '/settings/aliases' ||
     clean.startsWith('/settings/aliases/')
   ) {
-    return 'aliases';
+    return 'sources';
   }
   if (
     clean === '/settings/api-tokens' ||
@@ -61,8 +66,8 @@ export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
 
 export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
   switch (subTab) {
-    case 'aliases':
-      return '/settings/aliases';
+    case 'sources':
+      return '/settings/sources';
     case 'tokens':
       return '/settings/api-tokens';
     case 'advanced':
@@ -76,7 +81,11 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
 export interface SettingsPanelProps {
   initialSubTab?: SettingsSubTab;
   initialAddIp?: string | null;
+  initialEditDockerHostId?: number | null;
+  initialDeletedDockerHostInfo?: { name: string; ip: string } | null;
   onAliasSaved?: () => void;
+  onDockerHostSaved?: () => void;
+  onClearSourcesState?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
   saveTriggerRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
 }
@@ -84,10 +93,21 @@ export interface SettingsPanelProps {
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   initialSubTab,
   initialAddIp,
+  initialEditDockerHostId,
+  initialDeletedDockerHostInfo,
   onAliasSaved,
+  onDockerHostSaved,
+  onClearSourcesState,
   onDirtyChange,
   saveTriggerRef,
 }) => {
+  const [activeAddIp, setActiveAddIp] = useState<string | null>(initialAddIp || null);
+
+  useEffect(() => {
+    if (initialAddIp) {
+      setActiveAddIp(initialAddIp);
+    }
+  }, [initialAddIp]);
   const { logout } = useAuth();
   const [settings, setSettings] = useState<SettingsResponseData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -532,8 +552,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   useEffect(() => {
     const clean = window.location.pathname.replace(/\/+$/, '').toLowerCase();
-    if (clean === '/aliases') {
-      window.history.replaceState(null, '', '/settings/aliases');
+    if (clean === '/aliases' || clean === '/settings/aliases') {
+      window.history.replaceState(null, '', '/settings/sources');
     }
   }, []);
 
@@ -745,15 +765,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         <button
           type="button"
-          onClick={() => handleSubTabChange('aliases')}
+          onClick={() => handleSubTabChange('sources')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'aliases'
+            activeSubTab === 'sources'
               ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
               : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
           }`}
         >
           <Server className="w-3.5 h-3.5 shrink-0" />
-          <span>Host Aliases</span>
+          <span>Sources</span>
         </button>
 
         <button
@@ -1441,12 +1461,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       )}
 
-      {/* Sub-tab 2: Host Aliases */}
-      {activeSubTab === 'aliases' && (
-        <HostAliasManager
-          initialAddIp={initialAddIp}
-          onAliasSaved={onAliasSaved}
-        />
+      {/* Sub-tab 2: Sources (Host Aliases + Docker Hosts) */}
+      {activeSubTab === 'sources' && (
+        <div className="space-y-6">
+          <HostAliasManager
+            initialAddIp={activeAddIp}
+            onAliasSaved={() => {
+              setActiveAddIp(null);
+              if (onAliasSaved) onAliasSaved();
+            }}
+          />
+          <DockerHostsTab
+            initialEditEndpointId={initialEditDockerHostId}
+            initialDeletedHostInfo={initialDeletedDockerHostInfo}
+            onHostSaved={onDockerHostSaved}
+            onAddSyslogAlias={(targetIp) => setActiveAddIp(targetIp)}
+            onClearSourcesState={onClearSourcesState}
+          />
+        </div>
       )}
 
       {/* Sub-tab 3: API & MCP Access */}

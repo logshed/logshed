@@ -7,6 +7,7 @@ import * as authApi from '../api/auth.ts';
 import * as systemApi from '../api/system.ts';
 import * as notifApi from '../api/notifications.ts';
 import * as tokensApi from '../api/tokens.ts';
+import * as dockerHostsApi from '../api/dockerHosts.ts';
 import { DEFAULT_SYSTEM_PROMPT } from '../utils/aiPrompt.ts';
 
 const mockLogout = vi.fn();
@@ -54,6 +55,7 @@ describe('SettingsPanel Component', () => {
     });
     vi.spyOn(notifApi, 'fetchNotificationChannels').mockResolvedValue([]);
     vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
   });
 
   it('renders AI System Instructions card, allows editing and saving ai_system_prompt', async () => {
@@ -674,16 +676,19 @@ describe('SettingsPanel Component', () => {
       expect(pathToSettingsSubTab('/settings')).toBe('app');
       expect(pathToSettingsSubTab('/settings/')).toBe('app');
       expect(pathToSettingsSubTab('/settings/app')).toBe('app');
-      expect(pathToSettingsSubTab('/settings/aliases')).toBe('aliases');
-      expect(pathToSettingsSubTab('/aliases')).toBe('aliases');
-      expect(pathToSettingsSubTab('/aliases/')).toBe('aliases');
+      expect(pathToSettingsSubTab('/settings/sources')).toBe('sources');
+      expect(pathToSettingsSubTab('/sources')).toBe('sources');
+      expect(pathToSettingsSubTab('/sources/')).toBe('sources');
+      expect(pathToSettingsSubTab('/settings/aliases')).toBe('sources');
+      expect(pathToSettingsSubTab('/aliases')).toBe('sources');
+      expect(pathToSettingsSubTab('/aliases/')).toBe('sources');
       expect(pathToSettingsSubTab('/settings/advanced')).toBe('advanced');
       expect(pathToSettingsSubTab('/settings/api-tokens')).toBe('tokens');
 
       expect(settingsSubTabToPath('app')).toBe('/settings/app');
-      expect(settingsSubTabToPath('aliases')).toBe('/settings/aliases');
-      expect(settingsSubTabToPath('advanced')).toBe('/settings/advanced');
+      expect(settingsSubTabToPath('sources')).toBe('/settings/sources');
       expect(settingsSubTabToPath('tokens')).toBe('/settings/api-tokens');
+      expect(settingsSubTabToPath('advanced')).toBe('/settings/advanced');
     });
 
     it('switches between sub-tabs when tab buttons are clicked', async () => {
@@ -693,12 +698,13 @@ describe('SettingsPanel Component', () => {
         expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
       });
 
-      // Switch to Host Aliases tab
-      const aliasesTab = screen.getByRole('button', { name: /^Host Aliases$/i });
-      fireEvent.click(aliasesTab);
+      // Switch to Sources tab (contains both Syslog Host Aliases and Docker Host Endpoints)
+      const sourcesTab = screen.getByRole('button', { name: /^Sources$/i });
+      fireEvent.click(sourcesTab);
 
       await waitFor(() => {
-        expect(screen.getByText('Host Alias Manager')).toBeInTheDocument();
+        expect(screen.getByText('Syslog Host Aliases')).toBeInTheDocument();
+        expect(screen.getByText('Docker Host Endpoints')).toBeInTheDocument();
       });
       expect(screen.queryByText('Internal Application Logging')).toBeNull();
 
@@ -709,7 +715,8 @@ describe('SettingsPanel Component', () => {
       await waitFor(() => {
         expect(screen.getByText('External API Access')).toBeInTheDocument();
       });
-      expect(screen.queryByText('Host Alias Manager')).toBeNull();
+      expect(screen.queryByText('Syslog Host Aliases')).toBeNull();
+      expect(screen.queryByText('Docker Host Endpoints')).toBeNull();
 
       // Switch to Advanced tab
       const advancedTab = screen.getByRole('button', { name: /^Advanced$/i });
@@ -719,8 +726,9 @@ describe('SettingsPanel Component', () => {
         expect(screen.getByText('Change Admin Password')).toBeInTheDocument();
       });
       expect(screen.queryByText('About LogShed')).toBeNull();
-      expect(screen.queryByText('Host Alias Manager')).toBeNull();
+      expect(screen.queryByText('Syslog Host Aliases')).toBeNull();
       expect(screen.queryByText('External API Access')).toBeNull();
+      expect(screen.queryByText('Docker Host Endpoints')).toBeNull();
 
       // Switch back to Application tab
       const appTab = screen.getByRole('button', { name: /^Application$/i });
@@ -739,10 +747,11 @@ describe('SettingsPanel Component', () => {
     });
 
     it('initializes on given initialSubTab prop', async () => {
-      render(<SettingsPanel initialSubTab="aliases" />);
+      render(<SettingsPanel initialSubTab="sources" />);
 
       await waitFor(() => {
-        expect(screen.getByText('Host Alias Manager')).toBeInTheDocument();
+        expect(screen.getByText('Syslog Host Aliases')).toBeInTheDocument();
+        expect(screen.getByText('Docker Host Endpoints')).toBeInTheDocument();
       });
       expect(screen.queryByText('Internal Application Logging')).toBeNull();
     });
@@ -763,9 +772,9 @@ describe('SettingsPanel Component', () => {
         expect(onDirtyChange).toHaveBeenLastCalledWith(true);
       });
 
-      // Switch to Host Aliases tab
-      const aliasesTab = screen.getByRole('button', { name: /^Host Aliases$/i });
-      fireEvent.click(aliasesTab);
+      // Switch to Sources tab
+      const sourcesTab = screen.getByRole('button', { name: /^Sources$/i });
+      fireEvent.click(sourcesTab);
 
       await waitFor(() => {
         expect(onDirtyChange).toHaveBeenLastCalledWith(false);

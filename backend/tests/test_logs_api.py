@@ -1073,5 +1073,77 @@ class TestLogStreamAndFacets:
         assert res_bad_to.status_code == 422
         assert "Invalid datetime format" in res_bad_to.json()["detail"]
 
+    @pytest.mark.asyncio
+    async def test_source_filter_decouples_docker_and_syslog_on_same_ip(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """Verifies filtering by Syslog or Docker alias never returns the other's logs even when sharing the same host IP."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        ts1 = (now_utc - datetime.timedelta(minutes=2)).isoformat()
+        ts2 = (now_utc - datetime.timedelta(minutes=1)).isoformat()
+
+        with sqlite3.connect(str(db_file)) as conn:
+            # 1. Host aliases (Syslog)
+            conn.execute(
+                "INSERT OR REPLACE INTO host_aliases (ip, alias, notes, created_at) VALUES (?, ?, ?, ?)",
+                ("192.168.1.50", "host-a-new", "Host A Syslog", ts1),
+            )
+            # 2. Docker endpoint (Docker)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO docker_endpoints (
+                    id, name, url, source_alias, enabled, tls_enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (2, "Host A Docker", "tcp://192.168.1.50:2375", "host-a-docker-new", 1, 0, ts1, ts1),
+            )
+            # 3. Seed Syslog log
+            conn.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ts1, ts1, "192.168.1.50", "host-a-new", "unraid-os", 1, 6, "Array started cleanly", "<14>1 unraid-os Array started cleanly"),
+            )
+            # 4. Seed Docker log on the same host IP
+            conn.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ts2, ts2, "192.168.1.50", "host-a-docker-new", "plex-container", 1, 6, "Plex Media Server ready", "Plex Media Server ready"),
+            )
+            conn.commit()
+
+        # Filtering by Syslog alias returns ONLY Syslog log
+        res_syslog = await client.get("/api/logs", params={"source": "host-a-new"})
+        assert res_syslog.status_code == 200
+        data_syslog = res_syslog.json()
+        assert data_syslog["total"] == 1
+        assert data_syslog["logs"][0]["source_alias"] == "host-a-new"
+        assert data_syslog["logs"][0]["app_name"] == "unraid-os"
+
+        # Filtering by Docker alias returns ONLY Docker log
+        res_docker = await client.get("/api/logs", params={"source": "host-a-docker-new"})
+        assert res_docker.status_code == 200
+        data_docker = res_docker.json()
+        assert data_docker["total"] == 1
+        assert data_docker["logs"][0]["source_alias"] == "host-a-docker-new"
+        assert data_docker["logs"][0]["app_name"] == "plex-container"
+
+        # Facets correctly distinguish host identities and their app scopes
+        res_facets = await client.get("/api/logs/facets")
+        assert res_facets.status_code == 200
+        facets = res_facets.json()
+        assert "host-a-new" in facets["sources"]
+        assert "host-a-docker-new" in facets["sources"]
+        assert "unraid-os" in facets["host_to_apps"]["host-a-new"]
+        assert "plex-container" not in facets["host_to_apps"]["host-a-new"]
+        assert "plex-container" in facets["host_to_apps"]["host-a-docker-new"]
+        assert "unraid-os" not in facets["host_to_apps"]["host-a-docker-new"]
+
+
 
 

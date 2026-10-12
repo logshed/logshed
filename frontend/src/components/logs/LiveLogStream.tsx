@@ -13,11 +13,12 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
-import { LogEntry, LogFilterParams } from '../../types.ts';
+import { LogEntry, LogFilterParams, DockerEndpoint } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
 import { LogDetailModal } from './LogDetailModal.tsx';
 import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
 import { fetchAliases } from '../../api/aliases.ts';
+import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
@@ -228,12 +229,20 @@ export function prepareLogEntry(
   entry: LogEntry | ProcessedLogEntry,
   aliases?: Record<string, string>,
   timeZone?: string,
+  dockerAliases?: Set<string>,
 ): ProcessedLogEntry {
   const existing = entry as ProcessedLogEntry;
+  const isDocker =
+    entry.source_ip === 'docker' ||
+    Boolean(
+      dockerAliases && entry.source_alias && dockerAliases.has(entry.source_alias.toLowerCase())
+    );
+
   const canonical =
+    !isDocker &&
     aliases &&
-    ((entry.source_ip && aliases[entry.source_ip]) ||
-      (entry.source_alias && aliases[entry.source_alias]));
+    ((entry.source_alias && aliases[entry.source_alias]) ||
+      (entry.source_ip && aliases[entry.source_ip]));
   const source_alias = canonical || entry.source_alias;
 
   return {
@@ -318,6 +327,8 @@ export function matchesSearchQuery(
 interface LiveLogStreamProps {
   onDiagnoseAi: (selectedLogs: LogEntry[]) => void;
   onAddAlias?: (ip: string) => void;
+  onEditDockerHost?: (endpointId: number) => void;
+  onManageDeletedDockerHost?: (info: { name: string; ip: string }) => void;
   knownAliases?: Record<string, string>;
   clearSelectionSignal?: number;
   pullTouchHandlers?: PullTouchHandlers;
@@ -327,14 +338,21 @@ const MAX_BUFFER_SIZE = 3000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
+const EMPTY_KNOWN_ALIASES: Record<string, string> = {};
+
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onDiagnoseAi,
   onAddAlias,
-  knownAliases = {},
+  onEditDockerHost,
+  onManageDeletedDockerHost,
+  knownAliases = EMPTY_KNOWN_ALIASES,
   clearSelectionSignal,
   pullTouchHandlers,
 }) => {
   const [logs, setLogs] = useState<ProcessedLogEntry[]>([]);
+  const [dockerEndpoints, setDockerEndpoints] = useState<DockerEndpoint[]>([]);
+  const dockerEndpointsRef = useRef<DockerEndpoint[]>([]);
+  const dockerAliasesRef = useRef<Set<string>>(new Set());
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [missedLogsCount, setMissedLogsCount] = useState<number>(0);
   const [selectedLogIds, setSelectedLogIds] = useState<Set<number>>(new Set());
@@ -374,6 +392,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
   const [serverTzName, setServerTzName] = useState<string>(() => getCachedServerTzName() || '');
   const { aliasVersion } = useAlias();
+  const lastHandledAliasVersionRef = useRef<number>(aliasVersion);
 
   useEffect(() => {
     fetchSettings()
@@ -399,33 +418,90 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filtersRef = useRef<LogFilterParams>(filters);
 
-
   useEffect(() => {
     filtersRef.current = filters;
   }, [filters]);
 
-  useEffect(() => {
-    fetchAliases()
-      .then((list) => {
-        const map: Record<string, string> = {};
-        list.forEach((a) => {
-          if (a.ip && a.alias) {
-            map[a.ip] = a.alias;
-          }
-        });
-        setActiveAliasesMap(map);
-      })
-      .catch((err) => {
+  const loadSourcesConfig = useCallback(() => {
+    Promise.all([
+      fetchAliases().catch((err) => {
         console.error('Failed to load host aliases in stream', err);
+        return [];
+      }),
+      fetchDockerEndpoints().catch((err) => {
+        console.error('Failed to load Docker endpoints in stream', err);
+        return [];
+      }),
+    ]).then(([aliasesList, endpointsList]) => {
+      const map: Record<string, string> = {};
+      aliasesList.forEach((a) => {
+        if (a.ip && a.alias) {
+          map[a.ip] = a.alias;
+        }
       });
-  }, []);
+      setActiveAliasesMap(map);
+      mergedAliasesRef.current = { ...map, ...knownAliases };
+
+      setDockerEndpoints(endpointsList);
+      dockerEndpointsRef.current = endpointsList;
+      const s = new Set<string>();
+      endpointsList.forEach((ep) => {
+        if (ep.source_alias) s.add(ep.source_alias.toLowerCase());
+        if (ep.name) s.add(ep.name.toLowerCase());
+      });
+      dockerAliasesRef.current = s;
+    });
+  }, [knownAliases]);
+
+  useEffect(() => {
+    loadSourcesConfig();
+  }, [loadSourcesConfig]);
 
   // Re-fetch aliases when aliasVersion changes (and is > 0)
   useEffect(() => {
-    if (aliasVersion <= 0) return;
+    if (aliasVersion <= lastHandledAliasVersionRef.current) {
+      lastHandledAliasVersionRef.current = aliasVersion;
+      return;
+    }
+    lastHandledAliasVersionRef.current = aliasVersion;
+
     const previousAliases = mergedAliasesRef.current || {};
-    fetchAliases()
-      .then((list) => {
+    const previousDockerEndpoints = dockerEndpointsRef.current || [];
+
+    Promise.all([
+      fetchAliases().catch((err) => {
+        console.error('Failed to reload host aliases in stream', err);
+        return [];
+      }),
+      fetchDockerEndpoints().catch((err) => {
+        console.error('Failed to reload Docker endpoints in stream', err);
+        return [];
+      }),
+    ])
+      .then(([list, endpointsList]) => {
+        if (endpointsList) {
+          setDockerEndpoints(endpointsList);
+          dockerEndpointsRef.current = endpointsList;
+          const s = new Set<string>();
+          endpointsList.forEach((ep) => {
+            if (ep.source_alias) s.add(ep.source_alias.toLowerCase());
+            if (ep.name) s.add(ep.name.toLowerCase());
+          });
+          dockerAliasesRef.current = s;
+        }
+
+        // Build all current and previous Docker aliases to reliably identify Docker logs
+        const allDockerAliases = new Set<string>();
+        endpointsList?.forEach((ep) => {
+          if (ep.source_alias) allDockerAliases.add(ep.source_alias.toLowerCase());
+          if (ep.name) allDockerAliases.add(ep.name.toLowerCase());
+        });
+        previousDockerEndpoints.forEach((ep) => {
+          if (ep.source_alias) allDockerAliases.add(ep.source_alias.toLowerCase());
+          if (ep.name) allDockerAliases.add(ep.name.toLowerCase());
+        });
+        allDockerAliases.add('docker');
+
         const map: Record<string, string> = {};
         list.forEach((a) => {
           if (a.ip && a.alias) {
@@ -460,9 +536,74 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           }
         });
 
-        // Update source_alias on matching in-memory logs so displayed log rows reflect alias changes
+        // Docker alias updates
+        const primaryPrev = previousDockerEndpoints.find((e) => e.id === 1);
+        const primaryCurr = endpointsList?.find((e) => e.id === 1);
+        if (primaryCurr) {
+          const oldPrimaryAlias = primaryPrev?.source_alias || 'docker';
+          const newPrimaryAlias = primaryCurr.source_alias || 'docker';
+          if (oldPrimaryAlias !== newPrimaryAlias) {
+            hostReplacements[oldPrimaryAlias] = newPrimaryAlias;
+            retiredHosts.add(oldPrimaryAlias);
+          }
+        }
+
+        if (endpointsList) {
+          endpointsList.forEach((ep) => {
+            if (ep.id > 1) {
+              const prevEp = previousDockerEndpoints.find((e) => e.id === ep.id);
+              if (prevEp && prevEp.source_alias && ep.source_alias && prevEp.source_alias !== ep.source_alias) {
+                hostReplacements[prevEp.source_alias] = ep.source_alias;
+                retiredHosts.add(prevEp.source_alias);
+              }
+            }
+          });
+        }
+
+        previousDockerEndpoints.forEach((prevEp) => {
+          if (endpointsList && !endpointsList.some((e) => e.id === prevEp.id)) {
+            if (prevEp.source_alias) {
+              retiredHosts.add(prevEp.source_alias);
+            }
+          }
+        });
+
+        // Update source_alias on matching in-memory logs with strict separation between Docker and Syslog
         setLogs((prev) =>
           prev.map((log) => {
+            const isDocker =
+              log.source_ip === 'docker' ||
+              Boolean(log.source_alias && allDockerAliases.has(log.source_alias.toLowerCase()));
+
+            if (isDocker) {
+              // Primary Docker endpoint
+              if (log.source_ip === 'docker') {
+                const targetAlias = primaryCurr?.source_alias || 'docker';
+                if (log.source_alias !== targetAlias) {
+                  return { ...log, source_alias: targetAlias };
+                }
+                return log;
+              }
+
+              // Remote Docker endpoints
+              if (log.source_alias && endpointsList) {
+                for (const ep of endpointsList) {
+                  if (ep.id > 1) {
+                    const prevEp = previousDockerEndpoints.find((e) => e.id === ep.id);
+                    if (prevEp && prevEp.source_alias && ep.source_alias && prevEp.source_alias !== ep.source_alias) {
+                      if (log.source_alias.toLowerCase() === prevEp.source_alias.toLowerCase()) {
+                        return { ...log, source_alias: ep.source_alias };
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Docker log is completely protected from Syslog remapping
+              return log;
+            }
+
+            // Syslog logs ONLY
             if (!log.source_ip) return log;
             if (newMerged[log.source_ip]) {
               const newAlias = newMerged[log.source_ip];
@@ -602,17 +743,30 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const updateFacetsWithNewLogs = useCallback((newLogs: LogEntry[]) => {
     if (!newLogs || newLogs.length === 0) return;
 
+    const getLogCanonicalHost = (log: LogEntry): string => {
+      const isDocker =
+        log.source_ip === 'docker' ||
+        Boolean(dockerAliasesRef.current && log.source_alias && dockerAliasesRef.current.has(log.source_alias.toLowerCase()));
+
+      if (isDocker) {
+        return log.source_alias || 'docker';
+      }
+      return (
+        (log.source_alias && mergedAliasesRef.current[log.source_alias]) ||
+        (log.source_ip && mergedAliasesRef.current[log.source_ip]) ||
+        log.source_alias ||
+        log.source_ip ||
+        ''
+      );
+    };
+
     // 1. Incrementally add any new sources
     setAccumulatedSources((prev) => {
       let added = false;
       const currentSet = new Set(prev);
       const aliasedIps = new Set(Object.keys(mergedAliasesRef.current || {}));
       for (const log of newLogs) {
-        const canonical =
-          (log.source_ip && mergedAliasesRef.current[log.source_ip]) ||
-          (log.source_alias && mergedAliasesRef.current[log.source_alias]) ||
-          log.source_alias ||
-          log.source_ip;
+        const canonical = getLogCanonicalHost(log);
         if (canonical && !aliasedIps.has(canonical) && !currentSet.has(canonical)) {
           currentSet.add(canonical);
           added = true;
@@ -640,11 +794,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       const next = { ...prev };
       for (const log of newLogs) {
         if (log.app_name) {
-          const canonical =
-            (log.source_ip && mergedAliasesRef.current[log.source_ip]) ||
-            (log.source_alias && mergedAliasesRef.current[log.source_alias]) ||
-            log.source_alias ||
-            log.source_ip;
+          const canonical = getLogCanonicalHost(log);
           if (canonical) {
             const currentApps = next[canonical] || [];
             if (!currentApps.includes(log.app_name)) {
@@ -663,11 +813,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       const next = { ...prev };
       for (const log of newLogs) {
         if (log.app_name) {
-          const canonical =
-            (log.source_ip && mergedAliasesRef.current[log.source_ip]) ||
-            (log.source_alias && mergedAliasesRef.current[log.source_alias]) ||
-            log.source_alias ||
-            log.source_ip;
+          const canonical = getLogCanonicalHost(log);
           if (canonical) {
             const currentHosts = next[log.app_name] || [];
             if (!currentHosts.includes(canonical)) {
@@ -752,7 +898,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
 
       // Keep newest logs at the top (res.logs is ordered DESC)
-      const preparedLogs = res.logs.map((entry) => prepareLogEntry(entry, mergedAliasesRef.current));
+      const preparedLogs = res.logs.map((entry) =>
+        prepareLogEntry(entry, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+      );
       setLogs(preparedLogs);
       updateFacetsWithNewLogs(res.logs);
       historicalOffsetRef.current = res.logs.length;
@@ -808,7 +956,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       if (res.logs.length > 0) {
         updateFacetsWithNewLogs(res.logs);
-        const preparedLogs = res.logs.map((entry) => prepareLogEntry(entry, mergedAliasesRef.current));
+        const preparedLogs = res.logs.map((entry) =>
+          prepareLogEntry(entry, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+        );
         setLogs((prev) => {
           const existingIds = new Set(prev.map((l) => l.id));
           const uniqueIncoming = preparedLogs.filter((l) => !existingIds.has(l.id));
@@ -901,7 +1051,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }
 
         // Buffer incoming SSE logs (Issue #1)
-        incomingBufferRef.current.push(prepareLogEntry(entry, mergedAliasesRef.current));
+        incomingBufferRef.current.push(
+          prepareLogEntry(entry, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+        );
 
         if (incomingBufferRef.current.length >= 500) {
           if (flushTimerRef.current !== null) {
@@ -1636,7 +1788,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             const existingIds = new Set(prevLogs.map((l) => l.id));
             const missingLogs = logsToInspect
               .filter((l) => !existingIds.has(l.id))
-              .map((l) => prepareLogEntry(l, mergedAliasesRef.current));
+              .map((l) =>
+                prepareLogEntry(l, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+              );
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
               const cmp = b.timestamp.localeCompare(a.timestamp);
@@ -1652,7 +1806,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             const existingIds = new Set(prevLogs.map((l) => l.id));
             const missingLogs = targetAndCtxLogs
               .filter((l) => !existingIds.has(l.id))
-              .map((l) => prepareLogEntry(l, mergedAliasesRef.current));
+              .map((l) =>
+                prepareLogEntry(l, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+              );
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
               const cmp = b.timestamp.localeCompare(a.timestamp);
@@ -1663,6 +1819,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onDiagnoseAi(targetAndCtxLogs);
         }}
         onAddAlias={onAddAlias}
+        onEditDockerHost={onEditDockerHost}
+        onManageDeletedDockerHost={onManageDeletedDockerHost}
+        dockerEndpoints={dockerEndpoints}
         isHostAliased={
           activeLogDetail
             ? Boolean(

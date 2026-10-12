@@ -4,12 +4,16 @@ Pytest configuration and global fixtures for LogShed backend test suite.
 
 import pytest
 from app.core.config import invalidate_settings_cache
+from app.api.deps import reset_all_db_connections
+from app.api.ingest import clear_ingest_token_cache
 
 
 @pytest.fixture(autouse=True)
 def auto_reset_settings_cache(monkeypatch):
     """Ensure in-memory settings cache is invalidated between test cases and on env changes."""
     invalidate_settings_cache()
+    clear_ingest_token_cache()
+    reset_all_db_connections()
     orig_setenv = monkeypatch.setenv
     orig_delenv = monkeypatch.delenv
 
@@ -25,3 +29,5 @@ def auto_reset_settings_cache(monkeypatch):
     monkeypatch.delenv = custom_delenv
     yield
     invalidate_settings_cache()
+    clear_ingest_token_cache()
+    reset_all_db_connections()

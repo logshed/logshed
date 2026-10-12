@@ -18,9 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import ai, alerts, aliases, auth, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
+from app.api import ai, alerts, aliases, auth, docker_hosts, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
 from app.api.deps import run_db_query
 from app.collectors.docker_collector import DockerTailer
+from app.collectors.docker_pool import DockerCollectorPool
 from app.collectors.syslog import SyslogServer
 from app.core.config import (
     get_all_system_settings,
@@ -54,6 +55,7 @@ _prune_worker: Optional[PruneWorker] = None
 _daily_digest_worker: Optional[DailyDigestWorker] = None
 _syslog_server: Optional[SyslogServer] = None
 _docker_tailer: Optional[DockerTailer] = None
+_docker_pool: Optional[DockerCollectorPool] = None
 _assembler: Optional[KeyedMultilineAssembler] = None
 _internal_log_handler: Optional[InternalLogHandler] = None
 _alert_evaluator: Optional[Any] = None
@@ -75,9 +77,21 @@ def get_syslog_server() -> Optional[SyslogServer]:
     return _syslog_server
 
 
+def get_docker_pool() -> Optional[DockerCollectorPool]:
+    """Returns the active DockerCollectorPool instance, or None if uninitialized."""
+    return _docker_pool
+
+
 def get_docker_tailer() -> Optional[DockerTailer]:
-    """Returns the active DockerTailer instance, or None if uninitialized or failed."""
+    """Returns the active primary DockerTailer instance (endpoint ID 1), or None if uninitialized or failed."""
+    if _docker_pool:
+        return _docker_pool.get_tailer(1)
     return _docker_tailer
+
+
+def get_assembler() -> Optional[KeyedMultilineAssembler]:
+    """Returns the active KeyedMultilineAssembler instance, or None if uninitialized."""
+    return _assembler
 
 
 def configure_internal_log_handler(
@@ -219,7 +233,7 @@ async def lifespan(app: FastAPI):
     Application lifespan manager.
     Sets up database schema, master encryption keys, and starts background workers.
     """
-    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _assembler, _alert_evaluator, _background_tasks
+    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
 
     db_path = get_db_path()
     logger.info(f"Setting up LogShed database at {db_path}...")
@@ -227,6 +241,49 @@ async def lifespan(app: FastAPI):
     # 1. Run migrations and set up master key
     await asyncio.to_thread(run_migrations, db_path)
     await asyncio.to_thread(get_or_create_master_key)
+
+    # Pre-seed Docker endpoints from DOCKER_ADDITIONAL_HOSTS if present
+    try:
+        import sqlite3
+        from app.core.config import get_docker_additional_hosts
+        from app.core.security import encrypt_value
+        add_hosts = get_docker_additional_hosts()
+        if add_hosts:
+            def _seed_docker_hosts(conn: sqlite3.Connection):
+                cur = conn.cursor()
+                now_seed_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                for h in add_hosts:
+                    cur.execute("SELECT id FROM docker_endpoints WHERE name = ?", (h["name"],))
+                    if not cur.fetchone():
+                        raw_k = h.get("client_key")
+                        enc_k = encrypt_value(raw_k.strip()) if (raw_k and raw_k.strip()) else None
+                        cur.execute(
+                            """
+                            INSERT INTO docker_endpoints (
+                                name, url, source_alias, enabled, tls_enabled,
+                                ca_cert, client_cert, client_key, exclude_containers,
+                                created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                h["name"],
+                                h["url"],
+                                h["source_alias"],
+                                h["enabled"],
+                                h["tls_enabled"],
+                                h.get("ca_cert"),
+                                h.get("client_cert"),
+                                enc_k,
+                                h.get("exclude_containers", ""),
+                                now_seed_iso,
+                                now_seed_iso,
+                            ),
+                        )
+                conn.commit()
+
+            await run_db_query(_seed_docker_hosts, custom_db_path=Path(db_path))
+    except Exception as e:
+        logger.warning(f"Error pre-seeding additional Docker hosts: {e}")
 
     # Ensure user presets directories exist in DATA_DIR
     for preset_sub in ("alerts", "drops"):
@@ -282,13 +339,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"SyslogServer could not be started: {e}")
 
-    # 9. Start Docker Tailer (optional / non-fatal if Docker socket is not present)
+    # 9. Start Docker Collector Pool (optional / non-fatal if Docker socket is not present)
     try:
         shared_cache = _syslog_server.alias_cache if _syslog_server else None
-        _docker_tailer = DockerTailer(assembler=_assembler, db_path=db_path, alias_cache=shared_cache)
-        _background_tasks.append(asyncio.create_task(_supervise_worker(_docker_tailer.run, "DockerTailer")))
+        _docker_pool = DockerCollectorPool(assembler=_assembler, db_path=db_path, alias_cache=shared_cache)
+        await _docker_pool.start()
+        _docker_tailer = _docker_pool.get_tailer(1)
+        logger.info("DockerCollectorPool initialized and workers started.")
     except Exception as e:
-        logger.warning(f"DockerTailer could not be started: {e}")
+        logger.warning(f"DockerCollectorPool could not be started: {e}")
 
     # 10. Attach internal log handler so application warnings and errors appear in LogShed
     persisted_level = None
@@ -336,11 +395,17 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
         _internal_log_handler = None
-    if _docker_tailer:
+    if _docker_pool:
         try:
-            await _docker_tailer.stop()
+            await _docker_pool.stop()
         except Exception as e:
-            logger.warning(f"Error stopping DockerTailer: {e}")
+            logger.warning(f"Error stopping DockerCollectorPool: {e}")
+    if _docker_tailer:
+        if _docker_pool is None or _docker_tailer not in getattr(_docker_pool, "_tailers", {}).values():
+            try:
+                await _docker_tailer.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping DockerTailer: {e}")
     if _syslog_server:
         try:
             await _syslog_server.stop()
@@ -407,6 +472,18 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
     _background_tasks.clear()
+
+    _docker_pool = None
+    _docker_tailer = None
+    _syslog_server = None
+    _queue_consumer = None
+    _fts_worker = None
+    _prune_worker = None
+    _metrics_worker = None
+    _alert_evaluator = None
+    _daily_digest_worker = None
+    _assembler = None
+    _internal_log_handler = None
     logger.info("Shutdown complete.")
 
 
@@ -491,6 +568,7 @@ def create_app() -> FastAPI:
     api_router.include_router(ai.router)
     api_router.include_router(tokens.router)
     api_router.include_router(mcp.router)
+    api_router.include_router(docker_hosts.router)
 
     app.include_router(api_router)
 

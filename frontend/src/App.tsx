@@ -21,6 +21,7 @@ import { fetchVersion } from './api/system.ts';
 
 export const pathToTab = (pathname: string): AppTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
+  if (clean === '/sources' || clean.startsWith('/sources/')) return 'settings';
   if (clean === '/aliases' || clean.startsWith('/aliases/')) return 'settings';
   if (clean === '/storage' || clean.startsWith('/storage/')) return 'storage';
   if (clean === '/rules' || clean.startsWith('/rules/')) return 'rules';
@@ -47,6 +48,8 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
   const [aiSelectedLogs, setAiSelectedLogs] = useState<LogEntry[]>([]);
   const [addAliasIp, setAddAliasIp] = useState<string | null>(null);
+  const [editDockerHostId, setEditDockerHostId] = useState<number | null>(null);
+  const [deletedDockerHostInfo, setDeletedDockerHostInfo] = useState<{ name: string; ip: string } | null>(null);
   const [pendingSettingsSubTab, setPendingSettingsSubTab] = useState<SettingsSubTab | null>(null);
   const [clearSelectionSignal, setClearSelectionSignal] = useState<number>(0);
   const [aliasVersion, setAliasVersion] = useState<number>(0);
@@ -137,8 +140,33 @@ export const App: React.FC = () => {
 
   const handleAddAliasFromLog = (ip: string) => {
     setAddAliasIp(ip);
-    setPendingSettingsSubTab('aliases');
+    setEditDockerHostId(null);
+    setDeletedDockerHostInfo(null);
+    setPendingSettingsSubTab('sources');
     handleTabChange('settings');
+  };
+
+  const handleEditDockerHostFromLog = (endpointId: number) => {
+    setEditDockerHostId(endpointId);
+    setAddAliasIp(null);
+    setDeletedDockerHostInfo(null);
+    setPendingSettingsSubTab('sources');
+    handleTabChange('settings');
+  };
+
+  const handleManageDeletedDockerHost = (info: { name: string; ip: string }) => {
+    setDeletedDockerHostInfo(info);
+    setAddAliasIp(null);
+    setEditDockerHostId(null);
+    setPendingSettingsSubTab('sources');
+    handleTabChange('settings');
+  };
+
+  const handleClearSourcesState = () => {
+    setAddAliasIp(null);
+    setEditDockerHostId(null);
+    setDeletedDockerHostInfo(null);
+    setPendingSettingsSubTab(null);
   };
 
   const handleTabChange = (nextTab: AppTab) => {
@@ -205,6 +233,8 @@ export const App: React.FC = () => {
           <LiveLogStream
             onDiagnoseAi={handleOpenAiModal}
             onAddAlias={handleAddAliasFromLog}
+            onEditDockerHost={handleEditDockerHostFromLog}
+            onManageDeletedDockerHost={handleManageDeletedDockerHost}
             clearSelectionSignal={clearSelectionSignal}
             pullTouchHandlers={pullTouchHandlers}
           />
@@ -223,10 +253,11 @@ export const App: React.FC = () => {
             <SettingsPanel
               initialSubTab={pendingSettingsSubTab || undefined}
               initialAddIp={addAliasIp}
-              onAliasSaved={() => {
-                setAddAliasIp(null);
-                setPendingSettingsSubTab(null);
-              }}
+              initialEditDockerHostId={editDockerHostId}
+              initialDeletedDockerHostInfo={deletedDockerHostInfo}
+              onAliasSaved={handleClearSourcesState}
+              onDockerHostSaved={handleClearSourcesState}
+              onClearSourcesState={handleClearSourcesState}
               onDirtyChange={setIsSettingsDirty}
               saveTriggerRef={saveSettingsTriggerRef}
             />

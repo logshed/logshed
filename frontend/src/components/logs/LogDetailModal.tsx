@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { LogEntry } from '../../types.ts';
+import { LogEntry, DockerEndpoint } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
@@ -15,6 +15,9 @@ interface LogDetailModalProps {
   onExplainWithAi: (log: LogEntry, contextLogs?: LogEntry[]) => void;
   onInspectWithContext?: (logs: LogEntry[]) => void;
   onAddAlias?: (ip: string) => void;
+  onEditDockerHost?: (endpointId: number) => void;
+  onManageDeletedDockerHost?: (info: { name: string; ip: string }) => void;
+  dockerEndpoints?: DockerEndpoint[];
   isHostAliased?: boolean;
   onCreateDropRule?: (log: LogEntry) => void;
   onDeleteLog?: (log: LogEntry) => void;
@@ -33,6 +36,9 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   onExplainWithAi,
   onInspectWithContext,
   onAddAlias,
+  onEditDockerHost,
+  onManageDeletedDockerHost,
+  dockerEndpoints = [],
   isHostAliased,
   onCreateDropRule,
   onDeleteLog,
@@ -127,19 +133,71 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     onClose();
   };
 
-  if (!log) return null;
+  const isSyslogRaw = useMemo(() => {
+    if (!log?.raw) return false;
+    return /^<\d{1,3}>/.test(log.raw);
+  }, [log]);
 
-  const isDockerSource =
-    log.source_ip === 'docker' || log.source_alias?.toLowerCase() === 'docker';
-  const cleanedPayload = cleanLogMessageForDisplay(log.message);
+  const matchedDockerEndpoint = useMemo(() => {
+    if (!log || isSyslogRaw) return null;
+    const endpoints = dockerEndpoints || [];
+
+    // 1. Match on source_alias or name
+    if (log.source_alias) {
+      const match = endpoints.find(
+        (ep) =>
+          ep.source_alias.toLowerCase() === log.source_alias.toLowerCase() ||
+          ep.name.toLowerCase() === log.source_alias.toLowerCase()
+      );
+      if (match) return match;
+    }
+
+    // 2. Local Docker match
+    if (log.source_ip === 'docker') {
+      const localMatch = endpoints.find(
+        (ep) => ep.id === 1 || ep.url.includes('docker.sock')
+      );
+      if (localMatch) return localMatch;
+    }
+
+    // 3. Match remote host URL hostname
+    if (log.source_ip && log.source_ip !== 'docker') {
+      const remoteMatch = endpoints.find((ep) => {
+        try {
+          const urlStr = ep.url.replace(/^tcp:\/\//, 'http://');
+          const parsed = new URL(urlStr);
+          return parsed.hostname === log.source_ip;
+        } catch {
+          return false;
+        }
+      });
+      if (remoteMatch) return remoteMatch;
+    }
+
+    return null;
+  }, [log, isSyslogRaw, dockerEndpoints]);
+
+  const isDeletedDockerHost = useMemo(() => {
+    if (!log || isSyslogRaw || matchedDockerEndpoint) return false;
+    if (log.source_ip === 'docker') return true;
+    if (log.facility === 1 && log.source_alias) return true;
+    if (log.source_alias?.toLowerCase().includes('docker')) return true;
+    return false;
+  }, [log, isSyslogRaw, matchedDockerEndpoint]);
+
+  const isDockerSource = Boolean(matchedDockerEndpoint || isDeletedDockerHost);
+  const cleanedPayload = cleanLogMessageForDisplay(log?.message || '');
 
   const handleCopyRaw = async () => {
+    if (!log) return;
     await copyRaw(log.raw);
   };
 
   const handleCopyMsg = async () => {
     await copyMsg(cleanedPayload);
   };
+
+  if (!log) return null;
 
   return (
     <SlideOver
@@ -188,31 +246,60 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-            {onAddAlias && (
+            {matchedDockerEndpoint && onEditDockerHost ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onEditDockerHost(matchedDockerEndpoint.id);
+                  onClose();
+                }}
+                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-accent-400" />
+                <span>Edit Docker Host</span>
+              </button>
+            ) : isDeletedDockerHost && onManageDeletedDockerHost ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onManageDeletedDockerHost({
+                    name: log.source_alias,
+                    ip: log.source_ip,
+                  });
+                  onClose();
+                }}
+                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-accent-400" />
+                <span>Configure Docker Host</span>
+              </button>
+            ) : onAddAlias ? (
               hostIsAliased ? (
                 <button
+                  type="button"
                   onClick={() => {
                     onAddAlias(log.source_ip);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium"
+                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
                 >
                   <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                   <span>Modify Host Alias</span>
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={() => {
                     onAddAlias(log.source_ip);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium"
+                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5 text-accent-400" />
                   <span>Add Host Alias</span>
                 </button>
               )
-            )}
+            ) : null}
 
             {onCreateDropRule && (
               <button

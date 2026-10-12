@@ -278,7 +278,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <button
             type="button"
             onClick={onOpenAddScheduleModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-dark-950 bg-accent-500 hover:bg-accent-400 transition cursor-pointer self-start sm:self-auto shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
           >
             <Plus className="w-4 h-4" />
             <span>Add Schedule</span>

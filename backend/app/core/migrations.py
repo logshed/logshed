@@ -12,6 +12,7 @@ mode and other performance pragmas enabled.
 """
 
 import logging
+import os
 import sqlite3
 import uuid
 from pathlib import Path
@@ -341,13 +342,14 @@ CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name
 def migrate_v3(conn: sqlite3.Connection) -> None:
     """
     Execute Migration 3: Configurable rule ordering, external API tokens,
-    multi-session maintenance tracking, and persistent system identity settings
+    multi-session maintenance tracking, multi-host Docker endpoints, and persistent system identity settings
     (LogShed v1.3.0 upgrade).
     - Add display_order column to drop_rules and alert_rules.
     - Backfill display_order from existing rule IDs.
     - Create composite indexes for ordered evaluation.
     - Create api_tokens table for Bearer token authentication.
     - Create maintenance_sessions table for concurrent maintenance tracking.
+    - Create docker_endpoints table and seed default primary Docker host.
     - Ensure persistent server_name and instance_id in system_settings.
     """
     logger.info("Running migration v3...")
@@ -397,9 +399,46 @@ CREATE TABLE IF NOT EXISTS maintenance_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);
 
+CREATE TABLE IF NOT EXISTS docker_endpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    source_alias TEXT NOT NULL DEFAULT 'docker',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    tls_enabled INTEGER NOT NULL DEFAULT 0,
+    ca_cert TEXT,
+    client_cert TEXT,
+    client_key TEXT,
+    exclude_containers TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docker_endpoints_name ON docker_endpoints(name);
+CREATE INDEX IF NOT EXISTS idx_docker_endpoints_enabled ON docker_endpoints(enabled);
+
 INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
 VALUES ('server_name', 'LogShed', datetime('now'), 0);
 ''')
+    cur = conn.execute("SELECT id FROM docker_endpoints WHERE id = 1 OR name = 'Primary Docker';")
+    if not cur.fetchone():
+        cur = conn.execute("SELECT key, value FROM system_settings WHERE key IN ('enable_docker', 'docker_source_alias', 'docker_exclude_containers');")
+        db_settings = dict(cur.fetchall())
+        enable_docker_val = db_settings.get("enable_docker", os.environ.get("ENABLE_DOCKER", "1"))
+        enabled = 0 if str(enable_docker_val).lower() in ("0", "false", "no", "disabled") else 1
+        docker_source_alias = db_settings.get("docker_source_alias", os.environ.get("DOCKER_SOURCE_ALIAS", "docker")) or "docker"
+        docker_exclude_containers = db_settings.get("docker_exclude_containers", os.environ.get("DOCKER_EXCLUDE_CONTAINERS", "")) or ""
+        docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock") or "unix:///var/run/docker.sock"
+
+        conn.execute(
+            """
+            INSERT INTO docker_endpoints (
+                id, name, url, source_alias, enabled, tls_enabled, exclude_containers, created_at, updated_at
+            ) VALUES (1, 'Primary Docker', ?, ?, ?, 0, ?, datetime('now'), datetime('now'));
+            """,
+            (docker_host, docker_source_alias, enabled, docker_exclude_containers),
+        )
+
     cur = conn.execute("SELECT value FROM system_settings WHERE key = 'instance_id';")
     row = cur.fetchone()
     if not row or not row[0]:
@@ -450,6 +489,14 @@ def run_migrations(db_path: Union[str, Path]) -> None:
                     raise
             else:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
+
+        # Ensure schema integrity for v3 databases (e.g. pre-release v1.3.0 dev deployments)
+        if current_version == 3:
+            cur = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docker_endpoints';")
+            if not cur.fetchone():
+                logger.info("Upgrading pre-release v3 database schema with docker_endpoints...")
+                migrate_v3(conn)
+                conn.commit()
     finally:
         conn.close()
 

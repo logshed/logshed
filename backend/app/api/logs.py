@@ -93,7 +93,9 @@ async def list_logs(
         parsed_sources = expand_source_aliases(source, conn=conn)
         if parsed_sources:
             src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
-            where_clauses.append(f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))")
+            where_clauses.append(
+                f"(logs.source_alias IN ({src_placeholders}) OR (logs.source_ip IN ({src_placeholders}) AND (logs.source_alias IS NULL OR logs.source_alias NOT IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)) AND logs.source_ip != 'docker'))"
+            )
             for i, s in enumerate(parsed_sources):
                 params[f"src_{i}"] = s
 
@@ -204,6 +206,16 @@ async def stream_logs(
     )
     parsed_apps = set(parse_multi_values(app_name))
 
+    def _get_docker_aliases(conn):
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT source_alias FROM docker_endpoints")
+            return {r[0].strip().lower() for r in cur.fetchall() if r[0] and str(r[0]).strip()} | {"docker"}
+        except Exception:
+            return {"docker"}
+
+    docker_aliases = await run_db_query(_get_docker_aliases)
+
     queue = await sse_manager.subscribe()
 
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -221,12 +233,16 @@ async def stream_logs(
                     # Apply optional stream filters
                     if severity_max is not None and entry.get("severity", 6) > severity_max:
                         continue
-                    if (
-                        parsed_sources
-                        and entry.get("source_alias") not in parsed_sources
-                        and entry.get("source_ip") not in parsed_sources
-                    ):
-                        continue
+                    if parsed_sources:
+                        entry_alias = (entry.get("source_alias") or "").strip()
+                        entry_ip = (entry.get("source_ip") or "").strip()
+                        is_docker_entry = entry_ip == "docker" or entry_alias.lower() in docker_aliases
+                        if is_docker_entry:
+                            if entry_alias not in parsed_sources:
+                                continue
+                        else:
+                            if entry_alias not in parsed_sources and entry_ip not in parsed_sources:
+                                continue
                     if parsed_apps and entry.get("app_name") not in parsed_apps:
                         continue
 
@@ -358,18 +374,39 @@ async def get_log_facets(
         host_to_apps: dict[str, set[str]] = {}
         app_to_hosts: dict[str, set[str]] = {}
 
-        # Add all configured aliases
+        try:
+            cursor.execute("SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL")
+            docker_rows = cursor.fetchall()
+            docker_aliases = {r[0].strip().lower() for r in docker_rows if r[0] and str(r[0]).strip()} | {"docker"}
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'docker_source_alias'")
+            ss_row = cursor.fetchone()
+            if ss_row and ss_row[0] and str(ss_row[0]).strip():
+                docker_aliases.add(str(ss_row[0]).strip().lower())
+        except Exception:
+            docker_aliases = {"docker"}
+
+        # Add all configured Syslog aliases
         for alias in aliases_map.values():
             if alias:
                 sources_set.add(alias)
                 if alias not in host_to_apps:
                     host_to_apps[alias] = set()
 
+        # Add all configured Docker aliases
+        for d_alias in docker_aliases:
+            if d_alias:
+                sources_set.add(d_alias)
+                if d_alias not in host_to_apps:
+                    host_to_apps[d_alias] = set()
+
         # Add all distinct sources from logs (even if they logged without app_name)
         for row in sources:
             s = row[0]
             ip = row[1]
-            canonical = (ip and aliases_map.get(ip)) or aliases_map.get(s) or s or ip
+            if (s and s.lower() in docker_aliases) or ip == "docker":
+                canonical = s or "docker"
+            else:
+                canonical = (ip and aliases_map.get(ip)) or aliases_map.get(s) or s or ip
             sources_set.add(canonical)
             if canonical not in host_to_apps:
                 host_to_apps[canonical] = set()
@@ -386,9 +423,11 @@ async def get_log_facets(
             ip = r[2]
 
             # Canonical host resolution:
-            # If the IP or raw_alias matches a configured host alias, use the alias.
-            # Otherwise use raw_alias (which is already the IP for unaliased hosts).
-            canonical_host = aliases_map.get(ip) or aliases_map.get(raw_alias) or raw_alias or ip
+            # Docker logs preserve their Docker endpoint alias without resolving to Syslog IP aliases.
+            if (raw_alias and raw_alias.lower() in docker_aliases) or ip == "docker":
+                canonical_host = raw_alias or "docker"
+            else:
+                canonical_host = aliases_map.get(ip) or aliases_map.get(raw_alias) or raw_alias or ip
             if not canonical_host:
                 continue
 

@@ -3,6 +3,7 @@ Application configuration for LogShed.
 Manages environment variables, filesystem paths, and defaults.
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -73,6 +74,44 @@ def get_syslog_tcp_inactivity_timeout() -> float:
 def get_docker_host() -> str:
     """Returns the Docker host socket or proxy address."""
     return os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")
+
+def get_docker_additional_hosts() -> list[dict[str, Any]]:
+    """
+    Parse and validate DOCKER_ADDITIONAL_HOSTS from the environment.
+    Returns a list of validated host dictionaries.
+    """
+    raw = os.environ.get("DOCKER_ADDITIONAL_HOSTS", "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except Exception as e:
+        logger.warning(f"Invalid JSON in DOCKER_ADDITIONAL_HOSTS: {e}")
+        return []
+    if not isinstance(parsed, list):
+        logger.warning("DOCKER_ADDITIONAL_HOSTS must be a JSON array of objects.")
+        return []
+
+    results: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        url = str(item.get("url", "")).strip()
+        if not name or not url:
+            continue
+        results.append({
+            "name": name,
+            "url": url,
+            "source_alias": str(item.get("source_alias", "docker")).strip() or "docker",
+            "enabled": 0 if str(item.get("enabled", "1")).lower() in ("0", "false", "no", "disabled") else 1,
+            "tls_enabled": 1 if bool(item.get("tls_enabled")) else 0,
+            "ca_cert": str(item.get("ca_cert", "")).strip() or None if item.get("ca_cert") else None,
+            "client_cert": str(item.get("client_cert", "")).strip() or None if item.get("client_cert") else None,
+            "client_key": str(item.get("client_key", "")).strip() or None if item.get("client_key") else None,
+            "exclude_containers": str(item.get("exclude_containers", "")).strip(),
+        })
+    return results
 
 def is_debug_or_dev() -> bool:
     """Returns True if running in development mode or debug is enabled."""

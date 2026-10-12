@@ -34,6 +34,12 @@ const SCOPE_PRESETS: ScopePreset[] = [
     scopes: ['maintenance:write', 'maintenance:read'],
   },
   {
+    id: 'ingest',
+    name: 'Edge Shipper / Ingest',
+    description: 'Recommended for Vector, Fluent Bit, and external HTTP log shippers.',
+    scopes: ['logs:write'],
+  },
+  {
     id: 'readonly',
     name: 'Read Only',
     description: 'Recommended for external dashboards and read-only telemetry.',
@@ -59,6 +65,7 @@ export const getPresetName = (scopes: string[]): string => {
   const hasLogsRead = scopes.includes('logs:read');
   const hasAlertsRead = scopes.includes('alerts:read');
   const hasSystemRead = scopes.includes('system:read');
+  const hasLogsWrite = scopes.includes('logs:write');
 
   if (hasMaintWrite && hasLogsRead && hasAlertsRead && hasSystemRead) {
     return 'AI Assistant / MCP';
@@ -68,6 +75,9 @@ export const getPresetName = (scopes: string[]): string => {
   }
   if (hasMaintWrite && scopes.includes('maintenance:read') && !hasLogsRead) {
     return 'Maintenance Only';
+  }
+  if (hasLogsWrite && scopes.length === 1) {
+    return 'Edge Shipper / Ingest';
   }
   return scopes.join(', ');
 };
@@ -219,7 +229,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
     e.preventDefault();
     if (!newTokenName.trim()) return;
 
-    const preset = SCOPE_PRESETS.find((p) => p.id === selectedPresetId) || SCOPE_PRESETS[2];
+    const preset = SCOPE_PRESETS.find((p) => p.id === selectedPresetId) || SCOPE_PRESETS.find((p) => p.id === 'ai_mcp') || SCOPE_PRESETS[0];
     setIsSubmitting(true);
     setErrorMsg(null);
 

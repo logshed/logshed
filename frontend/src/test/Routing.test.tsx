@@ -78,6 +78,8 @@ describe('URL Routing and History API Synchronization', () => {
       expect(pathToTab('/console')).toBe('stream');
       expect(pathToTab('/aliases')).toBe('settings');
       expect(pathToTab('/aliases/')).toBe('settings');
+      expect(pathToTab('/sources')).toBe('settings');
+      expect(pathToTab('/sources/')).toBe('settings');
       expect(pathToTab('/storage')).toBe('storage');
       expect(pathToTab('/rules')).toBe('rules');
       expect(pathToTab('/rules/rules')).toBe('rules');
@@ -86,6 +88,7 @@ describe('URL Routing and History API Synchronization', () => {
       expect(pathToTab('/rules/history')).toBe('rules');
       expect(pathToTab('/settings')).toBe('settings');
       expect(pathToTab('/settings/app')).toBe('settings');
+      expect(pathToTab('/settings/sources')).toBe('settings');
       expect(pathToTab('/settings/aliases')).toBe('settings');
       expect(pathToTab('/settings/advanced')).toBe('settings');
       expect(pathToTab('/unknown-path')).toBe('stream');

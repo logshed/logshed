@@ -98,7 +98,7 @@ export interface SystemSettings {
 }
 
 export type AppTab = 'stream' | 'storage' | 'rules' | 'settings';
-export type SettingsSubTab = 'app' | 'aliases' | 'tokens' | 'advanced';
+export type SettingsSubTab = 'app' | 'sources' | 'tokens' | 'advanced';
 
 export interface StorageMetricsSnapshot {
   recorded_at: string;
@@ -567,4 +567,64 @@ export interface ApiTokenCreateRequest {
 export interface ApiTokenCreateResponse {
   token: ApiToken;
   raw_token: string;
+}
+
+export interface DockerEndpoint {
+  id: number;
+  name: string;
+  url: string;
+  source_alias: string;
+  enabled: boolean;
+  tls_enabled: boolean;
+  ca_cert?: string | null;
+  client_cert?: string | null;
+  has_client_key?: boolean;
+  exclude_containers: string;
+  created_at: string;
+  updated_at: string;
+  is_connected?: boolean;
+  active_containers?: number;
+  last_error?: string | null;
+  last_activity?: string | null;
+  latency_ms?: number | null;
+}
+
+export interface DockerEndpointCreate {
+  name: string;
+  url: string;
+  source_alias?: string;
+  enabled?: boolean;
+  tls_enabled?: boolean;
+  ca_cert?: string | null;
+  client_cert?: string | null;
+  client_key?: string | null;
+  exclude_containers?: string;
+}
+
+export interface DockerEndpointUpdate {
+  name?: string;
+  url?: string;
+  source_alias?: string;
+  enabled?: boolean;
+  tls_enabled?: boolean;
+  ca_cert?: string | null;
+  client_cert?: string | null;
+  client_key?: string | null;
+  exclude_containers?: string;
+}
+
+export interface DockerEndpointTestRequest {
+  endpoint_id?: number;
+  url: string;
+  tls_enabled?: boolean;
+  ca_cert?: string | null;
+  client_cert?: string | null;
+  client_key?: string | null;
+}
+
+export interface DockerEndpointTestResult {
+  success: boolean;
+  version?: string | null;
+  latency_ms?: number | null;
+  error?: string | null;
 }

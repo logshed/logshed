@@ -41,10 +41,14 @@ LogShed provides self-contained native authentication and protection controls wi
 ## 6. Rate Limiting
 * **Authentication Endpoint:** In-memory sliding window on `/api/auth/login` (5 failed attempts per IP per minute). Exceeding this threshold returns `429 Too Many Requests`.
 * **API Token Sliding Window:** 120 requests per minute sliding window per token for programmatic external endpoints.
+* **High-Throughput Ingestion Endpoint:** 6,000 requests per minute sliding window per token for edge log shippers on `POST /api/v1/ingest`, backed by a 60-second in-memory token verification cache.
 * **AI Diagnosis Endpoints:** In-memory sliding window on `/api/ai/diagnose` and `/api/ai/diagnose/stream` (10 requests per minute per user/session) to prevent runaway LLM consumption.
 
-## 7. Secret Key Generation & Key Derivation
-* **Secrets at Rest:** API keys and sensitive settings stored at rest are encrypted with `cryptography.fernet`.
+## 7. Secret Key Generation, Key Derivation & Outbound Transport Security
+* **Secrets at Rest:** API keys, sensitive settings, and remote Docker mutual TLS client private keys stored at rest are encrypted with `cryptography.fernet`. Remote Docker client private keys (`client_key`) are strictly write-only in the REST API: they are never returned in plain text in GET or PUT responses (which return `has_client_key: bool`), and are stripped from all logs and external AI prompt dispatches. Ephemeral TLS contexts safely load decrypted client credentials into OpenSSL memory using temporary files with `0600` permissions and unlink them immediately.
+* **SSRF Policy & Outbound Endpoint Validation:**
+  * **Docker Daemon Collection:** As a self-hosted log management platform, LogShed connects to local Unix sockets (`unix://`) and private network endpoints (`tcp://`, `http://`, `https://`) to collect container logs from local or remote homelab Docker daemons. All configured daemon URLs are validated to require valid schemes (`unix://`, `tcp://`, `http://`, `https://`), and endpoint management is restricted to authenticated admin sessions with CSRF validation.
+  * **Notification Webhooks:** Governed by the `allow_private_notification_targets` runtime setting (default `True`), which allows dispatching notifications to local LAN IP addresses (RFC 1918) and internal domain names while permitting administrators in high-security environments to restrict outbound webhooks to public domains.
 * **Master Encryption Key Generation:**
   * Master encryption key stored at `/data/.secret_key` (generated automatically on first boot with `0600` permissions).
   * Persisted using direct file descriptors and restrictive Unix file creation masks.
@@ -58,6 +62,7 @@ LogShed provides self-contained native authentication and protection controls wi
 * **Masked Display Identifiers:** In UI and non-sensitive responses, tokens are identified via prefix and suffix format: `ls_live_<first 4 chars>...<last 4 chars>`.
 * **Scope-Based Permissions:**
   * Supported individual scopes:
+    - `logs:write`: Push log batches through the high-throughput HTTP ingestion endpoint (`POST /api/v1/ingest`).
     - `maintenance:write`: Start, update, and terminate on-demand maintenance windows and sessions (`POST /api/v1/maintenance/enable`, `POST /api/v1/maintenance/disable`).
     - `maintenance:read`: Inspect active maintenance window status and session details (`GET /api/v1/maintenance/status`).
     - `logs:read`: Execute FTS5 log queries, fetch surrounding log context, and inspect source/application facets (`GET /api/v1/logs`, `GET /api/v1/logs/{id}/context`, `GET /api/v1/logs/facets`).
@@ -67,6 +72,7 @@ LogShed provides self-contained native authentication and protection controls wi
     - `*`: Full administrative wildcard matching all existing and future programmatic endpoints.
   * **Preset Bundles:**
     - **Maintenance Only** (`["maintenance:write", "maintenance:read"]`): Intended for home automation runners, Proxmox update hooks, or backup scripts that silence notifications or drop errors during host restarts.
+    - **Edge Shipper / Ingest** (`["logs:write"]`): Intended for external log forwarders (Vector, Fluent Bit in Kubernetes/k3s, or custom scripts) pushing log batches directly into LogShed over HTTP.
     - **Read Only** (`["logs:read", "alerts:read", "system:read"]`): Intended for external monitoring dashboards, status monitors, or telemetry aggregators that need log and metric visibility without modification rights.
     - **AI Assistant / MCP** (`["logs:read", "alerts:read", "system:read", "maintenance:write"]`): Intended for Model Context Protocol (MCP) clients, Claude Desktop, or Cursor agents that investigate anomalies, query log context, and toggle maintenance during automated remediations.
     - **Full Access** (`["*"]`): Full administrative access across all endpoints, including storage vacuum and retention pruning.

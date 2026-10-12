@@ -4,10 +4,11 @@ Provides secure storage with encryption at rest for API keys.
 """
 
 import datetime
+import logging
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.core.config import (
@@ -28,6 +29,7 @@ from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest,
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
+logger = logging.getLogger(__name__)
 
 SENSITIVE_KEYS = {
     "ai_api_key",
@@ -210,6 +212,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
 @router.post("", response_model=MessageResponse)
 async def update_settings(
     req: SettingsUpdateRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """
@@ -225,10 +228,18 @@ async def update_settings(
                 detail=f"Retention days must be between 1 and {max_days}",
             )
 
+    old_docker_alias_box: list[Optional[str]] = [None]
+
     def _save_settings(conn):
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         cursor = conn.cursor()
+
+        if req.docker_source_alias is not None:
+            cursor.execute("SELECT source_alias FROM docker_endpoints WHERE id = 1")
+            ep1_row = cursor.fetchone()
+            if ep1_row:
+                old_docker_alias_box[0] = ep1_row[0]
 
         updates: list[tuple[str, str, int]] = []
 
@@ -385,6 +396,32 @@ async def update_settings(
                 (key, val, now, is_enc),
             )
 
+        # Synchronize Docker settings to docker_endpoints ID 1 (authoritative source of truth)
+        if (
+            req.enable_docker is not None
+            or req.docker_exclude_containers is not None
+            or req.docker_source_alias is not None
+        ):
+            cursor.execute(
+                """
+                UPDATE docker_endpoints SET
+                    enabled = CASE WHEN ? IS NOT NULL THEN ? ELSE enabled END,
+                    exclude_containers = CASE WHEN ? IS NOT NULL THEN ? ELSE exclude_containers END,
+                    source_alias = CASE WHEN ? IS NOT NULL THEN ? ELSE source_alias END,
+                    updated_at = ?
+                WHERE id = 1
+                """,
+                (
+                    1 if req.enable_docker else (0 if req.enable_docker is not None else None),
+                    1 if req.enable_docker else 0,
+                    req.docker_exclude_containers,
+                    req.docker_exclude_containers,
+                    req.docker_source_alias,
+                    req.docker_source_alias,
+                    now,
+                ),
+            )
+
         conn.commit()
 
     await run_db_query(_save_settings)
@@ -424,18 +461,44 @@ async def update_settings(
         or req.docker_source_alias is not None
     ):
         try:
-            from app.main import get_docker_tailer
-            docker_tailer = get_docker_tailer()
-            if docker_tailer is not None:
-                en_docker = bool(get_cached_setting("enable_docker", True)) if req.enable_docker is not None else None
-                excl = str(get_cached_setting("docker_exclude_containers", "")) if req.docker_exclude_containers is not None else None
-                alias = str(get_cached_setting("docker_source_alias", "docker")) if req.docker_source_alias is not None else None
-                await docker_tailer.update_settings(
-                    enable_docker=en_docker,
-                    exclude_containers=excl,
-                    source_alias=alias,
-                )
+            from app.main import get_docker_pool
+            docker_pool = get_docker_pool()
+            if docker_pool is not None:
+                if req.enable_docker is not None:
+                    await docker_pool.set_pool_enabled(req.enable_docker)
+
+                def _get_ep1(conn):
+                    cur = conn.cursor()
+                    cur.execute("SELECT * FROM docker_endpoints WHERE id = 1")
+                    row = cur.fetchone()
+                    return dict(row) if row else None
+
+                ep1_data = await run_db_query(_get_ep1)
+                if ep1_data:
+                    await docker_pool.reload_endpoint(1, ep1_data)
         except Exception:
             pass
+
+    if req.docker_source_alias is not None:
+        prev_alias = old_docker_alias_box[0]
+        new_alias = req.docker_source_alias.strip() or "docker"
+        if prev_alias and prev_alias != new_alias:
+            from app.api.docker_hosts import _batch_update_docker_aliases
+
+            def _run_docker_batch(conn):
+                try:
+                    _batch_update_docker_aliases(
+                        conn,
+                        source_ip="docker",
+                        target_alias=new_alias,
+                        old_alias=prev_alias,
+                        batch_size=1000,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"Background retroactive Docker alias update failed for primary Docker ({prev_alias} -> {new_alias}): {exc}"
+                    )
+
+            background_tasks.add_task(run_db_query, _run_docker_batch)
 
     return MessageResponse(status="ok")

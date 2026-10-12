@@ -3,7 +3,6 @@ import {
   Sliders,
   Cpu,
   Bell,
-  Box,
   Network,
   Server,
   Check,
@@ -30,9 +29,6 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   const [aiThinkingBudget, setAiThinkingBudget] = useState<number>(1024);
   const [appUrl, setAppUrl] = useState<string>('');
   const [allowPrivate, setAllowPrivate] = useState<boolean>(true);
-  const [enableDocker, setEnableDocker] = useState<boolean>(true);
-  const [dockerExcludeContainers, setDockerExcludeContainers] = useState<string>('');
-  const [dockerSourceAlias, setDockerSourceAlias] = useState<string>('docker');
   const [trustedProxies, setTrustedProxies] = useState<string>('');
   const [trustDockerProxies, setTrustDockerProxies] = useState<boolean>(false);
   const [cookieSecure, setCookieSecure] = useState<boolean>(false);
@@ -60,9 +56,6 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       setAiThinkingBudget(settings.ai_thinking_budget ?? 1024);
       setAppUrl(settings.app_url ?? '');
       setAllowPrivate(settings.allow_private_notification_targets ?? true);
-      setEnableDocker(settings.enable_docker ?? true);
-      setDockerExcludeContainers(settings.docker_exclude_containers ?? '');
-      setDockerSourceAlias(settings.docker_source_alias ?? 'docker');
       setTrustedProxies(settings.trusted_proxies ?? '');
       setTrustDockerProxies(settings.trust_docker_proxies ?? false);
       setCookieSecure(settings.cookie_secure ?? false);
@@ -78,9 +71,6 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       aiThinkingBudget !== (settings.ai_thinking_budget ?? 1024) ||
       appUrl.trim() !== (settings.app_url ?? '') ||
       allowPrivate !== (settings.allow_private_notification_targets ?? true) ||
-      enableDocker !== (settings.enable_docker ?? true) ||
-      dockerExcludeContainers.trim() !== (settings.docker_exclude_containers ?? '') ||
-      (dockerSourceAlias.trim() || 'docker') !== (settings.docker_source_alias ?? 'docker') ||
       trustedProxies.trim() !== (settings.trusted_proxies ?? '') ||
       trustDockerProxies !== (settings.trust_docker_proxies ?? false) ||
       cookieSecure !== (settings.cookie_secure ?? false) ||
@@ -99,9 +89,6 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     setAiThinkingBudget(settings.ai_thinking_budget ?? 1024);
     setAppUrl(settings.app_url ?? '');
     setAllowPrivate(settings.allow_private_notification_targets ?? true);
-    setEnableDocker(settings.enable_docker ?? true);
-    setDockerExcludeContainers(settings.docker_exclude_containers ?? '');
-    setDockerSourceAlias(settings.docker_source_alias ?? 'docker');
     setTrustedProxies(settings.trusted_proxies ?? '');
     setTrustDockerProxies(settings.trust_docker_proxies ?? false);
     setCookieSecure(settings.cookie_secure ?? false);
@@ -148,17 +135,6 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     }
     if (allowPrivate !== (settings.allow_private_notification_targets ?? true)) {
       updates.allow_private_notification_targets = allowPrivate;
-    }
-    if (enableDocker !== (settings.enable_docker ?? true)) {
-      updates.enable_docker = enableDocker;
-    }
-    const trimmedExcludes = dockerExcludeContainers.trim();
-    if (trimmedExcludes !== (settings.docker_exclude_containers ?? '')) {
-      updates.docker_exclude_containers = trimmedExcludes;
-    }
-    const resolvedAlias = dockerSourceAlias.trim() || 'docker';
-    if (resolvedAlias !== (settings.docker_source_alias ?? 'docker')) {
-      updates.docker_source_alias = resolvedAlias;
     }
     const trimmedProxies = trustedProxies.trim();
     if (trimmedProxies !== (settings.trusted_proxies ?? '')) {
@@ -300,68 +276,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
           </div>
         </div>
 
-        {/* Section 3: Docker Collector */}
-        <div className="space-y-3 pt-3 border-t border-dark-800">
-          <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-            <Box className="w-3.5 h-3.5 text-accent-400" />
-            <span>Docker Collector</span>
-          </h4>
-          <div className="space-y-3">
-            <div>
-              <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  aria-label="Enable Container Tailing"
-                  checked={enableDocker}
-                  onChange={(e) => setEnableDocker(e.target.checked)}
-                  className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
-                />
-                <span className="font-medium">Enable Container Tailing</span>
-              </label>
-              <p className="text-[11px] text-slate-500 mt-1 pl-6.5">
-                Applies dynamically to active container discovery and log stream ingestion.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="docker-exclude-containers" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  Excluded Containers
-                </label>
-                <input
-                  id="docker-exclude-containers"
-                  type="text"
-                  placeholder="container1, container2"
-                  value={dockerExcludeContainers}
-                  onChange={(e) => setDockerExcludeContainers(e.target.value)}
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Comma-separated container names or IDs to omit.
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="docker-source-alias" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  Source Attribution Alias
-                </label>
-                <input
-                  id="docker-source-alias"
-                  type="text"
-                  value={dockerSourceAlias}
-                  onChange={(e) => setDockerSourceAlias(e.target.value)}
-                  maxLength={64}
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Default source alias assigned to container log entries (1 - 64 chars).
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 4: Network & Reverse Proxy */}
+        {/* Section 3: Network & Reverse Proxy */}
         <div className="space-y-3 pt-3 border-t border-dark-800">
           <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
             <Network className="w-3.5 h-3.5 text-accent-400" />
@@ -421,7 +336,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
           </div>
         </div>
 
-        {/* Section 5: Syslog TCP Connection Limits */}
+        {/* Section 4: Syslog TCP Connection Limits */}
         <div className="space-y-3 pt-3 border-t border-dark-800">
           <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
             <Server className="w-3.5 h-3.5 text-accent-400" />

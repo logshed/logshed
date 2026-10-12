@@ -96,7 +96,14 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `GET` | `/api/tokens` | List all created API tokens with masked identifiers, scopes, and expiration | None | `list[ApiTokenListItem]` | `200`, `401` |
 | `POST` | `/api/tokens` | Create a new API token and receive one-time raw Bearer secret | `{"name": "...", "scopes": [...], "expires_days": 90}` | `ApiTokenCreateResponse` | `201`, `400`, `401` |
 | `DELETE` | `/api/tokens/{id}` | Revoke an API token immediately | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `401`, `404` |
+| **Docker Hosts Management** | | | | | |
+| `GET` | `/api/docker/hosts` | List configured Docker hosts with live connection health and container metrics | None | `list[DockerEndpointResponse]` | `200`, `401` |
+| `POST` | `/api/docker/hosts` | Create a new Docker endpoint (client private keys encrypted with Fernet) | `{"name": "...", "url": "...", "source_alias": "...", "enabled": true, "tls_enabled": false, ...}` | `DockerEndpointResponse` | `200`, `401`, `409` |
+| `PUT` | `/api/docker/hosts/{id}` | Update endpoint configuration or toggle enabled state | Partial or complete host fields | `DockerEndpointResponse` | `200`, `400`, `401`, `404` |
+| `DELETE` | `/api/docker/hosts/{id}` | Remove a Docker endpoint and stop its worker (primary socket ID 1 protected) | None | `MessageResponse` (`{"status": "ok", "message": "..."}`) | `200`, `400`, `401`, `404` |
+| `POST` | `/api/docker/hosts/test` | Test connectivity to a Docker daemon without saving | `{"url": "...", "tls_enabled": bool, "ca_cert": "...", "endpoint_id": int, ...}` | `DockerEndpointTestResponse` | `200`, `401` |
 | **External Programmatic API v1 (`Authorization: Bearer ls_live_...`)** | | | | | |
+| `POST` | `/api/v1/ingest` | High-throughput authenticated HTTP batch log ingestion for edge shippers (JSON array or NDJSON) | Batch array or NDJSON payload (`logs:write`) | `{"status": "ok", "ingested": int}` | `200`, `401`, `403`, `429` |
 | `GET` | `/api/v1/auth/verify` | Verify token validity and inspect granted scopes | None (any valid token) | `ApiTokenVerifyResponse` (`{"valid": true, "name": "...", "scopes": [...]}`) | `200`, `401` |
 | `POST` | `/api/v1/maintenance/enable` | Start on-demand multi-session maintenance window | `{"duration_minutes": 30, "reason": "...", "log_handling": "silence_alerts" \| "drop_errors", "target_app": "...", "target_host": "..."}` | `ExternalMaintenanceEnableResponse` | `200`, `400`, `401`, `403` |
 | `POST` | `/api/v1/maintenance/disable` | End specific maintenance session or clear all active sessions | `{"session_id": "..."}` (optional) | `ExternalMaintenanceDisableResponse` | `200`, `401`, `403` |

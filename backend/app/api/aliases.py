@@ -41,19 +41,56 @@ def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_siz
     """
     Retroactively update or revert source_alias for existing logs in chunked batches.
     Prevents long table locks on large datasets while interleaving concurrent writes.
+    Protects Docker logs from being clobbered by Syslog host IP alias updates.
     """
     cursor = conn.cursor()
-    update_query = """
-        UPDATE logs SET source_alias = ?
-        WHERE source_ip = ? AND id IN (
-            SELECT id FROM logs
-            WHERE source_ip = ? AND source_alias != ?
-            ORDER BY id DESC
-            LIMIT ?
-        )
-    """
+    if source_ip == "docker":
+        update_query = """
+            UPDATE logs SET source_alias = ?
+            WHERE source_ip = 'docker' AND (source_alias != ? OR source_alias IS NULL) AND id IN (
+                SELECT id FROM logs
+                WHERE source_ip = 'docker' AND (source_alias != ? OR source_alias IS NULL)
+                ORDER BY id DESC
+                LIMIT ?
+            )
+        """
+        params = (target_alias, target_alias, target_alias, batch_size)
+    else:
+        docker_aliases: list[str] = []
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL")
+            docker_aliases = [r[0].strip() for r in cur.fetchall() if r[0] and str(r[0]).strip()]
+        except Exception:
+            docker_aliases = []
+
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM system_settings WHERE key = 'docker_source_alias'")
+            row = cur.fetchone()
+            if row and row[0] and str(row[0]).strip():
+                docker_aliases.append(str(row[0]).strip())
+        except Exception:
+            pass
+
+        docker_aliases = list(set(docker_aliases) | {"docker"})
+        placeholders = ",".join("?" for _ in docker_aliases)
+        update_query = f"""
+            UPDATE logs SET source_alias = ?
+            WHERE source_ip = ?
+              AND (source_alias IS NULL OR source_alias NOT IN ({placeholders}))
+              AND id IN (
+                SELECT id FROM logs
+                WHERE source_ip = ?
+                  AND (source_alias IS NULL OR (source_alias != ? AND source_alias NOT IN ({placeholders})))
+                ORDER BY id DESC
+                LIMIT ?
+            )
+        """
+        params = (target_alias, source_ip, *docker_aliases, source_ip, target_alias, *docker_aliases, batch_size)
+
     while True:
-        cursor.execute(update_query, (target_alias, source_ip, source_ip, target_alias, batch_size))
+        cursor.execute(update_query, params)
         count = cursor.rowcount
         conn.commit()
         if count < batch_size:

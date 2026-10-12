@@ -182,6 +182,7 @@ describe('ApiTokensTab Component', () => {
     expect(getPresetName(['logs:read', 'alerts:read', 'system:read', 'maintenance:write'])).toBe('AI Assistant / MCP');
     expect(getPresetName(['logs:read', 'alerts:read', 'system:read'])).toBe('Read Only');
     expect(getPresetName(['maintenance:write', 'maintenance:read'])).toBe('Maintenance Only');
+    expect(getPresetName(['logs:write'])).toBe('Edge Shipper / Ingest');
     expect(getPresetName(['custom:read'])).toBe('custom:read');
   });
 

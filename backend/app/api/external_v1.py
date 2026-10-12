@@ -66,9 +66,12 @@ from app.services.retention import (
 from app.services.storage_metrics import sample_storage_metrics
 from app.version import APP_VERSION
 
+from app.api.ingest import router as ingest_router
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["External API v1"])
+router.include_router(ingest_router)
 
 # Cooldown tracking for expensive maintenance actions (5 minutes)
 _last_prune_time: float = 0.0
@@ -483,7 +486,7 @@ def build_log_where_clause(
     if parsed_sources:
         src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
         where_clauses.append(
-            f"(logs.source_alias IN ({src_placeholders}) OR logs.source_ip IN ({src_placeholders}))"
+            f"(logs.source_alias IN ({src_placeholders}) OR (logs.source_ip IN ({src_placeholders}) AND (logs.source_alias IS NULL OR logs.source_alias NOT IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)) AND logs.source_ip != 'docker'))"
         )
         for i, s in enumerate(parsed_sources):
             params[f"src_{i}"] = s

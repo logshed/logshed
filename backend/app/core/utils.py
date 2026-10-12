@@ -121,6 +121,23 @@ def expand_source_aliases(
                 lookup[key] = set()
             lookup[key].update(pair_items)
 
+    try:
+        cursor.execute("SELECT name, source_alias FROM docker_endpoints WHERE enabled = 1")
+        docker_rows = cursor.fetchall()
+        for row in docker_rows:
+            name = str(row[0]).strip() if row[0] is not None else ""
+            d_alias = str(row[1]).strip() if row[1] is not None else ""
+            if not name and not d_alias:
+                continue
+            pair_items = {item for item in (name, d_alias) if item}
+            for item in pair_items:
+                key = item.lower()
+                if key not in lookup:
+                    lookup[key] = set()
+                lookup[key].update(pair_items)
+    except Exception:
+        pass
+
     for item in parsed:
         matches = lookup.get(item.lower())
         if matches:

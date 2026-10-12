@@ -25,9 +25,6 @@ const mockBaseSettings: SystemSettings = {
   ai_thinking_budget: 1024,
   app_url: 'https://logshed.lan',
   allow_private_notification_targets: true,
-  enable_docker: true,
-  docker_exclude_containers: 'cadvisor',
-  docker_source_alias: 'docker',
   trusted_proxies: '172.16.0.0/12',
   trust_docker_proxies: false,
   cookie_secure: false,
@@ -52,8 +49,6 @@ describe('AdvancedSettingsCard Component', () => {
     expect(screen.getByDisplayValue('45')).toBeInTheDocument();
     expect(screen.getByDisplayValue('1024')).toBeInTheDocument();
     expect(screen.getByDisplayValue('https://logshed.lan')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('cadvisor')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('docker')).toBeInTheDocument();
     expect(screen.getByDisplayValue('172.16.0.0/12')).toBeInTheDocument();
     expect(screen.getByDisplayValue('250')).toBeInTheDocument();
   });
@@ -128,7 +123,7 @@ describe('AdvancedSettingsCard Component', () => {
     expect(screen.queryByLabelText(/Unsaved changes bar/i)).not.toBeInTheDocument();
   });
 
-  it('only sends modified fields when toggling container tailing', async () => {
+  it('only sends modified fields when toggling proxy trust', async () => {
     const onSaved = vi.fn();
     vi.mocked(settingsApi.updateSettings).mockResolvedValueOnce({
       status: 'ok',
@@ -141,15 +136,15 @@ describe('AdvancedSettingsCard Component', () => {
       />
     );
 
-    const dockerCheckbox = screen.getByLabelText(/Enable Container Tailing/i);
-    fireEvent.click(dockerCheckbox);
+    const trustCheckbox = screen.getByLabelText(/Trust Docker Bridge Networks/i);
+    fireEvent.click(trustCheckbox);
 
     const saveButton = screen.getByRole('button', { name: /Save Changes/i });
     fireEvent.click(saveButton);
 
     await waitFor(() => {
       expect(settingsApi.updateSettings).toHaveBeenCalledWith({
-        enable_docker: false,
+        trust_docker_proxies: true,
       });
       expect(onSaved).toHaveBeenCalled();
     });

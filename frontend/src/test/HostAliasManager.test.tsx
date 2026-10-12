@@ -74,6 +74,9 @@ describe('HostAliasManager Component', () => {
       expect(screen.getByText('Active Host Mappings (2)')).toBeInTheDocument();
     });
 
+    const openAddBtn = screen.getByRole('button', { name: /Add Host Alias/i });
+    fireEvent.click(openAddBtn);
+
     fireEvent.change(screen.getByPlaceholderText('e.g. 192.168.1.50'), {
       target: { value: '10.0.0.1' },
     });

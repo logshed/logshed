@@ -38,6 +38,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * Pin frequently accessed views directly to the filter bar.
 * **Log Detail & Context Inspector:**
   * Slide-over inspection drawer presenting parsed metadata, source IP, facility, formatted homelab timestamp (with timezone abbreviation badge), secondary database UTC reference line, and raw unparsed syslog payload.
+  * Protocol-aware host actions: For Docker records (`facility === 1`), links directly to "Edit Docker Host" or "Configure Docker Host" in `/settings/sources`. For records matching a deleted Docker endpoint, displays a recovery notice modal with endpoint configuration details. For Syslog records (`facility !== 1`), provides quick-add and edit actions for host IP aliases.
   * One-click action to fetch surrounding context lines formatted in the configured homelab timezone (symmetric 10 entries around selected record).
 * **Targeted Log Deletion Modal:**
   * Supports deletion of selected records, filtered ranges, or all historical logs with confirmation guards and dry-run count preview.
@@ -79,7 +80,10 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   1. Claude Desktop (Remote via `mcp-proxy`) for remote Proxmox, NAS, or external servers.
   2. Cursor / Windsurf / Antigravity (Remote SSE / Streamable HTTP) for direct network IDE integrations.
   3. Claude Desktop (Local Docker Stdio) for local single-machine Docker deployments.
-* **Host Alias Manager (`/settings/aliases`):** Dedicated table to manage IP-to-Hostname mappings (e.g., `192.168.1.1` -> `OPNsense Firewall`) with quick-add prompts for newly detected, unmapped IP addresses.
+* **Sources Management (`/settings/sources`):** Unified panel coordinating log source identities across protocols (`SourcesTab.tsx`). Combines two primary views:
+  * **Docker Hosts (`DockerHostsTab.tsx`):** Dedicated management panel for multi-host Docker log collection. Features live status badges (Connected, Reconnecting, Disabled, Error), active container counts, latency metrics, ad-hoc connection test buttons, and an Add/Edit host modal supporting mutual TLS (CA cert, client cert, and encrypted client key).
+  * **Host Aliases (`HostAliasManager.tsx`):** Dedicated table to manage IP-to-Hostname mappings for Syslog sources (e.g., `192.168.1.1` -> `OPNsense Firewall`) with quick-add prompts for newly detected, unmapped IP addresses.
+  * **Backward Compatibility:** Accessing legacy `/settings/aliases` automatically redirects to `/settings/sources`.
 * **Advanced Settings (`/settings/advanced`):** Runtime controls for AI timeout, reasoning token budget, base application URL, private IP webhook targets, Docker collector toggle and exclusions, trusted proxy headers, cookie security, and Syslog TCP connection ceilings (`AdvancedSettingsCard.tsx`).
 
 ## 4. Theme & Visual Styling

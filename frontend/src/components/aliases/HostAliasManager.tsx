@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Server, Plus, Trash2, Edit2, Check, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Server, Plus, Trash2, Edit2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
@@ -20,25 +20,18 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [ip, setIp] = useState<string>(initialAddIp || '');
+  // Add / Edit Modal state
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [editingIp, setEditingIp] = useState<string | null>(null);
+  const [ip, setIp] = useState<string>('');
   const [alias, setAlias] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [editingIp, setEditingIp] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
+
+  // Delete Modal state
   const [isDeletingIp, setIsDeletingIp] = useState<string | null>(null);
   const [deleteTargetIp, setDeleteTargetIp] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (initialAddIp) {
-      setIp(initialAddIp);
-      const existing = aliases.find((a) => a.ip === initialAddIp);
-      if (existing) {
-        setEditingIp(existing.ip);
-        setAlias(existing.alias);
-        setNotes(existing.notes || '');
-      }
-    }
-  }, [initialAddIp, aliases]);
 
   const loadAliases = async () => {
     try {
@@ -57,44 +50,73 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     loadAliases();
   }, []);
 
+  useEffect(() => {
+    if (initialAddIp) {
+      const existing = aliases.find((a) => a.ip === initialAddIp);
+      if (existing) {
+        setEditingIp(existing.ip);
+        setIp(existing.ip);
+        setAlias(existing.alias);
+        setNotes(existing.notes || '');
+      } else {
+        setEditingIp(null);
+        setIp(initialAddIp);
+        setAlias('');
+        setNotes('');
+      }
+      setModalError(null);
+      setIsModalOpen(true);
+    }
+  }, [initialAddIp, aliases]);
+
+  const openAddModal = () => {
+    setEditingIp(null);
+    setIp('');
+    setAlias('');
+    setNotes('');
+    setModalError(null);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (item: HostAlias) => {
+    setEditingIp(item.ip);
+    setIp(item.ip);
+    setAlias(item.alias);
+    setNotes(item.notes || '');
+    setModalError(null);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingIp(null);
+    setIp('');
+    setAlias('');
+    setNotes('');
+    setModalError(null);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ip.trim() || !alias.trim()) return;
 
     try {
       setIsSaving(true);
-      setErrorMsg(null);
+      setModalError(null);
       await saveAlias({
         ip: ip.trim(),
         alias: alias.trim(),
         notes: notes.trim() || null,
       });
-      setIp('');
-      setAlias('');
-      setNotes('');
-      setEditingIp(null);
+      handleCloseModal();
       await loadAliases();
       bumpAliasVersion();
       if (onAliasSaved) onAliasSaved();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to save host alias mapping.');
+      setModalError(err.message || 'Failed to save host alias mapping.');
     } finally {
       setIsSaving(false);
     }
-  };
-
-  const handleEdit = (item: HostAlias) => {
-    setEditingIp(item.ip);
-    setIp(item.ip);
-    setAlias(item.alias);
-    setNotes(item.notes || '');
-  };
-
-  const handleCancelEdit = () => {
-    setEditingIp(null);
-    setIp('');
-    setAlias('');
-    setNotes('');
   };
 
   const handleConfirmDelete = async () => {
@@ -126,106 +148,40 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
         </div>
       )}
 
-      {/* Add / Edit Form Card */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      {/* Syslog Host Aliases Card */}
+      <section className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-md">
+        <div className="p-3.5 sm:p-5 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
               <Server className="w-4 h-4 text-accent-500" />
-              <span>Host Alias Manager</span>
+              <span>Syslog Host Aliases</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {editingIp
-                ? `Editing host mapping for ${editingIp}.`
-                : 'Map incoming source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall).'}
+              Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). Configured syslog senders push logs directly to LogShed and un-aliased hosts appear by IP in the console view.
             </p>
           </div>
-          {editingIp && (
-            <span className="px-2 py-0.5 rounded bg-accent-950/50 text-accent-400 border border-accent-800 text-[11px] font-mono shrink-0 self-start sm:self-auto">
-              Editing: {editingIp}
-            </span>
-          )}
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white rounded text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Host Alias</span>
+          </button>
         </div>
 
-        <form onSubmit={handleSave} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-              Source IP Address
-            </label>
-            <input
-              type="text"
-              value={ip}
-              onChange={(e) => setIp(e.target.value)}
-              disabled={Boolean(editingIp)}
-              placeholder="e.g. 192.168.1.50"
-              required
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono disabled:opacity-50"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-              Friendly Host Alias
-            </label>
-            <input
-              type="text"
-              value={alias}
-              onChange={(e) => setAlias(e.target.value)}
-              placeholder="e.g. Proxmox-Node-01"
-              required
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-              Notes (Optional)
-            </label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Main hypervisor in rack 1"
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
-            />
-          </div>
-
-          <div className="sm:col-span-3 flex justify-end gap-2 pt-1">
-            {editingIp && (
-              <button
-                type="button"
-                onClick={handleCancelEdit}
-                className="px-3.5 py-2 sm:py-1.5 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded text-xs transition cursor-pointer"
-              >
-                Cancel
-              </button>
-            )}
-            <button
-              type="submit"
-              disabled={isSaving || !ip.trim() || !alias.trim()}
-              className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium px-4 py-2 sm:py-1.5 rounded text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[38px] sm:min-h-0"
-            >
-              {editingIp ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-              <span>{isSaving ? 'Saving...' : editingIp ? 'Update Mapping' : 'Add Mapping'}</span>
-            </button>
-          </div>
-        </form>
-      </section>
-
-      {/* Aliases Table Card */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-md">
-        <div className="p-3.5 sm:p-4 bg-dark-900 border-b border-dark-700 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Server className="w-4 h-4 text-accent-500" />
-            <span>Active Host Mappings ({aliases.length})</span>
-          </h3>
+        {/* Active Host Mappings Sub-Section */}
+        <div className="p-3.5 sm:px-5 sm:py-3 bg-dark-950/40 border-b border-dark-800 flex items-center justify-between">
+          <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+            Active Host Mappings ({aliases.length})
+          </h4>
         </div>
 
         {isLoading ? (
           <div className="p-6 text-center text-slate-500 font-mono text-xs">Loading mappings...</div>
         ) : aliases.length === 0 ? (
           <div className="p-6 text-center text-slate-500 font-mono text-xs">
-            No host aliases mapped yet. Add a mapping above to label incoming syslog IP addresses.
+            No host aliases mapped yet. Add a mapping to label incoming syslog IP addresses.
           </div>
         ) : isMobile ? (
           /* Mobile Card View */
@@ -236,7 +192,8 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                   <span className="font-mono text-accent-400 font-semibold text-xs sm:text-sm">{item.ip}</span>
                   <div className="flex items-center gap-1 font-sans">
                     <button
-                      onClick={() => handleEdit(item)}
+                      type="button"
+                      onClick={() => openEditModal(item)}
                       title="Edit Alias"
                       className="p-2 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
                     >
@@ -284,7 +241,8 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 </div>
                 <div className="flex items-center justify-end gap-1 font-sans">
                   <button
-                    onClick={() => handleEdit(item)}
+                    type="button"
+                    onClick={() => openEditModal(item)}
                     title="Edit Alias"
                     className="p-1 text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
                   >
@@ -305,6 +263,96 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           </div>
         )}
       </section>
+
+      {/* Add / Edit Host Alias Modal */}
+      {isModalOpen && (
+        <Modal
+          isOpen={isModalOpen}
+          onClose={handleCloseModal}
+          title={editingIp ? `Edit Host Alias - ${editingIp}` : 'Add Host Alias'}
+          maxWidth="max-w-md"
+        >
+          <form onSubmit={handleSave} className="space-y-4">
+            {modalError && (
+              <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <span>{modalError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                Source IP Address
+              </label>
+              <input
+                type="text"
+                value={ip}
+                onChange={(e) => setIp(e.target.value)}
+                disabled={Boolean(editingIp)}
+                placeholder="e.g. 192.168.1.50"
+                required
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono disabled:opacity-50"
+              />
+              {editingIp && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Source IP cannot be modified while editing. Delete and re-create to change the IP.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                Friendly Host Alias
+              </label>
+              <input
+                type="text"
+                value={alias}
+                onChange={(e) => setAlias(e.target.value)}
+                placeholder="e.g. Proxmox-Node-01"
+                required
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                Notes (Optional)
+              </label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="e.g. Main hypervisor in rack 1"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-dark-800">
+              <button
+                type="button"
+                onClick={handleCloseModal}
+                className="px-3.5 py-1.5 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving || !ip.trim() || !alias.trim()}
+                className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium px-4 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <span>{editingIp ? 'Update Mapping' : 'Add Mapping'}</span>
+                )}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {/* Delete Host Alias Confirmation Modal */}
       {deleteTargetIp && (

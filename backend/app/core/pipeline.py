@@ -573,6 +573,10 @@ class KeyedMultilineAssembler:
             stream_key
         )
 
+    def flush_stream(self, stream_key: str) -> None:
+        """Immediately flush the buffered multiline entry for stream_key into the shared queue."""
+        self._flush_stream_internal(stream_key)
+
     def _flush_stream_internal(self, stream_key: str) -> None:
         """
         Internal flush logic.

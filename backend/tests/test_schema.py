@@ -77,6 +77,7 @@ class TestSchemaIntegrity:
             "alert_history",
             "api_tokens",
             "maintenance_sessions",
+            "docker_endpoints",
         }
         assert expected.issubset(tables)
 
@@ -477,10 +478,20 @@ class TestMigrationRunner:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "api_tokens" in tables
         assert "maintenance_sessions" in tables
+        assert "docker_endpoints" in tables
 
         assert "idx_api_tokens_hash" in indexes
         assert "idx_api_tokens_expires" in indexes
         assert "idx_maint_sessions_active" in indexes
+        assert "idx_docker_endpoints_name" in indexes
+        assert "idx_docker_endpoints_enabled" in indexes
+
+        # Verify docker_endpoints default seed
+        docker_row = conn.execute("SELECT id, name, url, source_alias, enabled FROM docker_endpoints WHERE id = 1").fetchone()
+        assert docker_row is not None
+        assert docker_row[1] == "Primary Docker"
+        assert docker_row[3] == "docker"
+        assert docker_row[4] == 1
 
         # Verify system_settings server_name and instance_id
         cur = conn.cursor()
@@ -516,6 +527,69 @@ class TestMigrationRunner:
         assert cur.fetchone()[0] == "Production-Node-01"
         cur.execute("SELECT value FROM system_settings WHERE key = 'instance_id'")
         assert cur.fetchone()[0] == "custom-uuid-12345"
+        conn.close()
+
+    def test_migration_v3_pre_release_seamless_upgrade(self, tmp_path: Path):
+        """
+        Deploying over a database already at PRAGMA user_version = 3 (e.g. from an
+        earlier pre-release deployment without docker_endpoints) seamlessly ensures
+        the docker_endpoints table and primary endpoint seed are created without error.
+        """
+        p = tmp_path / "v3_prerelease.db"
+        conn = get_connection(p)
+        from app.core.migrations import migrate_v1, migrate_v2, set_user_version
+        migrate_v1(conn)
+        migrate_v2(conn)
+        # Create standard v3 tables without docker_endpoints and mark as user_version = 3
+        conn.execute("ALTER TABLE drop_rules ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("ALTER TABLE alert_rules ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("""
+            CREATE TABLE api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                token_prefix TEXT NOT NULL,
+                scopes TEXT NOT NULL DEFAULT '["maintenance:write"]',
+                created_at DATETIME NOT NULL,
+                expires_at DATETIME,
+                last_used_at DATETIME,
+                created_by TEXT DEFAULT 'admin'
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE maintenance_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL UNIQUE,
+                token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL,
+                initiated_by TEXT NOT NULL,
+                reason TEXT,
+                log_handling TEXT NOT NULL DEFAULT 'silence_alerts',
+                target_app TEXT,
+                target_host TEXT,
+                created_at DATETIME NOT NULL,
+                expires_at DATETIME NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+        """)
+        set_user_version(conn, 3)
+        conn.commit()
+
+        # Verify docker_endpoints is absent before run_migrations
+        cur = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docker_endpoints';")
+        assert cur.fetchone() is None
+        conn.close()
+
+        # Run migration runner over existing v3 database
+        run_migrations(p)
+
+        # Verify docker_endpoints and primary Docker host now exist
+        conn = get_connection(p)
+        assert get_user_version(conn) == 3
+        cur = conn.execute("SELECT id, name, url, enabled FROM docker_endpoints WHERE id = 1;")
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 1
+        assert row[1] == "Primary Docker"
         conn.close()
 
 

@@ -387,5 +387,95 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(screen.getByText('Raw Syslog Packet')).toBeInTheDocument();
     expect(screen.queryByText('Raw Container Output')).toBeNull();
   });
+
+  it('renders "Edit Docker Host" for active Docker endpoint log and calls onEditDockerHost', () => {
+    const dockerLog: LogEntry = {
+      id: 201,
+      timestamp: '2026-10-12T10:00:00Z',
+      received_at: '2026-10-12T10:00:00Z',
+      source_ip: '192.168.1.50',
+      source_alias: 'unraid-docker',
+      app_name: 'plex',
+      facility: 1,
+      severity: 6,
+      message: 'Container started',
+      raw: 'Container started',
+    };
+    const mockEndpoints = [
+      {
+        id: 2,
+        name: 'Unraid Docker',
+        url: 'tcp://192.168.1.50:2375',
+        source_alias: 'unraid-docker',
+        enabled: true,
+        tls_enabled: false,
+        ca_cert: null,
+        client_cert: null,
+        has_client_key: false,
+        exclude_containers: '',
+        created_at: '2026-10-12T00:00:00Z',
+        updated_at: '2026-10-12T00:00:00Z',
+        is_connected: true,
+        active_containers: 5,
+      },
+    ];
+
+    const handleEditDocker = vi.fn();
+    render(
+      <LogDetailModal
+        log={dockerLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onEditDockerHost={handleEditDocker}
+        dockerEndpoints={mockEndpoints}
+      />
+    );
+
+    const editBtn = screen.getByRole('button', { name: /Edit Docker Host/i });
+    expect(editBtn).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Modify Host Alias/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Add Host Alias/i })).toBeNull();
+
+    fireEvent.click(editBtn);
+    expect(handleEditDocker).toHaveBeenCalledWith(2);
+  });
+
+  it('renders "Configure Docker Host" for deleted Docker host and calls onManageDeletedDockerHost', () => {
+    const deletedDockerLog: LogEntry = {
+      id: 202,
+      timestamp: '2026-10-12T10:00:00Z',
+      received_at: '2026-10-12T10:00:00Z',
+      source_ip: '192.168.1.50',
+      source_alias: 'old-docker',
+      app_name: 'plex',
+      facility: 1,
+      severity: 6,
+      message: 'Container started',
+      raw: 'Container started',
+    };
+
+    const handleManageDeleted = vi.fn();
+    render(
+      <LogDetailModal
+        log={deletedDockerLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onManageDeletedDockerHost={handleManageDeleted}
+        dockerEndpoints={[]}
+      />
+    );
+
+    const configBtn = screen.getByRole('button', { name: /Configure Docker Host/i });
+    expect(configBtn).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Modify Host Alias/i })).toBeNull();
+
+    fireEvent.click(configBtn);
+    expect(handleManageDeleted).toHaveBeenCalledWith({
+      name: 'old-docker',
+      ip: '192.168.1.50',
+    });
+  });
 });
 

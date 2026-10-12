@@ -14,11 +14,14 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import sqlite3
+import ssl
+import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -87,14 +90,56 @@ if "DOCKER_DISCOVERY_INTERVAL" in os.environ:
 MAX_TTY_BUFFER = 65536  # 64 KB limit to prevent unbounded memory growth in TTY mode
 
 
-def _parse_docker_host(enable_docker: Optional[bool] = None) -> tuple[str, Optional[str]]:
+def create_docker_ssl_context(
+    ca_cert: Optional[str] = None,
+    client_cert: Optional[str] = None,
+    client_key: Optional[str] = None,
+) -> ssl.SSLContext:
     """
-    Parse DOCKER_HOST env var into (base_url, uds_path).
+    Create an ephemeral SSLContext configured for Docker mTLS.
+    Decrypted client credentials are safely materialized to temporary files
+    with restricted 0600 permissions solely during SSLContext generation.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+
+    if ca_cert and ca_cert.strip():
+        ctx.load_verify_locations(cadata=ca_cert.strip())
+
+    if client_cert and client_cert.strip() and client_key and client_key.strip():
+        temp_dir = tempfile.mkdtemp(prefix="logshed_tls_")
+        try:
+            cert_path = os.path.join(temp_dir, "client.crt")
+            key_path = os.path.join(temp_dir, "client.key")
+
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            fd_cert = os.open(cert_path, flags, 0o600)
+            with open(fd_cert, "w", encoding="utf-8") as f:
+                f.write(client_cert.strip())
+
+            fd_key = os.open(key_path, flags, 0o600)
+            with open(fd_key, "w", encoding="utf-8") as f:
+                f.write(client_key.strip())
+
+            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return ctx
+
+
+def _parse_docker_host(
+    enable_docker: Optional[bool] = None,
+    docker_host: Optional[str] = None,
+    tls_enabled: bool = False,
+) -> tuple[str, Optional[str]]:
+    """
+    Parse Docker host URL or DOCKER_HOST env var into (base_url, uds_path).
 
     Returns:
         (base_url, uds_path):
            - For unix sockets: ("http://localhost/v1.43", "/var/run/docker.sock")
-           - For tcp: ("http://proxy:2375/v1.43", None)
+           - For tcp: ("http://proxy:2375/v1.43", None) or ("https://proxy:2376/v1.43", None)
     """
     if enable_docker is None:
         try:
@@ -106,7 +151,10 @@ def _parse_docker_host(enable_docker: Optional[bool] = None) -> tuple[str, Optio
     if not enable_docker:
         return "", None
 
-    docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock").strip()
+    if docker_host is None:
+        docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock").strip()
+    else:
+        docker_host = docker_host.strip()
 
     if not docker_host or docker_host.lower() in ("none", "off", "disabled") or os.environ.get("ENABLE_DOCKER", "true").lower() in ("0", "false", "no", "disabled"):
         return "", None
@@ -118,24 +166,29 @@ def _parse_docker_host(enable_docker: Optional[bool] = None) -> tuple[str, Optio
     if docker_host.startswith("tcp://"):
         parsed = urlparse(docker_host)
         host = parsed.hostname or "localhost"
-        port = parsed.port or 2375
-        return f"http://{host}:{port}/{DOCKER_API_VERSION}", None
+        default_port = 2376 if tls_enabled else 2375
+        port = parsed.port or default_port
+        scheme = "https" if tls_enabled else "http"
+        return f"{scheme}://{host}:{port}/{DOCKER_API_VERSION}", None
 
     if docker_host.startswith("http://") or docker_host.startswith("https://"):
         parsed = urlparse(docker_host)
-        scheme = parsed.scheme
+        scheme = "https" if tls_enabled else parsed.scheme
         host = parsed.hostname or "localhost"
-        port = parsed.port or (443 if scheme == "https" else 2375)
+        default_port = 443 if scheme == "https" else 2375
+        port = parsed.port or default_port
         return f"{scheme}://{host}:{port}/{DOCKER_API_VERSION}", None
 
     # Fallback: treat as TCP address
-    return f"http://{docker_host}/{DOCKER_API_VERSION}", None
+    scheme = "https" if tls_enabled else "http"
+    return f"{scheme}://{docker_host}/{DOCKER_API_VERSION}", None
 
 
 def _build_client(
     base_url: str,
     uds_path: Optional[str],
     read_timeout: Optional[float] = None,
+    ssl_context: Optional[ssl.SSLContext] = None,
 ) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient configured for the Docker endpoint."""
     if read_timeout is None:
@@ -171,7 +224,8 @@ def _build_client(
             if hasattr(socket, "TCP_KEEPCNT"):
                 socket_options.append((socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3))
 
-        transport = httpx.AsyncHTTPTransport(socket_options=socket_options, limits=limits)
+        verify_param = ssl_context if ssl_context is not None else True
+        transport = httpx.AsyncHTTPTransport(verify=verify_param, socket_options=socket_options, limits=limits)
         return httpx.AsyncClient(
             transport=transport,
             base_url=base_url,
@@ -359,16 +413,17 @@ def _make_log_entry(
     default_alias = source_alias or source_ip
     resolved_alias = default_alias
     if alias_cache is not None:
-        if default_alias != source_ip:
-            resolved_default = alias_cache.resolve(default_alias)
-            if resolved_default != default_alias:
-                resolved_alias = resolved_default
+        if source_ip == "docker":
+            if default_alias != "docker":
+                resolved_default = alias_cache.resolve(default_alias)
+                if resolved_default != default_alias:
+                    resolved_alias = resolved_default
+                else:
+                    resolved_source = alias_cache.resolve("docker")
+                    if resolved_source != "docker":
+                        resolved_alias = resolved_source
             else:
-                resolved_source = alias_cache.resolve(source_ip)
-                if resolved_source != source_ip:
-                    resolved_alias = resolved_source
-        else:
-            resolved_alias = alias_cache.resolve(source_ip)
+                resolved_alias = alias_cache.resolve("docker")
 
     clean_message = _clean_text(message)
     clean_raw = _clean_text(raw if raw is not None else message)
@@ -439,24 +494,43 @@ def _batch_update_app_aliases(
     raw_name: str,
     target_alias: str,
     source_ip: str = "docker",
+    source_alias: Optional[str] = None,
     batch_size: int = 1000,
 ) -> None:
     """
     Retroactively update app_name for existing logs in chunked batches.
     Prevents long table locks on large datasets while interleaving concurrent writes.
+    Protects Syslog logs on shared IP hosts by scoping by Docker source_alias.
     """
     cursor = conn.cursor()
-    update_query = """
-        UPDATE logs SET app_name = ?
-        WHERE source_ip = ? AND app_name = ? AND id IN (
-            SELECT id FROM logs
+    if source_alias:
+        update_query = """
+            UPDATE logs SET app_name = ?
+            WHERE source_ip = ? AND app_name = ? AND source_alias = ? AND id IN (
+                SELECT id FROM logs
+                WHERE source_ip = ? AND app_name = ? AND source_alias = ?
+                ORDER BY id DESC
+                LIMIT ?
+            )
+        """
+        params = (target_alias, source_ip, raw_name, source_alias, source_ip, raw_name, source_alias, batch_size)
+    else:
+        update_query = """
+            UPDATE logs SET app_name = ?
             WHERE source_ip = ? AND app_name = ?
-            ORDER BY id DESC
-            LIMIT ?
-        )
-    """
+              AND source_alias IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)
+              AND id IN (
+                SELECT id FROM logs
+                WHERE source_ip = ? AND app_name = ?
+                  AND source_alias IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)
+                ORDER BY id DESC
+                LIMIT ?
+            )
+        """
+        params = (target_alias, source_ip, raw_name, source_ip, raw_name, batch_size)
+
     while True:
-        cursor.execute(update_query, (target_alias, source_ip, raw_name, source_ip, raw_name, batch_size))
+        cursor.execute(update_query, params)
         count = cursor.rowcount
         conn.commit()
         if count < batch_size:
@@ -531,6 +605,9 @@ async def _tail_container_logs(
     heartbeat_interval: Optional[float] = None,
     container_last_messages: Optional[dict[str, set[str]]] = None,
     alias_cache: Optional[AliasCache] = None,
+    endpoint_id: int = 1,
+    source_ip: str = "docker",
+    source_alias: Optional[str] = None,
 ) -> None:
     """
     Stream logs for a single container, feeding lines through the assembler.
@@ -540,7 +617,7 @@ async def _tail_container_logs(
     Uses proper Docker multiplexed stream frame parsing when tty=false,
     and newline-delimited raw text when tty=true.
     """
-    stream_key = f"docker:{container_id}"
+    stream_key = f"docker:{endpoint_id}:{container_id}"
     url = f"/containers/{container_id}/logs"
 
     if heartbeat_interval is None:
@@ -602,6 +679,8 @@ async def _tail_container_logs(
                 container_name, container_id, parsed_message,
                 severity=parsed_sev, timestamp=ts,
                 alias_cache=alias_cache,
+                source_ip=source_ip,
+                source_alias=source_alias,
                 raw=message,
             )
         return None
@@ -621,6 +700,11 @@ async def _tail_container_logs(
 
         try:
             async with client.stream("GET", url, params=params) as resp:
+                if getattr(resp, "status_code", None) == 404:
+                    logger.debug(
+                        f"Container {container_name} ({container_id[:12]}) not found (404); stopping tailer."
+                    )
+                    return
                 if getattr(resp, "status_code", None) == 400 and "since" in params:
                     logger.warning(
                         f"Docker rejected 'since' parameter for {container_name} ({container_id[:12]}): 400. "
@@ -789,6 +873,11 @@ async def _tail_container_logs(
         except (httpx.RemoteProtocolError, httpx.HTTPError, Exception) as e:
             if cancel_event.is_set():
                 return
+            if isinstance(e, httpx.HTTPStatusError) and getattr(e.response, "status_code", None) == 404:
+                logger.debug(
+                    f"Container {container_name} ({container_id[:12]}) returned 404; stopping tailer task."
+                )
+                return
             logger.debug(
                 f"Log stream disconnected for {container_name} ({container_id[:12]}): {e}. "
                 f"Reconnecting in {backoff:.1f}s..."
@@ -801,6 +890,17 @@ async def _tail_container_logs(
             pass
 
         backoff = min(backoff * _CONTAINER_BACKOFF_FACTOR, _CONTAINER_MAX_BACKOFF)
+
+
+class _AliasDedupSet(set):
+    """Deduplication set supporting (raw, display, ip) triples and legacy (raw, display) pair lookups."""
+
+    def __contains__(self, item: Any) -> bool:
+        if super().__contains__(item):
+            return True
+        if isinstance(item, tuple) and len(item) == 2:
+            return any(isinstance(x, tuple) and x[:2] == item for x in self)
+        return False
 
 
 class DockerTailer:
@@ -825,6 +925,10 @@ class DockerTailer:
         exclude_containers: Optional[str] = None,
         source_alias: Optional[str] = None,
         discovery_interval: Optional[float] = None,
+        endpoint_id: int = 1,
+        name: str = "Primary Docker",
+        url: Optional[str] = None,
+        ssl_context: Optional[ssl.SSLContext] = None,
     ):
         self._assembler = assembler
         self._running = False
@@ -860,7 +964,7 @@ class DockerTailer:
             self.alias_cache = AliasCache(effective_db_path)
             self._owns_alias_cache = True
 
-        from app.core.config import get_cached_setting
+        from app.core.config import get_cached_setting, get_docker_host
         self.enable_docker = (
             enable_docker
             if enable_docker is not None
@@ -876,10 +980,53 @@ class DockerTailer:
             if source_alias is not None
             else str(get_cached_setting("docker_source_alias", "docker"))
         )
-        self._current_client: Optional[httpx.AsyncClient] = None
-        self._updated_app_aliases: set[tuple[str, str]] = set()
+        self.endpoint_id = endpoint_id
+        self.name = name
+        self.url = url.strip() if (url and url.strip()) else get_docker_host()
+        self.ssl_context = ssl_context
+        self.tls_enabled = ssl_context is not None
 
-    def _schedule_app_alias_update(self, raw_name: str, display_name: str) -> None:
+        self._current_client: Optional[httpx.AsyncClient] = None
+        self._updated_app_aliases: set[Any] = _AliasDedupSet()
+        self._bg_tasks: set[asyncio.Task] = set()
+
+        # Connection health and latency status
+        self._is_connected: bool = False
+        self._last_error: Optional[str] = None
+        self._last_activity_iso: Optional[str] = None
+        self._latency_ms: Optional[float] = None
+
+    def _effective_source_ip(self) -> str:
+        """Derive the source IP/hostname for container logs from the endpoint URL or alias."""
+        if self.url.startswith(("tcp://", "http://", "https://")):
+            parsed = urlparse(self.url)
+            if parsed.hostname:
+                return parsed.hostname
+        if self.endpoint_id == 1:
+            return "docker"
+        return self.source_alias or f"docker-{self.endpoint_id}"
+
+    def get_status(self) -> dict[str, Any]:
+        """Return runtime connection health and container metrics for this host."""
+        return {
+            "endpoint_id": self.endpoint_id,
+            "name": self.name,
+            "url": self.url,
+            "source_alias": self.source_alias,
+            "enabled": self.enable_docker,
+            "is_connected": self._is_connected,
+            "active_containers": len(self._tailers),
+            "last_error": self._last_error,
+            "last_activity": self._last_activity_iso,
+            "latency_ms": self._latency_ms,
+        }
+
+    def _schedule_app_alias_update(
+        self,
+        raw_name: str,
+        display_name: str,
+        source_ip: Optional[str] = None,
+    ) -> None:
         """
         Schedule chunked background database update for app_name if alias differs from raw name.
         Uses in-memory deduplication set to avoid redundant batch queries across discovery cycles.
@@ -887,10 +1034,11 @@ class DockerTailer:
         if not raw_name or not display_name or raw_name == display_name:
             return
 
-        pair = (raw_name, display_name)
-        if pair in self._updated_app_aliases:
+        effective_ip = source_ip or self._effective_source_ip()
+        triple = (raw_name, display_name, effective_ip)
+        if triple in self._updated_app_aliases:
             return
-        self._updated_app_aliases.add(pair)
+        self._updated_app_aliases.add(triple)
 
         effective_db_path = self._db_path or get_db_path()
 
@@ -898,15 +1046,23 @@ class DockerTailer:
             try:
                 conn = get_connection(effective_db_path)
                 try:
-                    _batch_update_app_aliases(conn, raw_name, display_name)
+                    _batch_update_app_aliases(
+                        conn,
+                        raw_name,
+                        display_name,
+                        source_ip=effective_ip,
+                        source_alias=self.source_alias,
+                    )
                 finally:
                     conn.close()
             except Exception as e:
                 logger.warning(
-                    f"Background retroactive app alias update failed for {raw_name} -> {display_name}: {e}"
+                    f"Background retroactive app alias update failed for {raw_name} -> {display_name} ({effective_ip}): {e}"
                 )
 
-        asyncio.create_task(asyncio.to_thread(_run_batch))
+        task = asyncio.create_task(asyncio.to_thread(_run_batch))
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def update_settings(
         self,
@@ -970,10 +1126,15 @@ class DockerTailer:
         if self._owns_alias_cache and not self.alias_cache._refresh_task:
             await self.alias_cache.start()
 
-        base_url, uds_path = _parse_docker_host(self.enable_docker)
+        base_url, uds_path = _parse_docker_host(
+            enable_docker=self.enable_docker,
+            docker_host=self.url,
+            tls_enabled=self.tls_enabled,
+        )
+        name_suffix = f" for {self.name}" if self.name != "Primary Docker" else ""
         if not base_url or not self.enable_docker:
             logger.info(
-                "Docker container tailing disabled by configuration; operating in syslog-only mode."
+                f"Docker container tailing disabled by configuration{name_suffix}; operating in syslog-only mode."
             )
             while self._running and not self.enable_docker:
                 self._settings_event.clear()
@@ -990,13 +1151,17 @@ class DockerTailer:
                 except asyncio.CancelledError:
                     return
 
-            base_url, uds_path = _parse_docker_host(self.enable_docker)
+            base_url, uds_path = _parse_docker_host(
+                enable_docker=self.enable_docker,
+                docker_host=self.url,
+                tls_enabled=self.tls_enabled,
+            )
             if not base_url or not self.enable_docker:
                 return
 
         if uds_path and not os.path.exists(uds_path):
             logger.warning(
-                f"Docker socket not found at {uds_path}. Polling for socket before fallback..."
+                f"Docker socket not found at {uds_path}{name_suffix}. Polling for socket before fallback..."
             )
             elapsed = 0.0
             while elapsed < self._socket_poll_max and not os.path.exists(uds_path):
@@ -1012,7 +1177,7 @@ class DockerTailer:
 
             if not os.path.exists(uds_path):
                 logger.info(
-                    f"Docker socket not found at {uds_path}. "
+                    f"Docker socket not found at {uds_path}{name_suffix}. "
                     "Docker container tailing disabled; operating in syslog-only mode."
                 )
                 try:
@@ -1042,35 +1207,53 @@ class DockerTailer:
                 except asyncio.CancelledError:
                     return
 
-            base_url, uds_path = _parse_docker_host(self.enable_docker)
+            base_url, uds_path = _parse_docker_host(
+                enable_docker=self.enable_docker,
+                docker_host=self.url,
+                tls_enabled=self.tls_enabled,
+            )
             if not base_url:
                 await asyncio.sleep(1.0)
                 continue
 
             target_desc = uds_path if uds_path else base_url
             try:
-                base_url, uds_path = _parse_docker_host(self.enable_docker)
-                target_desc = uds_path if uds_path else base_url
-                async with _build_client(base_url, uds_path) as client:
+                async with _build_client(base_url, uds_path, ssl_context=self.ssl_context) as client:
                     self._current_client = client
                     try:
+                        # Measure initial latency via ping
+                        t0 = asyncio.get_running_loop().time()
+                        try:
+                            ping_resp = await client.get("/_ping", timeout=5.0)
+                            if ping_resp.status_code == 200:
+                                self._latency_ms = round((asyncio.get_running_loop().time() - t0) * 1000, 2)
+                        except Exception:
+                            pass
+
                         # Start tailing all currently running containers
                         await self._attach_running_containers(client)
-                        logger.info(f"Connected to Docker daemon at {target_desc}")
+                        self._is_connected = True
+                        self._last_error = None
+                        self._last_activity_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        logger.info(f"Connected to Docker daemon at {target_desc} ({self.name})")
                         backoff = _INITIAL_BACKOFF  # Reset on successful connect
 
                         # Stream Docker events for start/die
                         await self._watch_events(client)
                     finally:
                         self._current_client = None
+                        self._is_connected = False
 
             except asyncio.CancelledError:
+                self._is_connected = False
                 raise
             except Exception as e:
+                self._is_connected = False
+                self._last_error = str(e)
                 if not self._running:
                     break
                 logger.warning(
-                    f"Docker connection error at {target_desc}: {e}. Reconnecting in {backoff:.0f}s..."
+                    f"Docker connection error at {target_desc} ({self.name}): {e}. Reconnecting in {backoff:.0f}s..."
                 )
                 await self._cleanup_tailers()
                 await asyncio.sleep(backoff)
@@ -1079,11 +1262,14 @@ class DockerTailer:
     async def stop(self) -> None:
         """Signal graceful shutdown."""
         self._running = False
+        self._is_connected = False
         self._cancel_event.set()
         await self._cleanup_tailers()
+        for task in list(self._bg_tasks):
+            task.cancel()
         if self._owns_alias_cache:
             await self.alias_cache.stop()
-        logger.info("Docker tailer stopped")
+        logger.info(f"Docker tailer stopped ({self.name})")
 
     async def _discover_containers(
         self, client: Optional[httpx.AsyncClient] = None
@@ -1114,6 +1300,10 @@ class DockerTailer:
             if cid not in active_ids:
                 self._container_last_messages.pop(cid, None)
 
+        for cid in list(self._tailers.keys()):
+            if cid not in active_ids:
+                await self._stop_tailer(cid)
+
         return containers
 
     async def _attach_running_containers(self, client: httpx.AsyncClient) -> None:
@@ -1130,7 +1320,7 @@ class DockerTailer:
             ):
                 logger.debug(f"Skipping tailing self/excluded container {display_name} ({cid[:12]})")
                 continue
-            self._schedule_app_alias_update(raw_name, display_name)
+            self._schedule_app_alias_update(raw_name, display_name, source_ip=self._effective_source_ip())
             self._start_tailer(client, cid, display_name)
 
     def _start_tailer(
@@ -1157,12 +1347,15 @@ class DockerTailer:
                 container_last_seen=self._container_last_seen,
                 container_last_messages=self._container_last_messages,
                 alias_cache=self.alias_cache,
+                endpoint_id=self.endpoint_id,
+                source_ip=self._effective_source_ip(),
+                source_alias=self.source_alias,
             ),
             name=f"docker-tail-{container_name}",
         )
         self._tailers[container_id] = (task, cancel)
         task.add_done_callback(lambda t: self._tailers.pop(container_id, None))
-        logger.info(f"Started tailing container {container_name} ({container_id[:12]})")
+        logger.info(f"Started tailing container {container_name} ({container_id[:12]}) on {self.name}")
 
     async def _stop_tailer(self, container_id: str) -> None:
         """Stop and clean up a single container tailer."""
@@ -1229,8 +1422,8 @@ class DockerTailer:
                             cid, raw_name, display_name=display_name, exclude_containers=self.exclude_containers
                         ):
                             continue
-                        self._schedule_app_alias_update(raw_name, display_name)
-                        logger.info(f"Container {action}: {display_name} ({cid[:12]})")
+                        self._schedule_app_alias_update(raw_name, display_name, source_ip=self._effective_source_ip())
+                        logger.info(f"Container {action}: {display_name} ({cid[:12]}) on {self.name}")
                         if action == "restart":
                             await self._stop_tailer(cid)
                         self._start_tailer(client, cid, display_name)

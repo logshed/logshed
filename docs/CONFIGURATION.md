@@ -114,6 +114,8 @@ services:
 | `DOCKER_HEARTBEAT_INTERVAL` | `30.0` | Docker Compose only | Interval in seconds between Docker API connection health checks. | 1.1.0 |
 | `DOCKER_SOCKET_POLL_INTERVAL` | `5.0` | Docker Compose only | Initial delay in seconds when polling for socket availability during startup or reconnect. | 1.1.0 |
 | `DOCKER_SOCKET_POLL_MAX` | `60.0` | Docker Compose only | Maximum backoff duration in seconds for Docker socket reconnect attempts. | 1.1.0 |
+| `DOCKER_DISCOVERY_INTERVAL` | `60.0` | Docker Compose only | Interval in seconds between periodic container discovery scans to detect newly started or stopped containers. | 1.3.0 |
+| `DOCKER_ADDITIONAL_HOSTS` | *(empty)* | Docker Compose only | JSON-encoded array of remote Docker endpoints to pre-seed on startup (for example, `[{"name": "remote-node", "url": "tcp://192.168.1.50:2375", "source_alias": "remote-docker"}]`). | 1.3.0 |
 
 ---
 
