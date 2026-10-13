@@ -530,3 +530,75 @@ class TestExternalLogQueryHardening:
         res = await client.get("/api/v1/logs/999999999/context", headers=logs_token_headers)
         assert res.status_code == 404
         assert "not found" in res.json()["detail"]
+
+
+_SECRET_MSG = "login failed password=hunter2secret for admin"
+
+
+class TestExternalRedaction:
+    """Secrets are scrubbed on external paths while the internal UI API stays unredacted."""
+
+    def _seed(self, db_path: Path) -> None:
+        with get_connection(db_path) as conn:
+            for i in range(1, 4):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.execute(
+                "UPDATE logs SET message = ?, raw = ? WHERE id = 2", (_SECRET_MSG, _SECRET_MSG)
+            )
+            conn.commit()
+
+    @pytest.mark.asyncio
+    async def test_logs_and_context_redact_message_and_raw(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+
+        res = await client.get(
+            "/api/v1/logs", params={"include_raw": True}, headers=logs_token_headers
+        )
+        entry = next(e for e in res.json()["logs"] if e["id"] == 2)
+        assert "hunter2secret" not in entry["message"]
+        assert "hunter2secret" not in entry["raw"]
+        assert "[REDACTED]" in entry["message"]
+
+        ctx = await client.get(
+            "/api/v1/logs/2/context", params={"include_raw": True}, headers=logs_token_headers
+        )
+        target = ctx.json()["target_log"]
+        assert "hunter2secret" not in target["message"]
+        assert "hunter2secret" not in target["raw"]
+
+        ctx_around = await client.get("/api/v1/logs/1/context", headers=logs_token_headers)
+        assert all(
+            "hunter2secret" not in e["message"] for e in ctx_around.json()["after_logs"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_internal_logs_endpoint_is_not_redacted(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+        res = await client.get("/api/logs", headers=auth_headers)
+        entry = next(e for e in res.json()["logs"] if e["id"] == 2)
+        assert "hunter2secret" in entry["message"]
+
+    @pytest.mark.asyncio
+    async def test_alert_history_redacts_text_fields(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        with get_connection(tmp_path / "logs.db") as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
+                VALUES ('R', 1, ?, ?, 1, '2026-01-01T00:00:00+00:00')
+                """,
+                (_SECRET_MSG, "Cause: " + _SECRET_MSG),
+            )
+            conn.commit()
+
+        res = await client.get("/api/v1/alerts/history", headers=logs_token_headers)
+        assert res.status_code == 200
+        item = res.json()[0]
+        assert "hunter2secret" not in item["sample_log"]
+        assert "hunter2secret" not in item["incident_summary"]
+        assert "[REDACTED]" in item["sample_log"]

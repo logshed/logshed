@@ -865,3 +865,37 @@ class TestMCPCsrfExemption:
             )
             assert res.status_code == 403
             assert "X-Requested-With" in res.json()["detail"]
+
+
+class TestMCPRedaction:
+    """MCP tools never return secrets that appear in stored logs or alert history."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_tools_redact_secrets(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        secret = "token leaked password=hunter2secret here"
+        with get_connection(db_path) as conn:
+            conn.execute("UPDATE logs SET message = ?, raw = ? WHERE id = 2", (secret, secret))
+            conn.execute("UPDATE alert_history SET sample_log = ?, incident_summary = ?", (secret, secret))
+            conn.commit()
+
+        server = create_mcp_server()
+        tools = server._tool_manager._tools
+
+        queried = await tools["query_logs"].fn(limit=10, include_raw=True)
+        assert "hunter2secret" not in json.dumps(queried)
+
+        context = await tools["get_log_context"].fn(log_id=2, lines=5, include_raw=True)
+        assert "hunter2secret" not in json.dumps(context)
+        assert "[REDACTED]" in context["target_log"]["message"]
+
+        alerts = await tools["get_recent_alerts"].fn(limit=5)
+        assert "hunter2secret" not in json.dumps(alerts)
+        assert "[REDACTED]" in alerts[0]["sample_log"]
+
+    def test_count_logs_description_lists_group_by_aliases(self):
+        server = create_mcp_server()
+        desc = server._tool_manager._tools["count_logs"].description
+        for token in ("app_name", "level", "source_alias", "host"):
+            assert token in desc

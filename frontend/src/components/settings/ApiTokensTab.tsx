@@ -9,6 +9,7 @@ import {
   X,
   ExternalLink,
   Bot,
+  Shield,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
@@ -490,6 +491,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
             <span>{mcpErrorMsg}</span>
           </div>
         )}
+
+        <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl flex items-start gap-2.5 text-amber-200/90 text-xs leading-relaxed">
+          <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <span>
+            <strong className="font-semibold text-amber-300">Automated AI Redaction Notice:</strong> Log events and alert diagnoses returned to MCP clients are passed to the connected AI assistant, and through it to its provider, without prior review. Automated credential scrubbing operates on a best-effort basis and may not catch every sensitive token or secret. Ensure the logs your assistant can query do not contain unredacted secrets.
+          </span>
+        </div>
 
         {enableMcp ? (
           <div className="space-y-5 animate-in fade-in duration-150">

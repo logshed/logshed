@@ -117,7 +117,8 @@ def create_mcp_server() -> FastMCP:
             "Count homelab logs matching filters with optional grouping. "
             "Very fast and token-efficient for checking error volume, trends, or verifying issue presence. "
             "Accepts relative time ('1h', '24h', 'since_midnight') and named severity ('error', 'warning', 'info'). "
-            "group_by supports 'severity', 'app', or 'source'. "
+            "group_by supports 'severity' (alias 'level'), 'app' (alias 'app_name'), or "
+            "'source' (aliases 'source_alias', 'host'). "
             "For 'app' and 'source' grouping at most group_limit groups (default 25, max 200) are returned; "
             "the response sets truncated=true when more groups exist, while total still counts all matching logs."
         ),
@@ -254,12 +255,13 @@ def create_mcp_server() -> FastMCP:
     async def get_recent_alerts(limit: int = 10) -> list[dict[str, Any]]:
         """Retrieve historical alert firing incidents."""
         clamped_limit = min(max(1, limit), 50)
-        return await list_alert_history_v1(
+        items = await list_alert_history_v1(
             rule_id=None,
             limit=clamped_limit,
             offset=0,
             token={"scopes": ["alerts:read"]},
         )
+        return [item.model_dump() for item in items]
 
     @server.tool(
         name="enable_maintenance",

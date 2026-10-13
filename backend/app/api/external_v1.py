@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import require_api_token, require_auth_or_token, run_db_query
 from app.core.config import get_db_path
+from app.core.redactor import redact
 from app.core.pipeline import (
     get_dropped_by_filter_count,
     get_dropped_count,
@@ -32,6 +33,7 @@ from app.core.utils import (
     resolve_severity,
 )
 from app.models import (
+    AlertHistoryItem,
     ApiTokenVerifyResponse,
     ExternalMaintenanceDisableRequest,
     ExternalMaintenanceDisableResponse,
@@ -562,7 +564,8 @@ def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
     """Map a logs table row to a LogEntry (single mapping point for external log endpoints).
 
     The raw packet is populated only when include_raw is true; otherwise it is None
-    and omitted from serialized responses.
+    and omitted from serialized responses. Message and raw are always passed through
+    the redactor because these endpoints serve external clients and AI assistants.
     """
     return LogEntry(
         id=r["id"],
@@ -573,8 +576,8 @@ def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
         app_name=r["app_name"] if r["app_name"] is not None else "unknown",
         facility=r["facility"],
         severity=r["severity"],
-        message=r["message"],
-        raw=r["raw"] if include_raw else None,
+        message=redact(r["message"]),
+        raw=redact(r["raw"]) if include_raw and r["raw"] is not None else None,
     )
 
 
@@ -822,13 +825,33 @@ async def get_log_facets_v1(
     return await get_log_facets(user={"auth_type": "api_token"})
 
 
-@router.get("/alerts/history")
+_ALERT_TEXT_FIELDS = (
+    "sample_log",
+    "incident_summary",
+    "prompt_sent",
+    "system_prompt",
+    "response_text",
+    "user_context",
+)
+
+
+def _redact_alert_item(item: AlertHistoryItem) -> AlertHistoryItem:
+    """Return a copy of an alert history item with free-text fields passed through the redactor."""
+    updates = {
+        name: redact(getattr(item, name))
+        for name in _ALERT_TEXT_FIELDS
+        if getattr(item, name)
+    }
+    return item.model_copy(update=updates)
+
+
+@router.get("/alerts/history", response_model=list[AlertHistoryItem])
 async def list_alert_history_v1(
     rule_id: Optional[int] = Query(None, description="Optional alert rule ID filter"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     token: dict[str, Any] = Depends(require_api_token(["alerts:read"])),
-) -> list[dict[str, Any]]:
+) -> list[AlertHistoryItem]:
     """Retrieve historical alert firing incidents and AI diagnosis summaries."""
     from app.api.alerts import list_alert_history
     history_resp = await list_alert_history(
@@ -837,4 +860,4 @@ async def list_alert_history_v1(
         rule_id=rule_id,
         user={"auth_type": "api_token"},
     )
-    return [item.model_dump() for item in history_resp.items]
+    return [_redact_alert_item(item) for item in history_resp.items]
