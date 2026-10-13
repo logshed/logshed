@@ -240,7 +240,9 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
        ai_enrichment BOOLEAN DEFAULT 0,
        ai_model TEXT,
        ai_audit_id INTEGER REFERENCES ai_audit_log(id) ON DELETE SET NULL,
-       triggered_at DATETIME NOT NULL
+       triggered_at DATETIME NOT NULL,
+       maintenance_session_id TEXT
+       -- Added in migration 3: links a "Maintenance Window" row to maintenance_sessions.session_id
    );
 
    CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC);
@@ -248,6 +250,7 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
    CREATE INDEX IF NOT EXISTS idx_alert_history_rule_time ON alert_history(rule_id, triggered_at DESC);
    CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);
    CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_audit_id);
+   CREATE INDEX IF NOT EXISTS idx_alert_history_maint_session ON alert_history(maintenance_session_id);
    ```
 
 7. **Schema Additions, Default Settings & Data Migration:**
@@ -308,10 +311,15 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
       target_host TEXT,
       created_at DATETIME NOT NULL,
       expires_at DATETIME NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1
+      is_active INTEGER NOT NULL DEFAULT 1,
+      ended_at DATETIME,          -- actual end: expires_at on expiry, termination time if ended early
+      end_reason TEXT,            -- 'expired' | 'terminated' (NULL while running)
+      dropped_count INTEGER NOT NULL DEFAULT 0,
+      trigger_label TEXT          -- 'UI', 'MCP', or the API token name (snapshot, survives token deletion)
   );
   CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);
   ```
+- **Maintenance Audit History:** Each on-demand session (web UI, API token, MCP) writes one `alert_history` row (`rule_name = 'Maintenance Window'`, `maintenance_session_id` set, `triggered_at` = session start) when it starts. Start, end (or early-termination time), trigger, type, targets, and dropped-log count are read from the linked `maintenance_sessions` row at query time, so clearing alert history never removes the session audit data. Recurring schedules are not recorded. Sessions that pass their planned end are closed as `expired` by the 30-second `MaintenanceSweepWorker` (or lazily on status and history reads); early termination records `terminated`. Per-session `dropped_count` is accumulated in memory (no SQLite access per log line) and flushed during the sweep and at session end. Ended sessions older than the configured log retention, and their history rows, are pruned by the daily prune. At most 20 sessions can be active at once, and `target_app` and `target_host` are limited to 255 characters.
 - **System Identity Setup:**
   - `server_name` defaults to `'LogShed'` in `system_settings` table.
   - `instance_id` set to persistent UUID4 if not already present.

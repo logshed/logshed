@@ -217,6 +217,68 @@ def save_schedules(conn: sqlite3.Connection, schedules: list[MaintenanceSchedule
 _active_maintenance_sessions: list[dict[str, Any]] = []
 _active_sessions_lock = threading.Lock()
 
+MAX_ACTIVE_MAINTENANCE_SESSIONS = 20
+MAINTENANCE_HISTORY_RULE_NAME = "Maintenance Window"
+
+# Per-session drop counters incremented on the ingestion hot path (no SQLite access)
+# and flushed to maintenance_sessions.dropped_count by flush_dropped_counts().
+_dropped_counters: dict[str, int] = {}
+_dropped_counters_lock = threading.Lock()
+
+
+class MaintenanceSessionLimitError(Exception):
+    """Raised when the concurrent active maintenance session cap is reached."""
+
+
+def record_maintenance_drop(session_id: str) -> None:
+    """Increment the in-memory dropped-log counter for a maintenance session."""
+    with _dropped_counters_lock:
+        _dropped_counters[session_id] = _dropped_counters.get(session_id, 0) + 1
+
+
+def get_pending_dropped_counts() -> dict[str, int]:
+    """Return a copy of drop counts not yet flushed to SQLite."""
+    with _dropped_counters_lock:
+        return dict(_dropped_counters)
+
+
+def flush_dropped_counts(conn: sqlite3.Connection) -> int:
+    """
+    Persist pending per-session drop counters into maintenance_sessions.dropped_count
+    and mirror the running total onto the linked alert_history row.
+    Returns the number of sessions updated. Counts are restored on failure.
+    """
+    with _dropped_counters_lock:
+        pending = dict(_dropped_counters)
+        _dropped_counters.clear()
+    if not pending:
+        return 0
+
+    try:
+        for session_id, count in pending.items():
+            conn.execute(
+                "UPDATE maintenance_sessions SET dropped_count = dropped_count + ? WHERE session_id = ?",
+                (count, session_id),
+            )
+            conn.execute(
+                """
+                UPDATE alert_history
+                SET trigger_count = (
+                    SELECT dropped_count FROM maintenance_sessions WHERE session_id = ?
+                )
+                WHERE maintenance_session_id = ?
+                """,
+                (session_id, session_id),
+            )
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        with _dropped_counters_lock:
+            for session_id, count in pending.items():
+                _dropped_counters[session_id] = _dropped_counters.get(session_id, 0) + count
+        raise
+    return len(pending)
+
 
 def _has_maintenance_sessions_table(conn: sqlite3.Connection) -> bool:
     cur = conn.cursor()
@@ -237,10 +299,24 @@ def update_cached_maintenance_sessions(sessions: list[dict[str, Any]]) -> None:
         _active_maintenance_sessions = list(sessions)
 
 
+def _sweep_expired_sessions(conn: sqlite3.Connection, now_iso: str) -> None:
+    """Mark sessions past their planned end as expired, recording the planned end as ended_at."""
+    flush_dropped_counts(conn)
+    conn.execute(
+        """
+        UPDATE maintenance_sessions
+        SET is_active = 0, ended_at = expires_at, end_reason = 'expired'
+        WHERE is_active = 1 AND expires_at <= ?
+        """,
+        (now_iso,),
+    )
+    conn.commit()
+
+
 def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     Query active and unexpired maintenance sessions from SQLite and refresh in-memory cache.
-    Also sweeps expired sessions to keep database state current.
+    Also sweeps expired sessions to keep database state current and flushes drop counters.
     """
     if not _has_maintenance_sessions_table(conn):
         update_cached_maintenance_sessions([])
@@ -249,11 +325,7 @@ def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     now_iso = now_utc.isoformat()
 
-    conn.execute(
-        "UPDATE maintenance_sessions SET is_active = 0 WHERE is_active = 1 AND expires_at <= ?",
-        (now_iso,),
-    )
-    conn.commit()
+    _sweep_expired_sessions(conn, now_iso)
 
     cur = conn.cursor()
     cur.execute(
@@ -289,20 +361,21 @@ def should_drop_maintenance_error(
     source_ip: Optional[str],
     app_name: Optional[str],
     severity: Optional[int],
-) -> bool:
+) -> Optional[str]:
     """
     Fast in-memory evaluation for error log dropping during maintenance windows.
     Zero SQLite lookups per log line.
     Drops if severity <= 3 (Emergency, Alert, Critical, Error) and matches active session filters.
+    Returns the matching session_id (so the caller can count the drop), or None to keep the log.
     """
     if severity is None or severity > 3:
-        return False
+        return None
 
     with _active_sessions_lock:
         active_sessions = _active_maintenance_sessions
 
     if not active_sessions:
-        return False
+        return None
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
 
@@ -331,9 +404,9 @@ def should_drop_maintenance_error(
             if not matched_host:
                 continue
 
-        return True
+        return s.get("session_id")
 
-    return False
+    return None
 
 
 def create_maintenance_session(
@@ -346,9 +419,21 @@ def create_maintenance_session(
     target_host: Optional[str] = None,
     initiated_by: str = "api_token",
     token_id: Optional[int] = None,
+    trigger_label: str = "API",
 ) -> dict[str, Any]:
-    """Start a new on-demand maintenance session and update in-memory cache."""
+    """
+    Start a new on-demand maintenance session, record its incident history row,
+    and update the in-memory cache.
+
+    Raises MaintenanceSessionLimitError when MAX_ACTIVE_MAINTENANCE_SESSIONS are already active.
+    """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
+    refresh_maintenance_cache(conn)
+    if len(get_cached_maintenance_sessions()) >= MAX_ACTIVE_MAINTENANCE_SESSIONS:
+        raise MaintenanceSessionLimitError(
+            f"Too many active maintenance sessions (maximum {MAX_ACTIVE_MAINTENANCE_SESSIONS}). "
+            "End an existing session first."
+        )
     if expires_at is not None:
         expires_dt = expires_at.astimezone(datetime.timezone.utc)
         computed_duration = max(1, int((expires_dt - now_utc).total_seconds() / 60))
@@ -365,8 +450,8 @@ def create_maintenance_session(
         """
         INSERT INTO maintenance_sessions (
             session_id, token_id, initiated_by, reason, log_handling,
-            target_app, target_host, created_at, expires_at, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            target_app, target_host, created_at, expires_at, is_active, trigger_label
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             session_id,
@@ -378,7 +463,15 @@ def create_maintenance_session(
             target_host,
             now_iso,
             expires_iso,
+            trigger_label,
         ),
+    )
+    conn.execute(
+        """
+        INSERT INTO alert_history (rule_name, trigger_count, triggered_at, maintenance_session_id)
+        VALUES (?, 0, ?, ?)
+        """,
+        (MAINTENANCE_HISTORY_RULE_NAME, now_iso, session_id),
     )
     conn.commit()
     refresh_maintenance_cache(conn)
@@ -411,14 +504,29 @@ def disable_maintenance_sessions(
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     cur = conn.cursor()
 
+    # Close out sessions that already passed their planned end as 'expired' (not 'terminated')
+    # and persist pending drop counts before recording early termination.
+    _sweep_expired_sessions(conn, now_iso)
+
     if session_id and session_id.strip():
         cur.execute(
-            "UPDATE maintenance_sessions SET is_active = 0 WHERE session_id = ? AND is_active = 1",
-            (session_id.strip(),),
+            """
+            UPDATE maintenance_sessions
+            SET is_active = 0, ended_at = ?, end_reason = 'terminated'
+            WHERE session_id = ? AND is_active = 1
+            """,
+            (now_iso, session_id.strip()),
         )
         terminated = cur.rowcount
     else:
-        cur.execute("UPDATE maintenance_sessions SET is_active = 0 WHERE is_active = 1")
+        cur.execute(
+            """
+            UPDATE maintenance_sessions
+            SET is_active = 0, ended_at = ?, end_reason = 'terminated'
+            WHERE is_active = 1
+            """,
+            (now_iso,),
+        )
         terminated = cur.rowcount
         cur.execute(
             """
@@ -544,3 +652,8 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
         log_handling=log_handling,
     )
 
+
+
+def sweep_maintenance_sessions(conn: sqlite3.Connection) -> None:
+    """Periodic maintenance upkeep: close expired sessions, flush drop counts, refresh the cache."""
+    refresh_maintenance_cache(conn)

@@ -348,7 +348,8 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
     - Backfill display_order from existing rule IDs.
     - Create composite indexes for ordered evaluation.
     - Create api_tokens table for Bearer token authentication.
-    - Create maintenance_sessions table for concurrent maintenance tracking.
+    - Create maintenance_sessions table for concurrent maintenance tracking, including audit columns
+      (ended_at, end_reason, dropped_count, trigger_label) and link alert_history rows via maintenance_session_id.
     - Create docker_endpoints table and seed default primary Docker host.
     - Ensure persistent server_name and instance_id in system_settings.
     """
@@ -366,6 +367,12 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE alert_rules ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
         conn.execute("UPDATE alert_rules SET display_order = id WHERE display_order = 0;")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_rules_order ON alert_rules(is_enabled, display_order ASC, id ASC);")
+
+    cur = conn.execute("PRAGMA table_info(alert_history);")
+    history_cols = {row[1] for row in cur.fetchall()}
+    if "maintenance_session_id" not in history_cols:
+        conn.execute("ALTER TABLE alert_history ADD COLUMN maintenance_session_id TEXT;")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_history_maint_session ON alert_history(maintenance_session_id);")
 
     conn.executescript('''
 CREATE TABLE IF NOT EXISTS api_tokens (
@@ -394,7 +401,11 @@ CREATE TABLE IF NOT EXISTS maintenance_sessions (
     target_host TEXT,
     created_at DATETIME NOT NULL,
     expires_at DATETIME NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    ended_at DATETIME,
+    end_reason TEXT,
+    dropped_count INTEGER NOT NULL DEFAULT 0,
+    trigger_label TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);

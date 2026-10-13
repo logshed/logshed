@@ -279,6 +279,8 @@ def create_mcp_server() -> FastMCP:
     ) -> dict[str, Any]:
         """Activate a scoped maintenance session."""
         valid_handling = log_handling if log_handling in ("silence_alerts", "drop_errors") else "silence_alerts"
+        if len(target_app or "") > 255 or len(target_host or "") > 255:
+            raise ValueError("target_app and target_host must be at most 255 characters.")
         clamped_duration = max(1, duration_minutes)
 
         def _create(conn):
@@ -290,6 +292,7 @@ def create_mcp_server() -> FastMCP:
                 target_app=target_app,
                 target_host=target_host,
                 initiated_by="mcp",
+                trigger_label="MCP",
             )
 
         return await run_db_query(_create)

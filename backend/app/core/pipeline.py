@@ -176,13 +176,15 @@ class InternalLogHandler(logging.Handler):
                 increment_dropped_by_filter_count(1)
                 return
 
-            from app.services.maintenance_service import should_drop_maintenance_error
-            if should_drop_maintenance_error(
+            from app.services.maintenance_service import record_maintenance_drop, should_drop_maintenance_error
+            maint_session_id = should_drop_maintenance_error(
                 log_entry.get("source_alias"),
                 log_entry.get("source_ip"),
                 log_entry.get("app_name"),
                 log_entry.get("severity"),
-            ):
+            )
+            if maint_session_id is not None:
+                record_maintenance_drop(maint_session_id)
                 increment_dropped_by_filter_count(1)
                 return
 
@@ -621,13 +623,15 @@ class KeyedMultilineAssembler:
             increment_dropped_by_filter_count(1)
             return
 
-        from app.services.maintenance_service import should_drop_maintenance_error
-        if should_drop_maintenance_error(
+        from app.services.maintenance_service import record_maintenance_drop, should_drop_maintenance_error
+        maint_session_id = should_drop_maintenance_error(
             merged_entry.get('source_alias'),
             merged_entry.get('source_ip'),
             merged_entry.get('app_name'),
             merged_entry.get('severity'),
-        ):
+        )
+        if maint_session_id is not None:
+            record_maintenance_drop(maint_session_id)
             increment_dropped_by_filter_count(1)
             return
 

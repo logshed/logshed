@@ -227,6 +227,36 @@ async def _drop_filter_flush_worker() -> None:
             await asyncio.sleep(10)
 
 
+async def _maintenance_sweep_worker(db_path) -> None:
+    """
+    Background worker that closes expired maintenance sessions, flushes per-session
+    dropped-log counters, and keeps the in-memory session cache current (30s cadence).
+    Runs once immediately so drop_errors sessions survive a restart.
+    """
+    import sqlite3
+
+    from app.core.migrations import get_connection
+    from app.services.maintenance_service import sweep_maintenance_sessions
+
+    def _sweep() -> None:
+        conn = get_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            sweep_maintenance_sessions(conn)
+        finally:
+            conn.close()
+
+    while True:
+        try:
+            await asyncio.to_thread(_sweep)
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Error sweeping maintenance sessions: {e}")
+            await asyncio.sleep(10)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -293,6 +323,7 @@ async def lifespan(app: FastAPI):
     from app.services.drop_filter import init_drop_filter
     init_drop_filter(db_path)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_drop_filter_flush_worker, "DropFilterWorker")))
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_maintenance_sweep_worker, "MaintenanceSweepWorker", db_path)))
 
     # Initialize in-memory alert evaluator
     from app.services.alert_evaluator import init_alert_evaluator

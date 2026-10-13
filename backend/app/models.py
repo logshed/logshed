@@ -957,6 +957,15 @@ class AlertHistoryItem(BaseModel):
     source_alias: Optional[str] = None
     app_name: Optional[str] = None
     user_context: Optional[str] = None
+    maintenance_session_id: Optional[str] = None
+    maintenance_type: Optional[str] = None
+    maintenance_started_at: Optional[str] = None
+    maintenance_ended_at: Optional[str] = None
+    maintenance_end_reason: Optional[str] = None
+    maintenance_trigger: Optional[str] = None
+    maintenance_target_app: Optional[str] = None
+    maintenance_target_host: Optional[str] = None
+    maintenance_dropped_count: Optional[int] = None
 
 
 class AlertHistoryListResponse(BaseModel):
@@ -1023,8 +1032,8 @@ class ExternalMaintenanceEnableRequest(BaseModel):
     duration_minutes: int = Field(..., ge=1, le=1440, description="Duration in minutes (1 - 1440)")
     reason: Optional[str] = Field(None, max_length=255, description="Reason for maintenance window")
     log_handling: str = Field("silence_alerts", description="'silence_alerts' or 'drop_errors'")
-    target_app: Optional[str] = Field(None, description="Optional application filter for error dropping")
-    target_host: Optional[str] = Field(None, description="Optional host filter for error dropping")
+    target_app: Optional[str] = Field(None, max_length=255, description="Optional application filter for error dropping")
+    target_host: Optional[str] = Field(None, max_length=255, description="Optional host filter for error dropping")
 
     @field_validator("log_handling")
     @classmethod

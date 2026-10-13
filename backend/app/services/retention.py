@@ -65,6 +65,27 @@ def execute_prune(
             if count == 0:
                 break
 
+        # 1b. Prune ended maintenance sessions (and their linked incident history rows)
+        # older than retention_days. Running sessions are never pruned.
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='maintenance_sessions'"
+        )
+        if cursor.fetchone():
+            cursor.execute(
+                """
+                DELETE FROM alert_history WHERE maintenance_session_id IN (
+                    SELECT session_id FROM maintenance_sessions
+                    WHERE is_active = 0 AND ended_at IS NOT NULL AND ended_at < ?
+                )
+                """,
+                (cutoff_iso,),
+            )
+            cursor.execute(
+                "DELETE FROM maintenance_sessions WHERE is_active = 0 AND ended_at IS NOT NULL AND ended_at < ?",
+                (cutoff_iso,),
+            )
+            conn.commit()
+
         # 2. Compact FTS5 virtual table segments
         try:
             cursor.execute("INSERT INTO logs_fts(logs_fts) VALUES('optimize');")

@@ -55,6 +55,7 @@ from app.models import (
     VacuumResponse,
 )
 from app.services.maintenance_service import (
+    MaintenanceSessionLimitError,
     create_maintenance_session,
     disable_maintenance_sessions,
     get_maintenance_status,
@@ -135,9 +136,17 @@ async def enable_maintenance_window(
             target_host=payload.target_host,
             initiated_by=initiated_by,
             token_id=token_id,
+            trigger_label=(
+                str(auth.get("name") or "API token")
+                if auth.get("auth_type") == "api_token"
+                else "UI"
+            ),
         )
 
-    session_data = await run_db_query(_create)
+    try:
+        session_data = await run_db_query(_create)
+    except MaintenanceSessionLimitError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return ExternalMaintenanceEnableResponse(**session_data)
 
 
@@ -286,14 +295,14 @@ async def get_system_metrics(
 
         # Alert state sliding 15-minute window
         cur.execute(
-            "SELECT COUNT(*) FROM alert_history WHERE triggered_at >= ?",
+            "SELECT COUNT(*) FROM alert_history WHERE triggered_at >= ? AND maintenance_session_id IS NULL",
             (since_15m,),
         )
         recent_count = cur.fetchone()[0]
         recent_active = recent_count > 0
 
         cur.execute(
-            "SELECT triggered_at, rule_name FROM alert_history ORDER BY triggered_at DESC, id DESC LIMIT 1"
+            "SELECT triggered_at, rule_name FROM alert_history WHERE maintenance_session_id IS NULL ORDER BY triggered_at DESC, id DESC LIMIT 1"
         )
         last_row = cur.fetchone()
         last_trig = last_row["triggered_at"] if last_row else None

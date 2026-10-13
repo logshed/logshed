@@ -216,28 +216,29 @@ class TestExternalMaintenanceApi:
             headers=api_token_headers,
         )
         assert res.status_code == 200
+        session_id = res.json()["session_id"]
 
         # Fast in-memory check without database lookup
         # Error from backup-runner (severity 3 = ERROR) should be dropped
-        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 3) is True
+        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 3) == session_id
 
         # Critical error from backup-runner (severity 2 = CRITICAL) should be dropped
-        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 2) is True
+        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 2) == session_id
 
         # Error from postgres (different app) should NOT be dropped
-        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "postgres", 3) is False
+        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "postgres", 3) is None
 
         # Informational log from backup-runner (severity 6 = INFO) should NOT be dropped
-        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 6) is False
+        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 6) is None
 
         # Case-insensitive match for backup-runner
-        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "Backup-Runner", 3) is True
+        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "Backup-Runner", 3) == session_id
 
         # Clear session
         await client.post("/api/v1/maintenance/disable", json={}, headers=api_token_headers)
 
         # After clearing, error from backup-runner is no longer dropped
-        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 3) is False
+        assert should_drop_maintenance_error("compute-01", "192.168.1.10", "backup-runner", 3) is None
 
     @pytest.mark.asyncio
     async def test_invalid_log_handling_rejected(

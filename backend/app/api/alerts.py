@@ -38,6 +38,7 @@ from app.models import (
 )
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
+from app.services.maintenance_service import MaintenanceSessionLimitError
 from app.core.regex_validator import check_regex_safety, validate_regex_pattern
 from app.core.utils import parse_iso_to_epoch, parse_iso_to_utc_datetime
 
@@ -145,10 +146,14 @@ async def set_maintenance_window(
                 expires_at=dt,
                 reason="Web Console",
                 initiated_by="web_ui",
+                trigger_label="UI",
             )
             conn.commit()
 
-        await run_db_query(_save)
+        try:
+            await run_db_query(_save)
+        except MaintenanceSessionLimitError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
     from app.services.maintenance_service import get_maintenance_status
     return await run_db_query(get_maintenance_status)
@@ -936,8 +941,11 @@ async def list_alert_history(
     rule_id: Optional[int] = Query(None, description="Optional rule ID filter"),
     user: dict = Depends(get_current_user),
 ) -> AlertHistoryListResponse:
-    """Retrieve historical alert and AI analysis firing events with pagination."""
+    """Retrieve historical alert, AI analysis and maintenance window events with pagination."""
     def _query(conn):
+        from app.services.maintenance_service import get_pending_dropped_counts, sweep_maintenance_sessions
+        sweep_maintenance_sessions(conn)
+        pending_drops = get_pending_dropped_counts()
         cur = conn.cursor()
         where_sql = "WHERE h.rule_id = ?" if rule_id is not None else ""
         count_where = "WHERE rule_id = ?" if rule_id is not None else ""
@@ -952,9 +960,15 @@ async def list_alert_history(
                    h.ai_audit_id, h.triggered_at,
                    a.tokens_in, a.tokens_out, a.tokens_thoughts, a.tokens_used,
                    a.prompt_sent, a.system_prompt, a.response_text,
-                   a.source_alias, a.app_name, a.user_context
+                   a.source_alias, a.app_name, a.user_context,
+                   h.maintenance_session_id,
+                   m.log_handling AS m_log_handling, m.created_at AS m_created_at,
+                   m.ended_at AS m_ended_at, m.end_reason AS m_end_reason,
+                   m.trigger_label AS m_trigger_label, m.target_app AS m_target_app,
+                   m.target_host AS m_target_host, m.dropped_count AS m_dropped_count
             FROM alert_history h
             LEFT JOIN ai_audit_log a ON h.ai_audit_id = a.id
+            LEFT JOIN maintenance_sessions m ON h.maintenance_session_id = m.session_id
             {where_sql}
             ORDER BY h.triggered_at DESC, h.id DESC
             LIMIT ? OFFSET ?
@@ -998,6 +1012,18 @@ async def list_alert_history(
                     source_alias=r["source_alias"],
                     app_name=r["app_name"],
                     user_context=r["user_context"],
+                    maintenance_session_id=r["maintenance_session_id"],
+                    maintenance_type=r["m_log_handling"],
+                    maintenance_started_at=r["m_created_at"],
+                    maintenance_ended_at=r["m_ended_at"],
+                    maintenance_end_reason=r["m_end_reason"],
+                    maintenance_trigger=r["m_trigger_label"],
+                    maintenance_target_app=r["m_target_app"],
+                    maintenance_target_host=r["m_target_host"],
+                    maintenance_dropped_count=(
+                        (r["m_dropped_count"] or 0) + pending_drops.get(r["maintenance_session_id"], 0)
+                        if r["maintenance_session_id"] else None
+                    ),
                 )
             )
         return items, total
