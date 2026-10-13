@@ -127,20 +127,8 @@ async def set_maintenance_window(
                 detail=f"Invalid ISO 8601 datetime format for maintenance_until: {payload.until}",
             )
 
-        stored_iso = dt.isoformat()
-
         def _save(conn):
             from app.services.maintenance_service import create_maintenance_session
-            # Also update system_settings for backwards compatibility
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO system_settings (key, value, updated_at, is_encrypted)
-                VALUES ('maintenance_until', ?, ?, 0)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                """,
-                (stored_iso, now_iso),
-            )
             create_maintenance_session(
                 conn,
                 expires_at=dt,

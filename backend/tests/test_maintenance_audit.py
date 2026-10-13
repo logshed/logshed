@@ -348,6 +348,24 @@ class TestExposure:
         assert item["maintenance_dropped_count"] == 1
 
     @pytest.mark.asyncio
+    async def test_stopping_ui_session_ends_maintenance(self, client: AsyncClient, auth_headers: dict):
+        until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
+        res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["active"] is True
+        assert body["on_demand_until"] is None
+        session_id = body["sessions"][0]["session_id"]
+
+        res = await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["active"] is False
+        assert res.json()["sessions"] == []
+
+        res = await client.get("/api/alerts/maintenance", headers=auth_headers)
+        assert res.json()["active"] is False
+
+    @pytest.mark.asyncio
     async def test_ui_and_mcp_trigger_labels(self, client: AsyncClient, auth_headers: dict, db_path: Path):
         until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
         res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)

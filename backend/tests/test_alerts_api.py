@@ -433,11 +433,6 @@ class TestMaintenanceWindowApi:
         assert get_res.status_code == 200
         assert get_res.json()["active"] is True
 
-        # Verify settings GET reflects maintenance_until
-        settings_res = await client.get("/api/settings", headers=auth_headers)
-        assert settings_res.status_code == 200
-        assert settings_res.json()["maintenance_until"] is not None
-
         # Clear maintenance window
         clear_res = await client.post(
             "/api/alerts/maintenance",

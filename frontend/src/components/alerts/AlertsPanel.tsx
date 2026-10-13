@@ -196,6 +196,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       window.history.pushState(null, '', targetPath);
     }
     fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
+    if (nextSubTab === 'history') {
+      refreshHistory();
+    }
   };
 
   useEffect(() => {
@@ -250,13 +253,26 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     loadAll();
   }, [loadAll]);
 
+  const refreshHistory = useCallback(async () => {
+    try {
+      const data = await fetchAlertHistory(historyLimit, historyOffset);
+      setHistoryItems(data.items);
+      setHistoryTotal(data.total);
+    } catch {
+      // Keep the current list when a background refresh fails
+    }
+  }, [historyLimit, historyOffset]);
+
   // Periodic poll every 10 seconds to keep maintenance status synchronized
   useEffect(() => {
     const interval = setInterval(() => {
       fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
+      if (activeSubTab === 'history') {
+        refreshHistory();
+      }
     }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeSubTab, refreshHistory]);
 
   // Real-time timer to refresh state the exact second a window expires
   useEffect(() => {
@@ -304,6 +320,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       setMaintenance(res);
       setCustomUntil('');
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      refreshHistory();
       setFeedbackMsg({
         text: `Maintenance window active until ${formatMaintenanceTime(res.until)}.`,
         isError: false,
@@ -326,6 +343,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       const res = await setMaintenanceWindow(null);
       setMaintenance(res);
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      refreshHistory();
       setFeedbackMsg({
         text: 'All maintenance sessions cleared.',
         isError: false,
@@ -343,6 +361,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       const res = await deleteMaintenanceSession(sessionId);
       setMaintenance(res);
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      refreshHistory();
       setFeedbackMsg({
         text: 'Maintenance session terminated.',
         isError: false,
