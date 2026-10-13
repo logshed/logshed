@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Modular Technical Specifications**: Partitioned the monolithic `docs/SPEC.md` specification into domain-bounded modules under `docs/spec/` (`architecture.md`, `database.md`, `pipeline.md`, `ai-engine.md`, `security.md`, `api.md`, `frontend.md`, `deployment.md`) while maintaining `docs/SPEC.md` as a lightweight navigation hub. Streamlines documentation lookups and reduces token consumption when developing with AI coding assistants.
 
 ### Fixed
-- **Prune and Vacuum Safety**: Prune and vacuum now share one in-progress lock across the web UI, external API and daily `PruneWorker` (concurrent attempts return `409`; the worker retries after 60 seconds). The 5-minute external API cooldown starts only after a successful run and uses a monotonic clock. Vacuum and prune failures are logged server-side and return a generic error message instead of exception text.
+- **Prune and Vacuum Safety**: Prune and vacuum now share one in-progress lock across the web UI, external API and daily `PruneWorker` (concurrent attempts return `409`; the worker retries after 60 seconds). The 5-minute external API cooldown starts only after a successful run and uses a monotonic clock. The lock stays held until the operation finishes even if the client disconnects mid-run. Vacuum and prune failures are logged server-side and return a generic error message instead of exception text.
 - **MCP SSE Endpoint Base URL Resolution**: Resolved the MCP Server-Sent Events URL and client configuration snippets against the configured `app_url` from Advanced settings, ensuring reverse-proxy and LAN hosts point to the operator's designated instance URL.
 
 ---

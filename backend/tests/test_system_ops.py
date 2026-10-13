@@ -37,6 +37,7 @@ from app.services.operation_guard import (
     cooldown_remaining_seconds,
     mark_operation_success,
     operation_guard,
+    run_exclusive,
 )
 from app.services.retention import InsufficientDiskSpaceError
 
@@ -215,6 +216,119 @@ class TestOperationContention:
 
         await worker.stop()
         await asyncio.wait_for(task, timeout=2.0)
+
+
+class TestCancellationKeepsLock:
+    @pytest.mark.asyncio
+    async def test_run_exclusive_holds_lock_until_work_finishes_after_cancel(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _work():
+            started.set()
+            await release.wait()
+            return "done"
+
+        async def _other():
+            return "other"
+
+        caller = asyncio.create_task(run_exclusive("prune", _work))
+        await started.wait()
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+
+        # The orphaned work is still running, so the lock must still be held
+        with pytest.raises(OperationInProgressError):
+            await run_exclusive("vacuum", _other)
+
+        release.set()
+        for _ in range(100):
+            try:
+                assert await run_exclusive("vacuum", _other) == "other"
+                break
+            except OperationInProgressError:
+                await asyncio.sleep(0.01)
+        else:
+            pytest.fail("lock was never released after the work finished")
+
+    @pytest.mark.asyncio
+    async def test_external_prune_cancellation_does_not_allow_overlap(
+        self, write_token_headers: dict, monkeypatch
+    ):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def _slow_prune(db_path, retention_days=14, index_pending=True):
+            calls.append(1)
+            started.set()
+            await release.wait()
+            return {
+                "deleted_logs": 0,
+                "deleted_metrics": 0,
+                "metrics": {
+                    "recorded_at": "2026-01-01T00:00:00+00:00",
+                    "db_size_bytes": 1,
+                    "disk_free_bytes": 1,
+                    "disk_total_bytes": 1,
+                    "total_logs_count": 0,
+                },
+            }
+
+        monkeypatch.setattr(ext_v1_mod, "execute_prune_async", _slow_prune)
+
+        request = asyncio.create_task(ext_v1_mod.trigger_prune_v1(token={"scopes": ["system:write"]}))
+        await started.wait()
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+        with pytest.raises(HTTPException) as exc_info:
+            await ext_v1_mod.trigger_prune_v1(token={"scopes": ["system:write"]})
+        assert exc_info.value.status_code == 409
+        assert calls == [1]
+
+        release.set()
+        for _ in range(100):
+            if guard_mod._in_progress_lock.acquire(blocking=False):
+                guard_mod._in_progress_lock.release()
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("lock was never released after the prune finished")
+
+    @pytest.mark.asyncio
+    async def test_internal_vacuum_cancellation_does_not_allow_overlap(self, monkeypatch):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _slow_vacuum(db_path, *args, **kwargs):
+            started.set()
+            await release.wait()
+            raise RuntimeError("finished badly")
+
+        monkeypatch.setattr(system_mod, "execute_vacuum", _slow_vacuum)
+
+        request = asyncio.create_task(system_mod.trigger_vacuum(user={}))
+        await started.wait()
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+        with pytest.raises(HTTPException) as exc_info:
+            await system_mod.trigger_vacuum(user={})
+        assert exc_info.value.status_code == 409
+
+        # A failure in the orphaned work still releases the lock
+        release.set()
+        for _ in range(100):
+            if guard_mod._in_progress_lock.acquire(blocking=False):
+                guard_mod._in_progress_lock.release()
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("lock was never released after the vacuum failed")
 
 
 class TestCooldownAfterSuccess:

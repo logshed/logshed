@@ -8,11 +8,14 @@ skip and retry later. The cooldown tracker records the monotonic time of the las
 run of each operation and is only updated after success.
 """
 
+import asyncio
 import math
 import threading
 import time
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from typing import Awaitable, Callable, Iterator, Optional, TypeVar
+
+T = TypeVar("T")
 
 OPERATION_COOLDOWN_SECONDS: float = 300.0  # 5 minutes
 
@@ -66,3 +69,33 @@ def reset_operation_state() -> None:
     """Clear cooldowns (used by tests)."""
     with _state_lock:
         _last_success.clear()
+
+
+async def run_exclusive(name: str, work: Callable[[], Awaitable[T]]) -> T:
+    """
+    Run ``work`` while holding the shared in-progress lock, or raise immediately when busy.
+
+    The work runs in its own task behind ``asyncio.shield``. If the caller is cancelled (for
+    example the HTTP client disconnects mid-prune), the work and its worker thread keep running
+    and the lock is released only once the work has really finished, so a second prune or
+    vacuum can never overlap with one still running in a thread.
+    """
+    global _active_operation
+    if not _in_progress_lock.acquire(blocking=False):
+        raise OperationInProgressError(_active_operation)
+    with _state_lock:
+        _active_operation = name
+
+    async def _runner() -> T:
+        global _active_operation
+        try:
+            return await work()
+        finally:
+            with _state_lock:
+                _active_operation = None
+            _in_progress_lock.release()
+
+    task = asyncio.ensure_future(_runner())
+    # Retrieve any exception from an orphaned task (caller cancelled) so it is not reported as unretrieved
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    return await asyncio.shield(task)

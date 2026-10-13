@@ -18,7 +18,7 @@ from app.models import (
     VacuumResponse,
     VersionResponse,
 )
-from app.services.operation_guard import OperationInProgressError, operation_guard
+from app.services.operation_guard import OperationInProgressError, run_exclusive
 from app.services.retention import (
     InsufficientDiskSpaceError,
     execute_prune_async,
@@ -89,18 +89,20 @@ async def trigger_prune(user: dict = Depends(get_current_user)) -> PruneResponse
     WAL truncation, and takes a fresh storage metrics snapshot.
     Returns 409 while another prune or compaction is running.
     """
+    async def _work() -> dict:
+        retention_days = await run_db_query(get_effective_retention_days)
+        db_path = get_db_path()
+        try:
+            return await execute_prune_async(db_path, retention_days=retention_days)
+        except Exception:
+            logger.exception("Retention prune failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Prune failed. See server logs for details.",
+            )
+
     try:
-        with operation_guard("prune"):
-            retention_days = await run_db_query(get_effective_retention_days)
-            db_path = get_db_path()
-            try:
-                result = await execute_prune_async(db_path, retention_days=retention_days)
-            except Exception:
-                logger.exception("Retention prune failed")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Prune failed. See server logs for details.",
-                )
+        result = await run_exclusive("prune", _work)
     except OperationInProgressError:
         raise _operation_conflict()
 
@@ -129,21 +131,24 @@ async def trigger_vacuum(user: dict = Depends(get_current_user)) -> VacuumRespon
     and runs VACUUM. Returns 409 while another prune or compaction is running.
     """
     db_path = get_db_path()
+
+    async def _work() -> dict:
+        try:
+            return await execute_vacuum(db_path)
+        except InsufficientDiskSpaceError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+        except Exception:
+            logger.exception("Database compaction failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database compaction failed. See server logs for details.",
+            )
+
     try:
-        with operation_guard("vacuum"):
-            try:
-                result = await execute_vacuum(db_path)
-            except InsufficientDiskSpaceError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=str(e),
-                )
-            except Exception:
-                logger.exception("Database compaction failed")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Database compaction failed. See server logs for details.",
-                )
+        result = await run_exclusive("vacuum", _work)
     except OperationInProgressError:
         raise _operation_conflict()
 
