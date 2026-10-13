@@ -357,6 +357,9 @@ class TestMCPServer:
         assert all(set(e.keys()) == {"id", "raw"} for e in res_fields["logs"])
         assert all(e["raw"] for e in res_fields["logs"])
 
+        with pytest.raises(Exception, match="not found"):
+            await context_tool.fn(log_id=999999999)
+
         ctx_raw = await context_tool.fn(log_id=2, lines=2, include_raw=True)
         assert ctx_raw["target_log"]["raw"] == "raw2"
         ctx_default = await context_tool.fn(log_id=2, lines=2)

@@ -522,3 +522,11 @@ class TestExternalLogQueryHardening:
         deep = res_deep.json()
         assert deep["total"] == 1005
         assert deep["total_capped"] is False
+
+    @pytest.mark.asyncio
+    async def test_context_missing_log_returns_404(
+        self, client: AsyncClient, logs_token_headers: dict
+    ):
+        res = await client.get("/api/v1/logs/999999999/context", headers=logs_token_headers)
+        assert res.status_code == 404
+        assert "not found" in res.json()["detail"]

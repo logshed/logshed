@@ -744,7 +744,7 @@ async def get_log_context_v1(
         cursor.execute(f"SELECT {columns} FROM logs WHERE id = ?", (log_id,))
         target_row = cursor.fetchone()
         if not target_row:
-            return None, None, [], []
+            return None, [], []
 
         source_alias = target_row["source_alias"]
         app_name = target_row["app_name"]
