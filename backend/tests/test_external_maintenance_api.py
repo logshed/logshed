@@ -252,3 +252,65 @@ class TestExternalMaintenanceApi:
             headers=api_token_headers,
         )
         assert res.status_code == 422
+
+
+class TestV1CsrfAndRemovedAliases:
+    """CSRF enforcement on /api/v1/maintenance/* and removal of cookie-authenticated /api/v1 aliases."""
+
+    @staticmethod
+    def _bare_client() -> AsyncClient:
+        """Client without a default X-Requested-With header."""
+        return AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://testserver")
+
+    @pytest.mark.asyncio
+    async def test_cookie_post_without_csrf_header_is_forbidden(self, client: AsyncClient, auth_headers: dict):
+        cookie_only = {"Cookie": auth_headers["Cookie"]}
+        async with self._bare_client() as bare:
+            res = await bare.post(
+                "/api/v1/maintenance/enable",
+                json={"duration_minutes": 5},
+                headers=cookie_only,
+            )
+            assert res.status_code == 403
+            assert "X-Requested-With" in res.json()["detail"]
+
+            status_res = await bare.get("/api/v1/maintenance/status", headers=cookie_only)
+            assert status_res.json()["active"] is False
+
+    @pytest.mark.asyncio
+    async def test_cookie_post_with_csrf_header_passes(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/v1/maintenance/enable",
+            json={"duration_minutes": 5},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_bearer_post_without_csrf_header_passes(self, client: AsyncClient, api_token_headers: dict):
+        async with self._bare_client() as bare:
+            res = await bare.post(
+                "/api/v1/maintenance/enable",
+                json={"duration_minutes": 5},
+                headers=api_token_headers,
+            )
+            assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/alerts/maintenance",
+            "/api/v1/alerts/export",
+            "/api/v1/drop-rules/export",
+            "/api/v1/settings",
+            "/api/v1/aliases",
+            "/api/v1/saved-views",
+            "/api/v1/notifications",
+            "/api/v1/system/info",
+            "/api/v1/auth/status",
+        ],
+    )
+    async def test_removed_alias_routes_return_404(self, client: AsyncClient, auth_headers: dict, path: str):
+        res = await client.get(path, headers=auth_headers)
+        assert res.status_code == 404

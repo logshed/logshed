@@ -36,7 +36,7 @@ LogShed provides self-contained native authentication and protection controls wi
 ### 5. Cross-Site Request Forgery (CSRF) Protection
 * **Header Requirement:** Mutating API endpoints (`POST`, `PUT`, `DELETE`, `PATCH`) under `/api/` require the custom `X-Requested-With` header (e.g. `X-Requested-With: XMLHttpRequest`).
 * **Validation Middleware:** Inbound mutating requests lacking the `X-Requested-With` header are rejected immediately with `403 Forbidden` (`detail: "Forbidden: missing required X-Requested-With header."`).
-* **Exemptions:** Safe read-only methods (`GET`, `HEAD`, `OPTIONS`), container health check endpoints (`/api/health`), Server-Sent Events streams (`/api/logs/stream`), requests bearing an `Authorization: Bearer` header, and external `/api/v1/*` routes.
+* **Exemptions:** Safe read-only methods (`GET`, `HEAD`, `OPTIONS`), container health check endpoints (`/api/health`), Server-Sent Events streams (`/api/logs/stream`), and requests bearing an `Authorization: Bearer` header. There is no path-based exemption for `/api/v1/*`: cookie-authenticated mutating calls to `/api/v1/*` (for example `POST /api/v1/maintenance/disable` from the Web UI) must also send `X-Requested-With`.
 
 ## 6. Rate Limiting
 * **Authentication Endpoint:** In-memory sliding window on `/api/auth/login` (5 failed attempts per IP per minute). Exceeding this threshold returns `429 Too Many Requests`.
@@ -70,6 +70,8 @@ LogShed provides self-contained native authentication and protection controls wi
     - `system:read`: Read telemetry metrics, sliding alert state, and cached error distributions (`GET /api/v1/system/metrics`).
     - `system:write`: Trigger storage retention pruning and database compaction (`POST /api/v1/system/prune`, `POST /api/v1/system/vacuum`).
     - `*`: Full administrative wildcard matching all existing and future programmatic endpoints.
+  * **Scope Validation on Creation:** `POST /api/tokens` requires between 1 and 20 scopes. Each entry must be `*`, one of the individual scopes above, or a namespace wildcard `<category>:*` for a known category (`logs`, `alerts`, `system`, `maintenance`). Unknown entries are rejected with `422` and duplicates are removed. The allow-list is defined in `backend/app/core/api_tokens.py`.
+  * **Verification Order:** All Bearer verification paths (standard routes, `POST /api/v1/ingest`, MCP) share one function: hash lookup, expiry, scope check, rate limit, throttled `last_used_at` update. Revoking a token also clears its rate limit window, `last_used_at` throttle entry, and ingestion cache entry.
   * **Preset Bundles:**
     - **Maintenance Only** (`["maintenance:write", "maintenance:read"]`): Intended for home automation runners, Proxmox update hooks, or backup scripts that silence notifications or drop errors during host restarts.
     - **Edge Shipper / Ingest** (`["logs:write"]`): Intended for external log forwarders (Vector, Fluent Bit in Kubernetes/k3s, or custom scripts) pushing log batches directly into LogShed over HTTP.

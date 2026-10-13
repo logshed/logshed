@@ -537,7 +537,7 @@ def create_app() -> FastAPI:
             # Health checks and log stream (GET) are exempted
             if not request.url.path.startswith("/api/health") and request.url.path != "/api/logs/stream":
                 auth_header = request.headers.get("authorization", "")
-                if not (auth_header.lower().startswith("bearer ") or request.url.path.startswith("/api/v1/")):
+                if not auth_header.lower().startswith("bearer "):
                     if not request.headers.get("x-requested-with"):
                         return JSONResponse(
                             status_code=403,
@@ -575,18 +575,9 @@ def create_app() -> FastAPI:
     # External API v1 endpoints (mounted before alias router so dedicated v1 routes take priority)
     app.include_router(external_v1.router, prefix="/api")
 
-    # API v1 alias router
+    # API v1 router: only the MCP transport lives here (external_v1 is mounted above).
+    # Cookie-authenticated internal routers are intentionally NOT aliased under /api/v1.
     api_v1_router = APIRouter(prefix="/api/v1")
-    api_v1_router.include_router(auth.router)
-    api_v1_router.include_router(logs.router)
-    api_v1_router.include_router(settings.router)
-    api_v1_router.include_router(aliases.router)
-    api_v1_router.include_router(drop_rules.router)
-    api_v1_router.include_router(saved_views.router)
-    api_v1_router.include_router(notifications.router)
-    api_v1_router.include_router(alerts.router)
-    api_v1_router.include_router(system.router)
-    api_v1_router.include_router(ai.router)
     api_v1_router.include_router(mcp.router)
 
     app.include_router(api_v1_router)

@@ -104,7 +104,7 @@ class TestDropRulesExportImport:
         created = create_res.json()
         rule_id = created["id"]
 
-        # Export all via /api and /api/v1
+        # Export all via /api
         res_all = await client.get("/api/drop-rules/export", headers=auth_headers)
         assert res_all.status_code == 200
         all_data = res_all.json()
@@ -121,12 +121,7 @@ class TestDropRulesExportImport:
         assert "dropped_count" not in exported_rule
         assert "created_at" not in exported_rule
 
-        # Export all via /api/v1
-        v1_all = await client.get("/api/v1/drop-rules/export", headers=auth_headers)
-        assert v1_all.status_code == 200
-        assert len(v1_all.json()["drop_rules"]) == 1
-
-        # Export single rule via /api and /api/v1
+        # Export single rule via /api
         res_single = await client.get(f"/api/drop-rules/{rule_id}/export", headers=auth_headers)
         assert res_single.status_code == 200
         single_data = res_single.json()
@@ -134,9 +129,6 @@ class TestDropRulesExportImport:
         assert single_data["drop_rule"]["app_pattern"] == "noisy-daemon"
         assert "id" not in single_data["drop_rule"]
 
-        res_v1_single = await client.get(f"/api/v1/drop-rules/{rule_id}/export", headers=auth_headers)
-        assert res_v1_single.status_code == 200
-        assert res_v1_single.json()["drop_rule"]["app_pattern"] == "noisy-daemon"
 
         # 404 for non-existent rule
         res_404 = await client.get("/api/drop-rules/9999/export", headers=auth_headers)
@@ -207,13 +199,13 @@ class TestDropRulesExportImport:
         assert res_raw.status_code == 200
         assert res_raw.json()["imported"] == 1
 
-        # 5. Import via /api/v1/drop-rules/import
+        # 5. Import via /api/drop-rules/import
         v1_payload = {
             "source_pattern": "10.0.0.4",
             "app_pattern": "nginx",
             "message_pattern": "test",
         }
-        res_v1 = await client.post("/api/v1/drop-rules/import", headers=auth_headers, json=v1_payload)
+        res_v1 = await client.post("/api/drop-rules/import", headers=auth_headers, json=v1_payload)
         assert res_v1.status_code == 200
         assert res_v1.json()["imported"] == 1
 
@@ -296,7 +288,7 @@ class TestAlertRulesExportImport:
         created = create_res.json()
         rule_id = created["id"]
 
-        # Export all via /api/alerts/export, /api/alerts/rules/export, and /api/v1/alerts/export
+        # Export all via /api/alerts/export, /api/alerts/rules/export
         res_all = await client.get("/api/alerts/export", headers=auth_headers)
         assert res_all.status_code == 200
         all_data = res_all.json()
@@ -318,11 +310,8 @@ class TestAlertRulesExportImport:
         assert "trigger_count" not in exported
         assert "created_at" not in exported
 
-        res_v1_all = await client.get("/api/v1/alerts/export", headers=auth_headers)
-        assert res_v1_all.status_code == 200
-        assert len(res_v1_all.json()["alert_rules"]) == 1
 
-        # Export single rule via /api/alerts/{id}/export, /api/alerts/rules/{id}/export, and /api/v1
+        # Export single rule via /api/alerts/{id}/export, /api/alerts/rules/{id}/export
         res_single = await client.get(f"/api/alerts/{rule_id}/export", headers=auth_headers)
         assert res_single.status_code == 200
         assert res_single.json()["alert_rule"]["name"] == "Nginx Error Spike"
@@ -331,9 +320,6 @@ class TestAlertRulesExportImport:
         assert res_single_rules.status_code == 200
         assert res_single_rules.json()["alert_rule"]["name"] == "Nginx Error Spike"
 
-        res_v1_single = await client.get(f"/api/v1/alerts/{rule_id}/export", headers=auth_headers)
-        assert res_v1_single.status_code == 200
-        assert res_v1_single.json()["alert_rule"]["name"] == "Nginx Error Spike"
 
         # 404 for non-existent rule
         res_404 = await client.get("/api/alerts/9999/export", headers=auth_headers)
@@ -417,7 +403,7 @@ class TestAlertRulesExportImport:
             "rule_type": "pattern",
             "match_pattern": "Kernel panic",
         }
-        res_raw = await client.post("/api/v1/alerts/import", headers=auth_headers, json=raw_payload)
+        res_raw = await client.post("/api/alerts/import", headers=auth_headers, json=raw_payload)
         assert res_raw.status_code == 200
         assert res_raw.json()["imported"] == 1
 

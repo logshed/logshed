@@ -11,7 +11,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
+from app.api.ingest import forget_ingest_token
 from app.core.api_tokens import (
+    api_token_rate_limiter,
+    forget_last_used,
     format_masked_identifier,
     generate_raw_token,
     hash_token,
@@ -137,4 +140,9 @@ async def revoke_token(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API token {token_id} not found.",
         )
+
+    # Purge in-memory per-token state so a revoked token leaves nothing behind (and cannot be served from cache).
+    api_token_rate_limiter.forget(f"token_{token_id}")
+    forget_last_used(token_id)
+    forget_ingest_token(token_id)
     return MessageResponse(status="ok")

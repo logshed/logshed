@@ -5,6 +5,8 @@ All SQLite queries are dispatched via asyncio.to_thread() to keep the event loop
 
 import asyncio
 import datetime
+import json
+import logging
 import sqlite3
 import threading
 import time
@@ -13,9 +15,19 @@ from typing import Any, Callable, Optional, TypeVar
 
 from fastapi import Depends, HTTPException, Request, status
 
+from app.core.api_tokens import (
+    ApiTokenRateLimiter,
+    api_token_rate_limiter,
+    has_scope_permission,
+    hash_token,
+    should_update_last_used,
+)
 from app.core.config import get_db_path
 from app.core.migrations import get_connection
 from app.core.security import SESSION_COOKIE_NAME, verify_session_token
+from app.core.utils import parse_iso_to_utc_datetime
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -207,40 +219,77 @@ async def get_optional_user(request: Request) -> Optional[dict[str, Any]]:
     return payload
 
 
-def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
-    """
-    FastAPI dependency factory enforcing valid Bearer API token and required scopes.
-    Validates token SHA-256 hash against SQLite api_tokens table, checks expiration,
-    enforces 120 req/min token rate limiting, and verifies scope permissions.
-    """
-    import json
-    from app.core.api_tokens import (
-        api_token_rate_limiter,
-        has_scope_permission,
-        hash_token,
-        should_update_last_used,
+# Strong references to in-flight fire-and-forget tasks (the event loop only keeps weak references).
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _on_background_task_done(task: asyncio.Task) -> None:
+    """Discard a finished background task and log any exception it raised."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Background API token last_used_at update failed: %s", exc)
+
+
+def _schedule_last_used_update(token_id: int) -> None:
+    """Persist token last_used_at without blocking the request, retaining a reference to the task."""
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def _update_last_used(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+            (now_iso, token_id),
+        )
+        conn.commit()
+
+    task = asyncio.create_task(run_db_query(_update_last_used))
+    _background_tasks.add(task)
+    task.add_done_callback(_on_background_task_done)
+
+
+def _bearer_error(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
     )
-    from app.core.utils import parse_iso_to_utc_datetime
 
-    async def _dependency(request: Request) -> dict[str, Any]:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization Bearer token required.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
 
-        raw_token = auth_header[7:].strip()
-        if not raw_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid Bearer token.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+async def verify_api_token(
+    raw_token: str,
+    required_scopes: list[str],
+    *,
+    rate_limiter: Optional[ApiTokenRateLimiter] = None,
+    rate_limit_detail: str = "API token rate limit exceeded (maximum 120 requests per minute).",
+    cache: Optional[dict[str, tuple[float, dict[str, Any]]]] = None,
+    cache_lock: Optional[threading.Lock] = None,
+    cache_ttl: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Shared Bearer API token verification used by require_api_token, the ingest endpoint and MCP.
 
-        token_hash_val = hash_token(raw_token)
+    Check order (identical for every caller): hash lookup (or fresh cache hit) -> expiry ->
+    scope -> rate limit -> throttled last_used_at update. Scope is checked before the rate
+    limit so that requests rejected for insufficient scope do not consume rate limit quota.
+    The optional cache stores the token record (not the scope or rate limit outcome) for cache_ttl seconds.
+    """
+    limiter = rate_limiter if rate_limiter is not None else api_token_rate_limiter
+    token_hash_val = hash_token(raw_token)
+    token_info: Optional[dict[str, Any]] = None
 
+    if cache is not None and cache_lock is not None:
+        now_mono = time.monotonic()
+        with cache_lock:
+            entry = cache.get(token_hash_val)
+            if entry is not None:
+                if (now_mono - entry[0]) < cache_ttl:
+                    token_info = entry[1]
+                else:
+                    cache.pop(token_hash_val, None)
+
+    if token_info is None:
         def _lookup(conn: sqlite3.Connection):
             cur = conn.cursor()
             cur.execute(
@@ -255,63 +304,71 @@ def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
 
         row = await run_db_query(_lookup)
         if not row:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or unrecognized API token.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        expires_at_str = row["expires_at"]
-        if expires_at_str:
-            exp_dt = parse_iso_to_utc_datetime(expires_at_str)
-            now_utc = datetime.datetime.now(datetime.timezone.utc)
-            if exp_dt and exp_dt <= now_utc:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="API token has expired.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-        token_id = int(row["id"])
-        if not api_token_rate_limiter.record_request(f"token_{token_id}"):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="API token rate limit exceeded (maximum 120 requests per minute).",
-            )
+            raise _bearer_error("Invalid or unrecognized API token.")
 
         try:
             scopes_list = json.loads(row["scopes"]) if isinstance(row["scopes"], str) else row["scopes"]
         except Exception:
             scopes_list = []
 
-        if not has_scope_permission(scopes_list, required_scopes):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Insufficient token scope. Required: {', '.join(required_scopes)}",
-            )
-
-        if should_update_last_used(token_id):
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-            def _update_last_used(conn: sqlite3.Connection) -> None:
-                conn.execute(
-                    "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
-                    (now_iso, token_id),
-                )
-                conn.commit()
-
-            asyncio.create_task(run_db_query(_update_last_used))
-
-        return {
-            "id": token_id,
+        token_info = {
+            "id": int(row["id"]),
             "name": row["name"],
             "token_prefix": row["token_prefix"],
             "scopes": scopes_list,
             "created_at": row["created_at"],
-            "expires_at": expires_at_str,
+            "expires_at": row["expires_at"],
             "created_by": row["created_by"],
             "auth_type": "api_token",
         }
+        if cache is not None and cache_lock is not None:
+            with cache_lock:
+                cache[token_hash_val] = (time.monotonic(), token_info)
+
+    expires_at_str = token_info["expires_at"]
+    if expires_at_str:
+        exp_dt = parse_iso_to_utc_datetime(expires_at_str)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        if exp_dt and exp_dt <= now_utc:
+            raise _bearer_error("API token has expired.")
+
+    if not has_scope_permission(token_info["scopes"], required_scopes):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient token scope. Required: {', '.join(required_scopes)}",
+        )
+
+    token_id = token_info["id"]
+    if not limiter.record_request(f"token_{token_id}"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=rate_limit_detail,
+        )
+
+    if should_update_last_used(token_id):
+        _schedule_last_used_update(token_id)
+
+    return dict(token_info)
+
+
+def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
+    """
+    FastAPI dependency factory enforcing valid Bearer API token and required scopes.
+    Validates token SHA-256 hash against SQLite api_tokens table, checks expiration,
+    verifies scope permissions, and enforces 120 req/min token rate limiting
+    (see verify_api_token for the shared check order).
+    """
+
+    async def _dependency(request: Request) -> dict[str, Any]:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise _bearer_error("Authorization Bearer token required.")
+
+        raw_token = auth_header[7:].strip()
+        if not raw_token:
+            raise _bearer_error("Invalid Bearer token.")
+
+        return await verify_api_token(raw_token, required_scopes)
 
     return _dependency
 

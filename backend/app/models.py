@@ -1081,6 +1081,13 @@ class ApiTokenCreateRequest(BaseModel):
     scopes: list[str] = Field(default_factory=lambda: ["maintenance:write"])
     expires_days: Optional[int] = Field(None, ge=1, le=3650)
 
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, v: list[str]) -> list[str]:
+        from app.core.api_tokens import validate_token_scopes
+
+        return validate_token_scopes(v)
+
 
 class ApiTokenCreateResponse(BaseModel):
     """Response returned on API token creation containing the one-time raw secret."""

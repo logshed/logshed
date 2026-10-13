@@ -398,11 +398,11 @@ class TestAlertsApi:
 
 
 class TestMaintenanceWindowApi:
-    """Tests for GET and POST /api/v1/alerts/maintenance and /api/alerts/maintenance."""
+    """Tests for GET and POST /api/alerts/maintenance."""
 
     @pytest.mark.asyncio
     async def test_get_maintenance_initial_inactive(self, client: AsyncClient, auth_headers: dict):
-        res = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        res = await client.get("/api/alerts/maintenance", headers=auth_headers)
         assert res.status_code == 200
         data = res.json()
         assert data["active"] is False
@@ -419,7 +419,7 @@ class TestMaintenanceWindowApi:
 
         # Set maintenance window
         res = await client.post(
-            "/api/v1/alerts/maintenance",
+            "/api/alerts/maintenance",
             json={"until": future_iso},
             headers=auth_headers,
         )
@@ -429,7 +429,7 @@ class TestMaintenanceWindowApi:
         assert data["until"] is not None
 
         # Verify GET returns active
-        get_res = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        get_res = await client.get("/api/alerts/maintenance", headers=auth_headers)
         assert get_res.status_code == 200
         assert get_res.json()["active"] is True
 
@@ -440,7 +440,7 @@ class TestMaintenanceWindowApi:
 
         # Clear maintenance window
         clear_res = await client.post(
-            "/api/v1/alerts/maintenance",
+            "/api/alerts/maintenance",
             json={"until": None},
             headers=auth_headers,
         )
@@ -450,7 +450,7 @@ class TestMaintenanceWindowApi:
         assert clear_data["until"] is None
 
         # Verify GET now returns inactive
-        get_res2 = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        get_res2 = await client.get("/api/alerts/maintenance", headers=auth_headers)
         assert get_res2.status_code == 200
         assert get_res2.json()["active"] is False
         assert get_res2.json()["until"] is None
@@ -491,7 +491,7 @@ class TestMaintenanceWindowApi:
     @pytest.mark.asyncio
     async def test_set_maintenance_invalid_format(self, client: AsyncClient, auth_headers: dict):
         res = await client.post(
-            "/api/v1/alerts/maintenance",
+            "/api/alerts/maintenance",
             json={"until": "not-a-datetime"},
             headers=auth_headers,
         )
@@ -532,7 +532,7 @@ class TestMaintenanceWindowApi:
 
         # Save schedules
         save_res = await client.post(
-            "/api/v1/alerts/maintenance/schedules",
+            "/api/alerts/maintenance/schedules",
             json=schedules_payload,
             headers=auth_headers,
         )
@@ -543,7 +543,7 @@ class TestMaintenanceWindowApi:
         assert data["schedules"][0]["next_run"] is not None
 
         # Verify GET returns the saved schedules
-        get_res = await client.get("/api/v1/alerts/maintenance", headers=auth_headers)
+        get_res = await client.get("/api/alerts/maintenance", headers=auth_headers)
         assert get_res.status_code == 200
         get_data = get_res.json()
         assert len(get_data["schedules"]) == 3

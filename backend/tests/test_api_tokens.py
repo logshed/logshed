@@ -261,3 +261,163 @@ class TestApiTokensApi:
             cur.execute("SELECT last_used_at FROM api_tokens WHERE id = ?", (token_id,))
             second_ts = cur.fetchone()[0]
         assert first_ts == second_ts
+
+
+class TestScopeEdgeCases:
+    """Edge cases for has_scope_permission with malformed or degenerate scopes."""
+
+    def test_bare_namespace_wildcard_grants_nothing(self):
+        assert has_scope_permission([":*"], ["logs:read"]) is False
+
+    def test_empty_string_scope_grants_nothing(self):
+        assert has_scope_permission([""], ["logs:read"]) is False
+
+    def test_trailing_colon_scope_grants_nothing(self):
+        assert has_scope_permission(["logs:"], ["logs:read"]) is False
+
+    def test_namespace_wildcard_does_not_cross_categories(self):
+        assert has_scope_permission(["logs:*"], ["logsx:read"]) is False
+        assert has_scope_permission(["logs:*"], ["logs:read", "alerts:read"]) is False
+
+    def test_non_list_scopes_grant_nothing(self):
+        assert has_scope_permission(None, ["logs:read"]) is False  # type: ignore[arg-type]
+        assert has_scope_permission([None], ["logs:read"]) is False  # type: ignore[list-item]
+
+
+class TestScopeValidation:
+    """Scope allow-list enforcement on token creation."""
+
+    def test_valid_scopes_accepted(self):
+        from app.core.api_tokens import KNOWN_SCOPES, validate_token_scopes
+
+        assert validate_token_scopes(sorted(KNOWN_SCOPES)) == sorted(KNOWN_SCOPES)
+        assert validate_token_scopes(["*"]) == ["*"]
+        assert validate_token_scopes(["logs:*", "system:read"]) == ["logs:*", "system:read"]
+
+    def test_duplicates_removed_preserving_order(self):
+        from app.core.api_tokens import validate_token_scopes
+
+        assert validate_token_scopes(["logs:read", "alerts:read", "logs:read"]) == ["logs:read", "alerts:read"]
+
+    @pytest.mark.parametrize("bad", ["logs:delete", "bogus:*", "logs:", ":*", "", "LOGS:READ", "logs:read ", "**"])
+    def test_unknown_scope_rejected(self, bad):
+        from app.core.api_tokens import validate_token_scopes
+
+        with pytest.raises(ValueError):
+            validate_token_scopes(["logs:read", bad])
+
+    def test_empty_and_oversized_rejected(self):
+        from app.core.api_tokens import MAX_TOKEN_SCOPES, validate_token_scopes
+
+        with pytest.raises(ValueError):
+            validate_token_scopes([])
+        with pytest.raises(ValueError):
+            validate_token_scopes(["logs:read"] * (MAX_TOKEN_SCOPES + 1))
+
+    def test_ui_presets_match_backend_allow_list(self):
+        from app.core.api_tokens import validate_token_scopes
+
+        presets = [
+            ["maintenance:write", "maintenance:read"],
+            ["logs:write"],
+            ["logs:read", "alerts:read", "system:read"],
+            ["logs:read", "alerts:read", "system:read", "maintenance:write"],
+            ["*"],
+        ]
+        for preset in presets:
+            assert validate_token_scopes(preset) == preset
+
+    @pytest.mark.asyncio
+    async def test_create_token_endpoint_validates_scopes(self, client: AsyncClient, auth_headers: dict):
+        for bad in ([], ["nope:read"], ["logs:read"] * 25):
+            res = await client.post("/api/tokens", json={"name": "bad", "scopes": bad}, headers=auth_headers)
+            assert res.status_code == 422
+
+        res = await client.post(
+            "/api/tokens",
+            json={"name": "dupes", "scopes": ["logs:read", "logs:read", "alerts:*"]},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["token"]["scopes"] == ["logs:read", "alerts:*"]
+
+
+class TestTokenRevocationCleanup:
+    """Revoking a token purges its in-memory rate limit, throttle and ingest cache state."""
+
+    @pytest.mark.asyncio
+    async def test_revoke_purges_in_memory_state(self, client: AsyncClient, auth_headers: dict):
+        from app.api.ingest import _token_cache, ingest_rate_limiter
+
+        res = await client.post(
+            "/api/tokens", json={"name": "Ephemeral", "scopes": ["logs:write", "system:read"]}, headers=auth_headers
+        )
+        token_id = res.json()["token"]["id"]
+        bearer = {"Authorization": f"Bearer {res.json()['raw_token']}"}
+
+        # Populate rate limiter, last_used throttle and ingest cache for this token
+        assert (await client.get("/api/v1/auth/verify", headers=bearer)).status_code == 200
+        assert (await client.post("/api/v1/ingest", json=[{"message": "x"}], headers=bearer)).status_code == 200
+        key = f"token_{token_id}"
+        assert key in api_token_rate_limiter._requests
+        assert key in ingest_rate_limiter._requests
+        assert token_id in _last_used_timestamps
+        assert any(info["id"] == token_id for _, info in _token_cache.values())
+
+        del_res = await client.delete(f"/api/tokens/{token_id}", headers=auth_headers)
+        assert del_res.status_code == 200
+
+        assert key not in api_token_rate_limiter._requests
+        assert key not in ingest_rate_limiter._requests
+        assert token_id not in _last_used_timestamps
+        assert not any(info["id"] == token_id for _, info in _token_cache.values())
+
+        # Revoked token is rejected immediately, including on the cached ingest path
+        assert (await client.get("/api/v1/auth/verify", headers=bearer)).status_code == 401
+        assert (await client.post("/api/v1/ingest", json=[{"message": "x"}], headers=bearer)).status_code == 401
+
+    def test_forget_helpers(self):
+        from app.core.api_tokens import ApiTokenRateLimiter, forget_last_used
+
+        limiter = ApiTokenRateLimiter(max_requests=1, window_seconds=60.0)
+        assert limiter.record_request("token_7") is True
+        assert limiter.record_request("token_7") is False
+        limiter.forget("token_7")
+        limiter.forget("token_missing")
+        assert limiter.record_request("token_7") is True
+
+        _last_used_timestamps[7] = 1.0
+        forget_last_used(7)
+        forget_last_used(7)
+        assert 7 not in _last_used_timestamps
+
+
+class TestBackgroundLastUsedTask:
+    """last_used_at fire-and-forget tasks are strongly referenced and failures are logged."""
+
+    @pytest.mark.asyncio
+    async def test_task_reference_retained_and_released(self):
+        from app.api import deps
+
+        before = len(deps._background_tasks)
+        deps._schedule_last_used_update(987654)
+        assert len(deps._background_tasks) == before + 1
+        await asyncio.gather(*list(deps._background_tasks), return_exceptions=True)
+        await asyncio.sleep(0)
+        assert len(deps._background_tasks) == before
+
+    @pytest.mark.asyncio
+    async def test_task_exception_is_logged(self, caplog):
+        from app.api import deps
+
+        async def _boom():
+            raise RuntimeError("db exploded")
+
+        task = asyncio.create_task(_boom())
+        deps._background_tasks.add(task)
+        task.add_done_callback(deps._on_background_task_done)
+        with caplog.at_level("WARNING", logger="app.api.deps"):
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.sleep(0)
+        assert task not in deps._background_tasks
+        assert "db exploded" in caplog.text

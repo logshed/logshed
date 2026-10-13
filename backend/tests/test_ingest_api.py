@@ -107,8 +107,16 @@ class TestHttpIngestApi:
     @pytest.mark.asyncio
     async def test_authentication_required(self, client: AsyncClient):
         """Missing or invalid token returns 401."""
-        # No header
+        # No Authorization header and no X-Requested-With: rejected by CSRF middleware (no blanket /api/v1 exemption)
         resp = await client.post("/api/v1/ingest", json=[{"message": "test"}])
+        assert resp.status_code == 403
+
+        # No Authorization header but with X-Requested-With: rejected by token authentication
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "test"}],
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
         assert resp.status_code == 401
 
         # Invalid token

@@ -275,11 +275,11 @@ class TestDockerHostsApi:
         )
         assert resp.status_code == 403
 
-        # Confirm /api/v1 mount is not available (returns 404 or 405 Method Not Allowed from SPA route)
+        # Confirm /api/v1 mount is not available even with the CSRF header (404, or 405 from SPA route)
         v1_resp = await client.post(
             "/api/v1/docker/hosts",
             json={"name": "V1 Bypass", "url": "tcp://1.2.3.4:2375"},
-            headers=no_csrf_headers,
+            headers=auth_headers,
         )
         assert v1_resp.status_code in (404, 405)
 

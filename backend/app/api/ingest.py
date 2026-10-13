@@ -3,24 +3,16 @@ High-throughput authenticated HTTP batch log ingestion endpoint.
 Supports JSON arrays and newline-delimited JSON (NDJSON) from edge collectors (Vector, Fluent Bit).
 """
 
-import asyncio
 import datetime
 import json
 import logging
-import sqlite3
 import threading
-import time
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.api.deps import run_db_query
-from app.core.api_tokens import (
-    ApiTokenRateLimiter,
-    has_scope_permission,
-    hash_token,
-    should_update_last_used,
-)
+from app.api.deps import verify_api_token
+from app.core.api_tokens import ApiTokenRateLimiter
 from app.core.pipeline import (
     clean_log_text,
     get_queue,
@@ -46,6 +38,14 @@ def clear_ingest_token_cache() -> None:
         _token_cache.clear()
 
 
+def forget_ingest_token(token_id: int) -> None:
+    """Drop cached ingestion state (token cache entries and rate limit window) for a revoked token."""
+    with _token_cache_lock:
+        for key in [k for k, (_, info) in _token_cache.items() if info.get("id") == token_id]:
+            _token_cache.pop(key, None)
+    ingest_rate_limiter.forget(f"token_{token_id}")
+
+
 async def _authenticate_ingest_token(request: Request) -> dict[str, Any]:
     """
     Authenticate Bearer API token with dedicated 60-second caching and logs:write scope verification.
@@ -66,95 +66,15 @@ async def _authenticate_ingest_token(request: Request) -> dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token_hash_val = hash_token(raw_token)
-    now_mono = time.monotonic()
-
-    cached_entry: Optional[dict[str, Any]] = None
-    with _token_cache_lock:
-        if token_hash_val in _token_cache:
-            ts, data = _token_cache[token_hash_val]
-            if (now_mono - ts) < _TOKEN_CACHE_TTL:
-                cached_entry = data
-            else:
-                _token_cache.pop(token_hash_val, None)
-
-    if cached_entry is not None:
-        token_info = cached_entry
-    else:
-        def _lookup(conn: sqlite3.Connection):
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT id, name, token_prefix, scopes, created_at, expires_at, last_used_at, created_by
-                FROM api_tokens
-                WHERE token_hash = ?
-                """,
-                (token_hash_val,),
-            )
-            return cur.fetchone()
-
-        row = await run_db_query(_lookup)
-        if not row:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or unrecognized API token.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        expires_at_str = row["expires_at"]
-        if expires_at_str:
-            exp_dt = parse_iso_to_utc_datetime(expires_at_str)
-            now_utc = datetime.datetime.now(datetime.timezone.utc)
-            if exp_dt and exp_dt <= now_utc:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="API token has expired.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-        try:
-            scopes_list = json.loads(row["scopes"]) if isinstance(row["scopes"], str) else row["scopes"]
-        except Exception:
-            scopes_list = []
-
-        if not has_scope_permission(scopes_list, ["logs:write"]):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient token scope. Required: logs:write",
-            )
-
-        token_info = {
-            "id": int(row["id"]),
-            "name": row["name"],
-            "token_prefix": row["token_prefix"],
-            "scopes": scopes_list,
-            "created_at": row["created_at"],
-            "expires_at": expires_at_str,
-            "created_by": row["created_by"],
-        }
-        with _token_cache_lock:
-            _token_cache[token_hash_val] = (now_mono, token_info)
-
-    token_id = token_info["id"]
-    if not ingest_rate_limiter.record_request(f"token_{token_id}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Ingestion rate limit exceeded (maximum 6,000 requests per minute).",
-        )
-
-    if should_update_last_used(token_id):
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-        def _update_last_used(conn: sqlite3.Connection) -> None:
-            conn.execute(
-                "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
-                (now_iso, token_id),
-            )
-            conn.commit()
-
-        asyncio.create_task(run_db_query(_update_last_used))
-
-    return token_info
+    return await verify_api_token(
+        raw_token,
+        ["logs:write"],
+        rate_limiter=ingest_rate_limiter,
+        rate_limit_detail="Ingestion rate limit exceeded (maximum 6,000 requests per minute).",
+        cache=_token_cache,
+        cache_lock=_token_cache_lock,
+        cache_ttl=_TOKEN_CACHE_TTL,
+    )
 
 
 @router.post("/ingest")

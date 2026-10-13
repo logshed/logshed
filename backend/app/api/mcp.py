@@ -11,8 +11,6 @@ the 'AI Assistant / MCP' scope bundle:
 """
 
 import asyncio
-import datetime
-import json
 import logging
 from typing import Any, Optional
 from urllib.parse import parse_qs
@@ -26,15 +24,8 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import Receive, Scope, Send
 
-from app.api.deps import run_db_query
-from app.core.api_tokens import (
-    api_token_rate_limiter,
-    has_scope_permission,
-    hash_token,
-    should_update_last_used,
-)
+from app.api.deps import verify_api_token
 from app.core.config import get_cached_setting
-from app.core.utils import parse_iso_to_utc_datetime
 from app.mcp.server import create_mcp_server
 
 logger = logging.getLogger(__name__)
@@ -156,77 +147,9 @@ async def stop_mcp_session_manager() -> None:
 async def validate_mcp_token(raw_token: str) -> dict[str, Any]:
     """
     Validate a raw API token against the SQLite api_tokens table.
-    Enforces expiration, rate limiting, and required MCP scopes.
+    Enforces expiration, required MCP scopes, and rate limiting via the shared verifier.
     """
-    token_hash_val = hash_token(raw_token)
-
-    def _lookup(conn):
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, token_prefix, scopes, created_at, expires_at, last_used_at, created_by
-            FROM api_tokens
-            WHERE token_hash = ?
-            """,
-            (token_hash_val,),
-        )
-        return cur.fetchone()
-
-    row = await run_db_query(_lookup)
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or unrecognized API token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    expires_at_str = row["expires_at"]
-    if expires_at_str:
-        exp_dt = parse_iso_to_utc_datetime(expires_at_str)
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
-        if exp_dt and exp_dt <= now_utc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="API token has expired.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-    token_id = int(row["id"])
-    if not api_token_rate_limiter.record_request(f"token_{token_id}"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="API token rate limit exceeded (maximum 120 requests per minute).",
-        )
-
-    try:
-        scopes_list = json.loads(row["scopes"]) if isinstance(row["scopes"], str) else row["scopes"]
-    except Exception:
-        scopes_list = []
-
-    if not has_scope_permission(scopes_list, REQUIRED_MCP_SCOPES):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Insufficient token scope. Required: {', '.join(REQUIRED_MCP_SCOPES)}",
-        )
-
-    if should_update_last_used(token_id):
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-        def _update_last_used(conn):
-            conn.execute(
-                "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
-                (now_iso, token_id),
-            )
-            conn.commit()
-
-        asyncio.create_task(run_db_query(_update_last_used))
-
-    return {
-        "id": token_id,
-        "name": row["name"],
-        "token_prefix": row["token_prefix"],
-        "scopes": scopes_list,
-    }
+    return await verify_api_token(raw_token, REQUIRED_MCP_SCOPES)
 
 
 def extract_raw_token(headers: list[tuple[bytes, bytes]], query_string: bytes) -> Optional[str]:

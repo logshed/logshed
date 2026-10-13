@@ -3,7 +3,7 @@
 Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
 
 ## 1. Route Versioning & Mirror Router
-The internal Web UI uses the unversioned `/api/*` prefix. For external tools, third-party integrations, and script automation, a mirror router is mounted at `/api/v1/*`, guaranteeing backwards-compatible route stability. All endpoints documented below are available identically under both `/api/*` and `/api/v1/*`.
+The internal Web UI uses the unversioned `/api/*` prefix and is authenticated by the session cookie. The external programmatic routes (token-authenticated ingestion, maintenance, metrics, log queries, alert history) and the MCP transport are served under `/api/v1/*`. The cookie-authenticated internal routers (auth, logs, settings, aliases, drop rules, saved views, notifications, alerts, system, AI) are NOT mirrored under `/api/v1/*`; requests to those paths return `404`. Use the canonical `/api/*` paths for them.
 
 ## 2. Query Pagination & Evaluation Capping
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:
