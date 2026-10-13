@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Prune and Vacuum Safety**: Prune and vacuum now share one in-progress lock across the web UI, external API and daily `PruneWorker` (concurrent attempts return `409`; the worker retries after 60 seconds). The 5-minute external API cooldown starts only after a successful run and uses a monotonic clock. The lock stays held until the operation finishes even if the client disconnects mid-run. Vacuum and prune failures are logged server-side and return a generic error message instead of exception text.
+- **Metrics Efficiency**: `GET /api/v1/system/metrics` now shares one refresh between concurrent callers, merges the 24-hour and 1-hour error counts into a single query, and the metrics and storage overview endpoints reuse a storage snapshot for up to 15 seconds instead of counting every log row on each request. Response shapes are unchanged.
 - **MCP SSE Endpoint Base URL Resolution**: Resolved the MCP Server-Sent Events URL and client configuration snippets against the configured `app_url` from Advanced settings, ensuring reverse-proxy and LAN hosts point to the operator's designated instance URL.
 
 ---

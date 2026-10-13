@@ -72,7 +72,7 @@ from app.services.retention import (
     execute_vacuum,
     get_effective_retention_days,
 )
-from app.services.storage_metrics import sample_storage_metrics
+from app.services.storage_metrics import get_cached_storage_metrics
 from app.version import APP_VERSION
 
 from app.api.ingest import router as ingest_router
@@ -196,6 +196,93 @@ async def get_maintenance_status_v1(
 # System Telemetry & Metrics
 # ---------------------------------------------------------------------------
 
+_error_refresh_task: Optional["asyncio.Future[dict[str, Any]]"] = None
+
+
+def _fetch_error_aggregates(conn) -> dict[str, Any]:
+    """Compute the rolling error counts and top offenders in as few passes as possible."""
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    since_24h = (now_utc - datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    since_1h = (now_utc - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+    cur = conn.cursor()
+
+    # 24-hour and 1-hour error counts share one predicate, so use conditional aggregation
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count_24h,
+               COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END), 0) AS count_1h
+        FROM logs
+        WHERE severity <= 3 AND timestamp >= ?
+        """,
+        (since_1h, since_24h),
+    )
+    counts = cur.fetchone()
+
+    # Top error apps (24h)
+    cur.execute(
+        """
+        SELECT app_name, COUNT(*) as cnt
+        FROM logs
+        WHERE severity <= 3 AND timestamp >= ? AND app_name IS NOT NULL AND app_name != ''
+        GROUP BY app_name
+        ORDER BY cnt DESC
+        LIMIT 5
+        """,
+        (since_24h,),
+    )
+    top_apps = [TopErrorEntity(name=r["app_name"], count=r["cnt"]) for r in cur.fetchall()]
+
+    # Top error hosts (24h)
+    cur.execute(
+        """
+        SELECT COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown') as host_val, COUNT(*) as cnt
+        FROM logs
+        WHERE severity <= 3 AND timestamp >= ?
+        GROUP BY host_val
+        ORDER BY cnt DESC
+        LIMIT 5
+        """,
+        (since_24h,),
+    )
+    top_hosts = [TopErrorEntity(name=r["host_val"] or "unknown", count=r["cnt"]) for r in cur.fetchall()]
+
+    return {
+        "count_24h": counts[0],
+        "count_1h": counts[1],
+        "top_apps": top_apps,
+        "top_hosts": top_hosts,
+    }
+
+
+async def _refresh_error_stats() -> dict[str, Any]:
+    global _cached_error_stats, _cached_error_stats_time
+    fetched = await run_db_query(_fetch_error_aggregates)
+    with _error_cache_lock:
+        _cached_error_stats = fetched
+        _cached_error_stats_time = time.monotonic()
+    return fetched
+
+
+async def _get_error_stats() -> dict[str, Any]:
+    """
+    Return cached error aggregates, refreshing when stale. Concurrent callers that find the
+    cache stale share a single in-flight refresh instead of each running the aggregate queries.
+    """
+    global _error_refresh_task
+    with _error_cache_lock:
+        cached = _cached_error_stats
+        fresh = cached is not None and (time.monotonic() - _cached_error_stats_time) <= _METRICS_CACHE_TTL
+    if fresh:
+        return cached  # type: ignore[return-value]
+
+    # Event-loop code runs atomically between awaits, so the in-flight handle needs no extra lock
+    task = _error_refresh_task
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = asyncio.ensure_future(_refresh_error_stats())
+        _error_refresh_task = task
+    return await asyncio.shield(task)
+
+
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
 async def get_system_metrics(
     token: dict[str, Any] = Depends(require_api_token(["system:read"])),
@@ -205,84 +292,11 @@ async def get_system_metrics(
     Serves rolling error stats from an in-memory cache to maintain high polling performance.
     """
     db_path = get_db_path()
-    now_mono = time.monotonic()
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    since_24h = (now_utc - datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
-    since_1h = (now_utc - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
     since_15m = (now_utc - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%S")
 
-    # In-memory cached error breakdown
-    global _cached_error_stats, _cached_error_stats_time
-    with _error_cache_lock:
-        need_refresh = (
-            _cached_error_stats is None
-            or (now_mono - _cached_error_stats_time) > _METRICS_CACHE_TTL
-        )
-
-    if need_refresh:
-        def _fetch_error_aggregates(conn):
-            cur = conn.cursor()
-            # 24-hour error count
-            cur.execute(
-                "SELECT COUNT(*) FROM logs WHERE severity <= 3 AND timestamp >= ?",
-                (since_24h,),
-            )
-            count_24h = cur.fetchone()[0]
-
-            # 1-hour error count
-            cur.execute(
-                "SELECT COUNT(*) FROM logs WHERE severity <= 3 AND timestamp >= ?",
-                (since_1h,),
-            )
-            count_1h = cur.fetchone()[0]
-
-            # Top error apps (24h)
-            cur.execute(
-                """
-                SELECT app_name, COUNT(*) as cnt
-                FROM logs
-                WHERE severity <= 3 AND timestamp >= ? AND app_name IS NOT NULL AND app_name != ''
-                GROUP BY app_name
-                ORDER BY cnt DESC
-                LIMIT 5
-                """,
-                (since_24h,),
-            )
-            top_apps = [TopErrorEntity(name=r["app_name"], count=r["cnt"]) for r in cur.fetchall()]
-
-            # Top error hosts (24h)
-            cur.execute(
-                """
-                SELECT COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown') as host_val, COUNT(*) as cnt
-                FROM logs
-                WHERE severity <= 3 AND timestamp >= ?
-                GROUP BY host_val
-                ORDER BY cnt DESC
-                LIMIT 5
-                """,
-                (since_24h,),
-            )
-            top_hosts = [TopErrorEntity(name=r["host_val"] or "unknown", count=r["cnt"]) for r in cur.fetchall()]
-
-            return {
-                "count_24h": count_24h,
-                "count_1h": count_1h,
-                "top_apps": top_apps,
-                "top_hosts": top_hosts,
-            }
-
-        fetched_stats = await run_db_query(_fetch_error_aggregates)
-        with _error_cache_lock:
-            _cached_error_stats = fetched_stats
-            _cached_error_stats_time = now_mono
-
-    error_stats = _cached_error_stats or {
-        "count_24h": 0,
-        "count_1h": 0,
-        "top_apps": [],
-        "top_hosts": [],
-    }
+    error_stats = await _get_error_stats()
 
     # Query system settings, alert state, and maintenance status
     def _fetch_system_info(conn):
@@ -325,7 +339,7 @@ async def get_system_metrics(
     ) = await run_db_query(_fetch_system_info)
 
     # Storage metrics
-    storage_info = await asyncio.to_thread(sample_storage_metrics, db_path)
+    storage_info = await asyncio.to_thread(get_cached_storage_metrics, db_path)
     db_size_bytes = storage_info["db_size_bytes"]
     db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
     total_logs = storage_info["total_logs_count"]

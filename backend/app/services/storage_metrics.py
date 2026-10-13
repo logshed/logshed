@@ -7,6 +7,8 @@ import logging
 import os
 import shutil
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 from app.core.migrations import get_connection
@@ -70,6 +72,8 @@ def record_metrics(db_path: str | Path) -> dict:
     Samples and writes storage metrics to the database.
     """
     metrics = sample_storage_metrics(db_path)
+    with _snapshot_lock:
+        _snapshot_cache[str(db_path)] = (time.monotonic(), dict(metrics))
     
     conn = None
     try:
@@ -182,3 +186,33 @@ class StorageMetricsWorker:
         except RuntimeError:
             pass
         return metrics
+
+
+# Short-lived snapshot cache for read-only endpoints. sample_storage_metrics runs a full
+# SELECT COUNT(*) FROM logs, which is too costly to repeat on every metrics or storage poll.
+STORAGE_SNAPSHOT_TTL_SECONDS: float = 15.0
+_snapshot_lock = threading.Lock()
+_snapshot_cache: dict[str, tuple[float, dict]] = {}
+
+
+def get_cached_storage_metrics(db_path: str | Path) -> dict:
+    """
+    Return a storage snapshot no older than STORAGE_SNAPSHOT_TTL_SECONDS.
+
+    The lock is held while sampling, so concurrent callers share one refresh. Snapshots written
+    by record_metrics (hourly worker, prune) also refresh the cache.
+    """
+    key = str(db_path)
+    with _snapshot_lock:
+        entry = _snapshot_cache.get(key)
+        if entry and (time.monotonic() - entry[0]) <= STORAGE_SNAPSHOT_TTL_SECONDS:
+            return dict(entry[1])
+        snapshot = sample_storage_metrics(db_path)
+        _snapshot_cache[key] = (time.monotonic(), snapshot)
+        return dict(snapshot)
+
+
+def clear_storage_snapshot_cache() -> None:
+    """Drop cached snapshots (used by tests)."""
+    with _snapshot_lock:
+        _snapshot_cache.clear()

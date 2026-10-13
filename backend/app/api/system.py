@@ -25,7 +25,7 @@ from app.services.retention import (
     execute_vacuum,
     get_effective_retention_days,
 )
-from app.services.storage_metrics import sample_storage_metrics
+from app.services.storage_metrics import get_cached_storage_metrics
 from app.services.version_service import check_for_updates
 
 logger = logging.getLogger(__name__)
@@ -176,7 +176,7 @@ async def get_storage_overview(user: dict = Depends(get_current_user)) -> Storag
     Fetch current disk usage, DB footprint, log count, and up to 30 days of historical storage metrics.
     """
     db_path = get_db_path()
-    current = await asyncio.to_thread(sample_storage_metrics, db_path)
+    current = await asyncio.to_thread(get_cached_storage_metrics, db_path)
 
     def _get_history(conn):
         cursor = conn.cursor()
