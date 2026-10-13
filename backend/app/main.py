@@ -537,7 +537,11 @@ def create_app() -> FastAPI:
             # Health checks and log stream (GET) are exempted
             if not request.url.path.startswith("/api/health") and request.url.path != "/api/logs/stream":
                 auth_header = request.headers.get("authorization", "")
-                if not auth_header.lower().startswith("bearer "):
+                path = request.url.path
+                # MCP routes authenticate by API token only (never the session cookie), so there is no
+                # ambient credential for CSRF to abuse; clients may send a raw token or ?token= without Bearer.
+                is_mcp_path = path == "/api/v1/mcp" or path.startswith("/api/v1/mcp/")
+                if not (auth_header.lower().startswith("bearer ") or is_mcp_path):
                     if not request.headers.get("x-requested-with"):
                         return JSONResponse(
                             status_code=403,

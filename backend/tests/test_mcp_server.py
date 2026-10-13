@@ -756,3 +756,62 @@ class TestMCPCli:
         with pytest.raises(SystemExit) as exc_info:
             cli_mod.run_mcp_stdio()
         assert exc_info.value.code == 1
+
+
+class TestMCPCsrfExemption:
+    """MCP routes under /api/v1/mcp authenticate by token only and are exempt from the X-Requested-With check."""
+
+    @staticmethod
+    def _bare_client() -> AsyncClient:
+        """Client without a default X-Requested-With header."""
+        return AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://testserver")
+
+    @pytest.mark.asyncio
+    async def test_raw_token_post_without_csrf_header_not_rejected_by_csrf(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
+        token_res = await client.post(
+            "/api/tokens",
+            json={"name": "Log Viewer", "scopes": ["logs:read"]},
+            headers=auth_headers,
+        )
+        raw_token = token_res.json()["raw_token"]
+
+        async with self._bare_client() as bare:
+            # Raw Authorization value (no Bearer prefix) and ?token= both reach token validation (scope 403, not CSRF 403)
+            res_raw = await bare.post("/api/v1/mcp/sse", headers={"Authorization": raw_token}, json={})
+            assert res_raw.status_code == 403
+            assert "Insufficient token scope" in res_raw.json()["detail"]
+
+            res_query = await bare.post(f"/api/v1/mcp/sse?token={raw_token}", json={})
+            assert res_query.status_code == 403
+            assert "Insufficient token scope" in res_query.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_cookie_only_requests_are_rejected(self, client: AsyncClient, auth_headers: dict):
+        await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
+        cookie_only = {"Cookie": auth_headers["Cookie"]}
+
+        async with self._bare_client() as bare:
+            for method, path in (
+                ("POST", "/api/v1/mcp/sse"),
+                ("GET", "/api/v1/mcp/sse"),
+                ("POST", "/api/v1/mcp"),
+                ("POST", "/api/v1/mcp/messages"),
+            ):
+                res = await bare.request(method, path, headers=cookie_only)
+                assert res.status_code == 401, (method, path)
+                assert "Authorization Bearer token required" in res.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_other_v1_paths_still_require_csrf_header_for_cookie_auth(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        cookie_only = {"Cookie": auth_headers["Cookie"]}
+        async with self._bare_client() as bare:
+            res = await bare.post(
+                "/api/v1/maintenance/enable", json={"duration_minutes": 5}, headers=cookie_only
+            )
+            assert res.status_code == 403
+            assert "X-Requested-With" in res.json()["detail"]
