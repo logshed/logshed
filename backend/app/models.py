@@ -60,7 +60,7 @@ class LogEntry(BaseModel):
     facility: int
     severity: int
     message: str
-    raw: str
+    raw: Optional[str] = None
 
 
 class LogListResponse(BaseModel):
@@ -121,6 +121,7 @@ class LogCountResponse(BaseModel):
     total: int
     grouped_by: Optional[str] = None
     breakdown: dict[str, int] = Field(default_factory=dict)
+    truncated: bool = False
     time_range: dict[str, Optional[str]] = Field(default_factory=dict)
 
 

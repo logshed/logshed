@@ -514,20 +514,28 @@ def build_log_where_clause(
     return where_sql, params
 
 
-@router.get("/logs", response_model=LogListResponse)
-async def search_logs_v1(
-    query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
-    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
-    app_name: Optional[list[str]] = Query(None, description="Filter by application name"),
-    severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
-    severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
-    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
-    to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
-    limit: int = Query(50, ge=1, le=1000, description="Max logs to return"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
-    token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
-) -> LogListResponse:
-    """Search and filter logs with FTS5 expressions, source and app filters, and time ranges."""
+_INVALID_DATETIME_DETAIL = (
+    "Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h')."
+)
+
+_LOG_BASE_COLUMNS = (
+    "logs.id, logs.timestamp, logs.received_at, logs.source_ip, "
+    "logs.source_alias, logs.app_name, logs.facility, logs.severity, logs.message"
+)
+
+
+def _log_columns(include_raw: bool) -> str:
+    """Return the SELECT column list for log rows, selecting the raw packet only when needed."""
+    return f"{_LOG_BASE_COLUMNS}, logs.raw" if include_raw else _LOG_BASE_COLUMNS
+
+
+def _parse_log_filters(
+    severity_max: Optional[int],
+    severity: Optional[str],
+    from_: Optional[str],
+    to: Optional[str],
+) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Resolve named severity and relative/ISO time bounds, raising HTTP 422 on invalid input."""
     effective_severity_max = severity_max
     if severity is not None:
         try:
@@ -539,19 +547,53 @@ async def search_logs_v1(
         try:
             from_ = parse_relative_or_iso_time(from_)
         except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
-            )
+            raise HTTPException(status_code=422, detail=_INVALID_DATETIME_DETAIL)
 
     if to:
         try:
             to = parse_relative_or_iso_time(to)
         except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
-            )
+            raise HTTPException(status_code=422, detail=_INVALID_DATETIME_DETAIL)
+
+    return effective_severity_max, from_, to
+
+
+def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
+    """Map a logs table row to a LogEntry (single mapping point for external log endpoints).
+
+    The raw packet is populated only when include_raw is true; otherwise it is None
+    and omitted from serialized responses.
+    """
+    return LogEntry(
+        id=r["id"],
+        timestamp=str(r["timestamp"]),
+        received_at=str(r["received_at"]),
+        source_ip=r["source_ip"],
+        source_alias=r["source_alias"] if r["source_alias"] is not None else r["source_ip"],
+        app_name=r["app_name"] if r["app_name"] is not None else "unknown",
+        facility=r["facility"],
+        severity=r["severity"],
+        message=r["message"],
+        raw=r["raw"] if include_raw else None,
+    )
+
+
+@router.get("/logs", response_model=LogListResponse, response_model_exclude_none=True)
+async def search_logs_v1(
+    query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
+    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
+    app_name: Optional[list[str]] = Query(None, description="Filter by application name"),
+    severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
+    severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
+    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
+    to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
+    limit: int = Query(50, ge=1, le=1000, description="Max logs to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    include_raw: bool = Query(False, description="Include the raw syslog packet in each entry"),
+    token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
+) -> LogListResponse:
+    """Search and filter logs with FTS5 expressions, source and app filters, and time ranges."""
+    effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
 
     def _query_db(conn):
         where_sql, params = build_log_where_clause(
@@ -563,50 +605,34 @@ async def search_logs_v1(
             from_ts=from_,
             to_ts=to,
         )
-        params["limit"] = limit
-        params["offset"] = offset
 
-        # Total count query
-        count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
+        # Total count query: same cap as the internal /api/logs endpoint, which avoids
+        # full table scans on broad queries.
+        count_limit = max(1001, offset + limit + 1)
+        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
         cursor = conn.cursor()
-        cursor.execute(count_sql, {k: v for k, v in params.items() if k not in ("limit", "offset")})
+        cursor.execute(count_sql, {**params, "count_limit": count_limit})
         total = cursor.fetchone()[0]
 
         select_sql = f"""
-            SELECT logs.id, logs.timestamp, logs.received_at, logs.source_ip,
-                   logs.source_alias, logs.app_name, logs.facility, logs.severity,
-                   logs.message, logs.raw
+            SELECT {_log_columns(include_raw)}
             FROM logs
             {where_sql}
             ORDER BY logs.timestamp DESC, logs.id DESC
             LIMIT :limit OFFSET :offset
         """
-        cursor.execute(select_sql, params)
+        cursor.execute(select_sql, {**params, "limit": limit, "offset": offset})
         rows = cursor.fetchall()
-        logs_list = [
-            LogEntry(
-                id=r["id"],
-                timestamp=str(r["timestamp"]),
-                received_at=str(r["received_at"]),
-                source_ip=r["source_ip"],
-                source_alias=r["source_alias"],
-                app_name=r["app_name"],
-                facility=r["facility"],
-                severity=r["severity"],
-                message=r["message"],
-                raw=r["raw"],
-            )
-            for r in rows
-        ]
-        return logs_list, total
+        logs_list = [_row_to_log_entry(r, include_raw) for r in rows]
+        return logs_list, total, bool(total >= count_limit)
 
-    logs_out, total_count = await run_db_query(_query_db)
+    logs_out, total_count, total_capped = await run_db_query(_query_db)
     return LogListResponse(
         logs=logs_out,
         total=total_count,
         limit=limit,
         offset=offset,
-        total_capped=False,
+        total_capped=total_capped,
     )
 
 
@@ -620,33 +646,11 @@ async def count_logs_v1(
     from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
     to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
     group_by: Optional[str] = Query(None, description="Group breakdown by 'severity', 'app', or 'source'"),
+    group_limit: int = Query(25, ge=1, le=200, description="Max groups returned for 'app' and 'source' grouping"),
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogCountResponse:
     """Count logs matching filters with optional grouping by severity, app, or source."""
-    effective_severity_max = severity_max
-    if severity is not None:
-        try:
-            effective_severity_max = resolve_severity(severity)
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-
-    if from_:
-        try:
-            from_ = parse_relative_or_iso_time(from_)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
-            )
-
-    if to:
-        try:
-            to = parse_relative_or_iso_time(to)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h').",
-            )
+    effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
 
     def _count_db(conn):
         where_sql, params = build_log_where_clause(
@@ -660,6 +664,30 @@ async def count_logs_v1(
         )
         cursor = conn.cursor()
         valid_group = (group_by or "").lower().strip()
+
+        def _total_count() -> int:
+            cursor.execute(f"SELECT COUNT(*) FROM logs {where_sql}", params)
+            return cursor.fetchone()[0]
+
+        def _limited_group(expr: str, label: str):
+            """Run a capped GROUP BY, fetching one extra row to detect truncation."""
+            group_sql = f"""
+                SELECT {expr} as grp, COUNT(*) as cnt
+                FROM logs
+                {where_sql}
+                GROUP BY grp
+                ORDER BY cnt DESC, grp ASC
+                LIMIT :group_fetch_limit
+            """
+            cursor.execute(group_sql, {**params, "group_fetch_limit": group_limit + 1})
+            rows = cursor.fetchall()
+            truncated = len(rows) > group_limit
+            rows = rows[:group_limit]
+            breakdown = {r["grp"]: r["cnt"] for r in rows}
+            # When every group was returned, the group counts sum to the exact total,
+            # so the extra COUNT query is only needed when the breakdown is truncated.
+            total = _total_count() if truncated else sum(breakdown.values())
+            return total, label, breakdown, truncated
 
         if valid_group in ("severity", "level"):
             group_sql = f"""
@@ -679,69 +707,41 @@ async def count_logs_v1(
                 total += cnt
                 label = format_severity_label(sev_int)
                 breakdown[label] = cnt
-            return total, "severity", breakdown
+            return total, "severity", breakdown, False
 
         elif valid_group in ("app", "app_name"):
-            group_sql = f"""
-                SELECT logs.app_name, COUNT(*) as cnt
-                FROM logs
-                {where_sql}
-                GROUP BY logs.app_name
-                ORDER BY cnt DESC
-                LIMIT 25
-            """
-            cursor.execute(group_sql, params)
-            rows = cursor.fetchall()
-            breakdown = {r["app_name"]: r["cnt"] for r in rows}
-            count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
-            cursor.execute(count_sql, params)
-            total = cursor.fetchone()[0]
-            return total, "app", breakdown
+            return _limited_group("COALESCE(logs.app_name, 'unknown')", "app")
 
         elif valid_group in ("source", "source_alias", "host"):
-            group_sql = f"""
-                SELECT COALESCE(logs.source_alias, logs.source_ip, 'unknown') as src, COUNT(*) as cnt
-                FROM logs
-                {where_sql}
-                GROUP BY src
-                ORDER BY cnt DESC
-                LIMIT 25
-            """
-            cursor.execute(group_sql, params)
-            rows = cursor.fetchall()
-            breakdown = {r["src"]: r["cnt"] for r in rows}
-            count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
-            cursor.execute(count_sql, params)
-            total = cursor.fetchone()[0]
-            return total, "source", breakdown
+            return _limited_group("COALESCE(logs.source_alias, logs.source_ip, 'unknown')", "source")
 
         else:
-            count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
-            cursor.execute(count_sql, params)
-            total = cursor.fetchone()[0]
-            return total, None, {}
+            return _total_count(), None, {}, False
 
-    total, grouped_by_out, breakdown_out = await run_db_query(_count_db)
+    total, grouped_by_out, breakdown_out, truncated_out = await run_db_query(_count_db)
     return LogCountResponse(
         total=total,
         grouped_by=grouped_by_out,
         breakdown=breakdown_out,
+        truncated=truncated_out,
         time_range={"from": from_, "to": to},
     )
 
 
 
-@router.get("/logs/{log_id}/context", response_model=LogContextResponse)
+@router.get("/logs/{log_id}/context", response_model=LogContextResponse, response_model_exclude_none=True)
 async def get_log_context_v1(
     log_id: int,
     lines: int = Query(10, ge=1, le=50, description="Context lines before and after target log"),
     same_app: bool = Query(False, description="Restrict context to logs sharing the target's app_name"),
+    include_raw: bool = Query(False, description="Include the raw syslog packet in each entry"),
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogContextResponse:
     """Fetch symmetrical surrounding context logs before and after a specific log entry."""
     def _fetch(conn):
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM logs WHERE id = ?", (log_id,))
+        columns = _log_columns(include_raw)
+        cursor.execute(f"SELECT {columns} FROM logs WHERE id = ?", (log_id,))
         target_row = cursor.fetchone()
         if not target_row:
             return None, None, [], []
@@ -751,47 +751,49 @@ async def get_log_context_v1(
         t_time = target_row["timestamp"]
         t_id = target_row["id"]
 
-        app_clause = "AND app_name = ? " if same_app else ""
-        app_params = (app_name,) if same_app else ()
+        # NULL-safe source matching: "col = NULL" never matches, so NULL aliases
+        # are matched via IS NULL and constrained to the same source_ip.
+        if source_alias is None:
+            source_clause = "source_alias IS NULL AND source_ip = ? "
+            source_params: tuple = (target_row["source_ip"],)
+        else:
+            source_clause = "source_alias = ? "
+            source_params = (source_alias,)
+
+        if not same_app:
+            app_clause = ""
+            app_params: tuple = ()
+        elif app_name is None:
+            app_clause = "AND app_name IS NULL "
+            app_params = ()
+        else:
+            app_clause = "AND app_name = ? "
+            app_params = (app_name,)
 
         # Fetch lines before (chronologically earlier)
         before_sql = f"""
-            SELECT * FROM logs
-            WHERE source_alias = ? {app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
+            SELECT {columns} FROM logs
+            WHERE {source_clause}{app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
             ORDER BY timestamp DESC, id DESC
             LIMIT ?
         """
-        cursor.execute(before_sql, (source_alias, *app_params, t_time, t_time, t_id, lines))
+        cursor.execute(before_sql, (*source_params, *app_params, t_time, t_time, t_id, lines))
         before_rows = cursor.fetchall()
         before_rows.reverse()
 
         # Fetch lines after (chronologically later)
         after_sql = f"""
-            SELECT * FROM logs
-            WHERE source_alias = ? {app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
+            SELECT {columns} FROM logs
+            WHERE {source_clause}{app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
             ORDER BY timestamp ASC, id ASC
             LIMIT ?
         """
-        cursor.execute(after_sql, (source_alias, *app_params, t_time, t_time, t_id, lines))
+        cursor.execute(after_sql, (*source_params, *app_params, t_time, t_time, t_id, lines))
         after_rows = cursor.fetchall()
 
-        def _to_entry(r):
-            return LogEntry(
-                id=r["id"],
-                timestamp=str(r["timestamp"]),
-                received_at=str(r["received_at"]),
-                source_ip=r["source_ip"],
-                source_alias=r["source_alias"],
-                app_name=r["app_name"],
-                facility=r["facility"],
-                severity=r["severity"],
-                message=r["message"],
-                raw=r["raw"],
-            )
-
-        target_entry = _to_entry(target_row)
-        before_entries = [_to_entry(r) for r in before_rows]
-        after_entries = [_to_entry(r) for r in after_rows]
+        target_entry = _row_to_log_entry(target_row, include_raw)
+        before_entries = [_row_to_log_entry(r, include_raw) for r in before_rows]
+        after_entries = [_row_to_log_entry(r, include_raw) for r in after_rows]
         all_entries = before_entries + [target_entry] + after_entries
 
         return target_entry, before_entries, after_entries, all_entries

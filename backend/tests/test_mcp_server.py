@@ -316,6 +316,52 @@ class TestMCPServer:
         assert res_filtered["total"] == 1
 
     @pytest.mark.asyncio
+    async def test_mcp_count_logs_group_limit_and_truncated(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+        count_tool = server._tool_manager._tools.get("count_logs")
+
+        # Seeded data has 2 apps: limit 1 truncates, total still counts all logs
+        res_cut = await count_tool.fn(group_by="app", group_limit=1)
+        assert res_cut["truncated"] is True
+        assert res_cut["breakdown"] == {"traefik": 2}
+        assert res_cut["total"] == 3
+
+        res_full = await count_tool.fn(group_by="app")
+        assert res_full["truncated"] is False
+        assert res_full["total"] == 3
+
+        # Out-of-range values are clamped rather than rejected
+        res_clamped = await count_tool.fn(group_by="source", group_limit=0)
+        assert len(res_clamped["breakdown"]) == 1
+        assert res_clamped["truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_mcp_raw_is_fetched_only_when_requested(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+        query_tool = server._tool_manager._tools.get("query_logs")
+        context_tool = server._tool_manager._tools.get("get_log_context")
+
+        res_default = await query_tool.fn(limit=5)
+        assert all("raw" not in e for e in res_default["logs"])
+
+        res_raw = await query_tool.fn(limit=5, include_raw=True)
+        assert all(e["raw"].startswith("raw") for e in res_raw["logs"])
+
+        # Requesting raw via fields also fetches it
+        res_fields = await query_tool.fn(limit=5, fields=["id", "raw"])
+        assert all(set(e.keys()) == {"id", "raw"} for e in res_fields["logs"])
+        assert all(e["raw"] for e in res_fields["logs"])
+
+        ctx_raw = await context_tool.fn(log_id=2, lines=2, include_raw=True)
+        assert ctx_raw["target_log"]["raw"] == "raw2"
+        ctx_default = await context_tool.fn(log_id=2, lines=2)
+        assert "raw" not in ctx_default["target_log"]
+
+    @pytest.mark.asyncio
     async def test_mcp_ergonomics_named_severity_and_relative_time(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)

@@ -243,3 +243,276 @@ class TestExternalLogsApi:
             headers={"Authorization": f"Bearer {maint_token}"},
         )
         assert res_forbidden.status_code == 403
+
+
+_NULLABLE_LOGS_DDL = """
+DROP TABLE logs;
+CREATE TABLE logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    received_at DATETIME NOT NULL,
+    source_ip TEXT NOT NULL,
+    source_alias TEXT,
+    app_name TEXT,
+    facility INTEGER NOT NULL DEFAULT 1,
+    severity INTEGER NOT NULL DEFAULT 6,
+    message TEXT NOT NULL,
+    raw TEXT NOT NULL
+);
+"""
+
+_BASE_TS = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def _make_logs_nullable(db_path: Path) -> None:
+    """Recreate the logs table without NOT NULL on source_alias/app_name (defensive-path testing)."""
+    with get_connection(db_path) as conn:
+        conn.executescript(_NULLABLE_LOGS_DDL)
+        conn.commit()
+
+
+def _insert_log(conn, i: int, source_ip: str, source_alias, app_name, severity: int = 6) -> None:
+    ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
+    conn.execute(
+        """
+        INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+        """,
+        (ts, ts, source_ip, source_alias, app_name, severity, f"msg {i}", f"raw {i}"),
+    )
+
+
+class TestExternalLogQueryHardening:
+    """Count grouping, context matching, include_raw, and total cap behaviour."""
+
+    @pytest.mark.asyncio
+    async def test_count_group_by_app_and_source_with_null_values(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        _make_logs_nullable(db_path)
+        with get_connection(db_path) as conn:
+            _insert_log(conn, 1, "10.0.0.1", "host-a", "web")
+            _insert_log(conn, 2, "10.0.0.1", "host-a", None)
+            _insert_log(conn, 3, "10.0.0.2", None, None)
+            conn.commit()
+
+        res_app = await client.get(
+            "/api/v1/logs/count", params={"group_by": "app"}, headers=logs_token_headers
+        )
+        assert res_app.status_code == 200
+        data = res_app.json()
+        assert data["total"] == 3
+        assert data["breakdown"] == {"unknown": 2, "web": 1}
+        assert data["truncated"] is False
+
+        res_src = await client.get(
+            "/api/v1/logs/count", params={"group_by": "source"}, headers=logs_token_headers
+        )
+        assert res_src.status_code == 200
+        assert res_src.json()["breakdown"] == {"host-a": 2, "10.0.0.2": 1}
+
+    @pytest.mark.asyncio
+    async def test_count_group_limit_truncation(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            n = 0
+            for app_idx in range(5):
+                for _ in range(5 - app_idx):
+                    n += 1
+                    _insert_log(conn, n, "10.0.0.1", "host-a", f"app-{app_idx}")
+            conn.commit()
+
+        # Truncated: 5 groups, limit 2 -> top 2 returned, total still counts everything
+        res = await client.get(
+            "/api/v1/logs/count",
+            params={"group_by": "app", "group_limit": 2},
+            headers=logs_token_headers,
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["truncated"] is True
+        assert data["breakdown"] == {"app-0": 5, "app-1": 4}
+        assert data["total"] == 15
+
+        # Exactly group_limit groups is not truncated
+        res_exact = await client.get(
+            "/api/v1/logs/count",
+            params={"group_by": "app", "group_limit": 5},
+            headers=logs_token_headers,
+        )
+        exact = res_exact.json()
+        assert exact["truncated"] is False
+        assert len(exact["breakdown"]) == 5
+        assert exact["total"] == 15
+
+        # Total respects filters when truncated
+        res_filtered = await client.get(
+            "/api/v1/logs/count",
+            params={"group_by": "app", "group_limit": 1, "app_name": ["app-0", "app-1"]},
+            headers=logs_token_headers,
+        )
+        filtered = res_filtered.json()
+        assert filtered["truncated"] is True
+        assert filtered["total"] == 9
+
+        # Bounds validation
+        for bad in (0, 201):
+            res_bad = await client.get(
+                "/api/v1/logs/count",
+                params={"group_by": "app", "group_limit": bad},
+                headers=logs_token_headers,
+            )
+            assert res_bad.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_context_null_alias_matches_same_ip_only(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        _make_logs_nullable(db_path)
+        with get_connection(db_path) as conn:
+            # ids 1..6, alternating hosts, all with NULL alias
+            _insert_log(conn, 1, "10.0.0.1", None, "web")
+            _insert_log(conn, 2, "10.0.0.2", None, "web")
+            _insert_log(conn, 3, "10.0.0.1", None, "web")
+            _insert_log(conn, 4, "10.0.0.2", None, "web")
+            _insert_log(conn, 5, "10.0.0.1", None, "web")
+            # Aliased row from the same IP must not be mixed in
+            _insert_log(conn, 6, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        res = await client.get(
+            "/api/v1/logs/3/context", params={"lines": 5}, headers=logs_token_headers
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert [e["id"] for e in data["before_logs"]] == [1]
+        assert [e["id"] for e in data["after_logs"]] == [5]
+        assert [e["id"] for e in data["logs"]] == [1, 3, 5]
+        assert data["target_log"]["source_alias"] == "10.0.0.1"
+
+    @pytest.mark.asyncio
+    async def test_context_same_app_filters_and_handles_null_app(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        _make_logs_nullable(db_path)
+        with get_connection(db_path) as conn:
+            _insert_log(conn, 1, "10.0.0.1", "host-a", "web")
+            _insert_log(conn, 2, "10.0.0.1", "host-a", "db")
+            _insert_log(conn, 3, "10.0.0.1", "host-a", "web")
+            _insert_log(conn, 4, "10.0.0.1", "host-a", "db")
+            _insert_log(conn, 5, "10.0.0.1", "host-a", "web")
+            _insert_log(conn, 6, "10.0.0.1", "host-a", None)
+            _insert_log(conn, 7, "10.0.0.1", "host-a", None)
+            conn.commit()
+
+        res_all = await client.get(
+            "/api/v1/logs/3/context", params={"lines": 10}, headers=logs_token_headers
+        )
+        assert [e["id"] for e in res_all.json()["logs"]] == [1, 2, 3, 4, 5, 6, 7]
+
+        res_same = await client.get(
+            "/api/v1/logs/3/context",
+            params={"lines": 10, "same_app": True},
+            headers=logs_token_headers,
+        )
+        assert [e["id"] for e in res_same.json()["logs"]] == [1, 3, 5]
+
+        res_null_app = await client.get(
+            "/api/v1/logs/6/context",
+            params={"lines": 10, "same_app": True},
+            headers=logs_token_headers,
+        )
+        assert res_null_app.status_code == 200
+        assert [e["id"] for e in res_null_app.json()["logs"]] == [6, 7]
+
+    @pytest.mark.asyncio
+    async def test_include_raw_defaults_off_for_logs_and_context(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            for i in range(1, 4):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        res = await client.get("/api/v1/logs", headers=logs_token_headers)
+        assert res.status_code == 200
+        for entry in res.json()["logs"]:
+            assert "raw" not in entry
+            assert "message" in entry
+
+        res_raw = await client.get(
+            "/api/v1/logs", params={"include_raw": True}, headers=logs_token_headers
+        )
+        assert all(e["raw"].startswith("raw ") for e in res_raw.json()["logs"])
+
+        ctx = await client.get("/api/v1/logs/2/context", headers=logs_token_headers)
+        body = ctx.json()
+        assert "raw" not in body["target_log"]
+        for key in ("logs", "before_logs", "after_logs"):
+            assert all("raw" not in e for e in body[key])
+
+        ctx_raw = await client.get(
+            "/api/v1/logs/2/context",
+            params={"include_raw": True},
+            headers=logs_token_headers,
+        )
+        body_raw = ctx_raw.json()
+        assert body_raw["target_log"]["raw"] == "raw 2"
+        assert all("raw" in e for e in body_raw["logs"])
+
+    @pytest.mark.asyncio
+    async def test_internal_logs_endpoint_still_returns_raw(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            _insert_log(conn, 1, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        res = await client.get("/api/logs", headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["logs"][0]["raw"] == "raw 1"
+
+    @pytest.mark.asyncio
+    async def test_logs_total_is_capped_like_internal_endpoint(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            for i in range(1, 1006):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        res = await client.get(
+            "/api/v1/logs", params={"limit": 5}, headers=logs_token_headers
+        )
+        data = res.json()
+        assert data["total"] == 1001
+        assert data["total_capped"] is True
+        assert len(data["logs"]) == 5
+
+        # Selective filter stays exact and uncapped
+        res_small = await client.get(
+            "/api/v1/logs",
+            params={"limit": 5, "severity_max": 3},
+            headers=logs_token_headers,
+        )
+        small = res_small.json()
+        assert small["total"] == 0
+        assert small["total_capped"] is False
+
+        # A deep offset raises the cap to offset + limit + 1
+        res_deep = await client.get(
+            "/api/v1/logs",
+            params={"limit": 5, "offset": 1003},
+            headers=logs_token_headers,
+        )
+        deep = res_deep.json()
+        assert deep["total"] == 1005
+        assert deep["total_capped"] is False

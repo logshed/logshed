@@ -58,6 +58,11 @@ def _project_log_entry(
     return out
 
 
+def _needs_raw(include_raw: bool, fields: Optional[list[str]]) -> bool:
+    """Return True when the raw packet must be fetched (explicit include_raw or requested via fields)."""
+    return bool(include_raw or (fields and "raw" in fields))
+
+
 def create_mcp_server() -> FastMCP:
     """
     Factory creating and configuring the LogShed FastMCP server instance.
@@ -112,7 +117,9 @@ def create_mcp_server() -> FastMCP:
             "Count homelab logs matching filters with optional grouping. "
             "Very fast and token-efficient for checking error volume, trends, or verifying issue presence. "
             "Accepts relative time ('1h', '24h', 'since_midnight') and named severity ('error', 'warning', 'info'). "
-            "group_by supports 'severity', 'app', or 'source'."
+            "group_by supports 'severity', 'app', or 'source'. "
+            "For 'app' and 'source' grouping at most group_limit groups (default 25, max 200) are returned; "
+            "the response sets truncated=true when more groups exist, while total still counts all matching logs."
         ),
     )
     async def count_logs(
@@ -124,6 +131,7 @@ def create_mcp_server() -> FastMCP:
         from_time: Optional[str] = None,
         to_time: Optional[str] = None,
         group_by: Optional[str] = None,
+        group_limit: int = 25,
     ) -> dict[str, Any]:
         """Count logs matching filters with optional grouping by severity, app, or source."""
         effective_sev = None
@@ -141,6 +149,7 @@ def create_mcp_server() -> FastMCP:
             from_=from_time,
             to=to_time,
             group_by=group_by,
+            group_limit=min(max(1, group_limit), 200),
             token={"scopes": ["logs:read"]},
         )
         return res.model_dump()
@@ -185,6 +194,7 @@ def create_mcp_server() -> FastMCP:
             to=to_time,
             limit=clamped_limit,
             offset=0,
+            include_raw=_needs_raw(include_raw, fields),
             token={"scopes": ["logs:read"]},
         )
         data = res.model_dump()
@@ -216,6 +226,7 @@ def create_mcp_server() -> FastMCP:
             log_id=log_id,
             lines=clamped_lines,
             same_app=same_app,
+            include_raw=_needs_raw(include_raw, fields),
             token={"scopes": ["logs:read"]},
         )
         data = res.model_dump()
