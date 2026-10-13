@@ -58,7 +58,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
             <span>History</span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Previous alerts and on-demand analyses
+            Previous alerts, maintenance windows and on-demand analyses
           </p>
         </div>
         {historyItems.length > 0 && (
