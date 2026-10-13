@@ -129,6 +129,14 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const [availableApps, setAvailableApps] = useState<string[]>([]);
   const [isAiConfigured, setIsAiConfigured] = useState<boolean>(true);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Auto-dismiss success messages after 5 seconds; errors stay until replaced
+  useEffect(() => {
+    if (!feedbackMsg || feedbackMsg.isError) return;
+    const timer = setTimeout(() => setFeedbackMsg(null), 5000);
+    return () => clearTimeout(timer);
+  }, [feedbackMsg]);
+
   const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse>({
     active: false,
     until: null,

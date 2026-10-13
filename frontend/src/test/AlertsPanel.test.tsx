@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AlertsPanel, pathToAlertSubTab, alertSubTabToPath } from '../components/alerts/AlertsPanel.tsx';
 import * as alertsApi from '../api/alerts.ts';
@@ -719,6 +719,33 @@ describe('AlertsPanel Component', () => {
       expect(importSpy).toHaveBeenCalled();
       expect(screen.getByText(/Imported 2 rules \(0 skipped\)\./i)).toBeInTheDocument();
     });
+  });
+
+  it('auto-dismisses success feedback after 5 seconds', async () => {
+    vi.spyOn(alertsApi, 'importAlertRules').mockResolvedValue({ imported: 1, skipped: 0, errors: [] });
+
+    const { container } = render(<AlertsPanel />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument();
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File([JSON.stringify({ alert_rules: [] })], 'rules.json', { type: 'application/json' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Imported 1 rules? \(0 skipped\)\./i)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5100);
+      });
+      expect(screen.queryByText(/Imported 1 rules? \(0 skipped\)\./i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders combined History table with on-demand and alert badges and opens details', async () => {
