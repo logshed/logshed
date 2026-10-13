@@ -2,8 +2,10 @@
 API token generation, hashing, verification, and rate limiting for LogShed External API.
 """
 
+from dataclasses import dataclass
 import hashlib
 import json
+import math
 import secrets
 import threading
 import time
@@ -103,6 +105,16 @@ def validate_token_scopes(scopes: list[str]) -> list[str]:
     return result
 
 
+@dataclass(frozen=True)
+class RateLimitStatus:
+    """Snapshot of a token's sliding window after a rate limit check."""
+
+    limit: int
+    remaining: int
+    reset_seconds: int  # seconds until the oldest request leaves the window (at least 1 when limited)
+    allowed: bool
+
+
 class ApiTokenRateLimiter:
     """
     In-memory sliding window rate limiter for external API token calls.
@@ -127,19 +139,29 @@ class ApiTokenRateLimiter:
             self._cleanup_key(key, now)
             return len(self._requests.get(key, [])) >= self.max_requests
 
-    def record_request(self, key: str) -> bool:
+    def check_request(self, key: str) -> RateLimitStatus:
         """
-        Record a request timestamp if allowed.
-        Returns True if request is allowed, False if rate limited.
+        Record a request timestamp if allowed and return the resulting window status.
+        When limited, nothing is recorded and reset_seconds is the wait until a slot frees.
         """
         with self._lock:
             now = time.time()
             self._cleanup_key(key, now)
             timestamps = self._requests.get(key, [])
+            oldest = timestamps[0] if timestamps else now
+            reset_seconds = max(1, math.ceil(oldest + self.window_seconds - now))
             if len(timestamps) >= self.max_requests:
-                return False
+                return RateLimitStatus(self.max_requests, 0, reset_seconds, False)
             self._requests[key].append(now)
-            return True
+            remaining = self.max_requests - len(self._requests[key])
+            return RateLimitStatus(self.max_requests, remaining, reset_seconds, True)
+
+    def record_request(self, key: str) -> bool:
+        """
+        Record a request timestamp if allowed.
+        Returns True if request is allowed, False if rate limited.
+        """
+        return self.check_request(key).allowed
 
     def reset(self) -> None:
         with self._lock:

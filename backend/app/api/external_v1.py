@@ -60,6 +60,12 @@ from app.services.maintenance_service import (
     disable_maintenance_sessions,
     get_maintenance_status,
 )
+from app.services.operation_guard import (
+    OperationInProgressError,
+    cooldown_remaining_seconds,
+    mark_operation_success,
+    operation_guard,
+)
 from app.services.retention import (
     InsufficientDiskSpaceError,
     execute_prune_async,
@@ -76,11 +82,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["External API v1"])
 router.include_router(ingest_router)
 
-# Cooldown tracking for expensive maintenance actions (5 minutes)
-_last_prune_time: float = 0.0
-_last_vacuum_time: float = 0.0
-_cooldown_lock = threading.Lock()
-_OPERATION_COOLDOWN_SECONDS: float = 300.0  # 5 minutes
 
 # Telemetry error stats in-memory cache (12-second TTL)
 _cached_error_stats: Optional[dict[str, Any]] = None
@@ -375,29 +376,49 @@ async def get_system_metrics(
 # External Maintenance Operations (Compaction & Pruning)
 # ---------------------------------------------------------------------------
 
+def _operation_conflict(exc: OperationInProgressError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="A prune or compaction operation is already in progress.",
+    )
+
+
+def _enforce_cooldown(name: str, label: str) -> None:
+    remaining = cooldown_remaining_seconds(name)
+    if remaining > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"{label} cooldown active. Please wait {remaining} seconds before repeating.",
+            headers={"Retry-After": str(remaining)},
+        )
+
+
 @router.post("/system/prune", response_model=PruneResponse)
 async def trigger_prune_v1(
     token: dict[str, Any] = Depends(require_api_token(["system:write"])),
 ) -> PruneResponse:
     """
     Trigger retention pruning and database compaction.
-    Enforces a 5-minute cooldown between executions to prevent database lock disruption.
+    Returns 409 while another prune or compaction is running. A 5-minute cooldown starts
+    only after a successful run to prevent database lock disruption.
     """
-    global _last_prune_time
-    now = time.time()
-    with _cooldown_lock:
-        if (now - _last_prune_time) < _OPERATION_COOLDOWN_SECONDS:
-            remaining = int(_OPERATION_COOLDOWN_SECONDS - (now - _last_prune_time))
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Prune operation cooldown active. Please wait {remaining} seconds before repeating.",
-            )
-        _last_prune_time = now
+    try:
+        with operation_guard("prune"):
+            _enforce_cooldown("prune", "Prune operation")
+            retention_days = await run_db_query(get_effective_retention_days)
+            db_path = get_db_path()
+            try:
+                result = await execute_prune_async(db_path, retention_days=retention_days)
+            except Exception:
+                logger.exception("Retention prune failed")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Prune failed. See server logs for details.",
+                )
+            mark_operation_success("prune")
+    except OperationInProgressError as exc:
+        raise _operation_conflict(exc)
 
-    retention_days = await run_db_query(get_effective_retention_days)
-    db_path = get_db_path()
-
-    result = await execute_prune_async(db_path, retention_days=retention_days)
     metrics_raw = result["metrics"]
     metric_item = StorageMetricItem(
         recorded_at=str(metrics_raw["recorded_at"]),
@@ -421,33 +442,29 @@ async def trigger_vacuum_v1(
 ) -> VacuumResponse:
     """
     Execute database VACUUM to reclaim host disk space from freelist pages.
-    Enforces a 5-minute cooldown between executions.
+    Returns 409 while another prune or compaction is running. A 5-minute cooldown starts
+    only after a successful run.
     """
-    global _last_vacuum_time
-    now = time.time()
-    with _cooldown_lock:
-        if (now - _last_vacuum_time) < _OPERATION_COOLDOWN_SECONDS:
-            remaining = int(_OPERATION_COOLDOWN_SECONDS - (now - _last_vacuum_time))
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Database compaction cooldown active. Please wait {remaining} seconds before repeating.",
-            )
-        _last_vacuum_time = now
-
     db_path = get_db_path()
     try:
-        result = await execute_vacuum(db_path)
-    except InsufficientDiskSpaceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-    except Exception as e:
-        logger.error(f"Database compaction failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database compaction failed: {e}",
-        )
+        with operation_guard("vacuum"):
+            _enforce_cooldown("vacuum", "Database compaction")
+            try:
+                result = await execute_vacuum(db_path)
+            except InsufficientDiskSpaceError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e),
+                )
+            except Exception:
+                logger.exception("Database compaction failed")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Database compaction failed. See server logs for details.",
+                )
+            mark_operation_success("vacuum")
+    except OperationInProgressError as exc:
+        raise _operation_conflict(exc)
 
     metrics_raw = result["metrics"]
     metric_item = StorageMetricItem(

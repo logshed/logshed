@@ -20,10 +20,10 @@ from app.core.security import (
     reset_crypto_cache,
 )
 from app.core.sse import sse_manager
+from app.services.operation_guard import reset_operation_state
 from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
-from app.api.external_v1 import _last_prune_time, _last_vacuum_time
 import app.api.external_v1 as ext_v1_mod
 
 
@@ -37,8 +37,7 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     reset_crypto_cache()
     sse_manager.reset()
     _last_used_timestamps.clear()
-    ext_v1_mod._last_prune_time = 0.0
-    ext_v1_mod._last_vacuum_time = 0.0
+    reset_operation_state()
     ext_v1_mod._cached_error_stats = None
     ext_v1_mod._cached_error_stats_time = 0.0
 
@@ -60,8 +59,7 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     login_rate_limiter.reset()
     api_token_rate_limiter.reset()
     _last_used_timestamps.clear()
-    ext_v1_mod._last_prune_time = 0.0
-    ext_v1_mod._last_vacuum_time = 0.0
+    reset_operation_state()
 
 
 @pytest_asyncio.fixture

@@ -13,9 +13,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.api_tokens import (
+    RateLimitStatus,
     ApiTokenRateLimiter,
     api_token_rate_limiter,
     has_scope_permission,
@@ -257,6 +259,16 @@ def _bearer_error(detail: str) -> HTTPException:
     )
 
 
+def rate_limit_headers(status_info: RateLimitStatus) -> dict[str, str]:
+    """X-RateLimit-* headers (reset is in seconds until the oldest request leaves the window)."""
+    return {
+        "X-RateLimit-Limit": str(status_info.limit),
+        "X-RateLimit-Remaining": str(status_info.remaining),
+        "X-RateLimit-Reset": str(status_info.reset_seconds),
+    }
+
+
+
 async def verify_api_token(
     raw_token: str,
     required_scopes: list[str],
@@ -266,6 +278,7 @@ async def verify_api_token(
     cache: Optional[dict[str, tuple[float, dict[str, Any]]]] = None,
     cache_lock: Optional[threading.Lock] = None,
     cache_ttl: float = 0.0,
+    rate_status_sink: Optional[Callable[[RateLimitStatus], None]] = None,
 ) -> dict[str, Any]:
     """
     Shared Bearer API token verification used by require_api_token, the ingest endpoint and MCP.
@@ -274,6 +287,8 @@ async def verify_api_token(
     scope -> rate limit -> throttled last_used_at update. Scope is checked before the rate
     limit so that requests rejected for insufficient scope do not consume rate limit quota.
     The optional cache stores the token record (not the scope or rate limit outcome) for cache_ttl seconds.
+    On a 429 the exception carries Retry-After and X-RateLimit-* headers; on success the window status
+    is passed to the optional rate_status_sink so REST callers can attach X-RateLimit-* headers.
     """
     limiter = rate_limiter if rate_limiter is not None else api_token_rate_limiter
     token_hash_val = hash_token(raw_token)
@@ -339,16 +354,26 @@ async def verify_api_token(
         )
 
     token_id = token_info["id"]
-    if not limiter.record_request(f"token_{token_id}"):
+    rate_status = limiter.check_request(f"token_{token_id}")
+    if not rate_status.allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=rate_limit_detail,
+            headers={**rate_limit_headers(rate_status), "Retry-After": str(rate_status.reset_seconds)},
         )
+
+    if rate_status_sink is not None:
+        rate_status_sink(rate_status)
 
     if should_update_last_used(token_id):
         _schedule_last_used_update(token_id)
 
     return dict(token_info)
+
+
+# Registers the Bearer scheme in the OpenAPI document ("Authorize" in /docs). auto_error is off so
+# the existing error responses and status codes produced by verify_api_token are unchanged.
+bearer_scheme = HTTPBearer(auto_error=False, description="LogShed API token (ls_live_...)")
 
 
 def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
@@ -359,7 +384,11 @@ def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
     (see verify_api_token for the shared check order).
     """
 
-    async def _dependency(request: Request) -> dict[str, Any]:
+    async def _dependency(
+        request: Request,
+        response: Response,
+        _bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    ) -> dict[str, Any]:
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             raise _bearer_error("Authorization Bearer token required.")
@@ -368,7 +397,10 @@ def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
         if not raw_token:
             raise _bearer_error("Invalid Bearer token.")
 
-        return await verify_api_token(raw_token, required_scopes)
+        def _attach_rate_headers(info: RateLimitStatus) -> None:
+            response.headers.update(rate_limit_headers(info))
+
+        return await verify_api_token(raw_token, required_scopes, rate_status_sink=_attach_rate_headers)
 
     return _dependency
 
@@ -380,10 +412,14 @@ def require_auth_or_token(required_scopes: list[str]) -> Callable[[Request], Any
     """
     token_dep = require_api_token(required_scopes)
 
-    async def _dependency(request: Request) -> dict[str, Any]:
+    async def _dependency(
+        request: Request,
+        response: Response,
+        _bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    ) -> dict[str, Any]:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
-            return await token_dep(request)
+            return await token_dep(request, response)
 
         user = await get_optional_user(request)
         if user:

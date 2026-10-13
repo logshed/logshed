@@ -41,6 +41,8 @@ LogShed provides self-contained native authentication and protection controls wi
 ## 6. Rate Limiting
 * **Authentication Endpoint:** In-memory sliding window on `/api/auth/login` (5 failed attempts per IP per minute). Exceeding this threshold returns `429 Too Many Requests`.
 * **API Token Sliding Window:** 120 requests per minute sliding window per token for programmatic external endpoints.
+* **Rate Limit Headers:** Token-authenticated REST and ingestion responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds until the oldest counted request leaves the window). A `429` response also carries `Retry-After` (whole seconds). MCP responses carry the `429` headers only.
+* **Heavy Operations:** Prune and vacuum share one in-progress lock across the web UI, external API and the daily `PruneWorker`; a concurrent attempt returns `409 Conflict` (the worker retries after 60 seconds). The external API 5-minute cooldown starts only after a successful run and is measured with a monotonic clock. Operation failures are logged server-side and return a generic message.
 * **High-Throughput Ingestion Endpoint:** 6,000 requests per minute sliding window per token for edge log shippers on `POST /api/v1/ingest`, backed by a 60-second in-memory token verification cache.
 * **AI Diagnosis Endpoints:** In-memory sliding window on `/api/ai/diagnose` and `/api/ai/diagnose/stream` (10 requests per minute per user/session) to prevent runaway LLM consumption.
 

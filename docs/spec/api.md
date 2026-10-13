@@ -5,6 +5,8 @@ Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
 ## 1. Route Versioning & Mirror Router
 The internal Web UI uses the unversioned `/api/*` prefix and is authenticated by the session cookie. The external programmatic routes (token-authenticated ingestion, maintenance, metrics, log queries, alert history) and the MCP transport are served under `/api/v1/*`. The cookie-authenticated internal routers (auth, logs, settings, aliases, drop rules, saved views, notifications, alerts, system, AI) are NOT mirrored under `/api/v1/*`; requests to those paths return `404`. Use the canonical `/api/*` paths for them.
 
+The OpenAPI document (`/openapi.json`, `/docs`) declares an HTTP Bearer security scheme on the token-authenticated routes so `/docs` offers an Authorize button. Token routes return `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers, and `429` responses add `Retry-After` (see `docs/spec/security.md`).
+
 ## 2. Query Pagination & Evaluation Capping
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:
 - `logs`: Array of `LogEntry` records matching query filters.
@@ -88,8 +90,8 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/settings` | Update settings (encrypted at rest) | `{"ai_provider": "...", "ai_model": "...", "ai_fallback_models": "...", "ai_api_key": "...", "ai_base_url": "...", "ai_system_prompt": "...", "retention_days": 14, "internal_log_level": "WARNING", "check_for_updates": true}` | `SettingsResponse` | `200`, `400` |
 | **System & Maintenance** | | | | | |
 | `GET` | `/api/health` | Container healthcheck (unauthenticated returns minimal `{"status": "ok"}`; authenticated returns DB status, queue depth, dropped count, ingest rate) | None | `HealthResponse` | `200`, `503` |
-| `POST` | `/api/maintenance/prune` | Trigger manual retention purge, compaction, and metrics snapshot | None | `MessageResponse` (`{"status": "ok"}`) | `200` |
-| `POST` | `/api/system/vacuum` | Execute SQLite database VACUUM to reclaim disk space after large deletions (guarded by lock, requires 2x free disk space) | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `409`, `507` |
+| `POST` | `/api/maintenance/prune` | Trigger manual retention purge, compaction, and metrics snapshot (shares one in-progress lock with vacuum and the PruneWorker) | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `409`, `500` |
+| `POST` | `/api/system/vacuum` | Execute SQLite database VACUUM to reclaim disk space after large deletions (shares one in-progress lock with prune and the PruneWorker, requires free disk headroom; failures return a generic message and are logged) | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `400`, `409`, `500` |
 | `GET` | `/api/system/storage` | Fetch live disk usage & 30-day history | None | `StorageMetricsResponse` (`{"db_size_bytes": ..., "disk_free_bytes": ..., "disk_total_bytes": ..., "history": [...]}`) | `200` |
 | `GET` | `/api/system/version` | Read installed version and check GHCR for stable release updates | Query params: `refresh: bool` | `VersionResponse` | `200` |
 | **API Token Management (Web UI)** | | | | | |
@@ -109,8 +111,8 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/v1/maintenance/disable` | End specific maintenance session or clear all active sessions | `{"session_id": "..."}` (optional) | `ExternalMaintenanceDisableResponse` | `200`, `401`, `403` |
 | `GET` | `/api/v1/maintenance/status` | Read active maintenance status, remaining seconds, and session breakdown | None (`maintenance:read`) | `ExternalMaintenanceStatusResponse` | `200`, `401`, `403` |
 | `GET` | `/api/v1/system/metrics` | Read system telemetry, ingest rates, sliding alert state, and cached error breakdown | None (`system:read`) | `SystemMetricsResponse` | `200`, `401`, `403`, `429` |
-| `POST` | `/api/v1/system/prune` | Trigger retention pruning and compaction (5-minute cooldown) | None (`system:write`) | `PruneResponse` | `200`, `401`, `403`, `429` |
-| `POST` | `/api/v1/system/vacuum` | Trigger SQLite VACUUM compaction (5-minute cooldown) | None (`system:write`) | `VacuumResponse` | `200`, `400`, `401`, `403`, `429` |
+| `POST` | `/api/v1/system/prune` | Trigger retention pruning and compaction (shared in-progress lock returns `409`; 5-minute cooldown starts only after a successful run) | None (`system:write`) | `PruneResponse` | `200`, `401`, `403`, `409`, `429`, `500` |
+| `POST` | `/api/v1/system/vacuum` | Trigger SQLite VACUUM compaction (shared in-progress lock returns `409`; 5-minute cooldown starts only after a successful run; failures return a generic message and are logged) | None (`system:write`) | `VacuumResponse` | `200`, `400`, `401`, `403`, `409`, `429`, `500` |
 | `GET` | `/api/v1/logs` | Query logs with FTS5, source/app filters, relative or ISO time bounds, and named or numeric severity | `query`, `source`, `app_name`, `severity`, `severity_max`, `from`, `to`, `limit`, `offset`, `include_raw` (default `false`, omits `raw`) (`logs:read`) | `LogListResponse` (`message` and `raw` pass through the redactor; `total` is capped like `/api/logs`: `total_capped`) | `200`, `400`, `401`, `403` |
 | `GET` | `/api/v1/logs/count` | Fast aggregation count of logs matching filters with optional grouping (`severity`, `app`, `source`) | `query`, `source`, `app_name`, `severity`, `severity_max`, `from`, `to`, `group_by`, `group_limit` (1-200, default 25) (`logs:read`) | `LogCountResponse` (`truncated` is true when more `app`/`source` groups exist than `group_limit`) | `200`, `400`, `401`, `403` |
 | `GET` | `/api/v1/logs/{id}/context` | Fetch surrounding log lines as `before_logs`, `target_log` and `after_logs` (no combined list) | `lines` (1-50), `same_app: bool`, `include_raw` (default `false`) (`logs:read`) | `ExternalLogContextResponse` | `200`, `401`, `403`, `404` |

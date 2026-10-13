@@ -24,6 +24,7 @@ from app.core.security import (
     reset_crypto_cache,
 )
 from app.core.sse import sse_manager
+from app.services.operation_guard import reset_operation_state
 from app.main import create_app
 from app.mcp.server import create_mcp_server
 from app.services.drop_filter import init_drop_filter
@@ -44,8 +45,7 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     sse_manager.reset()
     _last_used_timestamps.clear()
     invalidate_settings_cache()
-    ext_v1_mod._last_prune_time = 0.0
-    ext_v1_mod._last_vacuum_time = 0.0
+    reset_operation_state()
     ext_v1_mod._cached_error_stats = None
     ext_v1_mod._cached_error_stats_time = 0.0
 

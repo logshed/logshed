@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0-beta.1] - 2026-10-09
 
 ### Added
+- **Rate Limit Headers & OpenAPI Bearer Scheme**: Token-authenticated REST and ingestion responses now return `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; `429` responses add `Retry-After` (also on MCP). The OpenAPI document declares an HTTP Bearer security scheme so `/docs` offers an Authorize button.
 - **External REST API (`/api/v1/*`)**: Comprehensive programmatic REST API for automated log queries, aggregation facets, incident history inspection, maintenance window control, system metrics telemetry, and storage compaction.
 - **Bearer Token Authentication & Granular Access Scopes**: Secure Bearer token authentication (`ls_live_<40 hex>`) with SHA-256 hash storage, namespace wildcard permissions (`maintenance:*`, `logs:read`, `metrics:read`, `incidents:read`, `system:admin`), sliding-window rate limiting (120 req/min), last-used tracking, and full management UI under Settings > API & MCP Access.
 - **Model Context Protocol (MCP) Server**: Built-in FastMCP server enabling external AI assistants (such as Claude Desktop, Cursor, Antigravity, and Windsurf) to investigate homelab issues directly. Exposes 8 operational tools (`get_system_metrics`, `list_services`, `query_logs`, `get_log_context`, `count_logs`, `get_recent_alerts`, `enable_maintenance`, `disable_maintenance`), 3 live resources (`logshed://system/metrics`, `logshed://services`, `logshed://alerts/active`), and a guided incident investigation prompt (`investigate_incident`).
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Modular Technical Specifications**: Partitioned the monolithic `docs/SPEC.md` specification into domain-bounded modules under `docs/spec/` (`architecture.md`, `database.md`, `pipeline.md`, `ai-engine.md`, `security.md`, `api.md`, `frontend.md`, `deployment.md`) while maintaining `docs/SPEC.md` as a lightweight navigation hub. Streamlines documentation lookups and reduces token consumption when developing with AI coding assistants.
 
 ### Fixed
+- **Prune and Vacuum Safety**: Prune and vacuum now share one in-progress lock across the web UI, external API and daily `PruneWorker` (concurrent attempts return `409`; the worker retries after 60 seconds). The 5-minute external API cooldown starts only after a successful run and uses a monotonic clock. Vacuum and prune failures are logged server-side and return a generic error message instead of exception text.
 - **MCP SSE Endpoint Base URL Resolution**: Resolved the MCP Server-Sent Events URL and client configuration snippets against the configured `app_url` from Advanced settings, ensuring reverse-proxy and LAN hosts point to the operator's designated instance URL.
 
 ---

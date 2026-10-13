@@ -11,11 +11,16 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from app.services.operation_guard import OperationInProgressError, operation_guard
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
 from app.services.storage_metrics import record_metrics, prune_old_metrics
 
 logger = logging.getLogger(__name__)
+
+# Delay before the PruneWorker retries when a manual prune or vacuum holds the shared lock
+_BUSY_RETRY_SECONDS: float = 60.0
+
 
 def execute_prune(
     db_path: str | Path, retention_days: int = 14, index_pending: bool = True
@@ -191,7 +196,18 @@ class PruneWorker:
         while self._running:
             try:
                 retention_days = await asyncio.to_thread(self._get_retention_days)
-                await execute_prune_async(self._db_path, retention_days=retention_days)
+                try:
+                    with operation_guard("prune"):
+                        await execute_prune_async(self._db_path, retention_days=retention_days)
+                except OperationInProgressError:
+                    logger.info(
+                        f"PruneWorker: another prune or compaction is running, retrying in {_BUSY_RETRY_SECONDS:.0f}s."
+                    )
+                    try:
+                        await asyncio.wait_for(self._stop_event.wait(), timeout=_BUSY_RETRY_SECONDS)
+                        break
+                    except asyncio.TimeoutError:
+                        continue
                 backoff = 5.0
             except asyncio.CancelledError:
                 break

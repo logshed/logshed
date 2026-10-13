@@ -18,6 +18,7 @@ from app.models import (
     VacuumResponse,
     VersionResponse,
 )
+from app.services.operation_guard import OperationInProgressError, operation_guard
 from app.services.retention import (
     InsufficientDiskSpaceError,
     execute_prune_async,
@@ -28,7 +29,6 @@ from app.services.storage_metrics import sample_storage_metrics
 from app.services.version_service import check_for_updates
 
 logger = logging.getLogger(__name__)
-_vacuum_lock = asyncio.Lock()
 
 router = APIRouter(tags=["System & Maintenance"])
 
@@ -75,17 +75,34 @@ async def health_check(request: Request, response: Response) -> HealthResponse:
     )
 
 
+def _operation_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="A prune or compaction operation is already in progress.",
+    )
+
+
 @router.post("/maintenance/prune", response_model=PruneResponse)
 async def trigger_prune(user: dict = Depends(get_current_user)) -> PruneResponse:
     """
     Manually triggers log retention pruning, FTS5 index compaction,
     WAL truncation, and takes a fresh storage metrics snapshot.
+    Returns 409 while another prune or compaction is running.
     """
-    retention_days = await run_db_query(get_effective_retention_days)
-    db_path = get_db_path()
-
-    result = await execute_prune_async(db_path, retention_days=retention_days)
-
+    try:
+        with operation_guard("prune"):
+            retention_days = await run_db_query(get_effective_retention_days)
+            db_path = get_db_path()
+            try:
+                result = await execute_prune_async(db_path, retention_days=retention_days)
+            except Exception:
+                logger.exception("Retention prune failed")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Prune failed. See server logs for details.",
+                )
+    except OperationInProgressError:
+        raise _operation_conflict()
 
     metrics_raw = result["metrics"]
     metric_item = StorageMetricItem(
@@ -109,46 +126,43 @@ async def trigger_vacuum(user: dict = Depends(get_current_user)) -> VacuumRespon
     """
     On-demand database compaction (VACUUM) to reclaim host disk space from freelist pages.
     Pauses SQLite writes while buffering incoming logs in memory, checkpoints WAL,
-    and runs VACUUM.
+    and runs VACUUM. Returns 409 while another prune or compaction is running.
     """
-    if _vacuum_lock.locked():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Database compaction is already in progress.",
-        )
+    db_path = get_db_path()
+    try:
+        with operation_guard("vacuum"):
+            try:
+                result = await execute_vacuum(db_path)
+            except InsufficientDiskSpaceError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e),
+                )
+            except Exception:
+                logger.exception("Database compaction failed")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Database compaction failed. See server logs for details.",
+                )
+    except OperationInProgressError:
+        raise _operation_conflict()
 
-    async with _vacuum_lock:
-        db_path = get_db_path()
-        try:
-            result = await execute_vacuum(db_path)
-        except InsufficientDiskSpaceError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e),
-            )
-        except Exception as e:
-            logger.error(f"Database compaction failed: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Database compaction failed: {e}",
-            )
+    metrics_raw = result["metrics"]
+    metric_item = StorageMetricItem(
+        recorded_at=str(metrics_raw["recorded_at"]),
+        db_size_bytes=metrics_raw["db_size_bytes"],
+        disk_free_bytes=metrics_raw["disk_free_bytes"],
+        disk_total_bytes=metrics_raw["disk_total_bytes"],
+        total_logs_count=metrics_raw["total_logs_count"],
+    )
 
-        metrics_raw = result["metrics"]
-        metric_item = StorageMetricItem(
-            recorded_at=str(metrics_raw["recorded_at"]),
-            db_size_bytes=metrics_raw["db_size_bytes"],
-            disk_free_bytes=metrics_raw["disk_free_bytes"],
-            disk_total_bytes=metrics_raw["disk_total_bytes"],
-            total_logs_count=metrics_raw["total_logs_count"],
-        )
-
-        return VacuumResponse(
-            status="ok",
-            previous_size_bytes=result["previous_size_bytes"],
-            new_size_bytes=result["new_size_bytes"],
-            reclaimed_bytes=result["reclaimed_bytes"],
-            metrics=metric_item,
-        )
+    return VacuumResponse(
+        status="ok",
+        previous_size_bytes=result["previous_size_bytes"],
+        new_size_bytes=result["new_size_bytes"],
+        reclaimed_bytes=result["reclaimed_bytes"],
+        metrics=metric_item,
+    )
 
 
 @router.get("/system/storage", response_model=StorageOverviewResponse)

@@ -7,11 +7,12 @@ import datetime
 import json
 import logging
 import threading
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, Security, status
+from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import verify_api_token
+from app.api.deps import bearer_scheme, rate_limit_headers, verify_api_token
 from app.core.api_tokens import ApiTokenRateLimiter
 from app.core.pipeline import (
     clean_log_text,
@@ -46,7 +47,7 @@ def forget_ingest_token(token_id: int) -> None:
     ingest_rate_limiter.forget(f"token_{token_id}")
 
 
-async def _authenticate_ingest_token(request: Request) -> dict[str, Any]:
+async def _authenticate_ingest_token(request: Request, response: Response) -> dict[str, Any]:
     """
     Authenticate Bearer API token with dedicated 60-second caching and logs:write scope verification.
     """
@@ -74,16 +75,21 @@ async def _authenticate_ingest_token(request: Request) -> dict[str, Any]:
         cache=_token_cache,
         cache_lock=_token_cache_lock,
         cache_ttl=_TOKEN_CACHE_TTL,
+        rate_status_sink=lambda info: response.headers.update(rate_limit_headers(info)),
     )
 
 
 @router.post("/ingest")
-async def ingest_logs(request: Request) -> dict[str, Any]:
+async def ingest_logs(
+    request: Request,
+    response: Response,
+    _bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+) -> dict[str, Any]:
     """
     High-throughput authenticated HTTP batch log ingestion endpoint.
     Accepts JSON arrays or newline-delimited JSON (NDJSON).
     """
-    token = await _authenticate_ingest_token(request)
+    token = await _authenticate_ingest_token(request, response)
     token_id = token["id"]
 
     body_bytes = await request.body()
