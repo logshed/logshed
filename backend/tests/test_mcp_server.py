@@ -183,7 +183,8 @@ class TestMCPServer:
         assert context_tool is not None
         context_res = await context_tool.fn(log_id=2, lines=5)
         assert context_res["target_id"] == 2
-        assert len(context_res["logs"]) >= 1
+        assert "logs" not in context_res
+        assert context_res["target_log"]["id"] == 2
 
         # 5. get_recent_alerts
         alerts_tool = server._tool_manager._tools.get("get_recent_alerts")

@@ -72,6 +72,14 @@ class LogListResponse(BaseModel):
     total_capped: bool = False
 
 
+class ExternalLogContextResponse(BaseModel):
+    """Surrounding context lines for the external API (no combined list)."""
+    target_id: int
+    target_log: Optional[LogEntry] = None
+    before_logs: list[LogEntry] = Field(default_factory=list)
+    after_logs: list[LogEntry] = Field(default_factory=list)
+
+
 class LogContextResponse(BaseModel):
     """Surrounding context lines for a given log ID."""
     target_id: int

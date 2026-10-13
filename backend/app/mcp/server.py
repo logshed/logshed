@@ -242,10 +242,6 @@ def create_mcp_server() -> FastMCP:
             _project_log_entry(l, include_raw=include_raw, fields=fields)
             for l in data.get("after_logs", [])
         ]
-        data["logs"] = [
-            _project_log_entry(l, include_raw=include_raw, fields=fields)
-            for l in data.get("logs", [])
-        ]
         return data
 
     @server.tool(

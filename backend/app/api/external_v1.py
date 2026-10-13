@@ -38,7 +38,7 @@ from app.models import (
     ExternalMaintenanceEnableRequest,
     ExternalMaintenanceEnableResponse,
     ExternalMaintenanceStatusResponse,
-    LogContextResponse,
+    ExternalLogContextResponse,
     LogCountResponse,
     LogEntry,
     LogFacetsResponse,
@@ -729,14 +729,14 @@ async def count_logs_v1(
 
 
 
-@router.get("/logs/{log_id}/context", response_model=LogContextResponse, response_model_exclude_none=True)
+@router.get("/logs/{log_id}/context", response_model=ExternalLogContextResponse, response_model_exclude_none=True)
 async def get_log_context_v1(
     log_id: int,
     lines: int = Query(10, ge=1, le=50, description="Context lines before and after target log"),
     same_app: bool = Query(False, description="Restrict context to logs sharing the target's app_name"),
     include_raw: bool = Query(False, description="Include the raw syslog packet in each entry"),
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
-) -> LogContextResponse:
+) -> ExternalLogContextResponse:
     """Fetch symmetrical surrounding context logs before and after a specific log entry."""
     def _fetch(conn):
         cursor = conn.cursor()
@@ -794,20 +794,18 @@ async def get_log_context_v1(
         target_entry = _row_to_log_entry(target_row, include_raw)
         before_entries = [_row_to_log_entry(r, include_raw) for r in before_rows]
         after_entries = [_row_to_log_entry(r, include_raw) for r in after_rows]
-        all_entries = before_entries + [target_entry] + after_entries
 
-        return target_entry, before_entries, after_entries, all_entries
+        return target_entry, before_entries, after_entries
 
-    target_entry, before_entries, after_entries, all_entries = await run_db_query(_fetch)
+    target_entry, before_entries, after_entries = await run_db_query(_fetch)
     if not target_entry:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Log entry {log_id} not found.",
         )
 
-    return LogContextResponse(
+    return ExternalLogContextResponse(
         target_id=log_id,
-        logs=all_entries,
         target_log=target_entry,
         before_logs=before_entries,
         after_logs=after_entries,

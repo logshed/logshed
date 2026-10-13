@@ -271,6 +271,12 @@ def _make_logs_nullable(db_path: Path) -> None:
         conn.commit()
 
 
+def _context_ids(body: dict) -> list[int]:
+    return [e["id"] for e in body["before_logs"]] + [body["target_log"]["id"]] + [
+        e["id"] for e in body["after_logs"]
+    ]
+
+
 def _insert_log(conn, i: int, source_ip: str, source_alias, app_name, severity: int = 6) -> None:
     ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
     conn.execute(
@@ -391,7 +397,7 @@ class TestExternalLogQueryHardening:
         data = res.json()
         assert [e["id"] for e in data["before_logs"]] == [1]
         assert [e["id"] for e in data["after_logs"]] == [5]
-        assert [e["id"] for e in data["logs"]] == [1, 3, 5]
+        assert "logs" not in data
         assert data["target_log"]["source_alias"] == "10.0.0.1"
 
     @pytest.mark.asyncio
@@ -413,14 +419,14 @@ class TestExternalLogQueryHardening:
         res_all = await client.get(
             "/api/v1/logs/3/context", params={"lines": 10}, headers=logs_token_headers
         )
-        assert [e["id"] for e in res_all.json()["logs"]] == [1, 2, 3, 4, 5, 6, 7]
+        assert _context_ids(res_all.json()) == [1, 2, 3, 4, 5, 6, 7]
 
         res_same = await client.get(
             "/api/v1/logs/3/context",
             params={"lines": 10, "same_app": True},
             headers=logs_token_headers,
         )
-        assert [e["id"] for e in res_same.json()["logs"]] == [1, 3, 5]
+        assert _context_ids(res_same.json()) == [1, 3, 5]
 
         res_null_app = await client.get(
             "/api/v1/logs/6/context",
@@ -428,7 +434,7 @@ class TestExternalLogQueryHardening:
             headers=logs_token_headers,
         )
         assert res_null_app.status_code == 200
-        assert [e["id"] for e in res_null_app.json()["logs"]] == [6, 7]
+        assert _context_ids(res_null_app.json()) == [6, 7]
 
     @pytest.mark.asyncio
     async def test_include_raw_defaults_off_for_logs_and_context(
@@ -454,7 +460,7 @@ class TestExternalLogQueryHardening:
         ctx = await client.get("/api/v1/logs/2/context", headers=logs_token_headers)
         body = ctx.json()
         assert "raw" not in body["target_log"]
-        for key in ("logs", "before_logs", "after_logs"):
+        for key in ("before_logs", "after_logs"):
             assert all("raw" not in e for e in body[key])
 
         ctx_raw = await client.get(
@@ -464,7 +470,7 @@ class TestExternalLogQueryHardening:
         )
         body_raw = ctx_raw.json()
         assert body_raw["target_log"]["raw"] == "raw 2"
-        assert all("raw" in e for e in body_raw["logs"])
+        assert all("raw" in e for e in body_raw["before_logs"] + body_raw["after_logs"])
 
     @pytest.mark.asyncio
     async def test_internal_logs_endpoint_still_returns_raw(
