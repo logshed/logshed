@@ -51,6 +51,7 @@ import { AlertRuleModal } from './AlertRuleModal.tsx';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
+import { isMaintenanceItem } from '../../utils/maintenanceHistory.ts';
 import { AlertRulesTab } from './tabs/AlertRulesTab.tsx';
 import { DropRulesTab } from './tabs/DropRulesTab.tsx';
 import { AlertHistoryTab } from './tabs/AlertHistoryTab.tsx';
@@ -945,7 +946,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           isOpen={!!selectedHistoryItem}
           onClose={() => setSelectedHistoryItem(null)}
           title={
-            selectedHistoryItem.rule_name === 'Daily Digest'
+            isMaintenanceItem(selectedHistoryItem)
+              ? 'Maintenance Window Details'
+              : selectedHistoryItem.rule_name === 'Daily Digest'
               ? 'Daily Digest Report'
               : !selectedHistoryItem.rule_id || selectedHistoryItem.rule_name === 'On-Demand Analysis'
               ? 'Historical AI Analysis'

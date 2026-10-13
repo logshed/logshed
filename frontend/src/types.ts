@@ -500,6 +500,15 @@ export interface AlertHistoryItem {
   source_alias?: string | null;
   app_name?: string | null;
   user_context?: string | null;
+  maintenance_session_id?: string | null;
+  maintenance_type?: string | null;
+  maintenance_started_at?: string | null;
+  maintenance_ended_at?: string | null;
+  maintenance_end_reason?: string | null;
+  maintenance_trigger?: string | null;
+  maintenance_target_app?: string | null;
+  maintenance_target_host?: string | null;
+  maintenance_dropped_count?: number | null;
 }
 
 export interface AlertHistoryResponse {

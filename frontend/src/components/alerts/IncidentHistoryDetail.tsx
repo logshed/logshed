@@ -11,12 +11,19 @@ import {
   ChevronRight,
   Info,
   Calendar,
+  Wrench,
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../types.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { useClipboard } from '../../utils/hooks.ts';
 import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
 import { DEFAULT_SYSTEM_PROMPT, buildFullEnvelope } from '../../utils/aiPrompt.ts';
+import {
+  isMaintenanceItem,
+  maintenanceEndLabel,
+  maintenanceTypeLabel,
+  MAINTENANCE_RULE_NAME,
+} from '../../utils/maintenanceHistory.ts';
 
 interface IncidentHistoryDetailProps {
   item: AlertHistoryItem;
@@ -77,6 +84,59 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
     }
     return item.incident_summary;
   }, [item.incident_summary, isDigest]);
+
+  if (isMaintenanceItem(item)) {
+    const isDropMode = item.maintenance_type === 'drop_errors';
+    const inProgress = !item.maintenance_ended_at;
+    const dropped = item.maintenance_dropped_count ?? 0;
+    const rows: { label: string; value: string }[] = [
+      { label: 'Start', value: new Date(item.maintenance_started_at || item.triggered_at).toLocaleString() },
+      {
+        label: item.maintenance_end_reason === 'terminated' ? 'Ended early at' : 'End',
+        value: item.maintenance_ended_at ? new Date(item.maintenance_ended_at).toLocaleString() : 'In progress',
+      },
+      { label: 'Trigger', value: item.maintenance_trigger || 'Unknown' },
+      { label: 'Type', value: maintenanceTypeLabel(item.maintenance_type) },
+      { label: 'Target app', value: item.maintenance_target_app || 'All apps' },
+      { label: 'Target host', value: item.maintenance_target_host || 'All hosts' },
+    ];
+    if (isDropMode) {
+      rows.push({ label: 'Logs dropped', value: dropped.toLocaleString() });
+    }
+
+    return (
+      <div className="space-y-4 font-sans text-xs" data-testid="maintenance-detail">
+        <div className="bg-dark-950 p-4 rounded-lg border border-dark-700 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Wrench className="w-4 h-4 text-sky-400 shrink-0" />
+            <span className="font-semibold text-slate-100 font-mono text-xs">{MAINTENANCE_RULE_NAME}</span>
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 ${
+                inProgress
+                  ? 'text-emerald-300 bg-emerald-950/60 border-emerald-800/60'
+                  : 'text-slate-300 bg-dark-800 border-dark-650'
+              }`}
+            >
+              {maintenanceEndLabel(item)}
+            </span>
+          </div>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 pt-2.5 border-t border-dark-800 text-[11px] font-mono">
+            {rows.map((row) => (
+              <div key={row.label} className="flex items-center justify-between gap-3">
+                <dt className="text-slate-400 text-[10px] uppercase font-semibold">{row.label}</dt>
+                <dd className="text-slate-200 text-right break-all">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+        {!isDropMode && (
+          <p className="text-slate-400 text-[11px]">
+            Logs were stored normally during this window. Only alert notifications were silenced.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 font-sans text-xs">

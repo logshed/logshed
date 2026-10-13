@@ -7,12 +7,19 @@ import {
   Brain,
   Zap,
   Bell,
+  Wrench,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../../types.ts';
 import { extractCleanSummary } from '../../../utils/summary.ts';
 import { formatLocalTimestamp } from '../../../utils/formatters.ts';
+import {
+  isMaintenanceItem,
+  maintenanceSummary,
+  maintenanceTypeLabel,
+  MAINTENANCE_RULE_NAME,
+} from '../../../utils/maintenanceHistory.ts';
 
 export interface AlertHistoryTabProps {
   historyItems: AlertHistoryItem[];
@@ -79,14 +86,19 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
         <div className="divide-y divide-dark-800">
           {historyItems.map((item) => {
             const isDigest = item.rule_name === 'Daily Digest';
+            const isMaintenance = isMaintenanceItem(item);
             const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
             const isAiAlert = !isOnDemand && !isDigest && Boolean(item.ai_enrichment);
-            const displayTarget = isDigest
+            const displayTarget = isMaintenance
+              ? MAINTENANCE_RULE_NAME
+              : isDigest
               ? 'Daily Digest'
               : isOnDemand
               ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand')
               : item.rule_name;
-            const summaryText = extractCleanSummary(item.incident_summary || item.sample_log || '');
+            const summaryText = isMaintenance
+              ? maintenanceSummary(item)
+              : extractCleanSummary(item.incident_summary || item.sample_log || '');
 
             return (
               <div
@@ -97,7 +109,12 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                 {/* Line 1: Type Badge + Target & Timestamp */}
                 <div className="flex items-center justify-between text-xs gap-2">
                   <div className="flex items-center gap-1.5 truncate">
-                    {isDigest ? (
+                    {isMaintenance ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
+                        <Wrench className="w-2.5 h-2.5 shrink-0" />
+                        Maintenance
+                      </span>
+                    ) : isDigest ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
                         <Calendar className="w-2.5 h-2.5 shrink-0" />
                         Daily Digest
@@ -144,7 +161,9 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                       </span>
                     )}
                     <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono">
-                      {item.trigger_count} {isDigest ? 'logs' : isOnDemand ? `log${item.trigger_count === 1 ? '' : 's'}` : `event${item.trigger_count === 1 ? '' : 's'}`}
+                      {isMaintenance
+                        ? maintenanceTypeLabel(item.maintenance_type)
+                        : <>{item.trigger_count} {isDigest ? 'logs' : isOnDemand ? `log${item.trigger_count === 1 ? '' : 's'}` : `event${item.trigger_count === 1 ? '' : 's'}`}</>}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 font-sans shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -183,14 +202,19 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
 
           {historyItems.map((item) => {
             const isDigest = item.rule_name === 'Daily Digest';
+            const isMaintenance = isMaintenanceItem(item);
             const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
             const isAiAlert = !isOnDemand && !isDigest && Boolean(item.ai_enrichment);
-            const displayTarget = isDigest
+            const displayTarget = isMaintenance
+              ? MAINTENANCE_RULE_NAME
+              : isDigest
               ? 'Daily Digest'
               : isOnDemand
               ? (item.source_alias && item.app_name ? `${item.source_alias} • ${item.app_name}` : item.source_alias || item.app_name || 'On-Demand')
               : item.rule_name;
-            const summaryText = extractCleanSummary(item.incident_summary || item.sample_log || '');
+            const summaryText = isMaintenance
+              ? maintenanceSummary(item)
+              : extractCleanSummary(item.incident_summary || item.sample_log || '');
 
             return (
               <div
@@ -202,7 +226,12 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                   {formatLocalTimestamp(item.triggered_at)}
                 </div>
                 <div>
-                  {isDigest ? (
+                  {isMaintenance ? (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
+                      <Wrench className="w-2.5 h-2.5 shrink-0" />
+                      Maintenance
+                    </span>
+                  ) : isDigest ? (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60">
                       <Calendar className="w-2.5 h-2.5 shrink-0" />
                       Daily Digest
