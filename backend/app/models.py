@@ -5,7 +5,7 @@ Pydantic v2 schemas and models for LogShed API.
 from datetime import datetime
 import ipaddress
 from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from app.core.config import DEFAULT_AI_MODEL, get_max_retention_days
 
@@ -70,6 +70,23 @@ class LogListResponse(BaseModel):
     limit: int
     offset: int
     total_capped: bool = False
+
+
+class ExternalLogListResponse(BaseModel):
+    """Keyset-paginated logs response for the external API."""
+    logs: list[LogEntry]
+    total: int
+    limit: int
+    total_capped: bool = False
+    next_cursor: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def _always_include_next_cursor(self, handler):
+        # Responses are serialized with exclude_none (to omit absent raw packets); keep an
+        # explicit null next_cursor so clients can detect the last page.
+        data = handler(self)
+        data["next_cursor"] = self.next_cursor
+        return data
 
 
 class ExternalLogContextResponse(BaseModel):

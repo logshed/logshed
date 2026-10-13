@@ -899,3 +899,34 @@ class TestMCPRedaction:
         desc = server._tool_manager._tools["count_logs"].description
         for token in ("app_name", "level", "source_alias", "host"):
             assert token in desc
+
+
+class TestMCPQueryLogsCursor:
+    @pytest.mark.asyncio
+    async def test_query_logs_pages_with_cursor(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+        query_tool = server._tool_manager._tools.get("query_logs")
+
+        seen: list[int] = []
+        cursor = None
+        for _ in range(50):
+            res = await query_tool.fn(limit=1, cursor=cursor)
+            assert "offset" not in res
+            assert "next_cursor" in res
+            seen.extend(e["id"] for e in res["logs"])
+            cursor = res["next_cursor"]
+            if cursor is None:
+                break
+        assert len(seen) == len(set(seen)) >= 2
+        assert seen == sorted(seen, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_query_logs_rejects_malformed_cursor(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        seed_sample_data(db_path)
+        server = create_mcp_server()
+        query_tool = server._tool_manager._tools.get("query_logs")
+        with pytest.raises(Exception, match="cursor"):
+            await query_tool.fn(limit=5, cursor="garbage!!")

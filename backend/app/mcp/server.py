@@ -162,7 +162,8 @@ def create_mcp_server() -> FastMCP:
             "host filters, severity thresholds, and time bounds. "
             "Returns compact log entries by default (omits redundant raw syslog packets to minimize token usage). "
             "Accepts relative time ('1h', '24h', 'since_midnight') and named severities ('error', 'warning', 'info'). "
-            "Set include_raw=True or specify fields list to customize output."
+            "Set include_raw=True or specify fields list to customize output. "
+            "Results are newest first; when next_cursor is present, pass it back as cursor to fetch the next page."
         ),
     )
     async def query_logs(
@@ -174,6 +175,7 @@ def create_mcp_server() -> FastMCP:
         from_time: Optional[str] = None,
         to_time: Optional[str] = None,
         limit: int = 50,
+        cursor: Optional[str] = None,
         include_raw: bool = False,
         fields: Optional[list[str]] = None,
     ) -> dict[str, Any]:
@@ -194,7 +196,7 @@ def create_mcp_server() -> FastMCP:
             from_=from_time,
             to=to_time,
             limit=clamped_limit,
-            offset=0,
+            cursor=cursor,
             include_raw=_needs_raw(include_raw, fields),
             token={"scopes": ["logs:read"]},
         )

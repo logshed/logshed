@@ -5,6 +5,7 @@ system telemetry and metrics, and log and incident queries.
 """
 
 import asyncio
+import base64
 import datetime
 import json
 import logging
@@ -44,7 +45,7 @@ from app.models import (
     LogCountResponse,
     LogEntry,
     LogFacetsResponse,
-    LogListResponse,
+    ExternalLogListResponse,
     PruneResponse,
     StorageMetricItem,
     SystemAlertState,
@@ -628,7 +629,33 @@ def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
     )
 
 
-@router.get("/logs", response_model=LogListResponse, response_model_exclude_none=True)
+_MAX_CURSOR_LENGTH = 200
+_INVALID_CURSOR_DETAIL = "Invalid cursor. Use the next_cursor value returned by the previous page."
+_TOTAL_CAP = 1001
+
+
+def _encode_log_cursor(timestamp: str, log_id: int) -> str:
+    """Encode a (timestamp, id) position as an opaque URL-safe cursor."""
+    raw = json.dumps([timestamp, log_id], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_log_cursor(cursor: str) -> tuple[str, int]:
+    """Decode a cursor produced by _encode_log_cursor, raising HTTP 422 when malformed."""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        timestamp, log_id = decoded
+        if not isinstance(timestamp, str) or not timestamp:
+            raise ValueError("bad timestamp")
+        if isinstance(log_id, bool) or not isinstance(log_id, int):
+            raise ValueError("bad id")
+        return timestamp, log_id
+    except (ValueError, TypeError, UnicodeError):
+        raise HTTPException(status_code=422, detail=_INVALID_CURSOR_DETAIL)
+
+
+@router.get("/logs", response_model=ExternalLogListResponse, response_model_exclude_none=True)
 async def search_logs_v1(
     query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
     source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
@@ -638,12 +665,17 @@ async def search_logs_v1(
     from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
     to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
     limit: int = Query(50, ge=1, le=1000, description="Max logs to return"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
+    cursor: Optional[str] = Query(
+        None,
+        max_length=_MAX_CURSOR_LENGTH,
+        description="Opaque pagination cursor from the previous page's next_cursor (newest first)",
+    ),
     include_raw: bool = Query(False, description="Include the raw syslog packet in each entry"),
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
-) -> LogListResponse:
-    """Search and filter logs with FTS5 expressions, source and app filters, and time ranges."""
+) -> ExternalLogListResponse:
+    """Search and filter logs (newest first) with keyset pagination via next_cursor."""
     effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
+    cursor_pos = _decode_log_cursor(cursor) if cursor else None
 
     def _query_db(conn):
         where_sql, params = build_log_where_clause(
@@ -656,33 +688,46 @@ async def search_logs_v1(
             to_ts=to,
         )
 
-        # Total count query: same cap as the internal /api/logs endpoint, which avoids
-        # full table scans on broad queries.
-        count_limit = max(1001, offset + limit + 1)
+        # Total: capped count of all rows matching the filters (independent of the cursor
+        # position), which avoids full table scans on broad queries.
+        db_cursor = conn.cursor()
         count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
-        cursor = conn.cursor()
-        cursor.execute(count_sql, {**params, "count_limit": count_limit})
-        total = cursor.fetchone()[0]
+        db_cursor.execute(count_sql, {**params, "count_limit": _TOTAL_CAP})
+        total = db_cursor.fetchone()[0]
+
+        page_params = {**params, "fetch_limit": limit + 1}
+        page_where = where_sql
+        if cursor_pos is not None:
+            keyset_sql = (
+                "(logs.timestamp < :cursor_ts OR (logs.timestamp = :cursor_ts AND logs.id < :cursor_id))"
+            )
+            page_where = f"{where_sql} AND {keyset_sql}" if where_sql else f"WHERE {keyset_sql}"
+            page_params["cursor_ts"], page_params["cursor_id"] = cursor_pos
 
         select_sql = f"""
             SELECT {_log_columns(include_raw)}
             FROM logs
-            {where_sql}
+            {page_where}
             ORDER BY logs.timestamp DESC, logs.id DESC
-            LIMIT :limit OFFSET :offset
+            LIMIT :fetch_limit
         """
-        cursor.execute(select_sql, {**params, "limit": limit, "offset": offset})
-        rows = cursor.fetchall()
-        logs_list = [_row_to_log_entry(r, include_raw) for r in rows]
-        return logs_list, total, bool(total >= count_limit)
+        db_cursor.execute(select_sql, page_params)
+        rows = db_cursor.fetchall()
 
-    logs_out, total_count, total_capped = await run_db_query(_query_db)
-    return LogListResponse(
+        # One extra row signals another page exists
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = _encode_log_cursor(str(rows[-1]["timestamp"]), rows[-1]["id"]) if has_more else None
+        logs_list = [_row_to_log_entry(r, include_raw) for r in rows]
+        return logs_list, total, next_cursor
+
+    logs_out, total_count, next_cursor = await run_db_query(_query_db)
+    return ExternalLogListResponse(
         logs=logs_out,
         total=total_count,
         limit=limit,
-        offset=offset,
-        total_capped=total_capped,
+        total_capped=bool(total_count >= _TOTAL_CAP),
+        next_cursor=next_cursor,
     )
 
 

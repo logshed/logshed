@@ -513,15 +513,15 @@ class TestExternalLogQueryHardening:
         assert small["total"] == 0
         assert small["total_capped"] is False
 
-        # A deep offset raises the cap to offset + limit + 1
-        res_deep = await client.get(
+        # Paging with a cursor keeps the same filter-wide capped total
+        assert data["next_cursor"]
+        res_page2 = await client.get(
             "/api/v1/logs",
-            params={"limit": 5, "offset": 1003},
+            params={"limit": 5, "cursor": data["next_cursor"]},
             headers=logs_token_headers,
         )
-        deep = res_deep.json()
-        assert deep["total"] == 1005
-        assert deep["total_capped"] is False
+        assert res_page2.json()["total"] == 1001
+        assert res_page2.json()["total_capped"] is True
 
     @pytest.mark.asyncio
     async def test_context_missing_log_returns_404(
@@ -602,3 +602,186 @@ class TestExternalRedaction:
         assert "hunter2secret" not in item["sample_log"]
         assert "hunter2secret" not in item["incident_summary"]
         assert "[REDACTED]" in item["sample_log"]
+
+
+def _insert_log_at(conn, ts: str, app_name: str = "web", message: str = "msg", severity: int = 6, raw: str = "raw") -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+        VALUES (?, ?, '10.0.0.1', 'host-a', ?, 1, ?, ?, ?)
+        """,
+        (ts, ts, app_name, severity, message, raw),
+    )
+    return cur.lastrowid
+
+
+class TestKeysetPagination:
+    async def _collect(self, client: AsyncClient, headers: dict, **params) -> tuple[list[dict], int]:
+        entries: list[dict] = []
+        pages = 0
+        cursor = None
+        while True:
+            query = dict(params)
+            if cursor:
+                query["cursor"] = cursor
+            res = await client.get("/api/v1/logs", params=query, headers=headers)
+            assert res.status_code == 200, res.text
+            body = res.json()
+            assert "next_cursor" in body
+            entries.extend(body["logs"])
+            pages += 1
+            cursor = body["next_cursor"]
+            if cursor is None:
+                return entries, pages
+            assert pages < 100
+
+    @pytest.mark.asyncio
+    async def test_pages_cover_all_rows_once_in_order_including_timestamp_ties(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            # Groups of rows share a timestamp so the id tie-break is exercised across page edges
+            for group in range(5):
+                ts = (_BASE_TS + timedelta(seconds=group)).isoformat()
+                for _ in range(5):
+                    _insert_log_at(conn, ts)
+            conn.commit()
+            expected = [
+                r[0] for r in conn.execute("SELECT id FROM logs ORDER BY timestamp DESC, id DESC")
+            ]
+
+        entries, pages = await self._collect(client, logs_token_headers, limit=4)
+        assert [e["id"] for e in entries] == expected
+        assert pages == 7  # 25 rows / 4 per page
+
+    @pytest.mark.asyncio
+    async def test_last_page_has_explicit_null_cursor_and_exact_page_boundary(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            for i in range(1, 7):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        # Exactly one full page: no further page, so next_cursor is null (not absent)
+        res = await client.get("/api/v1/logs", params={"limit": 6}, headers=logs_token_headers)
+        body = res.json()
+        assert len(body["logs"]) == 6
+        assert "next_cursor" in body and body["next_cursor"] is None
+
+        res = await client.get("/api/v1/logs", params={"limit": 5}, headers=logs_token_headers)
+        assert res.json()["next_cursor"]
+
+        # Empty result
+        res = await client.get(
+            "/api/v1/logs", params={"app_name": "nope"}, headers=logs_token_headers
+        )
+        assert res.json()["logs"] == []
+        assert res.json()["next_cursor"] is None
+        assert "offset" not in res.json()
+
+    @pytest.mark.asyncio
+    async def test_cursor_works_with_filters_include_raw_and_redaction(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            for i in range(1, 7):
+                ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
+                _insert_log_at(
+                    conn,
+                    ts,
+                    app_name="web" if i % 2 else "db",
+                    message=f"connect with password=hunter{i}",
+                    raw=f"<13> connect with password=hunter{i}",
+                )
+            conn.commit()
+
+        entries, _ = await self._collect(
+            client, logs_token_headers, app_name="web", limit=2, include_raw=True
+        )
+        assert len(entries) == 3
+        assert {e["app_name"] for e in entries} == {"web"}
+        for e in entries:
+            assert "raw" in e
+            assert "hunter" not in e["message"]
+            assert "hunter" not in e["raw"]
+
+    @pytest.mark.asyncio
+    async def test_newer_rows_do_not_shift_later_pages(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        with get_connection(db_path) as conn:
+            for i in range(1, 11):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        first = (await client.get("/api/v1/logs", params={"limit": 4}, headers=logs_token_headers)).json()
+        with get_connection(db_path) as conn:
+            for i in range(100, 105):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.commit()
+
+        second = (
+            await client.get(
+                "/api/v1/logs",
+                params={"limit": 4, "cursor": first["next_cursor"]},
+                headers=logs_token_headers,
+            )
+        ).json()
+        assert [e["id"] for e in first["logs"]] == [10, 9, 8, 7]
+        assert [e["id"] for e in second["logs"]] == [6, 5, 4, 3]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "cursor",
+        [
+            "!!!not-base64!!!",
+            "bm90LWpzb24",                       # "not-json"
+            "eyJhIjoxfQ",                        # {"a":1}
+            "WyIyMDI2LTAxLTAxIl0",               # ["2026-01-01"]
+            "WyIyMDI2LTAxLTAxIiwidHdvIl0",       # ["2026-01-01","two"]
+            "WyIyMDI2LTAxLTAxIix0cnVlXQ",        # ["2026-01-01",true]
+            "WzEsMl0",                           # [1,2]
+            "x" * 201,
+        ],
+    )
+    async def test_malformed_cursor_returns_422(
+        self, client: AsyncClient, logs_token_headers: dict, cursor: str
+    ):
+        res = await client.get("/api/v1/logs", params={"cursor": cursor}, headers=logs_token_headers)
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_offset_is_not_part_of_the_external_api(self, client: AsyncClient):
+        res = await client.get("/openapi.json")
+        params = {p["name"] for p in res.json()["paths"]["/api/v1/logs"]["get"]["parameters"]}
+        assert "cursor" in params
+        assert "offset" not in params
+
+    def test_keyset_query_uses_an_index_without_a_full_sort(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        run_migrations(db_path)
+        with get_connection(db_path) as conn:
+            for i in range(1, 200):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web", severity=i % 8)
+            conn.commit()
+            ts = (_BASE_TS + timedelta(seconds=100)).isoformat()
+            plan = conn.execute(
+                """
+                EXPLAIN QUERY PLAN
+                SELECT id FROM logs
+                WHERE (logs.timestamp < :ts OR (logs.timestamp = :ts AND logs.id < :id))
+                ORDER BY logs.timestamp DESC, logs.id DESC
+                LIMIT 51
+                """,
+                {"ts": ts, "id": 100},
+            ).fetchall()
+        details = " | ".join(str(r[-1]) for r in plan)
+        assert "SEARCH logs USING" in details and "idx_logs_time_sev" in details
+        assert "SCAN logs" not in details
+        # Only ties on the same timestamp are sorted ("LAST TERM"), never the whole result set
+        assert "TEMP B-TREE FOR ORDER BY" not in details
