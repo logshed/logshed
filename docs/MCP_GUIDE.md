@@ -11,7 +11,7 @@ This guide explains how to connect AI assistants (such as Claude Desktop, Cursor
 - [Quick Start Setup (3 Steps)](#quick-start-setup-3-steps)
 - [Client Configuration Guides](#client-configuration-guides)
   - [Claude Desktop (Remote Server / Proxmox / NAS)](#claude-desktop-remote-server--proxmox--nas)
-  - [Cursor / Windsurf / Antigravity (Remote SSE)](#cursor--windsurf--antigravity-remote-sse)
+  - [Cursor / Windsurf / Antigravity (Remote Streamable HTTP & SSE)](#cursor--windsurf--antigravity-remote-streamable-http--sse)
   - [Claude Desktop (Same-Machine Docker)](#claude-desktop-same-machine-docker)
 - [Available MCP Tools Reference](#available-mcp-tools-reference)
 - [Built-In Resources & Prompts](#built-in-resources--prompts)
@@ -222,12 +222,12 @@ LogShed registers eight dedicated tools with your AI assistant:
 |---|---|---|
 | `get_system_metrics` | None | Retrieves live homelab telemetry: current log ingestion rate, 1-hour and 24-hour error totals, top error applications and hosts, active alert rule states, disk usage, and maintenance status. |
 | `list_services` | None | Returns distinct application names (`app_name`) and host sources (`source_alias` / `source_ip`) currently sending logs to LogShed, along with host-to-app relationship maps. |
-| `count_logs` | `query`, `apps`, `sources`, `severity`, `from_time`, `to_time`, `group_by` | Counts logs matching filters with optional grouping (`severity`, `app`, `source`). Fast and token-efficient for checking error volume and trends without fetching full payloads. Supports relative time (`"1h"`, `"24h"`, `"since_midnight"`) and named severity (`"error"`, `"warning"`). |
-| `query_logs` | `query`, `apps`, `sources`, `severity`, `severity_max`, `from_time`, `to_time`, `limit`, `cursor`, `include_raw`, `fields` | Searches logs using SQLite FTS5 syntax. Compact by default (omits redundant raw syslog packets to minimize token usage). Results are newest first; when the response contains `next_cursor`, pass it back as `cursor` to fetch the next page (`null` on the last page). Supports field projection (`fields`), named severities (`"error"`, `"warning"`, `"info"`), and relative time bounds (`"1h"`, `"24h"`, `"since_midnight"`). |
+| `count_logs` | `query`, `apps`, `sources`, `severity`, `severity_max`, `from_time`, `to_time`, `group_by`, `group_limit` | Counts logs matching filters with optional grouping (`severity`, `app`, `source`; aliases `level`, `app_name`, `source_alias`, `host`). Fast and token-efficient for checking error volume and trends without fetching full payloads. App and source grouping returns at most `group_limit` groups (default 25, max 200) and sets `truncated` when more exist, while `total` still counts every matching log. Supports relative time (`"1h"`, `"24h"`, `"since_midnight"`) and named severity (`"error"`, `"warning"`). |
+| `query_logs` | `query`, `apps`, `sources`, `severity`, `severity_max`, `from_time`, `to_time`, `limit`, `cursor`, `include_raw`, `fields` | Searches logs using SQLite FTS5 syntax. Compact by default (omits redundant raw syslog packets, facility and receive time to reduce token usage). `limit` defaults to 50 (max 200). Results are newest first; when the response contains `next_cursor`, pass it back as `cursor` to fetch the next page (`null` on the last page). `total` counts all matching logs up to 1001 (`total_capped` is true at the cap). There is no `offset` parameter. Supports field projection (`fields`), named severities (`"error"`, `"warning"`, `"info"`), and relative time bounds (`"1h"`, `"24h"`, `"since_midnight"`). |
 | `get_log_context` | `log_id`, `lines`, `same_app`, `include_raw`, `fields` | Fetches surrounding chronological log entries (up to 50 lines before and after) around a specific log ID to inspect complete stack traces and request flows. Compact by default. |
-| `get_recent_alerts` | `limit` | Retrieves historical incident firing records, triggering sample log lines, and previous AI root-cause summaries. Text is redacted. Maintenance windows appear as `Maintenance Window` entries with `maintenance_*` start, end, trigger, type, target, and dropped-count fields. |
+| `get_recent_alerts` | `limit` (default 10, max 50) | Retrieves historical incident firing records (newest first), triggering sample log lines, and previous AI root-cause summaries. Text is redacted. Maintenance windows appear as `Maintenance Window` entries with `maintenance_*` start, end, trigger, type, target, and dropped-count fields. |
 | `enable_maintenance` | `duration_minutes`, `reason`, `log_handling`, `target_app`, `target_host` | Starts an on-demand maintenance window to suppress notifications or drop error chatter during planned restarts. Returns a tracking `session_id`. At most 20 sessions can be active at once, and `target_app` and `target_host` are limited to 255 characters. |
-| `disable_maintenance` | `session_id` | Deactivates an active maintenance session (or all active sessions if `session_id` is omitted). |
+| `disable_maintenance` | `session_id` | Deactivates an active maintenance session (or all active sessions if `session_id` is omitted). Returns `terminated_count` and `remaining_active_count`. |
 
 
 ---
@@ -239,14 +239,16 @@ In addition to tools, LogShed exposes read-only MCP resources and investigation 
 ### MCP Resources
 - `logshed://system/metrics`: Live JSON snapshot of current server telemetry and error distributions.
 - `logshed://services`: Real-time directory of active applications and host sources.
-- `logshed://alerts/active`: Active alert states, maintenance window schedules, and recent incident triggers.
+- `logshed://alerts/active`: Current maintenance state (`maintenance_active`, `maintenance_until`, `log_handling`) and the 5 most recent incident history entries.
 
 ### MCP Prompts
-- `investigate_incident`: A structured diagnostic workflow that guides the AI agent through a systematic 4-step triage sequence:
+- `investigate_incident` (optional `app_name`, `time_window` default `"1h"`): A structured diagnostic workflow that guides the AI agent through a systematic 5-step triage sequence:
   1. Querying system metrics and error velocity.
-  2. Inspecting recent alert firings.
-  3. Searching error logs with SQLite FTS5.
-  4. Fetching surrounding log context to identify root causes and remediation steps.
+  2. Searching error logs with SQLite FTS5.
+  3. Fetching surrounding log context for the most critical or recurring errors.
+  4. Checking related alert firings.
+  5. Reporting the root cause with recommended remediation steps.
+- `safe_service_upgrade` (`service_name`, optional `duration_minutes` default 30): A deployment workflow that checks the service's recent logs, starts a `drop_errors` maintenance window targeted at the service, waits for the upgrade, verifies clean startup logs, and ends the maintenance window.
 
 ---
 
@@ -254,7 +256,7 @@ In addition to tools, LogShed exposes read-only MCP resources and investigation 
 
 LogShed applies strict guardrails to keep your homelab secure when interacting with external AI assistants:
 
-1. **Scoped Permissions**: MCP endpoints require a token with the `AI Assistant / MCP` preset (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`). The assistant cannot perform administrative actions such as purging historical logs, dropping tables, or altering user passwords.
+1. **Scoped Permissions**: MCP endpoints require a token whose scopes cover the `AI Assistant / MCP` preset (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`); other tokens get `403`. No MCP tool can perform administrative actions such as purging historical logs, dropping tables, or altering user passwords.
 2. **Master Runtime Switch**: The MCP server is disabled by default (`enable_mcp: false`). When turned off, the MCP endpoints immediately return `403 Forbidden` and reject all connections.
 3. **Sliding Rate Limiter**: All programmatic requests are rate-limited per token (120 requests per minute) to prevent runaway loops or accidental request floods.
 4. **Token Security**: Tokens are stored as SHA-256 hashes in SQLite. The raw secret is shown once upon creation and cannot be retrieved again from the database.
