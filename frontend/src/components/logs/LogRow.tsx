@@ -124,7 +124,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       data-index={index}
       onClick={() => onClick(log)}
       style={style}
-      className={`log-row grid grid-cols-[36px_165px_65px_130px_130px_1fr_60px] px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
+      className={`log-row grid grid-cols-[36px_120px_65px_130px_130px_1fr_60px] px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
         isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
       }${isHovered ? ' bg-dark-900/60' : ''}`}
     >

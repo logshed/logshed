@@ -12,6 +12,7 @@ vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize?: () => number }) => {
     const size = estimateSize ? estimateSize() : 28;
     return {
+      measure: () => {},
       getTotalSize: () => count * size,
       getVirtualItems: () =>
         Array.from({ length: count }, (_, index) => ({

@@ -1133,6 +1133,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     overscan: isMobile ? 12 : 25,
   });
 
+  // Cached row sizes come from the previous layout's estimate; re-measure when
+  // crossing the mobile breakpoint so cards don't overlap at 28px offsets.
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [isMobile, rowVirtualizer]);
+
   const virtualItems = rowVirtualizer.getVirtualItems();
   const lastVirtualItem = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1] : null;
 
@@ -1576,7 +1582,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       <div className="flex-1 relative overflow-hidden flex flex-col">
         {/* Table Header (Desktop only) */}
         {!isMobile && (
-          <div className="grid bg-dark-950 border-b border-dark-700 border-l-2 border-l-transparent text-slate-400 text-[11px] font-mono font-semibold grid-cols-[36px_165px_65px_130px_130px_1fr_60px] px-3 py-1.5 select-none items-center">
+          <div className="grid bg-dark-950 border-b border-dark-700 border-l-2 border-l-transparent text-slate-400 text-[11px] font-mono font-semibold grid-cols-[36px_120px_65px_130px_130px_1fr_60px] px-3 py-1.5 select-none items-center">
             <div className="flex items-center justify-center">
               <button
                 onClick={selectedLogIds.size > 0 ? deselectAllLogs : selectAllLogs}
