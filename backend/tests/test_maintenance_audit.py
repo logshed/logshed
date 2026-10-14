@@ -366,6 +366,26 @@ class TestExposure:
         assert res.json()["active"] is False
 
     @pytest.mark.asyncio
+    async def test_stopping_unknown_or_ended_session_returns_404(
+        self, client: AsyncClient, auth_headers: dict, db_path: Path
+    ):
+        with get_connection(db_path) as conn:
+            session_id = ms.create_maintenance_session(conn, duration_minutes=30)["session_id"]
+
+        res = await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
+        assert res.status_code == 200
+
+        # Already ended, unknown, and the hidden POST alias all report 404
+        res = await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
+        assert res.status_code == 404
+        res = await client.delete("/api/alerts/maintenance/sessions/does-not-exist", headers=auth_headers)
+        assert res.status_code == 404
+        res = await client.post(
+            "/api/alerts/maintenance/sessions/does-not-exist/disable", headers=auth_headers
+        )
+        assert res.status_code == 404
+
+    @pytest.mark.asyncio
     async def test_ui_and_mcp_trigger_labels(self, client: AsyncClient, auth_headers: dict, db_path: Path):
         until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
         res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)

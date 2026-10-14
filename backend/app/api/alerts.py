@@ -153,13 +153,19 @@ async def disable_single_maintenance_session(
     session_id: str,
     user: dict = Depends(get_current_user),
 ) -> MaintenanceWindowResponse:
-    """Terminate an active maintenance session by session ID."""
+    """Terminate an active maintenance session by session ID (404 if unknown or already ended)."""
     from app.services.maintenance_service import disable_maintenance_sessions, get_maintenance_status
 
     def _disable(conn):
-        disable_maintenance_sessions(conn, session_id=session_id)
+        terminated, _remaining = disable_maintenance_sessions(conn, session_id=session_id)
+        return terminated
 
-    await run_db_query(_disable)
+    # Raise after the query so the expired-session sweep inside disable_maintenance_sessions still commits
+    if not session_id.strip() or await run_db_query(_disable) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active maintenance session with ID {session_id}.",
+        )
     return await run_db_query(get_maintenance_status)
 
 
