@@ -3,7 +3,9 @@
 Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
 
 ## 1. Route Versioning & Mirror Router
-The internal Web UI uses the unversioned `/api/*` prefix and is authenticated by the session cookie. The external programmatic routes (token-authenticated ingestion, token verification, maintenance, metrics, prune and vacuum, log queries, alert history) and the MCP transport are served under `/api/v1/*`. The cookie-authenticated internal routers (auth, logs, settings, aliases, drop rules, saved views, notifications, alerts, system, AI) are NOT mirrored under `/api/v1/*`; requests to those paths return `404`. Use the canonical `/api/*` paths for them.
+The internal Web UI uses the unversioned `/api/*` prefix and is authenticated by the session cookie. The external programmatic routes (token-authenticated ingestion, token verification, maintenance, metrics, prune and vacuum, log queries, alert history) and the MCP transport are served under `/api/v1/*`. The cookie-authenticated internal routers (auth, logs, settings, aliases, drop rules, saved views, notifications, alerts, system, AI, API tokens, Docker hosts) are NOT mirrored under `/api/v1/*`; requests to those paths return `404`. Use the canonical `/api/*` paths for them.
+
+Every internal route requires the session cookie and returns `401` without a valid one, except `POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/status`, `GET /api/health` and `GET /api/system/version` (without `refresh`). Mutating internal calls also need `X-Requested-With` (otherwise `403`, see `docs/spec/security.md`), and FastAPI validation failures on query parameters or bodies return `422`. A few routes keep hidden aliases that are left out of the OpenAPI document: `GET /api/alerts/rules/export`, `GET /api/alerts/rules/{rule_id}/export`, `POST /api/alerts/rules/import`, `POST /api/alerts/maintenance/sessions/{session_id}/disable` and `PUT /api/alerts/maintenance/schedules`.
 
 The OpenAPI document (`/openapi.json`, `/docs`) declares an HTTP Bearer security scheme on the token-authenticated routes so `/docs` offers an Authorize button. Token-authenticated REST and ingestion responses return `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers, and `429` responses (including MCP) add `Retry-After` (see `docs/spec/security.md`). Every token-authenticated route can return `401` (missing, unknown or expired token), `403` (insufficient scope) and `429` (rate limit); FastAPI validation failures on query parameters or bodies return `422`.
 
@@ -11,6 +13,7 @@ The OpenAPI document (`/openapi.json`, `/docs`) declares an HTTP Bearer security
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:
 - `logs`: Array of `LogEntry` records matching query filters.
 - `total`: Total count of matching records up to the evaluation ceiling.
+- `limit` and `offset`: The page size and offset that were applied (`limit` defaults to 100, maximum 1000).
 - `total_capped`: Boolean flag indicating whether the total count was capped at the evaluation limit (`max(1001, offset + limit + 1)`). To prevent full-table scan bottlenecks on vast datasets under broad filters, SQLite limits the count calculation. When `total_capped` is true, the user interface displays a count indicator like `1,000+` or `(capped)` rather than executing expensive exhaustive table scans.
 
 ## 3. Endpoint Directory
@@ -18,93 +21,94 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | Method | Endpoint | Purpose | Payload / Parameters | Response Model | Status Codes |
 | --- | --- | --- | --- | --- | --- |
 | **Authentication** | | | | | |
-| `POST` | `/api/auth/setup` | First-time admin creation (returns `403` if already configured) | `{"password": "..."}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `403` |
+| `POST` | `/api/auth/setup` | First-time admin creation; also starts a session (returns `403` if already configured) | `{"password": "..."}` (8-128 characters) | `MessageResponse` (`{"status": "ok"}`) | `200`, `403`, `422` |
 | `POST` | `/api/auth/login` | Session login (rate-limited) | `{"password": "..."}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `401`, `429` |
 | `POST` | `/api/auth/logout` | Invalidate session cookie | None | `MessageResponse` (`{"status": "ok"}`) | `200` |
 | `GET` | `/api/auth/status` | Read setup status and current session authentication state | None | `AuthStatusResponse` (`{"setup_required": bool, "authenticated": bool}`) | `200` |
-| `POST` | `/api/auth/password` | Update admin password for authenticated session | `{"current_password": "...", "new_password": "..."}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `400`, `401` |
+| `POST` | `/api/auth/password` | Update admin password for authenticated session | `{"current_password": "...", "new_password": "..."}` (new password 8-128 characters) | `MessageResponse` (`{"status": "ok"}`) | `200`, `400`, `401`, `422` |
 | **Log Management & Deletion** | | | | | |
-| `GET` | `/api/logs` | Search & filter logs. Supports FTS5 query syntax, source/app filtering, severity threshold (`severity_max` 0-7), ISO datetime range, limit, offset. Returns `logs`, `total`, and `total_capped` | `query`, `source` (multi), `app_name` (multi), `severity_max`, `from`, `to`, `limit`, `offset` | `LogListResponse` | `200` |
-| `GET` | `/api/logs/stream` | Real-time Server-Sent Events (SSE) streaming incoming log entries | `severity_max`, `source`, `app_name` | Server-Sent Events (`text/event-stream`) | `200` |
-| `GET` | `/api/logs/facets` | Fetch all distinct sources, apps, and their mappings | None | `FacetsResponse` | `200` |
-| `GET` | `/api/logs/{id}/context` | Fetch surrounding context lines symmetrically around target log | `lines` (default 10), `same_app: bool` (default `false`) | `ContextResponse` | `200`, `404` |
-| `DELETE` | `/api/logs/{id}` | Delete a single log record by primary key ID | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `POST` | `/api/logs/delete` | Batch targeted deletion of logs matching filter criteria or specific IDs (requires confirmation parameters or `delete_all: true`) | `{"log_ids": [...], "query": "...", "source": [...], "app_name": [...], "severity_max": ..., "from": "...", "to": "...", "delete_all": bool}` | `LogDeleteResponse` (`{"deleted_count": int}`) | `200`, `400` |
-| `POST` | `/api/logs/delete/preview` | Calculate count of logs matching deletion criteria without deleting them | Same payload as `/api/logs/delete` | `LogDeletePreviewResponse` (`{"match_count": int}`) | `200`, `400` |
+| `GET` | `/api/logs` | Search & filter logs. Supports FTS5 query syntax, source/app filtering, severity threshold (`severity_max` 0-7), ISO datetime range, limit, offset. Returns `logs`, `total`, `limit`, `offset` and `total_capped` (unredacted) | `query`, `source` (multi), `app_name` (multi), `severity_max`, `from`, `to` (ISO-8601 only), `limit` (1-1000, default 100), `offset` | `LogListResponse` | `200`, `422` |
+| `GET` | `/api/logs/stream` | Real-time Server-Sent Events (SSE) streaming incoming log entries | `severity_max`, `source` (multi), `app_name` (multi), `max_events` (optional, closes the stream after that many events) | Server-Sent Events (`text/event-stream`) | `200` |
+| `GET` | `/api/logs/facets` | Fetch all distinct sources, apps, and their mappings | None | `LogFacetsResponse` | `200` |
+| `GET` | `/api/logs/{id}/context` | Fetch surrounding context lines symmetrically around target log (unredacted; includes the combined `logs` list used by the UI) | `lines` (1-100, default 10), `same_app: bool` (default `false`) | `LogContextResponse` (`target_id`, `logs`, `target_log`, `before_logs`, `after_logs`) | `200`, `404` |
+| `DELETE` | `/api/logs/{id}` | Delete a single log record by primary key ID | None | `LogDeleteResponse` (`{"status": "ok", "deleted_count": int, "message": "..."}`) | `200`, `404` |
+| `POST` | `/api/logs/delete` | Batch targeted deletion of logs matching filter criteria or specific IDs (requires at least one criterion or `delete_all: true`) | `{"log_ids": [...], "query": "...", "sources": [...], "apps": [...], "severity_max": ..., "from": "...", "to": "...", "delete_all": bool}` | `LogDeleteResponse` (`{"status": "ok", "deleted_count": int, "message": "..."}`) | `200`, `400` |
+| `POST` | `/api/logs/delete/preview` | Calculate count of logs matching deletion criteria without deleting them | Same payload as `/api/logs/delete` | `LogDeletePreviewResponse` (`{"matched_count": int}`) | `200`, `400` |
 | **Alert Rules & Incident History** | | | | | |
-| `GET` | `/api/alerts/rules` | List all configured alert rules | None | `list[AlertRule]` | `200` |
-| `POST` | `/api/alerts/rules` | Create a new alert rule | `{"name": "...", "rule_type": "...", "channel_id": ..., "filter_app": "...", "filter_severity": ..., "match_pattern": "...", "threshold_count": 1, "window_seconds": 60, "cooldown_seconds": 300, "ai_enrichment": false, "is_enabled": true}` | `AlertRule` | `201`, `400` |
-| `GET` | `/api/alerts/rules/{rule_id}` | Retrieve a single alert rule by ID | None | `AlertRule` | `200`, `404` |
-| `PUT` | `/api/alerts/rules/{rule_id}` | Update an existing alert rule | Partial or complete rule fields | `AlertRule` | `200`, `404` |
-| `PUT` | `/api/alerts/rules/reorder` | Atomically update evaluation and display ordering of alert rules | `{"rule_ids": [...]}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `400` |
+| `GET` | `/api/alerts/rules` | List all configured alert rules | None | `list[AlertRuleResponse]` | `200` |
+| `POST` | `/api/alerts/rules` | Create a new alert rule (`rule_type` is `threshold`, `pattern` or `rate`) | `{"name": "...", "rule_type": "...", "channel_id": ..., "filter_app": "...", "filter_severity": ..., "match_pattern": "...", "threshold_count": 1, "window_seconds": 60, "cooldown_seconds": 300, "ai_enrichment": false, "is_enabled": true}` | `AlertRuleResponse` | `201`, `400`, `422` |
+| `GET` | `/api/alerts/rules/{rule_id}` | Retrieve a single alert rule by ID | None | `AlertRuleResponse` | `200`, `404` |
+| `PUT` | `/api/alerts/rules/{rule_id}` | Update an existing alert rule | Partial or complete rule fields, plus optional `reset_cooldown: bool` | `AlertRuleResponse` | `200`, `400`, `404`, `422` |
+| `PUT` | `/api/alerts/rules/reorder` | Atomically update evaluation and display ordering of alert rules (the list must contain every rule ID exactly once) | `{"rule_ids": [...]}` | `list[AlertRuleResponse]` (in the new order) | `200`, `400` |
 | `DELETE` | `/api/alerts/rules/{rule_id}` | Delete an alert rule | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `POST` | `/api/alerts/test` | Test alert rule match pattern against historical logs (dry-run) | `{"rule_type": "...", "match_pattern": "...", "filter_app": "...", "filter_severity": ..., "window_seconds": ..., "threshold_count": ..., "sample_size": ...}` | `AlertTestResponse` | `200` |
-| `GET` | `/api/alerts/export` | Export all alert rules as JSON bundle | None | `AlertRulesExportResponse` (`{"rules": [...]}`) | `200` |
-| `GET` | `/api/alerts/{rule_id}/export` | Export a single alert rule as JSON | None | `AlertRule` | `200`, `404` |
-| `POST` | `/api/alerts/import` | Import alert rules from JSON payload | `{"rules": [...], "collision_strategy": "skip" \| "overwrite" \| "rename"}` | `AlertRulesImportResponse` | `200`, `400` |
-| `GET` | `/api/alerts/presets` | List built-in security canary alert presets (e.g., SSH brute force, OOM killer, sudo escalation) | None | `list[AlertPreset]` | `200` |
-| `POST` | `/api/alerts/presets/{preset_id}/install` | Install a built-in alert preset | `{"channel_id": ..., "is_enabled": true}` | `AlertRule` | `200`, `404` |
-| `GET` | `/api/alerts/history` | Fetch paginated incident firing history with AI summaries, full prompt envelopes, model identifiers, and token breakdowns, plus maintenance window rows (`rule_name` "Maintenance Window") with `maintenance_*` audit fields | Query params: `rule_id`, `limit`, `offset` | `IncidentHistoryResponse` | `200` |
+| `POST` | `/api/alerts/test` | Test a candidate rule's filters, match pattern and IP extraction against a sample log line (dry-run) | `{"rule_type": "...", "filter_app": "...", "filter_severity": ..., "match_pattern": "...", "sample_message": "...", "sample_app": "...", "sample_severity": 6}` | `AlertTestResponse` (`{"matched": bool, "extracted_ip": "...", "error": "..."}`) | `200`, `422` |
+| `GET` | `/api/alerts/export` | Export all alert rules as a downloadable JSON bundle | None | `AlertRuleExportBundle` (`{"version": "1", "exported_at": "...", "alert_rules": [...]}`) | `200` |
+| `GET` | `/api/alerts/{rule_id}/export` | Export a single alert rule as JSON | None | `AlertRuleExportSingle` (`{"version": "1", "exported_at": "...", "alert_rule": {...}}`) | `200`, `404` |
+| `POST` | `/api/alerts/import` | Import alert rules from an export bundle, a single exported rule, a bare rule object, or a list; rules whose name matches an existing rule (case-insensitive) are skipped | `{"alert_rules": [...]}`, `{"alert_rule": {...}}`, a rule object, or `[...]` | `AlertRuleImportResponse` (`{"imported": int, "skipped": int, "errors": [...]}`) | `200` |
+| `GET` | `/api/alerts/presets` | List built-in security canary alert presets (e.g., SSH brute force, OOM killer, sudo escalation) | None | `list[AlertPresetResponse]` | `200` |
+| `POST` | `/api/alerts/presets/{preset_id}/install` | Install a built-in alert preset | `{"channel_id": ...}` (optional) | `AlertRuleResponse` | `201`, `400`, `404` |
+| `GET` | `/api/alerts/history` | Fetch paginated incident firing history with AI summaries, full prompt envelopes, model identifiers, and token breakdowns, plus maintenance window rows (`rule_name` "Maintenance Window") with `maintenance_*` audit fields (unredacted) | Query params: `rule_id`, `limit` (1-200, default 50), `offset` | `AlertHistoryListResponse` (`{"items": [...], "total": int, "limit": int, "offset": int}`) | `200` |
 | `DELETE` | `/api/alerts/history/{history_id}` | Delete a single incident history record | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `DELETE` | `/api/alerts/history` | Clear all incident firing history records | None | `MessageResponse` (`{"status": "ok"}`) | `200` |
-| `GET` | `/api/alerts/maintenance` | Retrieve current alert maintenance window status and recurring schedules | None | `MaintenanceStatusResponse` | `200` |
-| `POST` | `/api/alerts/maintenance` | Activate or clear active on-demand maintenance window | `{"until": "<ISO-8601 or null>"}` | `MaintenanceStatusResponse` | `200` |
-| `POST` | `/api/alerts/maintenance/schedules` | Update recurring maintenance schedules | `{"schedules": [{"day_of_week": 0, "start_time": "02:00", "end_time": "04:00", "is_enabled": true}]}` | `MaintenanceStatusResponse` | `200`, `400` |
+| `DELETE` | `/api/alerts/history` | Clear all incident firing history records and all AI audit records | None | `MessageResponse` (`{"status": "ok", "detail": "Cleared N alert history record(s)."}`) | `200` |
+| `GET` | `/api/alerts/maintenance` | Retrieve current alert maintenance window status, active sessions and recurring schedules | None | `MaintenanceWindowResponse` | `200` |
+| `POST` | `/api/alerts/maintenance` | Start a Web UI maintenance session ending at `until` (recorded with trigger `UI`), or end every active session when `until` is null | `{"until": "<ISO-8601 or null>"}` | `MaintenanceWindowResponse` | `200`, `409` (active session cap of 20 reached), `422` (invalid datetime) |
+| `DELETE` | `/api/alerts/maintenance/sessions/{session_id}` | End one active maintenance session by ID | None | `MaintenanceWindowResponse` | `200` |
+| `POST` | `/api/alerts/maintenance/schedules` | Replace the recurring maintenance schedules (daily, weekly or monthly) | `{"schedules": [{"name": "...", "enabled": true, "recurrence": "weekly", "start_time": "02:00", "duration_minutes": 60, "day_of_week": 0, "day_of_month": 1}]}` (`duration_minutes` 1-1440, `day_of_week` 0 = Sunday) | `MaintenanceWindowResponse` | `200`, `422` |
 | **Ingestion Drop Rules** | | | | | |
-| `GET` | `/api/drop_rules` | List all configured drop rules with drop counters | None | `list[DropRule]` | `200` |
-| `POST` | `/api/drop_rules` | Create a new drop rule | `{"name": "...", "source_pattern": "...", "app_pattern": "...", "message_pattern": "...", "is_regex": false, "severity_threshold": ..., "is_enabled": true}` | `DropRule` | `201`, `400` |
-| `PUT` | `/api/drop_rules/{rule_id}` | Update an existing drop rule | Partial or complete drop rule fields | `DropRule` | `200`, `404` |
-| `PUT` | `/api/drop_rules/reorder` | Atomically update evaluation and display ordering of drop rules | `{"rule_ids": [...]}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `400` |
-| `DELETE` | `/api/drop_rules/{rule_id}` | Delete a drop rule | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `POST` | `/api/drop_rules/{rule_id}/reset` | Reset dropped counter for a specific drop rule to zero | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `POST` | `/api/drop_rules/test` | Dry-run test a drop rule pattern against recent logs | `{"source_pattern": "...", "app_pattern": "...", "message_pattern": "...", "is_regex": false, "severity_threshold": ..., "sample_size": ...}` | `DropRuleTestResponse` | `200` |
-| `GET` | `/api/drop_rules/export` | Export all drop rules as JSON bundle | None | `DropRulesExportResponse` (`{"rules": [...]}`) | `200` |
-| `GET` | `/api/drop_rules/{rule_id}/export` | Export a single drop rule as JSON | None | `DropRule` | `200`, `404` |
-| `POST` | `/api/drop_rules/import` | Import drop rules from JSON payload | `{"rules": [...], "collision_strategy": "skip" \| "overwrite" \| "rename"}` | `DropRulesImportResponse` | `200`, `400` |
-| `GET` | `/api/drop_rules/presets` | List built-in drop rule presets | None | `list[DropRulePreset]` | `200` |
-| `POST` | `/api/drop_rules/presets/{preset_id}/install` | Install a built-in drop preset | None | `DropRule` | `200`, `404` |
+| `GET` | `/api/drop-rules` | List all configured drop rules with drop counters | None | `list[DropRuleResponse]` | `200` |
+| `POST` | `/api/drop-rules` | Create a new drop rule (at least one of source, app, message pattern or severity threshold is required) | `{"name": "...", "source_pattern": "...", "app_pattern": "...", "message_pattern": "...", "is_regex": false, "severity_threshold": ..., "is_enabled": true}` | `DropRuleResponse` | `201`, `400`, `422` |
+| `PUT` | `/api/drop-rules/{rule_id}` | Update an existing drop rule | Partial or complete drop rule fields, plus optional `reset_counter: bool` | `DropRuleResponse` | `200`, `400`, `404`, `422` |
+| `PUT` | `/api/drop-rules/reorder` | Atomically update evaluation and display ordering of drop rules (the list must contain every rule ID exactly once) | `{"rule_ids": [...]}` | `list[DropRuleResponse]` (in the new order) | `200`, `400` |
+| `DELETE` | `/api/drop-rules/{rule_id}` | Delete a drop rule | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
+| `POST` | `/api/drop-rules/{rule_id}/reset` | Reset dropped counter for a specific drop rule to zero | None | `DropRuleResponse` | `200`, `404` |
+| `POST` | `/api/drop-rules/test` | Dry-run test a candidate drop rule against a sample log line | `{"source_pattern": "...", "app_pattern": "...", "message_pattern": "...", "is_regex": false, "severity_threshold": ..., "sample_message": "...", "sample_source": "...", "sample_app": "...", "sample_severity": ...}` | `DropRuleTestResponse` (`{"matched": bool, "error": "..."}`) | `200`, `422` |
+| `GET` | `/api/drop-rules/export` | Export all drop rules as a downloadable JSON bundle | None | `DropRuleExportBundle` (`{"version": "1", "exported_at": "...", "drop_rules": [...]}`) | `200` |
+| `GET` | `/api/drop-rules/{rule_id}/export` | Export a single drop rule as JSON | None | `DropRuleExportSingle` (`{"version": "1", "exported_at": "...", "drop_rule": {...}}`) | `200`, `404` |
+| `POST` | `/api/drop-rules/import` | Import drop rules from an export bundle, a single exported rule, a bare rule object, or a list; rules matching an existing source, app and message pattern (case-insensitive) are skipped | `{"drop_rules": [...]}`, `{"drop_rule": {...}}`, a rule object, or `[...]` | `DropRuleImportResponse` (`{"imported": int, "skipped": int, "errors": [...]}`) | `200` |
+| `GET` | `/api/drop-rules/presets` | List built-in drop rule presets | None | `list[DropPresetResponse]` | `200` |
+| `POST` | `/api/drop-rules/presets/{preset_id}/install` | Install a built-in drop preset | None | `DropRuleResponse` | `201`, `404` |
 | **Notification Channels & Daily Digest** | | | | | |
-| `GET` | `/api/notifications/channels` | List configured Apprise notification channels | None | `list[NotificationChannel]` | `200` |
-| `POST` | `/api/notifications/channels` | Create a new notification channel | `{"name": "...", "url": "...", "is_enabled": true}` | `NotificationChannel` | `201`, `400` |
-| `PUT` | `/api/notifications/channels/{channel_id}` | Update an existing notification channel | `{"name": "...", "url": "...", "is_enabled": true}` | `NotificationChannel` | `200`, `404` |
+| `GET` | `/api/notifications/channels` | List configured Apprise notification channels | None | `list[NotificationChannelResponse]` | `200` |
+| `POST` | `/api/notifications/channels` | Create a new notification channel | `{"name": "...", "url": "...", "is_enabled": true}` | `NotificationChannelResponse` | `201`, `400`, `422` |
+| `PUT` | `/api/notifications/channels/{channel_id}` | Update an existing notification channel | `{"name": "...", "url": "...", "is_enabled": true}` (all optional) | `NotificationChannelResponse` | `200`, `400`, `404`, `422` |
 | `DELETE` | `/api/notifications/channels/{channel_id}` | Delete a notification channel | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `POST` | `/api/notifications/test` | Test dispatch a notification to a specific URL or channel ID | `{"url": "..."}` or `{"channel_id": ...}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `400` |
-| `POST` | `/api/notifications/digest/send` | Trigger on-demand dispatch of the 24-hour daily analytical digest | None | `MessageResponse` (`{"status": "ok"}`) | `200` |
+| `POST` | `/api/notifications/test` | Test dispatch a notification to a specific URL or channel ID | `{"url": "..."}` or `{"channel_id": ...}` | `NotificationTestResponse` (`{"success": bool, "message": "..."}`) | `200`, `400`, `404`, `500` |
+| `POST` | `/api/notifications/digest/send` | Trigger on-demand dispatch of the 24-hour daily analytical digest | None | `DailyDigestRunResponse` | `200` |
 | **Saved Views** | | | | | |
-| `GET` | `/api/saved_views` | List all saved search and filter views | None | `list[SavedView]` | `200` |
-| `POST` | `/api/saved_views` | Create a new saved view | `{"name": "...", "query_params": "...", "is_pinned": false}` | `SavedView` | `201`, `400` |
-| `PUT` | `/api/saved_views/{view_id}` | Update a saved view (rename, update query parameters, pin/unpin) | `{"name": "...", "query_params": "...", "is_pinned": bool}` | `SavedView` | `200`, `404` |
-| `DELETE` | `/api/saved_views/{view_id}` | Delete a saved view | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
+| `GET` | `/api/saved-views` | List all saved search and filter views | None | `list[SavedViewResponse]` | `200` |
+| `POST` | `/api/saved-views` | Create a new saved view | `{"name": "...", "query_params": {...}, "is_pinned": false}` (`query_params` is a JSON object) | `SavedViewResponse` | `201`, `422` |
+| `PUT` | `/api/saved-views/{view_id}` | Update a saved view (rename, update query parameters, pin/unpin) | `{"name": "...", "query_params": {...}, "is_pinned": bool}` (all optional) | `SavedViewResponse` | `200`, `404`, `422` |
+| `DELETE` | `/api/saved-views/{view_id}` | Delete a saved view | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
 | **AI Analysis Engine** | | | | | |
-| `POST` | `/api/ai/preview` | Generate redacted preview and token estimate | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "client_timezone": "...", "client_utc_offset_minutes": ...}` | `AIPreviewResponse` | `200`, `400` |
-| `POST` | `/api/ai/diagnose` | Execute user-confirmed AI diagnosis (rate-limited) | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "system_prompt_override": "...", "provider": "...", "model": "...", "fallback_models": ["..."], "client_timezone": "...", "client_utc_offset_minutes": ...}` | `AIDiagnoseResponse` | `200`, `400`, `429`, `500` |
-| `POST` | `/api/ai/diagnose/stream` | Stream live diagnosis stages, failover events, and tokens via SSE | Same payload as `/api/ai/diagnose` | Server-Sent Events (`text/event-stream`) | `200`, `400`, `429` |
-| `GET` | `/api/ai/models` | Discover available models from configured or requested provider (cached in SQLite for 24h) | Query params: `provider`, `refresh: bool` | `AIModelsResponse` | `200` |
-| `POST` | `/api/ai/models/refresh` | Force immediate live refresh and cache update of available AI models from the provider | None | `AIModelsResponse` | `200` |
+| `POST` | `/api/ai/preview` | Generate redacted preview and token estimate | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "client_timezone": "...", "client_utc_offset_minutes": ...}` (`log_ids` 1-200 entries) | `AiPreviewResponse` | `200`, `422` |
+| `POST` | `/api/ai/diagnose` | Execute user-confirmed AI diagnosis (rate-limited) | `{"log_ids": [101, 102], "user_context": "...", "prompt_override": "...", "system_prompt_override": "...", "provider": "...", "model": "...", "fallback_models": ["..."], "client_timezone": "...", "client_utc_offset_minutes": ...}` | `AiDiagnosisResponse` | `200`, `400`, `422`, `429`, `502` (provider failure), `504` (timeout) |
+| `POST` | `/api/ai/diagnose/stream` | Stream live diagnosis stages, failover events, and tokens via SSE | Same payload as `/api/ai/diagnose` | Server-Sent Events (`text/event-stream`) | `200`, `400`, `422`, `429` |
+| `GET` | `/api/ai/models` | Read available models for the configured or requested provider from the SQLite cache (read-only; never calls the provider) | Query params: `provider` (`gemini`, `openai`, `anthropic`, `openai_compatible`) | `AiModelsResponse` | `200` |
+| `POST` | `/api/ai/models/refresh` | Force immediate live refresh and cache update of available AI models from the provider, optionally with an unsaved key | Query params: `provider`; optional body `{"api_key": "...", "base_url": "..."}` | `AiModelsResponse` | `200` |
 | **Host Aliases** | | | | | |
-| `GET` | `/api/aliases` | List IP-to-Host mappings | None | `list[HostAlias]` | `200` |
-| `POST` | `/api/aliases` | Upsert host alias mapping (retroactively updates existing logs) | `{"ip": "...", "alias": "...", "notes": "..."}` | `HostAlias` | `200`, `400` |
+| `GET` | `/api/aliases` | List IP-to-Host mappings | None | `list[HostAliasResponse]` | `200` |
+| `POST` | `/api/aliases` | Upsert host alias mapping (retroactively updates existing logs) | `{"ip": "...", "alias": "...", "notes": "..."}` (`ip` must be a valid IPv4 or IPv6 address, or `docker`) | `HostAliasResponse` | `200`, `422` |
 | `DELETE` | `/api/aliases/{ip}` | Remove host alias (reverts existing logs to raw IP) | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
 | **Settings** | | | | | |
 | `GET` | `/api/settings` | Read application configuration (keys masked) and container timezone metadata | None | `SettingsResponse` | `200` |
-| `POST` | `/api/settings` | Update settings (encrypted at rest) | `{"ai_provider": "...", "ai_model": "...", "ai_fallback_models": "...", "ai_api_key": "...", "ai_base_url": "...", "ai_system_prompt": "...", "retention_days": 14, "internal_log_level": "WARNING", "check_for_updates": true}` | `SettingsResponse` | `200`, `400` |
+| `POST` | `/api/settings` | Update settings (sensitive values encrypted at rest; masked `********` values keep the stored secret). Only the fields sent are changed; see `SettingsUpdateRequest` in `backend/app/models.py` for the full list | `{"ai_provider": "...", "ai_model": "...", "ai_fallback_models": "...", "ai_api_key": "...", "ai_base_url": "...", "ai_system_prompt": "...", "retention_days": 14, "internal_log_level": "WARNING", "check_for_updates": true, "enable_mcp": false, ...}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `422` (for example `retention_days` outside 1 to `MAX_RETENTION_DAYS`) |
 | **System & Maintenance** | | | | | |
-| `GET` | `/api/health` | Container healthcheck (unauthenticated returns minimal `{"status": "ok"}`; authenticated returns DB status, queue depth, dropped count, ingest rate) | None | `HealthResponse` | `200`, `503` |
+| `GET` | `/api/health` | Container healthcheck (unauthenticated returns minimal `{"status": "ok"}` or `{"status": "degraded"}`; authenticated returns DB status, queue depth, dropped count, ingest rate) | None | `HealthResponse` | `200`, `503` |
 | `POST` | `/api/maintenance/prune` | Trigger manual retention purge of logs and alert history (including linked AI audit records), compaction, and metrics snapshot (shares one in-progress lock with vacuum and the PruneWorker) | None | `PruneResponse` (`deleted_logs` counts logs only; `deleted_history` and `deleted_ai_audit` are reported separately) | `200`, `409`, `500` |
 | `GET` | `/api/maintenance/prune/preview` | Read-only preview of what a prune would delete right now: logs (indexed ones only), alert history split by kind (alerts, on-demand analyses, digests, maintenance windows), AI audit records, and old storage metrics, plus when the next daily cleanup runs when known | `retention_days` (optional, 1 to `MAX_RETENTION_DAYS`, default: saved value) | `PrunePreviewResponse` | `200`, `401`, `422` |
-| `POST` | `/api/system/vacuum` | Execute SQLite database VACUUM to reclaim disk space after large deletions (shares one in-progress lock with prune and the PruneWorker, requires free disk headroom; failures return a generic message and are logged) | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `400`, `409`, `500` |
-| `GET` | `/api/system/storage` | Fetch disk usage (log total cached for up to 15 seconds) & 30-day history | None | `StorageMetricsResponse` (`{"db_size_bytes": ..., "disk_free_bytes": ..., "disk_total_bytes": ..., "history": [...]}`) | `200` |
-| `GET` | `/api/system/version` | Read installed version and check GHCR for stable release updates | Query params: `refresh: bool` | `VersionResponse` | `200` |
+| `POST` | `/api/system/vacuum` | Execute SQLite database VACUUM to reclaim disk space after large deletions (shares one in-progress lock with prune and the PruneWorker, requires free disk headroom; failures return a generic message and are logged) | None | `VacuumResponse` (`previous_size_bytes`, `new_size_bytes`, `reclaimed_bytes`, `metrics`) | `200`, `400`, `409`, `500` |
+| `GET` | `/api/system/storage` | Fetch disk usage (log total cached for up to 15 seconds) & 30-day history | None | `StorageOverviewResponse` (`{"db_size_bytes": ..., "disk_free_bytes": ..., "disk_total_bytes": ..., "total_logs_count": ..., "history": [...]}`) | `200` |
+| `GET` | `/api/system/version` | Read installed version and check GHCR for stable release updates (no session needed unless `refresh` is true) | Query params: `refresh: bool` | `VersionResponse` | `200`, `401` (`refresh=true` without a session) |
 | **API Token Management (Web UI)** | | | | | |
 | `GET` | `/api/tokens` | List all created API tokens with masked identifiers, scopes, and expiration | None | `list[ApiTokenListItem]` | `200`, `401` |
 | `POST` | `/api/tokens` | Create a new API token and receive one-time raw Bearer secret | `{"name": "...", "scopes": [...], "expires_days": 90}` | `ApiTokenCreateResponse` | `200`, `401`, `422` (1 to 20 scopes from the allow-list in `docs/spec/security.md`) |
 | `DELETE` | `/api/tokens/{id}` | Revoke an API token immediately | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `401`, `404` |
 | **Docker Hosts Management** | | | | | |
 | `GET` | `/api/docker/hosts` | List configured Docker hosts with live connection health and container metrics | None | `list[DockerEndpointResponse]` | `200`, `401` |
-| `POST` | `/api/docker/hosts` | Create a new Docker endpoint (client private keys encrypted with Fernet) | `{"name": "...", "url": "...", "source_alias": "...", "enabled": true, "tls_enabled": false, ...}` | `DockerEndpointResponse` | `200`, `401`, `409` |
-| `PUT` | `/api/docker/hosts/{id}` | Update endpoint configuration or toggle enabled state | Partial or complete host fields | `DockerEndpointResponse` | `200`, `400`, `401`, `404` |
-| `DELETE` | `/api/docker/hosts/{id}` | Remove a Docker endpoint and stop its worker (primary socket ID 1 protected) | None | `MessageResponse` (`{"status": "ok", "message": "..."}`) | `200`, `400`, `401`, `404` |
-| `POST` | `/api/docker/hosts/test` | Test connectivity to a Docker daemon without saving | `{"url": "...", "tls_enabled": bool, "ca_cert": "...", "endpoint_id": int, ...}` | `DockerEndpointTestResponse` | `200`, `401` |
+| `POST` | `/api/docker/hosts` | Create a new Docker endpoint (client private keys encrypted with Fernet) | `{"name": "...", "url": "...", "source_alias": "...", "enabled": true, "tls_enabled": false, "exclude_containers": "...", ...}` | `DockerEndpointResponse` | `200`, `401`, `409`, `422` (invalid URL scheme) |
+| `PUT` | `/api/docker/hosts/{id}` | Update endpoint configuration or toggle enabled state | Partial or complete host fields | `DockerEndpointResponse` | `200`, `400`, `401`, `404`, `422` |
+| `DELETE` | `/api/docker/hosts/{id}` | Remove a Docker endpoint and stop its worker (primary socket ID 1 protected) | None | `{"status": "ok", "message": "..."}` | `200`, `400`, `401`, `404` |
+| `POST` | `/api/docker/hosts/test` | Test connectivity to a Docker daemon without saving | `{"url": "...", "tls_enabled": bool, "ca_cert": "...", "endpoint_id": int, ...}` | `DockerEndpointTestResponse` (`{"success": bool, "version": "...", "latency_ms": ..., "error": "..."}`) | `200`, `401`, `422` |
 | **External Programmatic API v1 (`Authorization: Bearer ls_live_...`)** | | | | | |
 | `POST` | `/api/v1/ingest` | High-throughput authenticated HTTP batch log ingestion for edge shippers (JSON array, single object, or NDJSON) | Batch array or NDJSON payload (`logs:write`) | `{"status": "ok", "ingested": int}` | `200`, `400` (invalid JSON), `401`, `403`, `429` |
 | `GET` | `/api/v1/auth/verify` | Verify token validity and inspect granted scopes | None (any valid token) | `ApiTokenVerifyResponse` (`{"valid": true, "name": "...", "scopes": [...], "expires_at": "<ISO-8601 or null>"}`) | `200`, `401`, `429` |
