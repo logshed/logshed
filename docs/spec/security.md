@@ -23,7 +23,7 @@ LogShed provides self-contained native authentication and protection controls wi
 * Subsequent credential updates require authenticated password rotation (`POST /api/auth/password`) or the CLI rescue utility.
 
 ## 4. Session Security & Cookie Handling
-* **Session Cookie Architecture:** Cryptographically signed, HTTP-only, `SameSite=Lax` session cookies (`logshed_session` / `session`).
+* **Session Cookie Architecture:** Cryptographically signed, HTTP-only, `SameSite=Lax` session cookie named `session`, set at login and at first-run setup.
 * **Browser Storage Baseline:** No JWTs or sensitive authentication tokens stored in browser `localStorage` or `sessionStorage`.
 * **Payload Structure & Encryption:** Session tokens contain user ID, issue timestamp (`iat`), expiration timestamp (`exp`), and issuer claim (`iss="logshed"`). Tokens are encrypted using Fernet (AES-128-CBC + HMAC-SHA256).
 * **Session Lifetime:** Default duration is 7 days (604,800 seconds).
@@ -33,7 +33,7 @@ LogShed provides self-contained native authentication and protection controls wi
   * `Path`: `/`
   * `Secure`: Automatically set when requests arrive over HTTPS, when forwarded through trusted reverse proxies (`X-Forwarded-Proto: https`), or when enforced via the `cookie_secure` configuration setting (`COOKIE_SECURE=true`).
 
-### 5. Cross-Site Request Forgery (CSRF) Protection
+## 5. Cross-Site Request Forgery (CSRF) Protection
 * **Header Requirement:** Mutating API endpoints (`POST`, `PUT`, `DELETE`, `PATCH`) under `/api/` require the custom `X-Requested-With` header (e.g. `X-Requested-With: XMLHttpRequest`).
 * **Validation Middleware:** Inbound mutating requests lacking the `X-Requested-With` header are rejected immediately with `403 Forbidden` (`detail: "Forbidden: missing required X-Requested-With header."`).
 * **Exemptions:** Safe read-only methods (`GET`, `HEAD`, `OPTIONS`), container health check endpoints (`/api/health`), Server-Sent Events streams (`/api/logs/stream`), requests bearing an `Authorization: Bearer` header, and the MCP transport routes under `/api/v1/mcp` (including `/sse` and `/messages`). The MCP routes are exempt because they authenticate by API token only (Bearer, raw `Authorization` value, or `?token=`) and never accept the session cookie, so there is no ambient browser credential for a cross-site request to abuse. Requests without a valid token are rejected with `401` (the only exception is `POST /api/v1/mcp/messages`, which also accepts the unguessable 128-bit `session_id` of an already authenticated SSE session). There is no other path-based exemption for `/api/v1/*`: cookie-authenticated mutating calls to those paths (for example `POST /api/v1/maintenance/disable` from the Web UI) must also send `X-Requested-With`.
