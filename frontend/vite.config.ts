@@ -24,5 +24,15 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    // Pre-bundle large many-module libraries once instead of importing ~1,500 icon modules per test file
+    // (cuts collect time by ~70%). Adding react-dom and the testing libraries gained little and broke a test.
+    deps: {
+      optimizer: {
+        web: {
+          enabled: true,
+          include: ['lucide-react', 'recharts'],
+        },
+      },
+    },
   },
 });
