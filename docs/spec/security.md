@@ -65,14 +65,14 @@ LogShed provides self-contained native authentication and protection controls wi
 * **Scope-Based Permissions:**
   * Supported individual scopes:
     - `logs:write`: Push log batches through the high-throughput HTTP ingestion endpoint (`POST /api/v1/ingest`).
-    - `maintenance:write`: Start, update, and terminate on-demand maintenance windows and sessions (`POST /api/v1/maintenance/enable`, `POST /api/v1/maintenance/disable`).
+    - `maintenance:write`: Start and terminate on-demand maintenance windows and sessions (`POST /api/v1/maintenance/enable`, `POST /api/v1/maintenance/disable`).
     - `maintenance:read`: Inspect active maintenance window status and session details (`GET /api/v1/maintenance/status`).
-    - `logs:read`: Execute FTS5 log queries, fetch surrounding log context, and inspect source/application facets (`GET /api/v1/logs`, `GET /api/v1/logs/{id}/context`, `GET /api/v1/logs/facets`).
+    - `logs:read`: Execute FTS5 log queries and counts, fetch surrounding log context, and inspect source/application facets (`GET /api/v1/logs`, `GET /api/v1/logs/count`, `GET /api/v1/logs/{id}/context`, `GET /api/v1/logs/facets`).
     - `alerts:read`: Review incident history firings and trigger audit summaries (`GET /api/v1/alerts/history`).
     - `system:read`: Read telemetry metrics, sliding alert state, and cached error distributions (`GET /api/v1/system/metrics`).
     - `system:write`: Trigger storage retention pruning and database compaction (`POST /api/v1/system/prune`, `POST /api/v1/system/vacuum`).
     - `*`: Full administrative wildcard matching all existing and future programmatic endpoints.
-  * **Scope Validation on Creation:** `POST /api/tokens` requires between 1 and 20 scopes. Each entry must be `*`, one of the individual scopes above, or a namespace wildcard `<category>:*` for a known category (`logs`, `alerts`, `system`, `maintenance`). Unknown entries are rejected with `422` and duplicates are removed. The allow-list is defined in `backend/app/core/api_tokens.py`.
+  * **Scope Validation on Creation:** `POST /api/tokens` requires between 1 and 20 scopes. Each entry must be `*`, one of the individual scopes above, or a namespace wildcard `<category>:*` for a known category (`logs`, `alerts`, `system`, `maintenance`). Unknown entries are rejected with `422` and duplicates are removed. A successful create returns `200` with the raw token. The allow-list is defined in `backend/app/core/api_tokens.py`.
   * **Verification Order:** All Bearer verification paths (standard routes, `POST /api/v1/ingest`, MCP) share one function: hash lookup, expiry, scope check, rate limit, throttled `last_used_at` update. Revoking a token also clears its rate limit window, `last_used_at` throttle entry, and ingestion cache entry.
   * **Preset Bundles:**
     - **Maintenance Only** (`["maintenance:write", "maintenance:read"]`): Intended for home automation runners, Proxmox update hooks, or backup scripts that silence notifications or drop errors during host restarts.
@@ -84,8 +84,8 @@ LogShed provides self-contained native authentication and protection controls wi
 * **Response Redaction:** All external API responses that carry log or AI diagnosis text (`/api/v1/logs`, `/api/v1/logs/{id}/context`, `/api/v1/alerts/history`, and every MCP tool) pass `message`, `raw`, alert samples, and AI summaries through `redactor.py` before leaving the server. Internal UI endpoints stay unredacted for authenticated sessions. Redaction is best-effort and may not catch every secret.
 * **Exempt from CSRF:** Bearer token requests are cryptographically bound to HTTP Authorization headers and immune to browser CSRF.
 * **Model Context Protocol (MCP) Authentication:**
-  * Streamable HTTP connections (`/mcp` and `/api/v1/mcp`), network SSE connections (`GET /api/v1/mcp/sse`), and JSON-RPC message calls (`POST /api/v1/mcp/messages`) require authentication with a valid token possessing the `AI Assistant / MCP` scope bundle (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) or wildcard `*`.
-  * Tokens can be supplied via standard `Authorization: Bearer <token>` or `API_ACCESS_TOKEN` headers/environment variables (supported by `mcp-proxy`).
+  * Streamable HTTP connections (`/mcp` and `/api/v1/mcp`), network SSE connections (`GET /api/v1/mcp/sse`), and JSON-RPC message calls (`POST /api/v1/mcp/messages`) require authentication with a valid token whose scopes cover the `AI Assistant / MCP` bundle (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`), for example that preset, matching namespace wildcards, or `*`. Missing scopes return `403`.
+  * Tokens can be supplied as `Authorization: Bearer <token>`, as a raw token in the `Authorization` header, or as a `?token=` query parameter. `mcp-proxy` reads the token from its `API_ACCESS_TOKEN` environment variable and sends it as a Bearer header.
   * Sessions establish verified mapping between client streams and message dispatchers with automatic expiration and cleanup.
 
 ## 9. CLI Password Recovery
