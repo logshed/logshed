@@ -99,7 +99,9 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           setErrorMsg(err.message || 'Could not check what a lower retention period would delete. Nothing was saved.');
           return;
         }
-        if (result.total > 0) {
+        // Old metric samples are removed at every cleanup regardless of retention, so
+        // they alone do not justify interrupting a save.
+        if (result.total - result.metrics > 0) {
           setPreview(result);
           setPreviewMode('save');
           return;

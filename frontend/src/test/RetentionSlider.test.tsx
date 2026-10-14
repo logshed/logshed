@@ -298,6 +298,34 @@ describe('RetentionSlider Component', () => {
     expect(screen.queryByTestId('prune-preview-list')).not.toBeInTheDocument();
   });
 
+  it('saves without a modal when only old metric samples would be deleted', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue({ ...emptyPreview, metrics: 5, total: 5 });
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+
+    await waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(7);
+    });
+    expect(screen.queryByTestId('prune-preview-list')).not.toBeInTheDocument();
+  });
+
+  it('still shows the modal, listing metric samples, when logs would also be deleted', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue({ ...emptyPreview, logs: 3, metrics: 5, total: 8 });
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('prune-preview-list')).toBeInTheDocument();
+    });
+    expect(onSaveMock).not.toHaveBeenCalled();
+  });
+
   it('saves without checking a preview when raising retention', async () => {
     const previewSpy = vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(dataPreview);
     const onSaveMock = vi.fn().mockResolvedValue(undefined);
