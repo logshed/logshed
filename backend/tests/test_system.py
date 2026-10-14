@@ -573,11 +573,21 @@ class TestRetentionAndPruneWorker:
         assert any("PRAGMA wal_checkpoint(TRUNCATE)" in s for s in executed_statements)
         assert not any("PRAGMA wal_checkpoint(PASSIVE)" in s for s in executed_statements)
 
-    def test_wal_checkpoint_active_reader_lock_real_sqlite(self, tmp_path: Path):
+    def test_wal_checkpoint_active_reader_lock_real_sqlite(self, tmp_path: Path, monkeypatch):
         """
         Real SQLite test: an active reader holding a read transaction during execute_prune
         is handled gracefully without raising sqlite3.OperationalError or crashing.
         """
+        import app.services.retention as retention_mod
+
+        def _short_busy_connection(path):
+            # Production busy_timeout is 5s; the lock is held for the whole call, so shorten the wait
+            conn = get_connection(path)
+            conn.execute("PRAGMA busy_timeout=100;")
+            return conn
+
+        monkeypatch.setattr(retention_mod, "get_connection", _short_busy_connection)
+
         db_file = tmp_path / "logs.db"
         run_migrations(db_file)
 

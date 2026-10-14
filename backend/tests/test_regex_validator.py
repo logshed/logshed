@@ -75,6 +75,16 @@ class TestRegexValidator:
         assert safe_regex_search(r"(info|warn|error)+", "warn: disk full") is True
         assert safe_regex_search(r"(a|b)+", "cccaabbbccc") is True
 
+    def test_safe_regex_search_precompiled_pattern(self):
+        """Verify precompiled patterns match directly without string validation."""
+        pat = re.compile(r"error:\s*\d+", re.IGNORECASE)
+        assert safe_regex_search(pat, "System error: 500 occurred") is True
+        assert safe_regex_search(pat, "All systems operational") is False
+
+    def test_safe_regex_search_rejects_dangerous_string_pattern(self):
+        """Verify a catastrophic backtracking string pattern is rejected and returns False."""
+        assert safe_regex_search(r"(a+)+$", "a" * 21 + "!") is False
+
     def test_safe_regex_search_empty_input(self):
         """Verify safe_regex_search handles empty string inputs safely."""
         assert safe_regex_search(r"abc", "") is False

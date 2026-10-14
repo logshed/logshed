@@ -866,6 +866,9 @@ class QueueConsumer:
                     raise
             except Exception as e:
                 if not self._running or self._stopping:
+                    if shutdown_retries == 0:
+                        # Shutdown may begin mid-retry; drop the steady-state backoff for a fast drain
+                        backoff = 0.05
                     shutdown_retries += 1
                     if shutdown_retries >= max_shutdown_retries:
                         logger.error(

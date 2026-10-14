@@ -26,6 +26,11 @@ def assembler() -> KeyedMultilineAssembler:
     return KeyedMultilineAssembler(queue)
 
 
+async def _run_until_cancelled(*args, **kwargs):
+    """Stand-in for DockerTailer.run that idles until the pool cancels it."""
+    await asyncio.sleep(10)
+
+
 class TestDockerCollectorPool:
     """Test suite for DockerCollectorPool lifecycle and management."""
 
@@ -103,7 +108,7 @@ class TestDockerCollectorPool:
         pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
 
         with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
-            mock_run.side_effect = asyncio.sleep(10)
+            mock_run.side_effect = _run_until_cancelled
             await pool.start()
             assert len(pool.get_tailers()) == 1
 
@@ -141,7 +146,7 @@ class TestDockerCollectorPool:
         pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
 
         with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
-            mock_run.side_effect = asyncio.sleep(10)
+            mock_run.side_effect = _run_until_cancelled
             await pool.start()
             assert len(pool.get_tailers()) == 1
 

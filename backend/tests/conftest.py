@@ -3,6 +3,8 @@ Pytest configuration and global fixtures for LogShed backend test suite.
 """
 
 import pytest
+from argon2 import PasswordHasher
+from app.core import security
 from app.core.config import invalidate_settings_cache
 from app.api.deps import reset_all_db_connections
 from app.api.ingest import clear_ingest_token_cache
@@ -31,3 +33,13 @@ def auto_reset_settings_cache(monkeypatch):
     invalidate_settings_cache()
     clear_ingest_token_cache()
     reset_all_db_connections()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def fast_password_hasher():
+    """Use minimal Argon2id cost parameters in tests; production cost adds ~125ms per hash.
+    Verification reads parameters from the hash itself, so production-cost hashes still verify."""
+    original = security._password_hasher
+    security._password_hasher = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
+    yield
+    security._password_hasher = original

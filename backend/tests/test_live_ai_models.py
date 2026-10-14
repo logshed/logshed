@@ -6,6 +6,8 @@ from app.services.ai_engine import fetch_available_models, is_text_generation_mo
 from google import genai
 from openai import AsyncOpenAI
 
+pytestmark = pytest.mark.e2e
+
 
 def load_env_keys():
     keys = {}

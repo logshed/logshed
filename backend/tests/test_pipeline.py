@@ -532,7 +532,7 @@ class TestQueueConsumer:
 
         consumer_task = asyncio.create_task(consumer.run())
 
-        # Wait for batch deadline (2.0s) and first failure
+        # Wait for the first insert failure
         for _ in range(35):
             if attempts >= 1:
                 break
