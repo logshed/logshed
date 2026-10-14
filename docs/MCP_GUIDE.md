@@ -255,7 +255,7 @@ In addition to tools, LogShed exposes read-only MCP resources and investigation 
 LogShed applies strict guardrails to keep your homelab secure when interacting with external AI assistants:
 
 1. **Scoped Permissions**: MCP endpoints require a token with the `AI Assistant / MCP` preset (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`). The assistant cannot perform administrative actions such as purging historical logs, dropping tables, or altering user passwords.
-2. **Master Runtime Switch**: The MCP server is disabled by default (`enable_mcp: false`). When turned off, the endpoints immediately return `503 Service Unavailable` and reject all connections.
+2. **Master Runtime Switch**: The MCP server is disabled by default (`enable_mcp: false`). When turned off, the MCP endpoints immediately return `403 Forbidden` and reject all connections.
 3. **Sliding Rate Limiter**: All programmatic requests are rate-limited per token (120 requests per minute) to prevent runaway loops or accidental request floods.
 4. **Token Security**: Tokens are stored as SHA-256 hashes in SQLite. The raw secret is shown once upon creation and cannot be retrieved again from the database.
 5. **Session Isolation**: Each network SSE connection is paired with an isolated in-memory session manager that cleans up immediately upon client disconnect or container shutdown.

@@ -120,9 +120,9 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `GET` | `/api/v1/logs/facets` | Fetch host aliases, applications, and source-app mapping | None (`logs:read`) | `LogFacetsResponse` | `200`, `401`, `403` |
 | `GET` | `/api/v1/alerts/history` | Fetch incident history firings and trigger summaries | Query params: `rule_id`, `limit`, `offset` (`alerts:read`) | `list[AlertHistoryItem]` (maintenance window rows carry `maintenance_session_id`, `maintenance_type`, `maintenance_started_at`, `maintenance_ended_at`, `maintenance_end_reason`, `maintenance_trigger`, `maintenance_target_app`, `maintenance_target_host`, and `maintenance_dropped_count`; `sample_log`, `incident_summary`, prompt and response text, and `user_context` pass through the redactor) | `200`, `401`, `403` |
 | **Model Context Protocol (MCP) (`Authorization: Bearer ls_live_...`)** | | | | | |
-| `GET` / `POST` | `/mcp` | Streamable HTTP endpoint for modern Model Context Protocol clients | Session initialization and JSON-RPC payloads (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) | `application/json` or SSE stream | `200`, `400`, `401`, `403`, `503` |
-| `GET` | `/api/v1/mcp/sse` | Establish persistent Server-Sent Events stream for Model Context Protocol sessions with keep-alive pings | None (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) | `text/event-stream` with session endpoint | `200`, `401`, `403`, `503` |
-| `POST` | `/api/v1/mcp/messages` | Handle incoming JSON-RPC 2.0 requests for active MCP sessions | JSON-RPC payload (`sessionId` query parameter) | JSON-RPC response | `200`, `400`, `401`, `403`, `404`, `503` |
+| `GET` / `POST` | `/mcp` | Streamable HTTP endpoint for modern Model Context Protocol clients | Session initialization and JSON-RPC payloads (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) | `application/json` or SSE stream | `200`, `400`, `401`, `403` |
+| `GET` | `/api/v1/mcp/sse` | Establish persistent Server-Sent Events stream for Model Context Protocol sessions with keep-alive pings | None (`logs:read`, `alerts:read`, `system:read`, `maintenance:write`) | `text/event-stream` with session endpoint | `200`, `401`, `403` |
+| `POST` | `/api/v1/mcp/messages` | Handle incoming JSON-RPC 2.0 requests for active MCP sessions | JSON-RPC payload (`sessionId` query parameter) | JSON-RPC response | `200`, `400`, `401`, `403`, `404` |
 
 ### 6.1 Model Context Protocol (MCP) Capabilities
 LogShed provides an integrated Model Context Protocol (MCP) server that enables external AI agents (Claude Desktop, Cursor, Antigravity, Windsurf) to investigate incidents and manage maintenance windows.
@@ -131,7 +131,7 @@ LogShed provides an integrated Model Context Protocol (MCP) server that enables 
   * **Streamable HTTP (`/mcp` and `/api/v1/mcp`):** Standard transport for modern MCP clients connecting over HTTP without separate SSE session handshakes. Requires an API token with the `AI Assistant / MCP` scope bundle passed via `Authorization: Bearer`.
   * **Network SSE (`GET /api/v1/mcp/sse` + `POST /api/v1/mcp/messages`):** Used by IDEs with native SSE transport or Claude Desktop via `mcp-proxy`. Requires an API token with the `AI Assistant / MCP` scope bundle passed via `Authorization: Bearer` or `API_ACCESS_TOKEN`.
   * **Local Docker Stdio (`app.cli mcp`):** Used when Claude Desktop runs locally alongside the container (`docker exec -i logshed python -m app.cli mcp`).
-* **Runtime Switch:** Controlled by the `enable_mcp` runtime setting (default `false`). When disabled, HTTP endpoints return `503 Service Unavailable`.
+* **Runtime Switch:** Controlled by the `enable_mcp` runtime setting (default `false`). When disabled, every MCP HTTP endpoint returns `403 Forbidden` (`detail: "Model Context Protocol is disabled in system settings"`) before the token is checked.
 * **Tools Exposed:**
   * `get_system_metrics`: Snapshot of ingestion rates, error distributions, top error apps/hosts, active alert states, and maintenance status.
   * `list_services`: Discovery of distinct application names and host sources sending logs, plus bidirectional host-app mappings.
