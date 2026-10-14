@@ -10,6 +10,7 @@ import sqlite3
 import pytest
 
 from app.core.migrations import run_migrations, get_connection
+from app.core.pipeline import SKIP_ALERT_RULES_KEY
 from app.services.alert_evaluator import AlertEvaluator, CompiledAlertRule
 from app.services.alert_presets import extract_ip_from_message, get_security_presets
 
@@ -282,6 +283,49 @@ class TestAlertEvaluatorEngine:
         assert rows[0][0] == rule_id
         assert rows[0][1] == "Spike Alert"
         assert rows[0][2] == 3
+
+    @pytest.mark.asyncio
+    async def test_internal_alerting_logs_marked_to_skip_are_never_evaluated(self, test_db: Path, monkeypatch):
+        """Logs written by alerting, notification and AI code cannot re-trigger the rule that produced them."""
+        conn = get_connection(test_db)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, match_pattern, threshold_count, window_seconds, cooldown_seconds, is_enabled, created_at)
+            VALUES ('Any Failure', 'threshold', 'failed', 1, 60, 0, 1, ?)
+            """,
+            (now_iso,),
+        )
+        conn.commit()
+        conn.close()
+
+        sent_notifications = []
+
+        async def mock_send(self, title, body, channel_id=None):
+            sent_notifications.append(title)
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc).isoformat()
+
+        await evaluator.evaluate_batch([
+            {"id": 1, "app_name": "notifier", "message": "Failed to dispatch notification", "timestamp": now, SKIP_ALERT_RULES_KEY: True},
+            {"id": 2, "app_name": "ai_engine", "message": "AI analysis request failed", "timestamp": now, SKIP_ALERT_RULES_KEY: True},
+        ])
+        await asyncio.sleep(0.05)
+        assert sent_notifications == []
+        assert all(len(window) == 0 for window in evaluator._windows.values())
+
+        await evaluator.evaluate_batch([
+            {"id": 3, "app_name": "retention", "message": "PruneWorker failed to connect", "timestamp": now},
+        ])
+        await asyncio.sleep(0.1)
+        assert len(sent_notifications) == 1
+        assert "Any Failure" in sent_notifications[0]
 
     @pytest.mark.asyncio
     async def test_cooldown_flap_dampening(self, test_db: Path, monkeypatch):

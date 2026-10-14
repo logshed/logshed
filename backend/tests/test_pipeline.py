@@ -624,7 +624,7 @@ class TestQueueConsumer:
         assert result == 100
 
     def test_internal_log_handler_suppresses_db_loop_loggers(self):
-        """InternalLogHandler must ignore logs from pipeline, retention, and storage_metrics."""
+        """InternalLogHandler must ignore logs from the pipeline and loggers that never reach it."""
         handler = InternalLogHandler()
         import logging
 
@@ -633,8 +633,6 @@ class TestQueueConsumer:
 
         for name in [
             "app.core.pipeline",
-            "app.services.retention",
-            "app.services.storage_metrics",
             "app.core.pipeline.submodule",
             "uvicorn.access",
             "httpx",

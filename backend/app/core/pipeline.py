@@ -20,23 +20,35 @@ from app.core.migrations import get_connection
 logger = logging.getLogger(__name__)
 
 
+# Key set on internal log entries that alert rules must not evaluate. The entries are still stored.
+SKIP_ALERT_RULES_KEY = "_skip_alert_rules"
+
+
 class InternalLogHandler(logging.Handler):
     """
-    Python logging handler that captures internal application warnings and errors
+    Python logging handler that captures internal application logs
     and feeds them directly into the LogShed ingestion pipeline.
     Ignores noisy HTTP access logs, SSE broadcast tasks, and ingestion pipeline internals
-    to prevent self-referential loops.
+    to prevent self-referential loops, and marks alerting and AI logs so alert rules skip them.
     """
     IGNORED_LOGGERS = {
+        # Never reach this handler (it is attached to the "app" logger only); kept as a guard
+        # in case it is ever attached higher up, as they would flood the log table.
         "uvicorn.access",
         "httpcore",
         "httpx",
         "asyncio",
+        # The handler feeds the pipeline and every stored log is broadcast over SSE,
+        # so logging from either would feed back into itself.
         "app.core.pipeline",
         "app.core.sse",
+        # Runs at startup before the handler is attached; also keeps schema upgrades out of the log table.
         "app.core.migrations",
-        "app.services.retention",
-        "app.services.storage_metrics",
+    }
+
+    # Stored, but skipped by alert rules: a rule matching these logs could fire alerts,
+    # notifications or AI enrichment that log again and re-trigger the same rule.
+    ALERT_EXEMPT_LOGGERS = {
         "app.services.alert_evaluator",
         "app.services.notifier",
         "app.services.ai_engine",
@@ -89,15 +101,20 @@ class InternalLogHandler(logging.Handler):
         """True if internal log emission is disabled."""
         return self._is_disabled
 
+    @staticmethod
+    def _matches_logger(name: str, loggers: set[str]) -> bool:
+        """True if name is one of the loggers or a child of one."""
+        return name in loggers or any(name.startswith(f"{parent}.") for parent in loggers)
+
+    def _is_alert_exempt(self, name: str) -> bool:
+        """True if records from this logger must be stored without alert rule evaluation."""
+        return self._matches_logger(name, self.ALERT_EXEMPT_LOGGERS)
+
     def emit(self, record: logging.LogRecord) -> None:
         if self._is_disabled:
             return
 
-        if (
-            record.name in self.IGNORED_LOGGERS
-            or record.name.startswith("uvicorn.access")
-            or any(record.name.startswith(f"{ignored}.") for ignored in self.IGNORED_LOGGERS)
-        ):
+        if self._matches_logger(record.name, self.IGNORED_LOGGERS):
             return
 
         # Check handler level filter (in case emit() is called directly or via custom handler dispatch)
@@ -163,6 +180,8 @@ class InternalLogHandler(logging.Handler):
                 "message": msg,
                 "raw": f"[{now_iso}] [{record.name}] [{record.levelname}] {msg}",
             }
+            if self._is_alert_exempt(record.name):
+                log_entry[SKIP_ALERT_RULES_KEY] = True
 
             from app.services.drop_filter import get_drop_filter
             drop_filter = get_drop_filter()

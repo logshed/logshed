@@ -21,7 +21,7 @@ from app.core.config import (
     to_canonical_log_level_name,
 )
 from app.core.migrations import run_migrations
-from app.core.pipeline import InternalLogHandler, get_queue
+from app.core.pipeline import SKIP_ALERT_RULES_KEY, InternalLogHandler, get_queue
 from app.core.security import SESSION_COOKIE_NAME, create_session_token
 from app.main import (
     configure_internal_log_handler,
@@ -326,14 +326,48 @@ class TestInternalLogHandler:
             "app.core.pipeline.QueueConsumer",
             "app.core.sse",
             "app.core.migrations",
-            "app.services.retention",
-            "app.services.storage_metrics",
         ]
 
         for name in ignored_names:
             handler.emit(self._make_record(name=name, level=logging.CRITICAL, msg=f"From {name}"))
 
         assert q.empty(), f"Expected queue to be empty, but contained items: {[q.get_nowait() for _ in range(q.qsize())]}"
+
+    @pytest.mark.parametrize(
+        "name",
+        ["app.services.retention", "app.services.storage_metrics", "app.collectors.syslog"],
+    )
+    def test_operational_loggers_are_stored_and_alertable(self, name):
+        handler = InternalLogHandler(level="INFO")
+        q = get_queue()
+
+        handler.emit(self._make_record(name=name, level=logging.INFO, msg=f"From {name}"))
+
+        entry = q.get_nowait()
+        assert entry["message"] == f"From {name}"
+        assert entry["app_name"] == name.split(".")[-1]
+        assert SKIP_ALERT_RULES_KEY not in entry
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "app.services.alert_evaluator",
+            "app.services.notifier",
+            "app.services.ai_engine",
+            "app.services.ai_service",
+            "app.services.ai_engine.child",
+        ],
+    )
+    def test_alerting_and_ai_loggers_are_stored_but_skip_alert_rules(self, name):
+        handler = InternalLogHandler(level="INFO")
+        q = get_queue()
+
+        handler.emit(self._make_record(name=name, level=logging.ERROR, msg=f"From {name}"))
+
+        entry = q.get_nowait()
+        assert entry["message"] == f"From {name}"
+        assert entry["severity"] == 3
+        assert entry[SKIP_ALERT_RULES_KEY] is True
 
     def test_reentrancy_protection(self):
         """Verify that recursive calls to emit on the same thread do not loop."""
@@ -451,6 +485,43 @@ class TestInternalLogHandler:
             assert rows[0][2] == 4  # RFC 5424 Warning
             assert "Syslog packet malformed on port 1514" in rows[0][3]
 
+        finally:
+            configure_internal_log_handler("DISABLED")
+
+    @pytest.mark.asyncio
+    async def test_internal_ai_and_retention_logs_persist_end_to_end(self, tmp_path: Path):
+        """AI analysis and prune logs reach SQLite at INFO, and only the AI log is marked to skip alert rules."""
+        from app.core.pipeline import QueueConsumer
+        from app.core.migrations import get_connection
+
+        db_file = tmp_path / "internal_ai_logs.db"
+        run_migrations(db_file)
+        evaluated: list[dict] = []
+
+        class RecordingEvaluator:
+            async def evaluate_batch(self, batch):
+                evaluated.extend(batch)
+
+        consumer = QueueConsumer(db_file, alert_evaluator=RecordingEvaluator())
+        consumer_task = asyncio.create_task(consumer.run())
+        configure_internal_log_handler("INFO")
+
+        try:
+            logging.getLogger("app.services.ai_engine").info("AI analysis attempting model 'gemini-3.7-flash' (attempt 1/1)...")
+            logging.getLogger("app.services.retention").info("Prune completed: deleted 12 logs.")
+            await asyncio.sleep(0.5)
+            await consumer.stop()
+            await consumer_task
+
+            conn = get_connection(db_file)
+            rows = conn.execute("SELECT app_name, severity, message FROM logs ORDER BY id").fetchall()
+            conn.close()
+
+            assert ("ai_engine", 6) == rows[0][:2]
+            assert "attempting model" in rows[0][2]
+            assert ("retention", 6) == rows[1][:2]
+            tags = {e["app_name"]: e.get(SKIP_ALERT_RULES_KEY, False) for e in evaluated}
+            assert tags == {"ai_engine": True, "retention": False}
         finally:
             configure_internal_log_handler("DISABLED")
 

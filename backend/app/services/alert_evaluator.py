@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any, Optional, Union
 
+from app.core.pipeline import SKIP_ALERT_RULES_KEY
 from app.core.redactor import redact
 from app.core.regex_validator import validate_pattern_complexity
 from app.core.utils import match_wildcard, parse_iso_to_epoch
@@ -318,6 +319,8 @@ class AlertEvaluator:
         """
         Evaluate an ingested batch of logs against active alert rules.
         Schedules background alert dispatch tasks when thresholds are reached.
+        Internal LogShed logs marked with SKIP_ALERT_RULES_KEY (alerting, notification and AI logs)
+        are never evaluated, so a rule cannot re-trigger itself through the logs its own actions write.
         """
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         now_epoch = now_utc.timestamp()
@@ -325,6 +328,7 @@ class AlertEvaluator:
         # Prune expired window entries for all rules (PERF-04)
         self.prune_expired_windows(now_epoch)
 
+        batch = [entry for entry in batch if not entry.get(SKIP_ALERT_RULES_KEY)]
         if not batch:
             return
 

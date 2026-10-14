@@ -78,3 +78,15 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Alert Rules Evaluation Order:**
   - Alert rules evaluate in user-configured sequence (`ORDER BY display_order ASC, id ASC`).
   - Each rule evaluates within its own sliding window, and notification dispatch within a batch deterministically follows this configured order.
+
+## 6. Internal Application Logs (`InternalLogHandler`)
+
+- **Implementation Reference:** `InternalLogHandler` in [backend/app/core/pipeline.py](file:///home/ben/workspace/logshed/backend/app/core/pipeline.py), attached to the `app` logger at startup.
+- **Threshold:** Records at or above the internal log level (`internal_log_level` setting or `LOGSHED_INTERNAL_LOG_LEVEL`, default `WARNING`, `DISABLED` turns ingestion off) are queued as logs from source `127.0.0.1` / `logshed` (or its host alias), with the last segment of the logger name as `app_name`. Drop rules and maintenance windows apply as for any other log.
+- **Never Stored (loop and noise guards):**
+  - `app.core.pipeline` and `app.core.sse`: the handler feeds the pipeline and every stored log is broadcast over SSE, so their logs would feed back into themselves.
+  - `app.core.migrations`: runs at startup before the handler is attached.
+  - `uvicorn.access`, `httpx`, `httpcore` and `asyncio`: outside the `app` logger, so they never reach the handler; listed as a guard against flooding if it is ever attached higher up.
+- **Stored but Skipped by Alert Rules:** Logs from `app.services.alert_evaluator`, `app.services.notifier`, `app.services.ai_engine` and `app.services.ai_service` (and their child loggers) carry an internal `_skip_alert_rules` marker. `AlertEvaluator.evaluate_batch` drops marked entries before rule matching, so a rule cannot re-trigger itself through the alert, notification or AI enrichment logs its own firing writes. These logs are searchable and stream live like any other log.
+- **Stored and Alertable:** All other `app.*` loggers, including retention pruning (`retention`) and storage metrics (`storage_metrics`).
+- **Re-entrancy Guard:** A thread-local flag stops logging performed while emitting a record from being captured again.

@@ -846,7 +846,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
             <div className="flex items-center text-xs text-slate-400 sm:pt-4">
               <span>
-                Logs at or above this level are captured into LogShed. Ingestion pipelines, database tasks, and SSE streams include recursion suppression to prevent loops.
+                Logs at or above this level are captured into LogShed. Logs from alerting, notifications and AI analysis are stored but never trigger alert rules, so a rule cannot fire itself. Ingestion pipeline and live stream logs are not captured.
               </span>
             </div>
           </div>
