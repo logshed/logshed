@@ -202,6 +202,24 @@ class TestAlertsApi:
         assert "Invalid regex syntax" in (res_bad.json()["error"] or "")
 
     @pytest.mark.asyncio
+    async def test_test_pattern_endpoint_hides_unexpected_error_text(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
+    ):
+        from app.api import alerts as alerts_mod
+
+        def _boom(_message):
+            raise RuntimeError("internal-secret-detail")
+
+        monkeypatch.setattr(alerts_mod, "extract_ip_from_message", _boom)
+        payload = {"rule_type": "threshold", "match_pattern": "error", "sample_message": "test line"}
+        res = await client.post("/api/alerts/test", json=payload, headers=auth_headers)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["matched"] is False
+        assert "internal-secret-detail" not in (body["error"] or "")
+        assert "See server logs" in body["error"]
+
+    @pytest.mark.asyncio
     async def test_security_presets_endpoints(self, client: AsyncClient, auth_headers: dict):
         # 1. List presets
         res = await client.get("/api/alerts/presets", headers=auth_headers)

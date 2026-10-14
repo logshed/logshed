@@ -821,11 +821,13 @@ async def test_alert_pattern(
             extracted_ip=extracted_ip,
             error=regex_error,
         )
-    except Exception as exc:
+    except Exception:
+        # Regex problems are reported above via regex_error; anything reaching here is unexpected
+        logger.exception("Alert pattern dry-run failed")
         return AlertTestResponse(
             matched=False,
             extracted_ip=None,
-            error=str(exc),
+            error="Pattern test failed unexpectedly. See server logs for details.",
         )
 
 
