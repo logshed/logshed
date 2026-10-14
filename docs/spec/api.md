@@ -144,7 +144,7 @@ LogShed provides an integrated Model Context Protocol (MCP) server that enables 
   * `get_log_context`: Fetch chronological surrounding log lines around a target log ID with compact projection support.
   * `count_logs`: Fast and token-efficient log count queries with optional grouping by severity, application, or source host (`group_limit` and `truncated` as on `GET /api/v1/logs/count`).
   * `get_recent_alerts`: Retrieve recent alert firing incident summaries, triggering log samples and maintenance window entries (`limit` defaults to 10 and is clamped to 50).
-  * `enable_maintenance`: Activate an on-demand maintenance window to silence alerts or drop errors during planned maintenance (recorded with trigger `MCP`).
+  * `enable_maintenance`: Activate an on-demand maintenance window to silence alerts or drop errors during planned maintenance (recorded with trigger `MCP`; input is validated against the same limits as `POST /api/v1/maintenance/enable` and invalid values return a tool error).
   * `disable_maintenance`: Deactivate one maintenance session by `session_id`, or all active sessions when it is omitted.
 * **Redaction:** Every MCP tool and external REST log or alert endpoint passes log `message` and `raw` text, alert samples, and AI diagnosis text through `redactor.py` before returning it. Internal UI endpoints (`/api/logs`, `/api/alerts`) are not redacted. Redaction is best-effort and may not catch every secret.
 * **Resources Exposed:**
