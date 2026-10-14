@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RetentionSlider } from '../components/storage/RetentionSlider.tsx';
+import { describeNextCleanup } from '../components/storage/PrunePreviewModal.tsx';
 import { formatBytes } from '../components/storage/StorageCard.tsx';
 import * as systemApi from '../api/system.ts';
 
@@ -83,6 +84,10 @@ describe('RetentionSlider Component', () => {
   });
 
   it('disables save button when unchanged and enables it when modified', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue({
+      retention_days: 7, cutoff: '2026-09-20T12:00:00+00:00', logs: 0, history_alerts: 0, history_on_demand: 0,
+      history_digests: 0, history_maintenance: 0, history_total: 0, metrics: 0, ai_audit: 0, total: 0,
+    });
     const onSaveMock = vi.fn().mockResolvedValue(undefined);
     render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
 
@@ -98,27 +103,62 @@ describe('RetentionSlider Component', () => {
     expect(saveBtn.className).toContain('bg-accent-600');
 
     fireEvent.click(saveBtn);
-    expect(onSaveMock).toHaveBeenCalledWith(7);
+    await waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(7);
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Saved!')).toBeInTheDocument();
     });
   });
 
-  it('triggers manual purge on demand with Purge Expired Logs Now button', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const pruneSpy = vi.spyOn(systemApi, 'triggerManualPrune').mockResolvedValue({
-      status: 'ok',
-      deleted_logs: 120,
-      deleted_metrics: 5,
-      metrics: {
-        recorded_at: '2026-09-04T12:00:00Z',
-        db_size_bytes: 4096000,
-        disk_free_bytes: 10000000,
-        disk_total_bytes: 20000000,
-        total_logs_count: 500,
-      },
-    });
+  const emptyPreview = {
+    retention_days: 14,
+    cutoff: '2026-09-20T12:00:00+00:00',
+    logs: 0,
+    history_alerts: 0,
+    history_on_demand: 0,
+    history_digests: 0,
+    history_maintenance: 0,
+    history_total: 0,
+    metrics: 0,
+    ai_audit: 0,
+    total: 0,
+    last_cleanup_at: null,
+    next_cleanup_at: null,
+  };
+
+  const dataPreview = {
+    ...emptyPreview,
+    retention_days: 7,
+    logs: 1200,
+    history_alerts: 3,
+    history_on_demand: 2,
+    history_digests: 1,
+    history_maintenance: 4,
+    history_total: 10,
+    ai_audit: 2,
+    total: 1212,
+  };
+
+  const pruneResult = {
+    status: 'ok',
+    deleted_logs: 120,
+    deleted_metrics: 5,
+    deleted_history: 7,
+    deleted_ai_audit: 3,
+    metrics: {
+      recorded_at: '2026-09-04T12:00:00Z',
+      db_size_bytes: 4096000,
+      disk_free_bytes: 10000000,
+      disk_total_bytes: 20000000,
+      total_logs_count: 500,
+    },
+  };
+
+  it('previews and then purges expired logs and history with the Purge button', async () => {
+    const previewSpy = vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue({ ...dataPreview, retention_days: 14 });
+    const pruneSpy = vi.spyOn(systemApi, 'triggerManualPrune').mockResolvedValue(pruneResult);
 
     const onPruneCompleted = vi.fn();
     render(
@@ -129,16 +169,171 @@ describe('RetentionSlider Component', () => {
       />
     );
 
-    const purgeBtn = screen.getByRole('button', { name: /Purge Expired Logs Now/i });
-    fireEvent.click(purgeBtn);
+    fireEvent.click(screen.getByRole('button', { name: /Purge Expired Logs & History Now/i }));
+
+    await waitFor(() => {
+      expect(previewSpy).toHaveBeenCalledWith();
+      expect(screen.getByTestId('prune-preview-list')).toBeInTheDocument();
+    });
+    // Nothing is purged until the user confirms
+    expect(pruneSpy).not.toHaveBeenCalled();
+    const list = screen.getByTestId('prune-preview-list');
+    expect(list).toHaveTextContent('Logs');
+    expect(list).toHaveTextContent('1,200');
+    expect(list).toHaveTextContent('Maintenance windows');
+    expect(list).toHaveTextContent('AI audit records');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Delete Now$/i }));
 
     await waitFor(() => {
       expect(pruneSpy).toHaveBeenCalled();
       expect(onPruneCompleted).toHaveBeenCalled();
       expect(screen.getByText('Prune Completed Successfully:')).toBeInTheDocument();
       expect(screen.getByText('120')).toBeInTheDocument();
+      expect(screen.getByText('7')).toBeInTheDocument();
     });
   });
+
+  it('shows nothing to purge and no confirm button when no data is expired', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(emptyPreview);
+    const pruneSpy = vi.spyOn(systemApi, 'triggerManualPrune').mockResolvedValue(pruneResult);
+
+    render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Purge Expired Logs & History Now/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/there is nothing to purge right now/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /Delete Now/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText(/there is nothing to purge right now/i)).not.toBeInTheDocument();
+    expect(pruneSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows the preview modal when lowering retention and cancel saves nothing', async () => {
+    const previewSpy = vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(dataPreview);
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+
+    await waitFor(() => {
+      expect(previewSpy).toHaveBeenCalledWith(7);
+      expect(screen.getByTestId('prune-preview-list')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Lowering retention to 7 days/i)).toBeInTheDocument();
+    expect(onSaveMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(onSaveMock).not.toHaveBeenCalled();
+    expect((screen.getByRole('slider') as HTMLInputElement).value).toBe('14');
+    expect(screen.queryByTestId('prune-preview-list')).not.toBeInTheDocument();
+  });
+
+  it('saves only when choosing to delete at the next daily cleanup', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue({
+      ...dataPreview,
+      next_cleanup_at: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
+    });
+    const pruneSpy = vi.spyOn(systemApi, 'triggerManualPrune').mockResolvedValue(pruneResult);
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/The next daily cleanup runs in about 5 hours/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete at Next Daily Cleanup/i }));
+
+    await waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(7);
+      expect(screen.getByText('Saved!')).toBeInTheDocument();
+    });
+    expect(pruneSpy).not.toHaveBeenCalled();
+  });
+
+  it('saves and then purges immediately when choosing Save and Delete Now', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(dataPreview);
+    const order: string[] = [];
+    const onSaveMock = vi.fn().mockImplementation(async () => {
+      order.push('save');
+    });
+    vi.spyOn(systemApi, 'triggerManualPrune').mockImplementation(async () => {
+      order.push('prune');
+      return pruneResult;
+    });
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Save and Delete Now/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Save and Delete Now/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Prune Completed Successfully:')).toBeInTheDocument();
+    });
+    expect(order).toEqual(['save', 'prune']);
+    expect(onSaveMock).toHaveBeenCalledWith(7);
+  });
+
+  it('saves without a modal when lowering retention would delete nothing', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(emptyPreview);
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+
+    await waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(7);
+    });
+    expect(screen.queryByTestId('prune-preview-list')).not.toBeInTheDocument();
+  });
+
+  it('saves without checking a preview when raising retention', async () => {
+    const previewSpy = vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(dataPreview);
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '30 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+
+    await waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith(30);
+    });
+    expect(previewSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not save and shows an error when the preview cannot be loaded', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockRejectedValue(new Error('Preview unavailable'));
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Preview unavailable/i)).toBeInTheDocument();
+    });
+    expect(onSaveMock).not.toHaveBeenCalled();
+  });
+
+  it('describes the next daily cleanup in plain terms', () => {
+    const now = Date.parse('2026-10-14T12:00:00Z');
+    expect(describeNextCleanup(null, now)).toBe('at the next startup or within 24 hours');
+    expect(describeNextCleanup('2026-10-14T12:00:30Z', now)).toBe('within the next minute');
+    expect(describeNextCleanup('2026-10-14T12:45:00Z', now)).toBe('in about 45 minutes');
+    expect(describeNextCleanup('2026-10-14T17:10:00Z', now)).toBe('in about 5 hours');
+  });
+
 
   it('renders explanatory caption and Info icon with tooltip about automated schedule and page reuse', () => {
     render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
@@ -146,7 +341,7 @@ describe('RetentionSlider Component', () => {
     // Explanatory footnote caption
     expect(
       screen.getByText(
-        'Old logs are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.'
+        'Old logs and history are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.'
       )
     ).toBeInTheDocument();
 

@@ -129,7 +129,25 @@ export interface PruneResponse {
   status: string;
   deleted_logs: number;
   deleted_metrics: number;
+  deleted_history: number;
+  deleted_ai_audit: number;
   metrics: StorageMetricsSnapshot;
+}
+
+export interface PrunePreview {
+  retention_days: number;
+  cutoff: string;
+  logs: number;
+  history_alerts: number;
+  history_on_demand: number;
+  history_digests: number;
+  history_maintenance: number;
+  history_total: number;
+  metrics: number;
+  ai_audit: number;
+  total: number;
+  last_cleanup_at?: string | null;
+  next_cleanup_at?: string | null;
 }
 
 export interface VacuumResponse {

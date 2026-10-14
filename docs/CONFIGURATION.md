@@ -178,7 +178,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 |---|---|---|
 | **AI Provider & API Key** | **Settings > Application** | Select provider (`Google Gemini` or `OpenAI / Custom`), enter API key, and configure primary/fallback model tags. Stored encrypted at rest. |
 | **Notification Targets** | **Settings > Application** | Add Apprise webhook URLs (Discord, Pushover, Gotify, Telegram, Slack, Email). URLs with sensitive tokens are masked and stored encrypted. |
-| **Active Retention Slider** | **Settings > Application** | Adjust retained log window (1 to `MAX_RETENTION_DAYS`, default 14 days). |
+| **Active Retention Slider** | **Settings > Application** | Adjust the retention window for logs and alert history (1 to `MAX_RETENTION_DAYS`, default 14 days). Lowering it shows what would be deleted and lets you delete now or at the next daily cleanup. |
 | **Host Aliases** | **Settings > Host Aliases** | Map IP addresses (e.g. `192.168.1.1`) to friendly names (`router`). Applies dynamically to log streams. |
 | **Alert Rules & Presets** | **Rules & History > Alert Rules** | Define threshold, pattern, or rate spike detection rules and link them to notification channels. |
 | **Ingestion Drop Rules** | **Rules & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |

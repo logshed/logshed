@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Trash2, Clock, Check, RefreshCw, AlertCircle, Info, Lock, Database } from 'lucide-react';
-import { triggerManualPrune, triggerVacuum } from '../../api/system.ts';
+import { fetchPrunePreview, triggerManualPrune, triggerVacuum } from '../../api/system.ts';
 import { formatBytes } from './StorageCard.tsx';
-import { PruneResponse, VacuumResponse } from '../../types.ts';
+import { PrunePreview, PruneResponse, VacuumResponse } from '../../types.ts';
 import { Modal } from '../common/Modal.tsx';
+import { PrunePreviewModal, PrunePreviewMode } from './PrunePreviewModal.tsx';
 
 interface RetentionSliderProps {
   retentionDays: number;
@@ -59,13 +60,52 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
     }
   };
 
+  const [previewMode, setPreviewMode] = useState<PrunePreviewMode | null>(null);
+  const [preview, setPreview] = useState<PrunePreview | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
+
+  const closePreview = () => {
+    setPreviewMode(null);
+    setPreview(null);
+  };
+
+  const saveRetention = async () => {
+    await onSaveRetention(days);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
+  const runPrune = async () => {
+    setIsPruning(true);
+    try {
+      const res = await triggerManualPrune();
+      setPruneResult(res);
+      if (onPruneCompleted) onPruneCompleted();
+    } finally {
+      setIsPruning(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setIsSaving(true);
       setErrorMsg(null);
-      await onSaveRetention(days);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2500);
+      if (days < retentionDays) {
+        // Lowering retention can delete data: show what would go before saving
+        let result: PrunePreview;
+        try {
+          result = await fetchPrunePreview(days);
+        } catch (err: any) {
+          setErrorMsg(err.message || 'Could not check what a lower retention period would delete. Nothing was saved.');
+          return;
+        }
+        if (result.total > 0) {
+          setPreview(result);
+          setPreviewMode('save');
+          return;
+        }
+      }
+      await saveRetention();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to update retention period.');
     } finally {
@@ -73,18 +113,63 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
     }
   };
 
-  const handlePruneNow = async () => {
-    if (!window.confirm('Trigger immediate purge of expired logs now?')) return;
+  const handleSaveAndDeleteLater = async () => {
+    closePreview();
     try {
-      setIsPruning(true);
+      setIsSaving(true);
       setErrorMsg(null);
-      const res = await triggerManualPrune();
-      setPruneResult(res);
-      if (onPruneCompleted) onPruneCompleted();
+      await saveRetention();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update retention period.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveAndDeleteNow = async () => {
+    try {
+      setIsSaving(true);
+      setErrorMsg(null);
+      await saveRetention();
+      await runPrune();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update retention period or purge expired data.');
+    } finally {
+      setIsSaving(false);
+      closePreview();
+    }
+  };
+
+  const handleCancelPreview = () => {
+    if (previewMode === 'save') {
+      // Nothing was saved, so return the slider to the saved retention
+      setDays(clampDays(retentionDays));
+    }
+    closePreview();
+  };
+
+  const handlePruneNow = async () => {
+    try {
+      setIsLoadingPreview(true);
+      setErrorMsg(null);
+      const result = await fetchPrunePreview();
+      setPreview(result);
+      setPreviewMode('purge');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Could not check what would be purged.');
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
+
+  const handleConfirmPurge = async () => {
+    try {
+      setErrorMsg(null);
+      await runPrune();
     } catch (err: any) {
       setErrorMsg(err.message || 'Manual purge failed.');
     } finally {
-      setIsPruning(false);
+      closePreview();
     }
   };
 
@@ -260,8 +345,8 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
           <button
             onClick={handlePruneNow}
-            disabled={isPruning || isCompacting}
-            title="Immediately purge logs older than the configured retention policy, compact the search index, and checkpoint the SQLite WAL."
+            disabled={isPruning || isCompacting || isLoadingPreview}
+            title="Show what is older than the configured retention policy, then purge those logs and history entries, compact the search index, and checkpoint the SQLite WAL."
             className="bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
           >
             {isPruning ? (
@@ -272,13 +357,13 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             ) : (
               <>
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Purge Expired Logs Now</span>
+                <span>Purge Expired Logs & History Now</span>
               </>
             )}
           </button>
           <div
             className="text-slate-500 hover:text-slate-300 transition cursor-help p-0.5"
-            title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Click 'Purge Expired Logs Now' if you recently lowered your retention days and want to immediately purge older logs, compact the search index, and checkpoint the WAL. Click 'Compact Database' to repack the database file and return freelist space to the host filesystem."
+            title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Lowering retention shows what would be deleted and lets you delete it now or at the next daily cleanup. Click 'Purge Expired Logs & History Now' to review and immediately purge older logs and history entries, compact the search index, and checkpoint the WAL. Click 'Compact Database' to repack the database file and return freelist space to the host filesystem."
           >
             <Info className="w-4 h-4" />
           </div>
@@ -287,7 +372,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
       {/* Explanatory Caption */}
       <p className="text-[11px] text-slate-500 leading-relaxed">
-        Old logs are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.
+        Old logs and history are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.
       </p>
 
       {/* Active Vacuum Progress Banner */}
@@ -323,12 +408,26 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
         <div className="p-3 bg-dark-950 border border-emerald-900/60 rounded-lg text-xs font-mono text-slate-300 animate-in fade-in">
           <span className="text-emerald-400 font-semibold block mb-1">Prune Completed Successfully:</span>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
-            <div>Deleted Records: <span className="text-slate-100">{pruneResult.deleted_logs}</span></div>
+            <div>Deleted Logs: <span className="text-slate-100">{pruneResult.deleted_logs}</span></div>
+            <div>Deleted History Entries: <span className="text-slate-100">{pruneResult.deleted_history}</span></div>
+            <div>Deleted AI Audit Records: <span className="text-slate-100">{pruneResult.deleted_ai_audit}</span></div>
             <div>Deleted Metrics: <span className="text-slate-100">{pruneResult.deleted_metrics}</span></div>
             <div>Current DB Footprint: <span className="text-slate-100">{formatBytes(pruneResult.metrics.db_size_bytes)}</span></div>
           </div>
         </div>
       )}
+
+      {/* Retention Preview Modal */}
+      <PrunePreviewModal
+        isOpen={previewMode !== null}
+        mode={previewMode ?? 'purge'}
+        preview={preview}
+        days={previewMode === 'save' ? days : (preview?.retention_days ?? retentionDays)}
+        busy={isSaving || isPruning}
+        onDeleteNow={previewMode === 'save' ? handleSaveAndDeleteNow : handleConfirmPurge}
+        onDeleteLater={handleSaveAndDeleteLater}
+        onCancel={handleCancelPreview}
+      />
 
       {/* Database Compaction Modal */}
       <Modal

@@ -9,7 +9,7 @@ The LogShed frontend is a responsive single-page web application built with Reac
 The frontend implements single-page HTML5 History API routing across four top-level navigation destinations:
 - **`/` (Logs / Console):** Live streaming log console with virtual scrolling, search, filters, saved views, and context inspection.
 - **`/rules` (Rules & Alerts Hub):** Unified hub managing alert rules, ingestion drop rules, incident history, maintenance windows, and built-in canary presets.
-- **`/storage` (Storage Metrics):** Storage metrics dashboard displaying database file sizes, host mount disk usage, 30-day volume trends, manual prune triggers, and database vacuum utilities.
+- **`/storage` (Storage Metrics):** Storage metrics dashboard displaying database file sizes, host mount disk usage, 30-day volume trends, manual prune triggers, and database vacuum utilities. Lowering retention or purging expired data first shows a preview modal listing the logs, history items, metrics and AI audit records that would be deleted.
 - **`/settings` (Settings & Aliases):** Application settings, AI provider configuration, notification channels, API & MCP access, advanced runtime options, and IP-to-Host alias management located at `/settings/aliases`. Top-level requests to `/aliases` automatically redirect to `/settings/aliases`.
 
 Unsaved changes detection and browser exit guards prevent accidental loss of form inputs across settings tabs and modal dialogs.
