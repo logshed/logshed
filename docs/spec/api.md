@@ -1,6 +1,6 @@
 # Specification: API Specifications & Contracts
 
-Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
+Parent document: [docs/SPEC.md](../../docs/SPEC.md)
 
 ## 1. Route Versioning & Mirror Router
 The internal Web UI uses the unversioned `/api/*` prefix and is authenticated by the session cookie. The external programmatic routes (token-authenticated ingestion, token verification, maintenance, metrics, prune and vacuum, log queries, alert history) and the MCP transport are served under `/api/v1/*`. The cookie-authenticated internal routers (auth, logs, settings, aliases, drop rules, saved views, notifications, alerts, system, AI, API tokens, Docker hosts) are NOT mirrored under `/api/v1/*`; requests to those paths return `404`. Use the canonical `/api/*` paths for them.

@@ -1,6 +1,6 @@
 # Specification: Security & Authentication
 
-Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
+Parent document: [docs/SPEC.md](../../docs/SPEC.md)
 
 ## 1. Overview
 LogShed provides self-contained native authentication and protection controls without external authentication providers or identity brokers. All security primitives execute locally within the application container.

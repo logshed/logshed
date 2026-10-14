@@ -1,6 +1,6 @@
 # Specification: Ingestion & In-Memory Pipeline
 
-> This document is part of the modular LogShed technical specification suite. For the full system specification, see [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md).
+> This document is part of the modular LogShed technical specification suite. For the full system specification, see [docs/SPEC.md](../../docs/SPEC.md).
 
 ```
 [Syslog Listener (UDP/TCP 1514)] ──┐
@@ -14,7 +14,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 
 ## 1. Syslog Ingestion (`SyslogServer`)
 
-- **Implementation Reference:** [backend/app/collectors/syslog.py](file:///home/ben/workspace/logshed/backend/app/collectors/syslog.py)
+- **Implementation Reference:** [backend/app/collectors/syslog.py](../../backend/app/collectors/syslog.py)
 - **Protocols & Ports:** Asynchronous UDP and TCP listeners on port `1514` (configurable via `SYSLOG_PORT`).
 - **Parsing Standards:** Complete parsing for RFC 3164 (BSD syslog) and RFC 5424 (IETF syslog with structured data).
 - **TCP Framing:** Implements RFC 6587 octet-counted framing and newline-delimited framing for stream separation.
@@ -26,7 +26,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 
 ## 2. Docker Ingestion (`DockerTailer`)
 
-- **Implementation Reference:** [backend/app/collectors/docker_collector.py](file:///home/ben/workspace/logshed/backend/app/collectors/docker_collector.py)
+- **Implementation Reference:** [backend/app/collectors/docker_collector.py](../../backend/app/collectors/docker_collector.py)
 - **Endpoint Connectivity:** Connects through the Docker Engine API via `DOCKER_HOST` environment variable (`unix:///var/run/docker.sock` or `tcp://proxy:2375` for `tecnativa/docker-socket-proxy`). Connects using `httpx` with Unix domain socket transport (`httpx.HTTPTransport(uds=...)`) or standard HTTP proxy transport without external Docker SDKs.
 - **Metadata Tagging & App Label Resolution:** Assigns `source_alias="docker"` (or the configured value of `DOCKER_SOURCE_ALIAS`) and resolves `app_name` using container labels and metadata in descending priority:
   1. `Labels["logshed.alias"]` or `Labels["logshed.name"]` (explicit user override)
@@ -62,7 +62,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 
 ## 5. Bounded Buffer & In-Memory Pipeline (`QueueConsumer`)
 
-- **Implementation Reference:** [backend/app/core/pipeline.py](file:///home/ben/workspace/logshed/backend/app/core/pipeline.py)
+- **Implementation Reference:** [backend/app/core/pipeline.py](../../backend/app/core/pipeline.py)
 - **Bounded In-Memory Buffer:** `asyncio.Queue(maxsize=10000)`.
 - **Backpressure & Drop Handling:** If the in-memory queue reaches saturation (10,000 items), incoming logs are rejected and the atomic `dropped_logs_total` counter increments, protecting system memory and the event loop from unbounded ingestion spikes.
 - **Debounced Batch Flusher:** Flushes batches to SQLite after a **50ms debounce window** or as soon as the batch accumulates 5,000 records. Drains pending items aggressively using non-blocking `queue.get_nowait()` on each cycle to boost throughput, eliminate artificial bottlenecks, and supply low-latency real-time streaming to UI and SSE subscribers.
@@ -81,7 +81,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 
 ## 6. Internal Application Logs (`InternalLogHandler`)
 
-- **Implementation Reference:** `InternalLogHandler` in [backend/app/core/pipeline.py](file:///home/ben/workspace/logshed/backend/app/core/pipeline.py), attached to the `app` logger at startup.
+- **Implementation Reference:** `InternalLogHandler` in [backend/app/core/pipeline.py](../../backend/app/core/pipeline.py), attached to the `app` logger at startup.
 - **Threshold:** Records at or above the internal log level (`internal_log_level` setting or `LOGSHED_INTERNAL_LOG_LEVEL`, default `WARNING`, `DISABLED` turns ingestion off) are queued as logs from source `127.0.0.1` / `logshed` (or its host alias), with the last segment of the logger name as `app_name`. Drop rules and maintenance windows apply as for any other log.
 - **Never Stored (loop and noise guards):**
   - `app.core.pipeline` and `app.core.sse`: the handler feeds the pipeline and every stored log is broadcast over SSE, so their logs would feed back into themselves.

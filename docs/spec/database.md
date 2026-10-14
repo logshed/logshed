@@ -1,10 +1,10 @@
 # Specification: Database Schema & Storage Engine (SQLite + FTS5)
 
-> Modular specification extracted from [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md).
+> Modular specification extracted from [docs/SPEC.md](../../docs/SPEC.md).
 
 ## 2. Database Schema & Storage Engine (SQLite + FTS5)
 Database path: `/data/logs.db`. WAL mode enabled (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;`).
-Schema migrations managed via [`backend/app/core/migrations.py`](file:///home/ben/workspace/logshed/backend/app/core/migrations.py) using `PRAGMA user_version`.
+Schema migrations managed via [`backend/app/core/migrations.py`](../../backend/app/core/migrations.py) using `PRAGMA user_version`.
 
 ### 2.1 Core DDL (Migration v1)
 ```sql
@@ -343,7 +343,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
   - `instance_id` set to persistent UUID4 if not already present.
 
 ### 2.4 Asynchronous FTS5 Indexing Model & Worker Architecture
-- **Supervised Background Task:** `FTSIndexWorker` ([`backend/app/services/fts_indexer.py`](file:///home/ben/workspace/logshed/backend/app/services/fts_indexer.py)) runs as a supervised task under `_supervise_worker` in [`backend/app/main.py`](file:///home/ben/workspace/logshed/backend/app/main.py). Worker failures are isolated, logged, and restarted with exponential backoff.
+- **Supervised Background Task:** `FTSIndexWorker` ([`backend/app/services/fts_indexer.py`](../../backend/app/services/fts_indexer.py)) runs as a supervised task under `_supervise_worker` in [`backend/app/main.py`](../../backend/app/main.py). Worker failures are isolated, logged, and restarted with exponential backoff.
 - **Decoupled Ingestion Pipeline:** Ingestion tasks (`QueueConsumer`) commit raw log rows directly to the `logs` table without waiting for FTS tokenization.
 - **Catch-Up Latency Target:** Catch-up latency target is <= 1000ms (empirically measured < 250ms).
 - **Single-Statement Bulk Inserts with RETURNING rowid:**
@@ -357,11 +357,11 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
 - **Reactive Wake-Up & Fallback Polling:** `QueueConsumer` triggers `fts_indexer.notify_new_logs()` immediately upon committing a batch of logs to the database, waking up `FTSIndexWorker` via an internal `asyncio.Event` (`_wake_event`). A periodic polling interval (default 0.5s) serves as fallback in case of missed notifications, guaranteeing the <= 1000ms catch-up latency SLA.
 - **Crash Resilience & State Tracking:** `fts_index_state.last_indexed_id` is committed atomically with each FTS insert batch. On worker crash or restart, indexing resumes from `last_indexed_id + 1`, eliminating duplicate or missing FTS rows.
 - **Search Consistency Middleware:** When incoming search queries arrive at `/api/logs?query=...`, the middleware signals the supervised `FTSIndexWorker` via non-blocking event notification (`worker.notify_new_logs()`) to accelerate catch-up without stalling query execution threads. This ensures pending logs are indexed promptly while avoiding query latency bottlenecks under ingestion load.
-- **Retention Coordination:** Retention pruning ([`backend/app/services/retention.py`](file:///home/ben/workspace/logshed/backend/app/services/retention.py)) coordinates with `fts_index_state.last_indexed_id`. During retention pruning (`execute_prune`), pending unindexed logs are indexed first (`index_pending_logs`), and deletions enforce `AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)` to guarantee no unindexed log records are ever purged without being indexed, preventing orphaned FTS records or unindexed log deletion.
+- **Retention Coordination:** Retention pruning ([`backend/app/services/retention.py`](../../backend/app/services/retention.py)) coordinates with `fts_index_state.last_indexed_id`. During retention pruning (`execute_prune`), pending unindexed logs are indexed first (`index_pending_logs`), and deletions enforce `AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)` to guarantee no unindexed log records are ever purged without being indexed, preventing orphaned FTS records or unindexed log deletion.
 - **Graceful Shutdown Sequencing:** Lifespan shutdown stops log collectors (`SyslogServer`, `DockerTailer`), flushes the multiline assembler, stops `QueueConsumer` (drains queue to DB), then stops `FTSIndexWorker` (flushes pending unindexed logs to `logs_fts`), followed by `PruneWorker`, `StorageMetricsWorker`, `AlertEvaluator`, `DailyDigestWorker`, notification executor, regex executor, and flushes drop filter counts.
 
 ### 2.5 Thread-Local Connection Model & Concurrency
-- **Thread-Local Read Connection Reuse:** In [`backend/app/api/deps.py`](file:///home/ben/workspace/logshed/backend/app/api/deps.py), synchronous database queries are dispatched to worker threads via `run_db_query(fn, custom_db_path)` using `asyncio.to_thread()`. `get_thread_read_connection(db_path: Path) -> sqlite3.Connection` maintains a thread-local dictionary `_thread_local.connections` keyed by resolved database path, reusing connections across sequential queries on worker threads.
+- **Thread-Local Read Connection Reuse:** In [`backend/app/api/deps.py`](../../backend/app/api/deps.py), synchronous database queries are dispatched to worker threads via `run_db_query(fn, custom_db_path)` using `asyncio.to_thread()`. `get_thread_read_connection(db_path: Path) -> sqlite3.Connection` maintains a thread-local dictionary `_thread_local.connections` keyed by resolved database path, reusing connections across sequential queries on worker threads.
 - **One-Time Pragma Execution:** Pragmas and row factory are configured only once per newly opened thread connection:
   `PRAGMA journal_mode=WAL;`
   `PRAGMA synchronous=NORMAL;`

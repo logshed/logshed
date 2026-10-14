@@ -1,6 +1,6 @@
 # Specification: Deployment & Container Specification
 
-Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
+Parent document: [docs/SPEC.md](../../docs/SPEC.md)
 
 ## 1. Process Model & Runtime Architecture
 LogShed executes as a single container, single OS process application running multiple concurrent `asyncio` tasks (`SyslogServer`, `DockerTailer`, `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`) under supervisor isolation. The application runs strictly with a single Uvicorn worker (`--workers 1`) because in-memory ingestion queues, rate limiters, and drop counters are process-local and would silently desync across separate OS processes.

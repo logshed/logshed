@@ -1,6 +1,6 @@
 # Specification: Frontend Specification (React + Vite + Tailwind)
 
-Parent document: [docs/SPEC.md](file:///home/ben/workspace/logshed/docs/SPEC.md)
+Parent document: [docs/SPEC.md](../../docs/SPEC.md)
 
 ## 1. Overview & Architecture
 The LogShed frontend is a responsive single-page web application built with React, Vite, and Tailwind CSS. The interface is tailored for dense, real-time log observation, incident investigation, rule configuration, and system administration. Production builds are bundled directly into `backend/app/static/` and served by FastAPI with HTML5 History API fallback routing to `index.html`.
