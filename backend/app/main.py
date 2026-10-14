@@ -602,7 +602,6 @@ def create_app() -> FastAPI:
     api_router.include_router(system.router)
     api_router.include_router(ai.router)
     api_router.include_router(tokens.router)
-    api_router.include_router(mcp.router)
     api_router.include_router(docker_hosts.router)
 
     app.include_router(api_router)
