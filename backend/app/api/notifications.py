@@ -240,10 +240,11 @@ async def test_notification(
             )
         try:
             target_url = decrypt_channel_url(encrypted_url)
-        except Exception as exc:
+        except Exception:
+            logger.exception("Failed to decrypt notification channel %s URL", payload.channel_id)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to decrypt notification channel URL: {exc}",
+                detail="Failed to decrypt the notification channel URL. See server logs for details.",
             )
     elif payload.url is not None and payload.url.strip():
         target_url = payload.url.strip()

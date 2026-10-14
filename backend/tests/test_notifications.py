@@ -422,6 +422,29 @@ class TestNotificationsApi:
             assert res.json()["success"] is True
 
     @pytest.mark.asyncio
+    async def test_test_endpoint_decrypt_failure_hides_exception_text(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        res = await client.post(
+            "/api/notifications/channels",
+            json={"name": "Test Target", "url": "discord://123456789/target_token"},
+            headers=auth_headers,
+        )
+        channel_id = res.json()["id"]
+
+        secret_error = "InvalidToken key material abc123"
+        with patch(
+            "app.api.notifications.decrypt_channel_url", side_effect=ValueError(secret_error)
+        ), patch("app.api.notifications.logger") as mock_logger:
+            res = await client.post(
+                "/api/notifications/test", json={"channel_id": channel_id}, headers=auth_headers
+            )
+        assert res.status_code == 500
+        assert secret_error not in res.json()["detail"]
+        assert "server logs" in res.json()["detail"]
+        mock_logger.exception.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_unauthenticated_requests_rejected(self, client: AsyncClient):
         res = await client.get("/api/notifications/channels")
         assert res.status_code in (401, 403)
