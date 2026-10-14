@@ -455,10 +455,11 @@ class TestMCPApiAndTransport:
     async def test_mcp_served_only_at_root_and_v1(self, client: AsyncClient, auth_headers: dict):
         await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
         bearer = {"Authorization": "Bearer ls_live_unknown"}
-        # The unversioned /api/mcp alias is not mounted
+        # The unversioned /api/mcp alias is not mounted (POSTs get 405 instead of 404 when the built
+        # frontend is present, because the GET-only SPA fallback route then matches the path)
         assert (await client.get("/api/mcp/sse")).status_code == 404
-        assert (await client.post("/api/mcp", headers=bearer, json={})).status_code == 404
-        assert (await client.post("/api/mcp/messages", headers=bearer, json={})).status_code == 404
+        assert (await client.post("/api/mcp", headers=bearer, json={})).status_code in (404, 405)
+        assert (await client.post("/api/mcp/messages", headers=bearer, json={})).status_code in (404, 405)
         # The supported transports still reach token validation
         assert (await client.post("/mcp", headers=bearer, json={})).status_code == 401
         assert (await client.post("/api/v1/mcp", headers=bearer, json={})).status_code == 401
