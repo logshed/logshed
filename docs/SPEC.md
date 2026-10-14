@@ -21,15 +21,6 @@ To provide clear domain boundaries and keep token consumption manageable for AI 
 
 ---
 
-## AI Assistant & Developer Guidelines
+## Developer Workflow & Test Conventions
 
-When working on specific LogShed tasks, avoid loading the entire specification corpus into conversation context. Instead, consult the targeted module:
-
-- **Database schema, migrations, or FTS5 indexing:** Read [`docs/spec/database.md`](docs/spec/database.md).
-- **Background workers or configuration parameters:** Read [`docs/spec/architecture.md`](docs/spec/architecture.md).
-- **Log parsing, syslog framing, or Docker ingestion:** Read [`docs/spec/pipeline.md`](docs/spec/pipeline.md).
-- **AI prompts, LLM providers, or thinking budgets:** Read [`docs/spec/ai-engine.md`](docs/spec/ai-engine.md).
-- **Authentication, cookies, or encryption:** Read [`docs/spec/security.md`](docs/spec/security.md).
-- **REST endpoints, query parameters, or response models:** Read [`docs/spec/api.md`](docs/spec/api.md).
-- **UI components, virtual lists, or client state:** Read [`docs/spec/frontend.md`](docs/spec/frontend.md).
-- **Dockerfile, entrypoint permissions, or container deployment:** Read [`docs/spec/deployment.md`](docs/spec/deployment.md).
+This specification describes what LogShed does. How to work on it lives in [`AGENTS.md`](../AGENTS.md) at the repository root: build and test commands, coding standards, dependency guardrails, and the backend test suite conventions (shared app fixture, low-cost Argon2id hashing, the `e2e` marker). Read it before changing code or tests.

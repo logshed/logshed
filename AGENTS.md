@@ -3,6 +3,7 @@
 ## Build & Test Commands
 - Run backend tests: `.venv/bin/pytest backend/tests/ -v`
 - Run single test file: `.venv/bin/pytest backend/tests/test_schema.py -v`
+- Run end-to-end tests (excluded by default; may build Docker images or call live AI providers with keys from `.env`): `.venv/bin/pytest backend/tests/ -m e2e -v`
 - Run frontend tests: `cd frontend && npm test`
 - Build frontend: `cd frontend && npm run build`
 - Python Environment: Always execute Python tools using `.venv/bin/python` or `.venv/bin/pytest` (or prefix shell commands with `source .venv/bin/activate && ...`). Never use the global system Python.
@@ -13,6 +14,14 @@
     - Repository state: `git status`, `git diff`, `git log`.
     - Package inspection: `.venv/bin/pip show <pkg>` or `.venv/bin/pip list`.
   * **Python Execution Scope:** Python execution is strictly reserved for running existing project test suites (`.venv/bin/pytest`) and starting the project application.
+
+## Backend Test Suite Conventions
+`backend/tests/conftest.py` keeps the backend suite fast (about 45s). Know these before writing or debugging tests:
+- **Shared FastAPI app:** In tests, `create_app()` returns a cached instance (one per CORS origin set and built-frontend presence), because building the app costs about 0.12s and over 300 tests use one. Never mutate the returned app (adding routes, middleware, mounts or `app.state`); call `create_app.uncached()` when a test needs its own instance. `app.dependency_overrides` is cleared automatically after each test.
+- **Low-cost Argon2id:** `hash_password()` uses minimal Argon2id cost parameters in tests. Production-cost hashes still verify, but tests must not assert the production cost parameters on hashes produced by `hash_password()`.
+- **`e2e` marker:** Tests needing a live Docker build or external services (including live AI provider calls) must be marked `@pytest.mark.e2e` so the default run stays offline and deterministic.
+- **No real waiting:** Do not let tests sit out production timeouts or backoffs (SQLite `busy_timeout`, retry delays, batch windows). Patch the value down or inject the condition instead; check new slow tests with `--durations=20`.
+- **Async mocks:** Give `AsyncMock.side_effect` an async function, never a coroutine object such as `asyncio.sleep(10)` (it is never awaited and leaks a `RuntimeWarning` into unrelated tests).
 
 ## Architecture & Code Standards
 - **Runtime:** Python 3.12 (`asyncio`) + FastAPI + SQLite (WAL mode + FTS5).
@@ -26,7 +35,7 @@
   * Database & Migrations: SQLite (WAL mode + FTS5 external content table) versioned via `PRAGMA user_version = 3`. Asynchronous FTS5 indexing decoupled from raw ingestion via supervised `FTSIndexWorker` (target catch-up latency <= 1000ms), durable state tracking in `fts_index_state` (last_indexed_id), conditional triggers guarding against unindexed row deletions, and thread-local read connection reuse via `run_db_query` in `backend/app/api/deps.py`. No external database servers.
 
 ## Workflow Protocol
-1. Consult `docs/SPEC.md` (or targeted domain modules in `docs/spec/`) for technical schemas, endpoints, and exact trigger definitions.
+1. Consult `docs/SPEC.md` for technical schemas, endpoints, and exact trigger definitions. It is a short index mapping each topic to a domain module in `docs/spec/`; read only the modules relevant to the task rather than loading the whole specification into context.
 2. At the end of every phase, run the phase verification test suite.
 
 ## Dependency & Performance Guardrails
