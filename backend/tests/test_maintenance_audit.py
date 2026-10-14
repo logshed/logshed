@@ -283,6 +283,30 @@ class TestLimits:
         with pytest.raises(Exception, match="255"):
             await tool.fn(duration_minutes=5, target_app="a" * 256)
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"duration_minutes": 0}, "duration_minutes"),
+            ({"duration_minutes": 1441}, "1440"),
+            ({"duration_minutes": 5, "reason": "r" * 256}, "255"),
+            ({"duration_minutes": 5, "log_handling": "mute_everything"}, "log_handling"),
+        ],
+    )
+    async def test_mcp_rejects_values_rest_rejects(self, kwargs: dict, match: str, db_path: Path):
+        tool = create_mcp_server()._tool_manager._tools["enable_maintenance"]
+        with pytest.raises(ValueError, match=match):
+            await tool.fn(**kwargs)
+        with get_connection(db_path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0
+
+    @pytest.mark.asyncio
+    async def test_mcp_accepts_rest_upper_bounds(self, db_path: Path):
+        tool = create_mcp_server()._tool_manager._tools["enable_maintenance"]
+        res = await tool.fn(duration_minutes=1440, reason="r" * 255, log_handling="drop_errors")
+        assert res["duration_minutes"] == 1440
+        assert res["log_handling"] == "drop_errors"
+
 
 class TestRetention:
     def test_prune_removes_old_ended_sessions_and_rows_only(self, db_path: Path):

@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import ValidationError
 
 from app.api.deps import run_db_query
 from app.api.external_v1 import (
@@ -23,6 +24,7 @@ from app.api.external_v1 import (
 )
 from app.api.logs import get_log_facets
 from app.core.utils import format_severity_label, resolve_severity
+from app.models import ExternalMaintenanceEnableRequest
 from app.services.maintenance_service import (
     create_maintenance_session,
     disable_maintenance_sessions,
@@ -269,7 +271,9 @@ def create_mcp_server() -> FastMCP:
         name="enable_maintenance",
         description=(
             "Start an on-demand maintenance window to silence alert notifications "
-            "and optionally drop error logs during planned operations. Returns a session_id."
+            "and optionally drop error logs during planned operations. Returns a session_id. "
+            "duration_minutes must be 1 - 1440, log_handling is 'silence_alerts' or 'drop_errors', "
+            "and reason, target_app and target_host are limited to 255 characters."
         ),
     )
     async def enable_maintenance(
@@ -280,19 +284,29 @@ def create_mcp_server() -> FastMCP:
         target_host: Optional[str] = None,
     ) -> dict[str, Any]:
         """Activate a scoped maintenance session."""
-        valid_handling = log_handling if log_handling in ("silence_alerts", "drop_errors") else "silence_alerts"
-        if len(target_app or "") > 255 or len(target_host or "") > 255:
-            raise ValueError("target_app and target_host must be at most 255 characters.")
-        clamped_duration = max(1, duration_minutes)
+        # Validate with the REST request model so MCP and /api/v1/maintenance/enable share one set of limits
+        try:
+            req = ExternalMaintenanceEnableRequest(
+                duration_minutes=duration_minutes,
+                reason=reason,
+                log_handling=log_handling,
+                target_app=target_app,
+                target_host=target_host,
+            )
+        except ValidationError as exc:
+            problems = "; ".join(
+                f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()
+            )
+            raise ValueError(f"Invalid maintenance request: {problems}") from None
 
         def _create(conn):
             return create_maintenance_session(
                 conn,
-                duration_minutes=clamped_duration,
-                reason=reason,
-                log_handling=valid_handling,
-                target_app=target_app,
-                target_host=target_host,
+                duration_minutes=req.duration_minutes,
+                reason=req.reason,
+                log_handling=req.log_handling,
+                target_app=req.target_app,
+                target_host=req.target_host,
                 initiated_by="mcp",
                 trigger_label="MCP",
             )
