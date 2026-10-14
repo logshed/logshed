@@ -199,6 +199,7 @@ describe('ApiTokensTab Component', () => {
     expect(mcpToggle).not.toBeChecked();
     expect(screen.getByText('Disabled')).toBeInTheDocument();
     expect(screen.getByText(/MCP server is currently disabled/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Automated AI Redaction Notice/i)).not.toBeInTheDocument();
   });
 
   it('renders MCP section with SSE endpoint and collapsible client configuration options when enabled', async () => {
@@ -213,6 +214,7 @@ describe('ApiTokensTab Component', () => {
     const mcpToggle = screen.getByLabelText(/Enable Model Context Protocol/i);
     expect(mcpToggle).toBeChecked();
     expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText(/Automated AI Redaction Notice/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue(/api\/v1\/mcp\/sse/)).toBeInTheDocument();
 
     // Verify all 3 collapsible options are present and collapsed by default
