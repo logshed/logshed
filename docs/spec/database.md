@@ -315,7 +315,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
       ended_at DATETIME,          -- actual end: expires_at on expiry, termination time if ended early
       end_reason TEXT,            -- 'expired' | 'terminated' (NULL while running)
       dropped_count INTEGER NOT NULL DEFAULT 0,
-      trigger_label TEXT          -- 'UI', 'MCP', or the API token name (snapshot, survives token deletion)
+      trigger_label TEXT          -- 'UI', 'MCP', or 'API - <token name>' (snapshot, survives token deletion)
   );
   CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);
   ```

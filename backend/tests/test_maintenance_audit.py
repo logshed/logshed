@@ -330,7 +330,7 @@ class TestExposure:
         assert res.status_code == 200
         item = next(i for i in res.json() if i["maintenance_session_id"] == session_id)
         assert item["rule_name"] == "Maintenance Window"
-        assert item["maintenance_trigger"] == "Deploy Bot"
+        assert item["maintenance_trigger"] == "API - Deploy Bot"
         assert item["maintenance_type"] == "drop_errors"
         assert item["maintenance_target_app"] == "batch"
         assert item["maintenance_target_host"] == "node-1"

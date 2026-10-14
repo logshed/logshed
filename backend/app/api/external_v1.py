@@ -139,7 +139,7 @@ async def enable_maintenance_window(
             initiated_by=initiated_by,
             token_id=token_id,
             trigger_label=(
-                str(auth.get("name") or "API token")
+                f"API - {auth.get('name') or 'token'}"
                 if auth.get("auth_type") == "api_token"
                 else "UI"
             ),
