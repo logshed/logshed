@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -22,20 +23,232 @@ logger = logging.getLogger(__name__)
 _BUSY_RETRY_SECONDS: float = 60.0
 
 
+# Prune schedule tracking (process-local, matches the single-process model).
+# The PruneWorker runs at startup and then every 24 hours from the end of each run.
+_PRUNE_INTERVAL_SECONDS: float = 86400.0
+_schedule_lock = threading.Lock()
+_last_prune_at: Optional[datetime.datetime] = None
+_next_scheduled_prune_at: Optional[datetime.datetime] = None
+
+
+def _record_prune_completed() -> None:
+    global _last_prune_at
+    with _schedule_lock:
+        _last_prune_at = datetime.datetime.now(datetime.timezone.utc)
+
+
+def _set_next_scheduled_prune(delay_seconds: Optional[float]) -> None:
+    global _next_scheduled_prune_at
+    with _schedule_lock:
+        if delay_seconds is None:
+            _next_scheduled_prune_at = None
+        else:
+            _next_scheduled_prune_at = datetime.datetime.now(
+                datetime.timezone.utc
+            ) + datetime.timedelta(seconds=delay_seconds)
+
+
+def get_prune_schedule() -> dict[str, Optional[str]]:
+    """Return when the last prune finished and when the PruneWorker will next run (if known)."""
+    with _schedule_lock:
+        return {
+            "last_cleanup_at": _last_prune_at.isoformat() if _last_prune_at else None,
+            "next_cleanup_at": (
+                _next_scheduled_prune_at.isoformat() if _next_scheduled_prune_at else None
+            ),
+        }
+
+
+# History rows (alert_history) that a prune with a given cutoff deletes. Non-maintenance rows
+# age out by triggered_at. Maintenance rows age out by the session's ended_at, so a window that
+# is still running is never deleted. A maintenance row whose session row no longer exists falls
+# back to triggered_at.
+_HISTORY_DELETE_WHERE = """
+    (
+        ({a}.maintenance_session_id IS NULL AND {a}.triggered_at < :cutoff)
+        OR (
+            {a}.maintenance_session_id IS NOT NULL
+            AND (
+                EXISTS (
+                    SELECT 1 FROM maintenance_sessions s
+                    WHERE s.session_id = {a}.maintenance_session_id
+                      AND s.is_active = 0 AND s.ended_at IS NOT NULL AND s.ended_at < :cutoff
+                )
+                OR (
+                    NOT EXISTS (
+                        SELECT 1 FROM maintenance_sessions s
+                        WHERE s.session_id = {a}.maintenance_session_id
+                    )
+                    AND {a}.triggered_at < :cutoff
+                )
+            )
+        )
+    )
+"""
+
+# Mirrors the kind detection used by the incident history UI.
+_HISTORY_KIND_CASE = """
+    CASE
+        WHEN h.maintenance_session_id IS NOT NULL THEN 'maintenance'
+        WHEN h.rule_name = 'Daily Digest' THEN 'digest'
+        WHEN h.rule_id IS NULL AND (
+            h.rule_name = 'On-Demand Analysis'
+            OR (h.ai_audit_id IS NOT NULL AND h.sample_log IS NULL)
+        ) THEN 'on_demand'
+        ELSE 'alert'
+    END
+"""
+
+_HISTORY_DELETE_H = _HISTORY_DELETE_WHERE.format(a="h")
+_HISTORY_DELETE_K = _HISTORY_DELETE_WHERE.format(a="k")
+
+# AI audit records that go with a prune: those linked to a deleted history row that no kept
+# history row still references, plus unreferenced records older than the cutoff.
+_AI_AUDIT_LINKED_WHERE = f"""
+    a.id IN (
+        SELECT h.ai_audit_id FROM alert_history h
+        WHERE h.ai_audit_id IS NOT NULL AND {_HISTORY_DELETE_H}
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM alert_history k
+        WHERE k.ai_audit_id = a.id AND NOT {_HISTORY_DELETE_K}
+    )
+"""
+_AI_AUDIT_ORPHAN_WHERE = """
+    a.timestamp < :cutoff
+    AND NOT EXISTS (SELECT 1 FROM alert_history k WHERE k.ai_audit_id = a.id)
+"""
+
+
+
+def _prune_history(conn: sqlite3.Connection, cutoff_iso: str) -> tuple[int, int]:
+    """
+    Delete expired alert history rows, their linked AI audit records, orphaned AI audit
+    records older than the cutoff, and ended maintenance sessions older than the cutoff.
+    Returns (deleted_history_rows, deleted_ai_audit_rows).
+    """
+    cursor = conn.cursor()
+    params = {"cutoff": cutoff_iso}
+
+    # Collect the AI audit ids that go with the history rows being deleted, before the delete.
+    cursor.execute(
+        f"""
+        SELECT a.id FROM ai_audit_log a
+        WHERE {_AI_AUDIT_LINKED_WHERE}
+        """,
+        params,
+    )
+    linked_audit_ids = [row[0] for row in cursor.fetchall()]
+
+    cursor.execute(
+        f"DELETE FROM alert_history WHERE id IN (SELECT h.id FROM alert_history h WHERE {_HISTORY_DELETE_H})",
+        params,
+    )
+    deleted_history = cursor.rowcount
+
+    deleted_ai_audit = 0
+    for i in range(0, len(linked_audit_ids), 500):
+        chunk = linked_audit_ids[i : i + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        cursor.execute(f"DELETE FROM ai_audit_log WHERE id IN ({placeholders})", chunk)
+        deleted_ai_audit += cursor.rowcount
+
+    cursor.execute(
+        f"DELETE FROM ai_audit_log WHERE id IN (SELECT a.id FROM ai_audit_log a WHERE {_AI_AUDIT_ORPHAN_WHERE})",
+        params,
+    )
+    deleted_ai_audit += cursor.rowcount
+
+    cursor.execute(
+        "DELETE FROM maintenance_sessions WHERE is_active = 0 AND ended_at IS NOT NULL AND ended_at < ?",
+        (cutoff_iso,),
+    )
+    conn.commit()
+    return deleted_history, deleted_ai_audit
+
+
+def compute_prune_preview(conn: sqlite3.Connection, retention_days: int) -> dict[str, Any]:
+    """
+    Read-only counts of what a prune with the given retention_days would delete right now.
+    Uses the same predicates as execute_prune, including the FTS-indexed guard for logs.
+    """
+    retention_days = max(1, retention_days)
+    cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=retention_days)
+    cutoff_iso = cutoff_dt.isoformat()
+    params = {"cutoff": cutoff_iso}
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM logs
+        WHERE timestamp < :cutoff
+          AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)
+        """,
+        params,
+    )
+    logs = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM storage_metrics WHERE recorded_at < datetime('now', '-30 days')")
+    metrics = cursor.fetchone()[0]
+
+    kinds = {"alert": 0, "on_demand": 0, "digest": 0, "maintenance": 0}
+    cursor.execute(
+        f"""
+        SELECT {_HISTORY_KIND_CASE} AS kind, COUNT(*) FROM alert_history h
+        WHERE {_HISTORY_DELETE_H}
+        GROUP BY kind
+        """,
+        params,
+    )
+    for kind, count in cursor.fetchall():
+        kinds[kind] = count
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*) FROM ai_audit_log a
+        WHERE ({_AI_AUDIT_LINKED_WHERE}) OR ({_AI_AUDIT_ORPHAN_WHERE})
+        """,
+        params,
+    )
+    ai_audit = cursor.fetchone()[0]
+
+    history_total = sum(kinds.values())
+    schedule = get_prune_schedule()
+    return {
+        "retention_days": retention_days,
+        "cutoff": cutoff_iso,
+        "logs": logs,
+        "history_alerts": kinds["alert"],
+        "history_on_demand": kinds["on_demand"],
+        "history_digests": kinds["digest"],
+        "history_maintenance": kinds["maintenance"],
+        "history_total": history_total,
+        "metrics": metrics,
+        "ai_audit": ai_audit,
+        "total": logs + history_total + metrics + ai_audit,
+        "last_cleanup_at": schedule["last_cleanup_at"],
+        "next_cleanup_at": schedule["next_cleanup_at"],
+    }
+
+
 def execute_prune(
     db_path: str | Path, retention_days: int = 14, index_pending: bool = True
 ) -> dict:
     """
     Executes iterative batch pruning, FTS5 index compaction, WAL checkpointing,
     and updates storage metrics.
-    
+
     Returns a dict with:
-        deleted_logs: Total number of log rows deleted
+        deleted_logs: Total number of log rows deleted (logs only)
         deleted_metrics: Total number of old metric rows deleted
+        deleted_history: Alert history rows deleted (alerts, digests, analyses, maintenance windows)
+        deleted_ai_audit: AI audit records deleted (linked to deleted history, plus orphans)
         metrics: Newly recorded storage metrics snapshot
     """
     retention_days = max(1, retention_days)
     total_deleted = 0
+    deleted_history = 0
+    deleted_ai_audit = 0
     db_path_obj = Path(db_path)
     cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=retention_days)
     cutoff_iso = cutoff_dt.isoformat()
@@ -70,26 +283,9 @@ def execute_prune(
             if count == 0:
                 break
 
-        # 1b. Prune ended maintenance sessions (and their linked incident history rows)
-        # older than retention_days. Running sessions are never pruned.
-        cursor.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='maintenance_sessions'"
-        )
-        if cursor.fetchone():
-            cursor.execute(
-                """
-                DELETE FROM alert_history WHERE maintenance_session_id IN (
-                    SELECT session_id FROM maintenance_sessions
-                    WHERE is_active = 0 AND ended_at IS NOT NULL AND ended_at < ?
-                )
-                """,
-                (cutoff_iso,),
-            )
-            cursor.execute(
-                "DELETE FROM maintenance_sessions WHERE is_active = 0 AND ended_at IS NOT NULL AND ended_at < ?",
-                (cutoff_iso,),
-            )
-            conn.commit()
+        # 1b. Prune alert history (alerts, digests, on-demand analyses, maintenance windows)
+        # older than the cutoff, plus the AI audit records they link to.
+        deleted_history, deleted_ai_audit = _prune_history(conn, cutoff_iso)
 
         # 2. Compact FTS5 virtual table segments
         try:
@@ -133,13 +329,18 @@ def execute_prune(
 
     logger.info(
         f"Prune completed: deleted {total_deleted} logs, "
+        f"{deleted_history} history rows, {deleted_ai_audit} AI audit rows, "
         f"{deleted_metrics} old metrics, retention_days={retention_days}"
     )
+
+    _record_prune_completed()
 
     return {
         "status": "ok",
         "deleted_logs": total_deleted,
         "deleted_metrics": deleted_metrics,
+        "deleted_history": deleted_history,
+        "deleted_ai_audit": deleted_ai_audit,
         "metrics": metrics,
     }
 
@@ -204,6 +405,7 @@ class PruneWorker:
                         f"PruneWorker: another prune or compaction is running, retrying in {_BUSY_RETRY_SECONDS:.0f}s."
                     )
                     try:
+                        _set_next_scheduled_prune(_BUSY_RETRY_SECONDS)
                         await asyncio.wait_for(self._stop_event.wait(), timeout=_BUSY_RETRY_SECONDS)
                         break
                     except asyncio.TimeoutError:
@@ -214,6 +416,7 @@ class PruneWorker:
             except Exception as e:
                 logger.error(f"PruneWorker error, backing off for {backoff}s: {e}")
                 try:
+                    _set_next_scheduled_prune(backoff)
                     await asyncio.wait_for(self._stop_event.wait(), timeout=backoff)
                     break
                 except asyncio.TimeoutError:
@@ -222,7 +425,8 @@ class PruneWorker:
 
             # Wait 24 hours (86400 seconds) or until stop signal
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=86400.0)
+                _set_next_scheduled_prune(_PRUNE_INTERVAL_SECONDS)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=_PRUNE_INTERVAL_SECONDS)
                 break
             except asyncio.TimeoutError:
                 continue
@@ -246,6 +450,7 @@ class PruneWorker:
         """Signal graceful shutdown."""
         self._running = False
         self._stop_event.set()
+        _set_next_scheduled_prune(None)
         logger.info("PruneWorker stopping.")
 
 

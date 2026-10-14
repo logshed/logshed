@@ -11,7 +11,7 @@ Single Docker container running Python 3.12 (`asyncio`) + FastAPI backend servin
   2. `DockerCollectorPool`: Supervises multiple concurrent `DockerTailer` workers streaming container logs across local Unix sockets, remote TCP proxies, and mutual TLS endpoints.
   3. `QueueConsumer`: Drains the in-memory buffer queue, applies active drop rules, evaluates alert rules, persists batch chunks to SQLite, broadcasts live SSE events, and signals the FTS indexing worker.
   4. `FTSIndexWorker`: Asynchronously batches unindexed log entries into the `logs_fts` external content table with durable state tracking.
-  5. `PruneWorker`: Runs automated daily retention purging coordinated with the FTS watermark, followed by index compaction and WAL truncation.
+  5. `PruneWorker`: Runs automated daily retention purging of logs, alert history and linked AI audit records coordinated with the FTS watermark, followed by index compaction and WAL truncation.
   6. `StorageMetricsWorker`: Samples database file footprint and host mount disk metrics hourly and immediately following pruning operations.
   7. `ModelRefreshWorker`: Discovers and caches available AI models from the configured provider every 12 hours.
   8. `DropFilterWorker`: Flushes in-memory drop rule match counts to SQLite every 30 seconds to prevent database write contention.

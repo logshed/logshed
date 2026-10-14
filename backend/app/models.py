@@ -514,7 +514,26 @@ class PruneResponse(BaseModel):
     status: str = "ok"
     deleted_logs: int
     deleted_metrics: int
+    deleted_history: int
+    deleted_ai_audit: int
     metrics: StorageMetricItem
+
+
+class PrunePreviewResponse(BaseModel):
+    """Read-only counts of what a prune with the given retention would delete right now."""
+    retention_days: int
+    cutoff: str
+    logs: int
+    history_alerts: int
+    history_on_demand: int
+    history_digests: int
+    history_maintenance: int
+    history_total: int
+    metrics: int
+    ai_audit: int
+    total: int
+    last_cleanup_at: Optional[str] = None
+    next_cleanup_at: Optional[str] = None
 
 
 class VacuumResponse(BaseModel):

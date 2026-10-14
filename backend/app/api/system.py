@@ -4,7 +4,9 @@ System health, storage metrics, and retention maintenance API endpoints for LogS
 
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app.api.deps import get_current_user, get_optional_user, run_db_query
 from app.core.config import get_db_path, get_max_retention_days, is_max_retention_days_overridden
@@ -12,6 +14,7 @@ from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
 from app.models import (
     HealthResponse,
+    PrunePreviewResponse,
     PruneResponse,
     StorageMetricItem,
     StorageOverviewResponse,
@@ -21,6 +24,7 @@ from app.models import (
 from app.services.operation_guard import OperationInProgressError, run_exclusive
 from app.services.retention import (
     InsufficientDiskSpaceError,
+    compute_prune_preview,
     execute_prune_async,
     execute_vacuum,
     get_effective_retention_days,
@@ -82,10 +86,33 @@ def _operation_conflict() -> HTTPException:
     )
 
 
+@router.get("/maintenance/prune/preview", response_model=PrunePreviewResponse)
+async def preview_prune(
+    retention_days: Optional[int] = Query(None, description="Retention in days to preview (default: saved value)"),
+    user: dict = Depends(get_current_user),
+) -> PrunePreviewResponse:
+    """
+    Read-only preview of what a prune would delete right now for the given retention:
+    logs, alert history by kind, AI audit records, and old storage metrics.
+    """
+    max_days = get_max_retention_days()
+    if retention_days is not None and not (1 <= retention_days <= max_days):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"retention_days must be between 1 and {max_days}.",
+        )
+
+    def _preview(conn) -> dict:
+        days = retention_days if retention_days is not None else get_effective_retention_days(conn)
+        return compute_prune_preview(conn, days)
+
+    return PrunePreviewResponse(**await run_db_query(_preview))
+
+
 @router.post("/maintenance/prune", response_model=PruneResponse)
 async def trigger_prune(user: dict = Depends(get_current_user)) -> PruneResponse:
     """
-    Manually triggers log retention pruning, FTS5 index compaction,
+    Manually triggers log and alert history retention pruning, FTS5 index compaction,
     WAL truncation, and takes a fresh storage metrics snapshot.
     Returns 409 while another prune or compaction is running.
     """
@@ -119,6 +146,8 @@ async def trigger_prune(user: dict = Depends(get_current_user)) -> PruneResponse
         status="ok",
         deleted_logs=result["deleted_logs"],
         deleted_metrics=result["deleted_metrics"],
+        deleted_history=result["deleted_history"],
+        deleted_ai_audit=result["deleted_ai_audit"],
         metrics=metric_item,
     )
 

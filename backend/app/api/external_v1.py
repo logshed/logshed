@@ -450,6 +450,8 @@ async def trigger_prune_v1(
         status="ok",
         deleted_logs=result["deleted_logs"],
         deleted_metrics=result["deleted_metrics"],
+        deleted_history=result["deleted_history"],
+        deleted_ai_audit=result["deleted_ai_audit"],
         metrics=metric_item,
     )
 
