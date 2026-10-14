@@ -52,7 +52,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `DELETE` | `/api/alerts/history` | Clear all incident firing history records and all AI audit records | None | `MessageResponse` (`{"status": "ok", "detail": "Cleared N alert history record(s)."}`) | `200` |
 | `GET` | `/api/alerts/maintenance` | Retrieve current alert maintenance window status, active sessions and recurring schedules | None | `MaintenanceWindowResponse` | `200` |
 | `POST` | `/api/alerts/maintenance` | Start a Web UI maintenance session ending at `until` (recorded with trigger `UI`), or end every active session when `until` is null | `{"until": "<ISO-8601 or null>"}` | `MaintenanceWindowResponse` | `200`, `409` (active session cap of 20 reached), `422` (invalid datetime) |
-| `DELETE` | `/api/alerts/maintenance/sessions/{session_id}` | End one active maintenance session by ID | None | `MaintenanceWindowResponse` | `200` |
+| `DELETE` | `/api/alerts/maintenance/sessions/{session_id}` | End one active maintenance session by ID | None | `MaintenanceWindowResponse` | `200`, `404` (unknown or already ended session) |
 | `POST` | `/api/alerts/maintenance/schedules` | Replace the recurring maintenance schedules (daily, weekly or monthly) | `{"schedules": [{"name": "...", "enabled": true, "recurrence": "weekly", "start_time": "02:00", "duration_minutes": 60, "day_of_week": 0, "day_of_month": 1}]}` (`duration_minutes` 1-1440, `day_of_week` 0 = Sunday) | `MaintenanceWindowResponse` | `200`, `422` |
 | **Ingestion Drop Rules** | | | | | |
 | `GET` | `/api/drop-rules` | List all configured drop rules with drop counters | None | `list[DropRuleResponse]` | `200` |
@@ -72,7 +72,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 | `POST` | `/api/notifications/channels` | Create a new notification channel | `{"name": "...", "url": "...", "is_enabled": true}` | `NotificationChannelResponse` | `201`, `400`, `422` |
 | `PUT` | `/api/notifications/channels/{channel_id}` | Update an existing notification channel | `{"name": "...", "url": "...", "is_enabled": true}` (all optional) | `NotificationChannelResponse` | `200`, `400`, `404`, `422` |
 | `DELETE` | `/api/notifications/channels/{channel_id}` | Delete a notification channel | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `404` |
-| `POST` | `/api/notifications/test` | Test dispatch a notification to a specific URL or channel ID | `{"url": "..."}` or `{"channel_id": ...}` | `NotificationTestResponse` (`{"success": bool, "message": "..."}`) | `200`, `400`, `404`, `500` |
+| `POST` | `/api/notifications/test` | Test dispatch a notification to a specific URL or channel ID | `{"url": "..."}` or `{"channel_id": ...}` | `NotificationTestResponse` (`{"success": bool, "message": "..."}`) | `200`, `400`, `404`, `500` (generic message if the stored channel URL cannot be decrypted) |
 | `POST` | `/api/notifications/digest/send` | Trigger on-demand dispatch of the 24-hour daily analytical digest | None | `DailyDigestRunResponse` | `200` |
 | **Saved Views** | | | | | |
 | `GET` | `/api/saved-views` | List all saved search and filter views | None | `list[SavedViewResponse]` | `200` |
