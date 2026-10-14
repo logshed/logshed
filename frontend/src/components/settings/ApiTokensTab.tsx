@@ -622,7 +622,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       {claudeProxyConfigSnippet}
                     </pre>
                     <p className="text-[10px] text-slate-500">
-                      Note: Requires <code className="text-slate-400 font-mono">mcp-proxy</code> installed locally (<code className="text-slate-400 font-mono">npm install -g mcp-proxy</code>).
+                      Note: Requires <code className="text-slate-400 font-mono">mcp-proxy</code> installed locally (Python package: <code className="text-slate-400 font-mono">uv tool install mcp-proxy</code> or <code className="text-slate-400 font-mono">pipx install mcp-proxy</code>; the npm package of the same name will not work).
                     </p>
                   </div>
                 )}

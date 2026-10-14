@@ -130,12 +130,13 @@ Depending on where your AI assistant runs relative to your LogShed server, choos
 
 Use this method when Claude Desktop runs on your laptop or workstation and LogShed runs remotely on a server (such as Proxmox VE, unRAID, TrueNAS, or a separate Docker host).
 
-Because Claude Desktop communicates strictly through local command-line processes, it uses `mcp-proxy` on your workstation to bridge local standard I/O to LogShed's remote network SSE endpoint:
+Because Claude Desktop communicates strictly through local command-line processes, it uses the Python [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) on your workstation to bridge local standard I/O to LogShed's remote network SSE endpoint. `mcp-proxy` reads the token from its `API_ACCESS_TOKEN` environment variable and sends it as an `Authorization: Bearer` header:
 
-1. Ensure Node.js is installed on your workstation, and install `mcp-proxy` globally:
+1. Install `mcp-proxy` from PyPI on your workstation with [`uv`](https://docs.astral.sh/uv/) (or `pipx install mcp-proxy`):
    ```bash
-   npm install -g mcp-proxy
+   uv tool install mcp-proxy
    ```
+   Do not use `npm install -g mcp-proxy`: the npm package with that name is a different tool that serves a local stdio server over HTTP and cannot connect to LogShed. If Claude Desktop reports that `mcp-proxy` cannot be found, set `"command"` below to the full path printed by `which mcp-proxy` (`where mcp-proxy` on Windows).
 2. Open Claude Desktop settings:
    - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
    - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
