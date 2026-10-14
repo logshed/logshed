@@ -56,6 +56,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Alert History Tab:**
   * Unified incident history covering triggered alert rules, automated AI rule enrichments, and scheduled daily analytical digest dispatches.
   * Detail inspection drawer (rendered via `IncidentHistoryDetail.tsx`) presents full prompt envelopes, model badges, incident summaries, and token consumption breakdowns (input, output, reasoning/thought, and total).
+  * Analyses with an AI audit record (on-demand analyses and alert enrichments) show an expandable **Follow-up Discussion** section below the diagnosis. Messages load on first expand, and the thread stays mounted when collapsed so a streaming reply is not lost.
   * Supports single-item and bulk history deletion.
 * **Maintenance Window Tab:**
   * Configure active on-demand alert suppression periods or recurring schedules by day of week and time window to silence alerts during routine maintenance.
@@ -67,6 +68,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Token Estimator & Model Picker:** Live token counter and active model selection.
 * **Situational Context:** Free-text user context textarea to provide situational background (e.g., recent system updates, topology changes).
 * **Structured Markdown Display:** Formatted analysis presentation including Summary, Root Cause, and Remediation steps with copyable command and configuration blocks.
+* **Follow-up Discussion (`AiFollowUpThread.tsx`):** Rendered below the Actionable Remediation card once a diagnosis completes (shared with Incident History). Shows the thread with Markdown replies (copyable code blocks), model and token badges per reply, a running token tally and an `X / 10 turns` counter. Replies stream in over SSE; partial text is discarded when a failover restarts the reply on a fallback model. The question box sends on Ctrl+Enter or Cmd+Enter and keeps 44px touch targets on mobile. The view follows new content unless the operator has scrolled up. After the 10th question an advisory replaces the input. "Clear Thread" asks for confirmation, then resets the conversation while keeping the diagnosis. Follow-ups in the modal reuse the provider and model selected for the diagnosis.
 
 ### 3.4 Storage Management Panel (`/storage`)
 * **Current Storage Card:** Dual-metric display showing active Database Footprint (MB/GB) alongside a visual progress bar for Available Mount Disk Space.

@@ -12,11 +12,13 @@ import {
   Info,
   Calendar,
   Wrench,
+  MessageSquare,
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../types.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { useClipboard } from '../../utils/hooks.ts';
 import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
+import { AiFollowUpThread } from '../ai/AiFollowUpThread.tsx';
 import { DEFAULT_SYSTEM_PROMPT, buildFullEnvelope } from '../../utils/aiPrompt.ts';
 import {
   isMaintenanceItem,
@@ -38,6 +40,8 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
   const { copied: copiedPrompt, copy: copyPrompt } = useClipboard();
   const [showPromptDetails, setShowPromptDetails] = useState<boolean>(false);
   const [promptViewMode, setPromptViewMode] = useState<'analysis' | 'full'>('analysis');
+  const [showFollowUp, setShowFollowUp] = useState<boolean>(false);
+  const [followUpOpened, setFollowUpOpened] = useState<boolean>(false);
 
   const isDigest = item.rule_name === 'Daily Digest';
   const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
@@ -60,6 +64,13 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
     : isOnDemand
     ? `${item.trigger_count} log${item.trigger_count === 1 ? '' : 's'}`
     : `${item.trigger_count} matching event${item.trigger_count === 1 ? '' : 's'}`;
+
+  const canFollowUp = Boolean(item.ai_audit_id) && !isFailed;
+
+  const toggleFollowUp = () => {
+    setFollowUpOpened(true);
+    setShowFollowUp(!showFollowUp);
+  };
 
   const cleanUserContext = item.user_context && !item.user_context.toLowerCase().startsWith('alert rule:')
     ? item.user_context
@@ -300,6 +311,39 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
             </div>
           ) : (
             <MarkdownRenderer content={displaySummary} />
+          )}
+        </div>
+      )}
+
+      {/* Expandable Follow-up Discussion (messages load on first expand) */}
+      {canFollowUp && (
+        <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
+          <button
+            type="button"
+            onClick={toggleFollowUp}
+            aria-expanded={showFollowUp}
+            className="w-full flex items-center justify-between p-3 bg-dark-900 hover:bg-dark-850 transition text-left cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              {showFollowUp ? (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              )}
+              <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+              <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                Follow-up Discussion
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-400 font-mono">
+              {showFollowUp ? 'Hide' : 'Expand'}
+            </span>
+          </button>
+
+          {followUpOpened && (
+            <div className={`border-t border-dark-700 p-3 ${showFollowUp ? '' : 'hidden'}`}>
+              <AiFollowUpThread auditId={item.ai_audit_id!} />
+            </div>
           )}
         </div>
       )}

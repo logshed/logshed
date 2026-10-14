@@ -60,6 +60,12 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       tokens_used: 330,
       audit_id: 12,
     });
+    vi.spyOn(aiApi, 'fetchConversationMessages').mockResolvedValue({
+      audit_id: 12,
+      messages: [],
+      turn_count: 0,
+      max_turns: 10,
+    });
     vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
       provider: 'gemini',
       models: [

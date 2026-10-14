@@ -15,26 +15,40 @@ from app.core.rate_limiter import ai_rate_limiter
 from app.core.redactor import redact
 from app.core.security import SESSION_COOKIE_NAME
 from app.models import (
+    AiConversationHistoryResponse,
+    AiConversationMessage,
     AiDiagnosisRequest,
     AiDiagnosisResponse,
+    AiFollowUpRequest,
+    AiFollowUpResponse,
     AiModelInfo,
     AiModelRefreshRequest,
     AiModelsResponse,
     AiPreviewRequest,
     AiPreviewResponse,
+    MessageResponse,
 )
 from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
     build_analysis_prompt,
     execute_ai_analysis,
+    execute_ai_follow_up,
     fetch_available_models,
     is_text_generation_model,
 )
 from app.services.ai_service import (
+    MAX_FOLLOW_UP_TURNS,
+    audit_entry_exists,
+    audit_not_found,
     build_diagnosis_context,
+    build_follow_up_context,
+    count_conversation_turns,
+    delete_conversation_thread,
+    get_conversation_messages,
     is_cache_fresh,
     read_ai_settings,
     save_diagnosis_audit,
+    save_follow_up_exchange,
     save_models_cache,
 )
 
@@ -51,6 +65,84 @@ def _check_ai_rate_limit(request: Request, user: dict) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded. Maximum 10 AI diagnosis requests per minute.",
         )
+
+
+def _require_ai_enabled(ctx: dict) -> None:
+    """Reject AI requests when the AI provider is disabled in settings."""
+    if not ctx.get("ai_enabled", True):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
+        )
+
+
+def _log_ai_failure(message: str) -> None:
+    """Log an AI request failure, with the traceback only in debug or development mode."""
+    if is_debug_or_dev():
+        logger.warning(message, exc_info=True)
+    else:
+        logger.warning(message)
+
+
+def _ai_failure(exc: Exception, action: str) -> HTTPException:
+    """Map a failed AI provider call to a redacted HTTP error (400 invalid input, 504 timeout, 502 otherwise)."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        clean_err = str(exc) if str(exc) else "Request timed out after deadline"
+        _log_ai_failure(f"{action} request timed out: {clean_err}")
+        return HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"{action} request timed out: {clean_err}",
+        )
+    clean_err = str(redact(str(exc)[:500]))
+    _log_ai_failure(f"{action} request failed: {clean_err}")
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=clean_err)
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=f"{action} failed: {clean_err}",
+    )
+
+
+def _stream_error_message(exc: Exception) -> str:
+    """Redacted error text for an SSE error event."""
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or not str(exc).strip():
+        return "Request timed out"
+    return str(redact(str(exc)[:500]))
+
+
+def _sse_response(events) -> StreamingResponse:
+    """Wrap an async generator of SSE frames in a non-buffered event-stream response."""
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _stream_worker_events(request: Request, queue: asyncio.Queue, worker):
+    """
+    Run worker() as a task and yield the events it queues as SSE frames until it queues None.
+    The worker is cancelled if the client disconnects.
+    """
+    task = asyncio.create_task(worker())
+    try:
+        while True:
+            if await request.is_disconnected():
+                task.cancel()
+                break
+            item = await queue.get()
+            if item is None:
+                break
+            yield f"data: {json.dumps(item)}\n\n"
+    except (asyncio.CancelledError, GeneratorExit):
+        task.cancel()
+        raise
 
 
 @router.get("/models", response_model=AiModelsResponse)
@@ -304,11 +396,7 @@ async def diagnose_logs(
             client_utc_offset_minutes=req.client_utc_offset_minutes,
         )
 
-        if not ctx.get("ai_enabled", True):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
-            )
+        _require_ai_enabled(ctx)
 
         ai_res = await execute_ai_analysis(
             provider=ctx["provider"],
@@ -365,33 +453,8 @@ async def diagnose_logs(
         )
     except HTTPException:
         raise
-    except ValueError as ve:
-        clean_err = str(redact(str(ve)[:500]))
-        if is_debug_or_dev():
-            logger.warning(f"AI analysis request failed: {clean_err}", exc_info=True)
-        else:
-            logger.warning(f"AI analysis request failed: {clean_err}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=clean_err)
-    except (asyncio.TimeoutError, TimeoutError) as te:
-        clean_err = str(te) if str(te) else "Request timed out after deadline"
-        if is_debug_or_dev():
-            logger.warning(f"AI analysis request timed out: {clean_err}", exc_info=True)
-        else:
-            logger.warning(f"AI analysis request timed out: {clean_err}")
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=f"AI analysis request timed out: {clean_err}",
-        )
     except Exception as exc:
-        clean_err = str(redact(str(exc)[:500]))
-        if is_debug_or_dev():
-            logger.warning(f"AI analysis request failed: {clean_err}", exc_info=True)
-        else:
-            logger.warning(f"AI analysis request failed: {clean_err}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI analysis failed: {clean_err}",
-        )
+        raise _ai_failure(exc, "AI analysis")
 
 
 @router.post("/diagnose/stream")
@@ -419,11 +482,7 @@ async def diagnose_logs_stream(
         client_utc_offset_minutes=req.client_utc_offset_minutes,
     )
 
-    if not ctx.get("ai_enabled", True):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="AI provider is disabled in settings. Please enable an AI provider in Settings to inspect logs.",
-        )
+    _require_ai_enabled(ctx)
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
@@ -500,41 +559,167 @@ async def diagnose_logs_stream(
                     "result": resp.model_dump(),
                 })
             except Exception as exc:
-                if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or not str(exc).strip():
-                    clean_err = "Request timed out"
-                else:
-                    clean_err = str(redact(str(exc)[:500]))
                 await queue.put({
                     "stage": "error",
-                    "message": clean_err,
+                    "message": _stream_error_message(exc),
                 })
             finally:
                 await queue.put(None)
 
-        task = asyncio.create_task(worker())
+        async for frame in _stream_worker_events(request, queue, worker):
+            yield frame
 
-        try:
-            while True:
-                if await request.is_disconnected():
-                    task.cancel()
-                    break
-                item = await queue.get()
-                if item is None:
-                    break
-                yield f"data: {json.dumps(item)}\n\n"
-        except (asyncio.CancelledError, GeneratorExit):
-            task.cancel()
-            raise
+    return _sse_response(event_generator())
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+
+
+
+
+@router.get("/audit/{audit_id}/messages", response_model=AiConversationHistoryResponse)
+async def get_follow_up_messages(
+    audit_id: int,
+    user: dict = Depends(get_current_user),
+) -> AiConversationHistoryResponse:
+    """Retrieve the follow-up conversation thread for an AI analysis."""
+    def _query(conn):
+        if not audit_entry_exists(conn, audit_id):
+            return None
+        return get_conversation_messages(conn, audit_id)
+
+    messages = await run_db_query(_query)
+    if messages is None:
+        raise audit_not_found(audit_id)
+
+    return AiConversationHistoryResponse(
+        audit_id=audit_id,
+        messages=[AiConversationMessage(**m) for m in messages],
+        turn_count=count_conversation_turns(messages),
+        max_turns=MAX_FOLLOW_UP_TURNS,
     )
 
 
+@router.delete("/audit/{audit_id}/messages", response_model=MessageResponse)
+async def clear_follow_up_messages(
+    audit_id: int,
+    user: dict = Depends(get_current_user),
+) -> MessageResponse:
+    """Clear the follow-up conversation thread for an AI analysis, keeping the diagnosis itself."""
+    def _delete(conn):
+        if not audit_entry_exists(conn, audit_id):
+            return False
+        delete_conversation_thread(conn, audit_id)
+        conn.commit()
+        return True
 
+    if not await run_db_query(_delete):
+        raise audit_not_found(audit_id)
+
+    return MessageResponse(status="ok", detail="Conversation thread cleared successfully.")
+
+
+async def _prepare_follow_up(audit_id: int, req: AiFollowUpRequest) -> dict:
+    """Build the follow-up conversation context and check that AI is enabled."""
+    ctx = await build_follow_up_context(
+        audit_id=audit_id,
+        question=req.message,
+        provider_override=req.provider,
+        model_override=req.model,
+    )
+    _require_ai_enabled(ctx)
+    return ctx
+
+
+async def _run_follow_up(audit_id: int, ctx: dict, on_progress=None) -> AiFollowUpResponse:
+    """Dispatch the follow-up conversation with failover, then persist the question and reply."""
+    reply, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts = await execute_ai_follow_up(
+        provider=ctx["provider"],
+        model=ctx["model"],
+        api_key=ctx["api_key"],
+        base_url=ctx["base_url"],
+        messages=ctx["messages"],
+        fallback_models=ctx["fallback_models"],
+        timeout=ctx["ai_timeout"],
+        thinking_budget=ctx["ai_thinking_budget"],
+        on_progress=on_progress,
+    )
+
+    message, turn_count = await save_follow_up_exchange(
+        audit_id=audit_id,
+        question=ctx["question"],
+        reply=reply,
+        model=model_used,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        tokens_thoughts=tokens_thoughts,
+        tokens_used=tokens_used,
+    )
+
+    return AiFollowUpResponse(
+        message=AiConversationMessage(**message),
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        tokens_thoughts=tokens_thoughts,
+        tokens_used=tokens_used,
+        model_used=model_used,
+        fallback_used=(model_used != ctx["model"]),
+        fallback_attempts=fallback_attempts,
+        turn_count=turn_count,
+        max_turns=MAX_FOLLOW_UP_TURNS,
+    )
+
+
+@router.post("/audit/{audit_id}/follow-up", response_model=AiFollowUpResponse)
+async def ask_follow_up(
+    audit_id: int,
+    req: AiFollowUpRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> AiFollowUpResponse:
+    """
+    Ask a follow-up question about an AI analysis and wait for the full reply.
+    Shares the AI rate limit with diagnoses and allows at most 10 questions per analysis.
+    """
+    _check_ai_rate_limit(request, user)
+
+    try:
+        ctx = await _prepare_follow_up(audit_id, req)
+        return await _run_follow_up(audit_id, ctx)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _ai_failure(exc, "AI follow-up")
+
+
+@router.post("/audit/{audit_id}/follow-up/stream")
+async def ask_follow_up_stream(
+    audit_id: int,
+    req: AiFollowUpRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Ask a follow-up question about an AI analysis, streaming SSE events
+    (init, calling, failover, delta, complete, error) as the reply is generated.
+    Shares the AI rate limit with diagnoses and allows at most 10 questions per analysis.
+    """
+    _check_ai_rate_limit(request, user)
+    ctx = await _prepare_follow_up(audit_id, req)
+
+    queue: asyncio.Queue = asyncio.Queue()
+    queue.put_nowait({
+        "stage": "init",
+        "model": ctx["model"],
+        "fallback_models": ctx["fallback_models"],
+        "message": f"Asking {ctx['model']}...",
+    })
+
+    async def worker():
+        try:
+            resp = await _run_follow_up(audit_id, ctx, on_progress=queue.put)
+            await queue.put({"stage": "complete", "result": resp.model_dump()})
+        except Exception as exc:
+            await queue.put({"stage": "error", "message": _stream_error_message(exc)})
+        finally:
+            await queue.put(None)
+
+    return _sse_response(_stream_worker_events(request, queue, worker))

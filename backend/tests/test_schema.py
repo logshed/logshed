@@ -78,6 +78,7 @@ class TestSchemaIntegrity:
             "api_tokens",
             "maintenance_sessions",
             "docker_endpoints",
+            "ai_conversation_messages",
         }
         assert expected.issubset(tables)
 
@@ -479,8 +480,10 @@ class TestMigrationRunner:
         assert "api_tokens" in tables
         assert "maintenance_sessions" in tables
         assert "docker_endpoints" in tables
+        assert "ai_conversation_messages" in tables
 
         assert "idx_api_tokens_hash" in indexes
+        assert "idx_ai_conversation_audit_id" in indexes
         assert "idx_api_tokens_expires" in indexes
         assert "idx_maint_sessions_active" in indexes
         assert "idx_docker_endpoints_name" in indexes
@@ -590,6 +593,161 @@ class TestMigrationRunner:
         assert row is not None
         assert row[0] == 1
         assert row[1] == "Primary Docker"
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        assert "ai_conversation_messages" in tables
+        conn.close()
+
+    def test_migration_v3_pre_release_adds_conversation_table(self, tmp_path: Path):
+        """A pre-release v3 database without ai_conversation_messages gains the table and index on startup."""
+        p = tmp_path / "v3_no_conversations.db"
+        run_migrations(p)
+        conn = get_connection(p)
+        conn.execute("DROP TABLE ai_conversation_messages;")
+        conn.commit()
+        conn.close()
+
+        run_migrations(p)
+
+        conn = get_connection(p)
+        assert get_user_version(conn) == 3
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        conn.close()
+        assert "ai_conversation_messages" in tables
+        assert "idx_ai_conversation_audit_id" in indexes
+
+
+
+# ===================================================================
+# 2b. AI Follow-up Conversation Messages
+# ===================================================================
+
+def _insert_audit(conn: sqlite3.Connection, timestamp: str = "2026-08-29T12:00:00+00:00") -> int:
+    cur = conn.execute(
+        "INSERT INTO ai_audit_log (timestamp, source_alias, app_name, log_count, model, prompt_sent, response_text) "
+        "VALUES (?, 'srv', 'app', 1, 'm', 'prompt', 'diagnosis')",
+        (timestamp,),
+    )
+    return cur.lastrowid
+
+
+def _insert_message(conn: sqlite3.Connection, audit_id: int, role: str = "user", content: str = "q") -> None:
+    conn.execute(
+        "INSERT INTO ai_conversation_messages (audit_id, role, content, model, created_at) VALUES (?, ?, ?, 'm', datetime('now'))",
+        (audit_id, role, content),
+    )
+
+
+class TestAiConversationMessages:
+
+    def test_columns(self, db_path: Path):
+        conn = get_connection(db_path)
+        cols = {r[1]: (r[2], r[3], r[4]) for r in conn.execute("PRAGMA table_info(ai_conversation_messages)").fetchall()}
+        fks = conn.execute("PRAGMA foreign_key_list(ai_conversation_messages)").fetchall()
+        conn.close()
+
+        assert set(cols) == {
+            "id", "audit_id", "role", "content", "tokens_in", "tokens_out",
+            "tokens_thoughts", "tokens_used", "model", "created_at",
+        }
+        assert cols["audit_id"][1] == 1
+        assert cols["tokens_used"] == ("INTEGER", 1, "0")
+        assert len(fks) == 1
+        # (id, seq, table, from, to, on_update, on_delete, match)
+        assert fks[0][2] == "ai_audit_log"
+        assert fks[0][3] == "audit_id"
+        assert fks[0][6] == "CASCADE"
+
+    def test_role_check_constraint(self, db_path: Path):
+        conn = get_connection(db_path)
+        audit_id = _insert_audit(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_message(conn, audit_id, role="system")
+        conn.close()
+
+    def test_unknown_audit_rejected(self, db_path: Path):
+        conn = get_connection(db_path)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_message(conn, 4242)
+        conn.close()
+
+    def test_deleting_audit_entry_cascades(self, db_path: Path):
+        conn = get_connection(db_path)
+        kept = _insert_audit(conn)
+        removed = _insert_audit(conn)
+        _insert_message(conn, kept)
+        _insert_message(conn, removed)
+        _insert_message(conn, removed, role="assistant", content="a")
+        conn.commit()
+
+        conn.execute("DELETE FROM ai_audit_log WHERE id = ?", (removed,))
+        conn.commit()
+        rows = conn.execute("SELECT audit_id FROM ai_conversation_messages").fetchall()
+        conn.close()
+        assert rows == [(kept,)]
+
+    def test_retention_prune_removes_threads_of_pruned_analyses(self, db_path: Path):
+        from app.services.retention import execute_prune
+
+        old_ts = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)).isoformat()
+        new_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        conn = get_connection(db_path)
+        old_audit = _insert_audit(conn, old_ts)
+        new_audit = _insert_audit(conn, new_ts)
+        for audit_id, ts in ((old_audit, old_ts), (new_audit, new_ts)):
+            conn.execute(
+                "INSERT INTO alert_history (rule_name, trigger_count, ai_enrichment, ai_audit_id, triggered_at) "
+                "VALUES ('On-Demand Analysis', 1, 1, ?, ?)",
+                (audit_id, ts),
+            )
+            _insert_message(conn, audit_id)
+        conn.commit()
+        conn.close()
+
+        result = execute_prune(db_path, retention_days=14)
+        assert result["deleted_ai_audit"] == 1
+
+        conn = get_connection(db_path)
+        rows = conn.execute("SELECT audit_id FROM ai_conversation_messages").fetchall()
+        conn.close()
+        assert rows == [(new_audit,)]
+
+    def test_data_access_functions(self, db_path: Path):
+        from app.services.ai_service import (
+            count_conversation_turns,
+            delete_conversation_thread,
+            get_conversation_messages,
+            save_conversation_message,
+        )
+
+        conn = get_connection(db_path)
+        audit_id = _insert_audit(conn)
+        other_id = _insert_audit(conn)
+        ts = "2026-08-29T12:10:00+00:00"
+        save_conversation_message(conn, audit_id, "user", "why?", "gemini-x", ts)
+        reply_id = save_conversation_message(
+            conn, audit_id, "assistant", "because", "gemini-x", ts,
+            tokens_in=100, tokens_out=20, tokens_thoughts=5, tokens_used=125,
+        )
+        save_conversation_message(conn, other_id, "user", "other", "gemini-x", ts)
+        conn.commit()
+
+        messages = get_conversation_messages(conn, audit_id)
+        assert [m["role"] for m in messages] == ["user", "assistant"]
+        assert messages[1] == {
+            "id": reply_id,
+            "role": "assistant",
+            "content": "because",
+            "tokens_used": 125,
+            "model": "gemini-x",
+            "created_at": ts,
+        }
+        assert count_conversation_turns(messages) == 1
+
+        assert delete_conversation_thread(conn, audit_id) == 2
+        conn.commit()
+        assert get_conversation_messages(conn, audit_id) == []
+        assert len(get_conversation_messages(conn, other_id)) == 1
         conn.close()
 
 

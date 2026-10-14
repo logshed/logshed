@@ -1,10 +1,14 @@
-import { apiFetch, ApiError } from './client.ts';
+import { apiFetch, ApiError, toApiError } from './client.ts';
 import {
+  AiConversationHistoryResponse,
   AiDiagnosisRequest,
   AiDiagnosisResponse,
   AiPreviewRequest,
   AiPreviewResponse,
   AiDiagnosisStreamEvent,
+  AiFollowUpRequest,
+  AiFollowUpResponse,
+  AiFollowUpStreamEvent,
   AiModelsResponse,
 } from '../types.ts';
 import { isTextModel } from '../utils/aiPrompt.ts';
@@ -124,3 +128,82 @@ export async function getAiModels(
 }
 
 
+
+export async function fetchConversationMessages(auditId: number): Promise<AiConversationHistoryResponse> {
+  return apiFetch<AiConversationHistoryResponse>(`/api/ai/audit/${auditId}/messages`);
+}
+
+export async function clearConversationThread(auditId: number): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/api/ai/audit/${auditId}/messages`, { method: 'DELETE' });
+}
+
+/**
+ * Ask a follow-up question about an AI analysis. With `onEvent`, the reply is streamed over SSE
+ * (`delta` events carry text chunks); without it the synchronous endpoint is used.
+ * Request errors (turn limit, rate limit, validation) reject with an ApiError.
+ */
+export async function sendAiFollowUp(
+  auditId: number,
+  req: AiFollowUpRequest,
+  onEvent?: (event: AiFollowUpStreamEvent) => void,
+): Promise<AiFollowUpResponse> {
+  const endpoint = `/api/ai/audit/${auditId}/follow-up`;
+  if (!onEvent) {
+    return apiFetch<AiFollowUpResponse>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  const streamEndpoint = `${endpoint}/stream`;
+  const response = await fetch(streamEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    credentials: 'include',
+    body: JSON.stringify(req),
+  });
+  if (!response.ok) {
+    throw await toApiError(response, streamEndpoint);
+  }
+  if (!response.body) {
+    throw new Error('Streaming is not supported by this browser.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() || '';
+
+    for (const frame of frames) {
+      const trimmed = frame.trim();
+      if (!trimmed.startsWith('data: ')) continue;
+      let event: AiFollowUpStreamEvent;
+      try {
+        event = JSON.parse(trimmed.slice(6));
+      } catch {
+        continue;
+      }
+      onEvent(event);
+      if (event.stage === 'complete' && event.result) {
+        await reader.cancel();
+        return event.result;
+      }
+      if (event.stage === 'error') {
+        await reader.cancel();
+        throw new Error(event.message || 'AI follow-up failed.');
+      }
+    }
+  }
+
+  throw new Error('The AI follow-up stream ended before a reply was received.');
+}

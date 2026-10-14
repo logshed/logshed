@@ -18,6 +18,7 @@ import {
   ChevronUp,
   SlidersHorizontal,
   ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels } from '../../api/ai.ts';
@@ -26,6 +27,7 @@ import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
+import { AiFollowUpThread } from './AiFollowUpThread.tsx';
 
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   gemini: DEFAULT_AI_MODEL,
@@ -1252,6 +1254,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               </h4>
               <MarkdownRenderer content={analysisResult.remediation} />
             </div>
+
+            {/* Follow-up Discussion */}
+            {analysisResult.audit_id != null && (
+              <div className="bg-dark-900/60 p-3 rounded-lg border border-dark-700">
+                <h4 className="text-[11px] font-semibold text-sky-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Follow-up Discussion
+                </h4>
+                <AiFollowUpThread auditId={analysisResult.audit_id} provider={provider} model={model} />
+              </div>
+            )}
 
             {/* AI Advisory Disclaimer */}
             <div className="p-3 bg-dark-950/80 border border-dark-700/80 rounded-lg flex items-start gap-2.5 text-slate-400 text-[11px] leading-relaxed">

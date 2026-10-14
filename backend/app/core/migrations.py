@@ -351,6 +351,8 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
     - Create maintenance_sessions table for concurrent maintenance tracking, including audit columns
       (ended_at, end_reason, dropped_count, trigger_label) and link alert_history rows via maintenance_session_id.
     - Create docker_endpoints table and seed default primary Docker host.
+    - Create ai_conversation_messages table for AI follow-up conversation threads
+      (cascade-deleted with their ai_audit_log entry).
     - Ensure persistent server_name and instance_id in system_settings.
     """
     logger.info("Running migration v3...")
@@ -428,6 +430,21 @@ CREATE TABLE IF NOT EXISTS docker_endpoints (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_docker_endpoints_name ON docker_endpoints(name);
 CREATE INDEX IF NOT EXISTS idx_docker_endpoints_enabled ON docker_endpoints(enabled);
 
+CREATE TABLE IF NOT EXISTS ai_conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    audit_id INTEGER NOT NULL REFERENCES ai_audit_log(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    tokens_in INTEGER NOT NULL DEFAULT 0,
+    tokens_out INTEGER NOT NULL DEFAULT 0,
+    tokens_thoughts INTEGER NOT NULL DEFAULT 0,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    model TEXT NOT NULL,
+    created_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_conversation_audit_id ON ai_conversation_messages(audit_id, created_at ASC);
+
 INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
 VALUES ('server_name', 'LogShed', datetime('now'), 0);
 ''')
@@ -503,9 +520,12 @@ def run_migrations(db_path: Union[str, Path]) -> None:
 
         # Ensure schema integrity for v3 databases (e.g. pre-release v1.3.0 dev deployments)
         if current_version == 3:
-            cur = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docker_endpoints';")
-            if not cur.fetchone():
-                logger.info("Upgrading pre-release v3 database schema with docker_endpoints...")
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                "AND name IN ('docker_endpoints', 'ai_conversation_messages');"
+            )
+            if cur.fetchone()[0] < 2:
+                logger.info("Upgrading pre-release v3 database schema with missing v1.3.0 tables...")
                 migrate_v3(conn)
                 conn.commit()
     finally:

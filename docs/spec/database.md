@@ -320,6 +320,24 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
   CREATE INDEX IF NOT EXISTS idx_maint_sessions_active ON maintenance_sessions(is_active, expires_at);
   ```
 - **Maintenance Audit History:** Each on-demand session (web UI, API token, MCP) writes one `alert_history` row (`rule_name = 'Maintenance Window'`, `maintenance_session_id` set, `triggered_at` = session start) when it starts. Start, end (or early-termination time), trigger, type, targets, and dropped-log count are read from the linked `maintenance_sessions` row at query time, so clearing alert history never removes the session audit data. Recurring schedules are not recorded. Sessions that pass their planned end are closed as `expired` by the 30-second `MaintenanceSweepWorker` (or lazily on status and history reads); early termination records `terminated`. Per-session `dropped_count` is accumulated in memory (no SQLite access per log line) and flushed during the sweep and at session end. Ended sessions older than the configured log retention, and their history rows, are pruned by the daily prune (see 2.6); a running session is never pruned. At most 20 sessions can be active at once, and `target_app` and `target_host` are limited to 255 characters.
+- **AI Follow-up Conversation Messages Table:**
+  ```sql
+  CREATE TABLE IF NOT EXISTS ai_conversation_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      audit_id INTEGER NOT NULL REFERENCES ai_audit_log(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,           -- user rows hold the redacted question as sent to the provider
+      tokens_in INTEGER NOT NULL DEFAULT 0,
+      tokens_out INTEGER NOT NULL DEFAULT 0,
+      tokens_thoughts INTEGER NOT NULL DEFAULT 0,
+      tokens_used INTEGER NOT NULL DEFAULT 0,
+      model TEXT NOT NULL,             -- model that produced the reply (after any failover)
+      created_at DATETIME NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_conversation_audit_id ON ai_conversation_messages(audit_id, created_at ASC);
+  ```
+  Each follow-up question and its reply are written in one `BEGIN IMMEDIATE` transaction that re-checks the 10-question limit, so concurrent requests cannot exceed it. Deleting an `ai_audit_log` row (single history delete, clear all history, or retention pruning) removes its thread through `ON DELETE CASCADE` (every connection enables `PRAGMA foreign_keys=ON`).
+- **Pre-release v3 Databases:** On startup, a database already at `user_version = 3` that is missing `docker_endpoints` or `ai_conversation_messages` (from an earlier v1.3.0 pre-release) re-runs the idempotent `migrate_v3` to add them.
 - **System Identity Setup:**
   - `server_name` defaults to `'LogShed'` in `system_settings` table.
   - `instance_id` set to persistent UUID4 if not already present.
@@ -370,7 +388,7 @@ Daily task runs iterative batch pruning coordinated with the FTS indexing waterm
 3. Prune alert history and AI audit records older than the cutoff (all history follows the global `retention_days`):
    - Non-maintenance `alert_history` rows (alert firings, Daily Digest, On-Demand Analysis) are deleted when `triggered_at` is older than the cutoff.
    - Maintenance window rows are deleted when their session has ended and `ended_at` is older than the cutoff (a maintenance row whose session no longer exists falls back to `triggered_at`); running sessions are never deleted. Ended sessions older than the cutoff are then deleted too.
-   - The `ai_audit_log` row linked by `ai_audit_id` is deleted with its history row unless a kept history row still references it. Unreferenced `ai_audit_log` rows older than the cutoff are deleted as well.
+   - The `ai_audit_log` row linked by `ai_audit_id` is deleted with its history row unless a kept history row still references it. Unreferenced `ai_audit_log` rows older than the cutoff are deleted as well. Follow-up conversation threads in `ai_conversation_messages` are removed with their `ai_audit_log` row by cascade.
    - The prune result reports `deleted_logs` (logs only), `deleted_history` and `deleted_ai_audit` separately.
 4. Execute FTS5 index compaction:
    `INSERT INTO logs_fts(logs_fts) VALUES('optimize');`

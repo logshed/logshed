@@ -2400,9 +2400,547 @@ class TestAiProviderStateAndKeyManagement:
             assert s_data["ai_providers_config"]["openai"]["has_api_key"] is True
 
 
+# ===================================================================
+# AI Follow-up Conversations
+# ===================================================================
+
+ORIGINAL_PROMPT = "### System Metadata\n- Host / Source: router\n\n### Redacted Log Stream (Chronological)\n```\nlog line\n```"
+ORIGINAL_DIAGNOSIS = "## Summary\nDNS upstream timeout.\n\n## Root Cause\nUpstream unreachable.\n\n## Actionable Remediation\nCheck port 53."
 
 
+@pytest.fixture
+def audit_id(populated_db) -> int:
+    """Insert an on-demand AI audit entry and its history row; return the audit id."""
+    conn = sqlite3.connect(populated_db)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO ai_audit_log (timestamp, source_alias, app_name, log_count, model, prompt_sent, response_text, trigger_source)
+        VALUES ('2026-08-29T12:05:00Z', 'router', 'dnsmasq', 2, 'gemini-retired-model', ?, ?, 'on-demand')
+        """,
+        (ORIGINAL_PROMPT, ORIGINAL_DIAGNOSIS),
+    )
+    new_id = cur.lastrowid
+    cur.execute(
+        """
+        INSERT INTO alert_history (rule_name, trigger_count, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
+        VALUES ('On-Demand Analysis', 2, ?, 1, 'gemini-retired-model', ?, '2026-08-29T12:05:00Z')
+        """,
+        (ORIGINAL_DIAGNOSIS, new_id),
+    )
+    conn.commit()
+    conn.close()
+    return new_id
 
 
+def _follow_up_result(reply: str = "Run `dig @1.1.1.1 example.com` to test.", model: str = "gemini-3.7-flash"):
+    return (reply, 400, 60, 0, 460, model, [])
 
 
+async def _aiter(items):
+    for item in items:
+        yield item
+
+
+def _parse_sse(body: str) -> list[dict]:
+    return [json.loads(line[6:]) for line in body.split("\n\n") if line.startswith("data: ")]
+
+
+class TestAiFollowUpEngine:
+
+    @pytest.mark.asyncio
+    async def test_follow_up_uses_conversational_system_prompt_and_streams_deltas(self):
+        events: list[dict] = []
+        messages = [
+            {"role": "user", "content": ORIGINAL_PROMPT},
+            {"role": "assistant", "content": ORIGINAL_DIAGNOSIS},
+            {"role": "user", "content": "Which port?"},
+        ]
+
+        async def fake_dispatch(**kwargs):
+            await kwargs["on_delta"]("Port ")
+            await kwargs["on_delta"]("53.")
+            return ("Port 53.", 300, 5, 0, 305)
+
+        with patch("app.services.ai_engine.dispatch_multi_turn_gemini", side_effect=fake_dispatch) as mock_dispatch:
+            res = await ai_engine.execute_ai_follow_up(
+                provider="gemini",
+                model="gemini-3.7-flash",
+                api_key="key",
+                base_url=None,
+                messages=messages,
+                on_progress=events.append,
+            )
+
+        assert res == ("Port 53.", 300, 5, 0, 305, "gemini-3.7-flash", [])
+        kwargs = mock_dispatch.call_args.kwargs
+        assert kwargs["messages"] == messages
+        assert kwargs["system_prompt"] == ai_engine.FOLLOW_UP_SYSTEM_PROMPT
+        assert "do not use the \"## Summary\"" in ai_engine.FOLLOW_UP_SYSTEM_PROMPT
+        assert [e["stage"] for e in events] == ["calling", "delta", "delta"]
+        assert [e["content"] for e in events if e["stage"] == "delta"] == ["Port ", "53."]
+
+    @pytest.mark.asyncio
+    async def test_follow_up_fails_over_to_fallback_model(self):
+        events: list[dict] = []
+        with patch(
+            "app.services.ai_engine.dispatch_multi_turn_openai",
+            new_callable=AsyncMock,
+            side_effect=[ai_engine.AiServiceUnavailableError("503 overloaded"), ("Answer", 10, 2, 0, 12)],
+        ) as mock_dispatch:
+            res = await ai_engine.execute_ai_follow_up(
+                provider="openai",
+                model="gpt-primary",
+                api_key="key",
+                base_url="http://local/v1",
+                messages=[{"role": "user", "content": "q"}],
+                fallback_models=["gpt-fallback"],
+                on_progress=events.append,
+            )
+
+        assert res[5] == "gpt-fallback"
+        assert res[6] == ["gpt-primary failed: 503 overloaded"]
+        assert [c.kwargs["model"] for c in mock_dispatch.call_args_list] == ["gpt-primary", "gpt-fallback"]
+        assert mock_dispatch.call_args.kwargs["base_url"] == "http://local/v1"
+        assert [e["stage"] for e in events] == ["calling", "failover", "calling"]
+
+    @pytest.mark.asyncio
+    async def test_follow_up_non_retryable_error_does_not_fail_over(self):
+        with patch(
+            "app.services.ai_engine.dispatch_multi_turn_anthropic",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Anthropic endpoint error: invalid x-api-key"),
+        ) as mock_dispatch:
+            with pytest.raises(RuntimeError, match="invalid x-api-key"):
+                await ai_engine.execute_ai_follow_up(
+                    provider="anthropic",
+                    model="claude-a",
+                    api_key="key",
+                    base_url=None,
+                    messages=[{"role": "user", "content": "q"}],
+                    fallback_models=["claude-b"],
+                )
+        assert mock_dispatch.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_follow_up_all_models_fail_reports_chain(self):
+        with patch(
+            "app.services.ai_engine.dispatch_multi_turn_gemini",
+            new_callable=AsyncMock,
+            side_effect=TimeoutError("Request timed out"),
+        ):
+            with pytest.raises(ai_engine.AiServiceUnavailableError, match="All 2 models failed"):
+                await ai_engine.execute_ai_follow_up(
+                    provider="gemini",
+                    model="m1",
+                    api_key="key",
+                    base_url=None,
+                    messages=[{"role": "user", "content": "q"}],
+                    fallback_models=["m2"],
+                )
+
+    @pytest.mark.asyncio
+    async def test_follow_up_unsupported_provider(self):
+        with pytest.raises(ValueError, match="Unsupported AI provider"):
+            await ai_engine.execute_ai_follow_up(
+                provider="mystery",
+                model="m",
+                api_key="key",
+                base_url=None,
+                messages=[{"role": "user", "content": "q"}],
+            )
+
+    @pytest.mark.asyncio
+    async def test_dispatch_multi_turn_gemini_maps_roles_and_tokens(self):
+        usage = MagicMock(prompt_token_count=500, candidates_token_count=40, thoughts_token_count=12, total_token_count=552)
+        chunks = [MagicMock(text="Use ", usage_metadata=None), MagicMock(text="dig.", usage_metadata=usage)]
+        deltas: list[str] = []
+
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            client = MagicMock()
+            client.aio.models.generate_content_stream = AsyncMock(return_value=_aiter(chunks))
+            mock_genai.Client.return_value = client
+
+            res = await ai_engine.dispatch_multi_turn_gemini(
+                api_key="key",
+                model="gemini-3.7-flash",
+                messages=[
+                    {"role": "user", "content": "logs"},
+                    {"role": "assistant", "content": "diagnosis"},
+                    {"role": "user", "content": "question"},
+                ],
+                system_prompt=ai_engine.FOLLOW_UP_SYSTEM_PROMPT,
+                on_delta=deltas.append,
+            )
+
+        assert res == ("Use dig.", 500, 40, 12, 552)
+        assert deltas == ["Use ", "dig."]
+        contents = client.aio.models.generate_content_stream.call_args.kwargs["contents"]
+        assert [c.role for c in contents] == ["user", "model", "user"]
+        assert [c.parts[0].text for c in contents] == ["logs", "diagnosis", "question"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_multi_turn_gemini_requires_api_key(self):
+        with pytest.raises(ValueError, match="API key is not configured"):
+            await ai_engine.dispatch_multi_turn_gemini(
+                api_key="",
+                model="m",
+                messages=[{"role": "user", "content": "q"}],
+                system_prompt="s",
+            )
+
+    @pytest.mark.asyncio
+    async def test_dispatch_multi_turn_gemini_empty_reply_raises(self):
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            client = MagicMock()
+            client.aio.models.generate_content_stream = AsyncMock(return_value=_aiter([MagicMock(text=None, usage_metadata=None)]))
+            mock_genai.Client.return_value = client
+            with pytest.raises(RuntimeError, match="empty response"):
+                await ai_engine.dispatch_multi_turn_gemini(
+                    api_key="key",
+                    model="m",
+                    messages=[{"role": "user", "content": "q"}],
+                    system_prompt="s",
+                )
+
+    @pytest.mark.asyncio
+    async def test_dispatch_multi_turn_openai_streams_with_system_message_and_usage(self):
+        from types import SimpleNamespace
+
+        chunks = [
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Restart "))], usage=None),
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="dnsmasq."))], usage=None),
+            SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(prompt_tokens=320, completion_tokens=8, total_tokens=328, completion_tokens_details=None),
+            ),
+        ]
+        deltas: list[str] = []
+
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            client = MagicMock()
+            client.chat.completions.create = AsyncMock(return_value=_aiter(chunks))
+            mock_cls.return_value = client
+
+            res = await ai_engine.dispatch_multi_turn_openai(
+                api_key="key",
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "logs"}, {"role": "assistant", "content": "diag"}, {"role": "user", "content": "q"}],
+                system_prompt="SYS",
+                on_delta=deltas.append,
+            )
+
+        assert res == ("Restart dnsmasq.", 320, 8, 0, 328)
+        assert deltas == ["Restart ", "dnsmasq."]
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["stream"] is True
+        assert kwargs["messages"][0] == {"role": "system", "content": "SYS"}
+        assert [m["role"] for m in kwargs["messages"][1:]] == ["user", "assistant", "user"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_multi_turn_anthropic_streams_text_and_usage(self):
+        from types import SimpleNamespace
+
+        class FakeStream:
+            def __init__(self):
+                self.text_stream = _aiter(["Check ", "the firewall."])
+
+            async def get_final_message(self):
+                return SimpleNamespace(usage=SimpleNamespace(input_tokens=210, output_tokens=6))
+
+        class FakeStreamManager:
+            async def __aenter__(self):
+                return FakeStream()
+
+            async def __aexit__(self, *exc):
+                return False
+
+        deltas: list[str] = []
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            client = MagicMock()
+            client.messages.stream = MagicMock(return_value=FakeStreamManager())
+            mock_cls.return_value = client
+
+            res = await ai_engine.dispatch_multi_turn_anthropic(
+                api_key="key",
+                model="claude-3-5-haiku",
+                messages=[{"role": "user", "content": "logs"}, {"role": "assistant", "content": "diag"}, {"role": "user", "content": "q"}],
+                system_prompt="SYS",
+                on_delta=deltas.append,
+            )
+
+        assert res == ("Check the firewall.", 210, 6, 0, 216)
+        assert deltas == ["Check ", "the firewall."]
+        kwargs = client.messages.stream.call_args.kwargs
+        assert kwargs["system"] == "SYS"
+        assert [m["role"] for m in kwargs["messages"]] == ["user", "assistant", "user"]
+
+
+class TestAiFollowUpApi:
+
+    @pytest.mark.asyncio
+    async def test_get_messages_empty_thread(self, audit_id, auth_client):
+        res = await auth_client.get(f"/api/ai/audit/{audit_id}/messages")
+        assert res.status_code == 200
+        assert res.json() == {"audit_id": audit_id, "messages": [], "turn_count": 0, "max_turns": 10}
+
+    @pytest.mark.asyncio
+    async def test_unknown_audit_returns_404(self, populated_db, auth_client):
+        assert (await auth_client.get("/api/ai/audit/9999/messages")).status_code == 404
+        assert (await auth_client.delete("/api/ai/audit/9999/messages")).status_code == 404
+        res = await auth_client.post("/api/ai/audit/9999/follow-up", json={"message": "why?"})
+        assert res.status_code == 404
+        assert res.json()["detail"] == "AI analysis 9999 not found."
+
+    @pytest.mark.asyncio
+    async def test_follow_up_requires_auth(self, audit_id):
+        app = create_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as client:
+            res = await client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "why?"})
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", ["", "   ", "x" * 2001])
+    async def test_follow_up_message_validation(self, audit_id, auth_client, message):
+        res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": message})
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_follow_up_reconstructs_conversation_and_persists_turns(self, audit_id, auth_client, populated_db):
+        with patch(
+            "app.api.ai.execute_ai_follow_up",
+            new_callable=AsyncMock,
+            side_effect=[_follow_up_result("First answer."), _follow_up_result("Second answer.")],
+        ) as mock_exec:
+            res1 = await auth_client.post(
+                f"/api/ai/audit/{audit_id}/follow-up",
+                json={"message": "  How do I test it? api_key=supersecret12345  "},
+            )
+            res2 = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "And then?"})
+
+        assert res1.status_code == 200
+        data1 = res1.json()
+        assert data1["message"]["role"] == "assistant"
+        assert data1["message"]["content"] == "First answer."
+        assert data1["message"]["tokens_used"] == 460
+        assert data1["model_used"] == "gemini-3.7-flash"
+        assert data1["fallback_used"] is False
+        assert (data1["tokens_in"], data1["tokens_out"], data1["tokens_used"]) == (400, 60, 460)
+        assert (data1["turn_count"], data1["max_turns"]) == (1, 10)
+        assert res2.json()["turn_count"] == 2
+
+        # Provider and model resolve from current settings, not from the audit entry's retired model
+        first_kwargs = mock_exec.call_args_list[0].kwargs
+        assert first_kwargs["provider"] == "gemini"
+        assert first_kwargs["model"] == "gemini-3.7-flash"
+        assert first_kwargs["api_key"] == "test-gemini-key-12345"
+        first_messages = first_kwargs["messages"]
+        assert first_messages[0] == {"role": "user", "content": ORIGINAL_PROMPT}
+        assert first_messages[1] == {"role": "assistant", "content": ORIGINAL_DIAGNOSIS}
+        assert first_messages[2]["role"] == "user"
+        assert first_messages[2]["content"].startswith("How do I test it?")
+        assert "supersecret12345" not in first_messages[2]["content"]
+
+        second_messages = mock_exec.call_args_list[1].kwargs["messages"]
+        assert [m["role"] for m in second_messages] == ["user", "assistant", "user", "assistant", "user"]
+        assert second_messages[3]["content"] == "First answer."
+        assert second_messages[4]["content"] == "And then?"
+
+        history = (await auth_client.get(f"/api/ai/audit/{audit_id}/messages")).json()
+        assert history["turn_count"] == 2
+        assert [m["role"] for m in history["messages"]] == ["user", "assistant", "user", "assistant"]
+        assert "supersecret12345" not in history["messages"][0]["content"]
+        assert history["messages"][3]["content"] == "Second answer."
+
+    @pytest.mark.asyncio
+    async def test_follow_up_applies_provider_and_model_overrides(self, audit_id, auth_client, populated_db):
+        conn = sqlite3.connect(populated_db)
+        conn.execute(
+            "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_api_key_openai', ?, '2026-08-29T10:00:00Z', 1)",
+            (encrypt_value("openai-key-xyz"),),
+        )
+        conn.execute(
+            "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_fallback_models_openai', 'gpt-4o-mini', '2026-08-29T10:00:00Z', 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        with patch(
+            "app.api.ai.execute_ai_follow_up",
+            new_callable=AsyncMock,
+            return_value=("Answer", 1, 1, 0, 2, "gpt-4o-mini", ["gpt-4.1 failed: 503"]),
+        ) as mock_exec:
+            res = await auth_client.post(
+                f"/api/ai/audit/{audit_id}/follow-up",
+                json={"message": "q", "provider": "openai", "model": "gpt-4.1"},
+            )
+
+        assert res.status_code == 200
+        kwargs = mock_exec.call_args.kwargs
+        assert (kwargs["provider"], kwargs["model"], kwargs["api_key"]) == ("openai", "gpt-4.1", "openai-key-xyz")
+        assert kwargs["fallback_models"] == ["gpt-4o-mini"]
+        data = res.json()
+        assert data["fallback_used"] is True
+        assert data["fallback_attempts"] == ["gpt-4.1 failed: 503"]
+        assert data["message"]["model"] == "gpt-4o-mini"
+
+    @pytest.mark.asyncio
+    async def test_follow_up_turn_limit(self, audit_id, auth_client, populated_db):
+        conn = sqlite3.connect(populated_db)
+        for i in range(10):
+            conn.execute(
+                "INSERT INTO ai_conversation_messages (audit_id, role, content, model, created_at) VALUES (?, 'user', ?, 'm', datetime('now'))",
+                (audit_id, f"q{i}"),
+            )
+            conn.execute(
+                "INSERT INTO ai_conversation_messages (audit_id, role, content, model, created_at) VALUES (?, 'assistant', ?, 'm', datetime('now'))",
+                (audit_id, f"a{i}"),
+            )
+        conn.commit()
+        conn.close()
+
+        with patch("app.api.ai.execute_ai_follow_up", new_callable=AsyncMock) as mock_exec:
+            res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "one more?"})
+            stream_res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up/stream", json={"message": "one more?"})
+
+        assert res.status_code == 400
+        assert res.json()["detail"] == "Conversation turn limit of 10 reached."
+        assert stream_res.status_code == 400
+        assert not mock_exec.called
+
+    @pytest.mark.asyncio
+    async def test_follow_up_save_rechecks_turn_limit(self, audit_id, populated_db):
+        from fastapi import HTTPException
+        from app.services.ai_service import save_follow_up_exchange
+
+        for i in range(10):
+            await save_follow_up_exchange(audit_id, f"q{i}", f"a{i}", "m", 1, 1, 0, 2)
+        with pytest.raises(HTTPException) as exc_info:
+            await save_follow_up_exchange(audit_id, "q10", "a10", "m", 1, 1, 0, 2)
+        assert exc_info.value.status_code == 400
+
+        conn = sqlite3.connect(populated_db)
+        count = conn.execute("SELECT COUNT(*) FROM ai_conversation_messages WHERE audit_id = ?", (audit_id,)).fetchone()[0]
+        conn.close()
+        assert count == 20
+
+    @pytest.mark.asyncio
+    async def test_follow_up_rejected_when_ai_disabled(self, audit_id, auth_client, populated_db):
+        conn = sqlite3.connect(populated_db)
+        conn.execute("INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_enabled', '0', '2026-08-29T10:00:00Z', 0)")
+        conn.commit()
+        conn.close()
+
+        with patch("app.api.ai.execute_ai_follow_up", new_callable=AsyncMock) as mock_exec:
+            res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "q"})
+        assert res.status_code == 400
+        assert "disabled" in res.json()["detail"]
+        assert not mock_exec.called
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error, expected_status",
+        [
+            (ValueError("Unsupported AI provider: mystery"), 400),
+            (TimeoutError("Request timed out"), 504),
+            (RuntimeError("Gemini API error: 401 bad key api_key=supersecret12345"), 502),
+        ],
+    )
+    async def test_follow_up_provider_errors(self, audit_id, auth_client, error, expected_status):
+        with patch("app.api.ai.execute_ai_follow_up", new_callable=AsyncMock, side_effect=error):
+            res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "q"})
+        assert res.status_code == expected_status
+        assert "supersecret12345" not in res.json()["detail"]
+
+        history = (await auth_client.get(f"/api/ai/audit/{audit_id}/messages")).json()
+        assert history["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_follow_up_stream_emits_deltas_and_persists(self, audit_id, auth_client):
+        async def fake_exec(**kwargs):
+            await kwargs["on_progress"]({"stage": "calling", "model": kwargs["model"]})
+            await kwargs["on_progress"]({"stage": "delta", "content": "Streamed "})
+            await kwargs["on_progress"]({"stage": "delta", "content": "reply."})
+            return _follow_up_result("Streamed reply.")
+
+        with patch("app.api.ai.execute_ai_follow_up", side_effect=fake_exec):
+            res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up/stream", json={"message": "q"})
+
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/event-stream")
+        events = _parse_sse(res.text)
+        assert [e["stage"] for e in events] == ["init", "calling", "delta", "delta", "complete"]
+        assert events[0]["model"] == "gemini-3.7-flash"
+        result = events[-1]["result"]
+        assert result["message"]["content"] == "Streamed reply."
+        assert result["turn_count"] == 1
+
+        history = (await auth_client.get(f"/api/ai/audit/{audit_id}/messages")).json()
+        assert [m["content"] for m in history["messages"]] == ["q", "Streamed reply."]
+
+    @pytest.mark.asyncio
+    async def test_follow_up_stream_error_event(self, audit_id, auth_client):
+        with patch(
+            "app.api.ai.execute_ai_follow_up",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("OpenAI endpoint error: token=supersecret12345 rejected"),
+        ):
+            res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up/stream", json={"message": "q"})
+
+        events = _parse_sse(res.text)
+        assert [e["stage"] for e in events] == ["init", "error"]
+        assert "supersecret12345" not in events[-1]["message"]
+        history = (await auth_client.get(f"/api/ai/audit/{audit_id}/messages")).json()
+        assert history["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_follow_up_shares_ai_rate_limit_with_diagnosis(self, audit_id, auth_client):
+        with patch(
+            "app.api.ai.execute_ai_analysis",
+            new_callable=AsyncMock,
+            return_value=("S", "C", "R", "Raw", "Prompt", 1, 1, 0, 2),
+        ):
+            for _ in range(10):
+                assert (await auth_client.post("/api/ai/diagnose", json={"log_ids": [1]})).status_code == 200
+
+        with patch("app.api.ai.execute_ai_follow_up", new_callable=AsyncMock) as mock_exec:
+            res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "q"})
+            stream_res = await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up/stream", json={"message": "q"})
+        assert res.status_code == 429
+        assert stream_res.status_code == 429
+        assert not mock_exec.called
+
+    @pytest.mark.asyncio
+    async def test_clear_thread_keeps_diagnosis(self, audit_id, auth_client, populated_db):
+        with patch("app.api.ai.execute_ai_follow_up", new_callable=AsyncMock, return_value=_follow_up_result()):
+            await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "q"})
+
+        res = await auth_client.delete(f"/api/ai/audit/{audit_id}/messages")
+        assert res.status_code == 200
+        assert res.json() == {"status": "ok", "detail": "Conversation thread cleared successfully."}
+
+        history = (await auth_client.get(f"/api/ai/audit/{audit_id}/messages")).json()
+        assert history["messages"] == [] and history["turn_count"] == 0
+
+        conn = sqlite3.connect(populated_db)
+        row = conn.execute("SELECT response_text FROM ai_audit_log WHERE id = ?", (audit_id,)).fetchone()
+        conn.close()
+        assert row[0] == ORIGINAL_DIAGNOSIS
+
+    @pytest.mark.asyncio
+    async def test_deleting_history_item_cascades_to_thread(self, audit_id, auth_client, populated_db):
+        with patch("app.api.ai.execute_ai_follow_up", new_callable=AsyncMock, return_value=_follow_up_result()):
+            await auth_client.post(f"/api/ai/audit/{audit_id}/follow-up", json={"message": "q"})
+
+        history_items = (await auth_client.get("/api/alerts/history")).json()["items"]
+        history_id = next(i["id"] for i in history_items if i["ai_audit_id"] == audit_id)
+        assert (await auth_client.delete(f"/api/alerts/history/{history_id}")).status_code == 200
+
+        conn = sqlite3.connect(populated_db)
+        count = conn.execute("SELECT COUNT(*) FROM ai_conversation_messages").fetchone()[0]
+        conn.close()
+        assert count == 0

@@ -2,7 +2,8 @@
 AI Service Module for LogShed.
 
 Encapsulates database log retrieval, host note aggregation, settings decryption,
-shared diagnosis context preparation, model cache management, and audit log persistence.
+shared diagnosis context preparation, model cache management, audit log persistence,
+and AI follow-up conversation threads.
 """
 
 import datetime
@@ -16,7 +17,13 @@ from typing import Any, Optional
 from fastapi import HTTPException, status
 
 from app.api.deps import run_db_query
-from app.core.config import DEFAULT_AI_MODEL, get_all_system_settings
+from app.core.config import (
+    DEFAULT_AI_MODEL,
+    DEFAULT_AI_THINKING_BUDGET,
+    DEFAULT_AI_TIMEOUT,
+    get_all_system_settings,
+    get_cached_setting,
+)
 from app.core.redactor import redact
 from app.core.security import decrypt_value
 from app.core.utils import parse_iso_to_utc_datetime
@@ -134,6 +141,53 @@ def save_models_cache(conn: sqlite3.Connection, cache_key: str, models_data: lis
     return now_iso
 
 
+def resolve_ai_provider_settings(
+    settings: dict[str, str],
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    fallback_models_override: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """
+    Resolve the provider, model, credentials, fallback chain and runtime limits for an AI request
+    from the current system settings, applying optional per-request overrides.
+    """
+    active_db_provider = (settings.get("ai_provider") or "gemini").lower()
+    provider = (provider_override or active_db_provider).lower()
+    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else ("claude-sonnet-4-6" if provider == "anthropic" else "llama3.2"))
+    model = model_override or settings.get(f"ai_model_{provider}") or (settings.get("ai_model") if provider == active_db_provider else None) or default_model
+    api_key = (
+        settings.get(f"ai_api_key_{provider}")
+        or (settings.get("ai_api_key", "") if provider == active_db_provider else "")
+    )
+    base_url = settings.get(f"ai_base_url_{provider}") or (settings.get("ai_base_url") if provider == active_db_provider else None) or None
+
+    fallback_models_str = settings.get(f"ai_fallback_models_{provider}") or (settings.get("ai_fallback_models", "") if provider == active_db_provider else "")
+    configured_fallbacks = [m.strip() for m in fallback_models_str.split(",") if m.strip()]
+    fallback_models = (
+        fallback_models_override
+        if fallback_models_override is not None
+        else configured_fallbacks
+    )
+
+    stored_ai_enabled = settings.get("ai_enabled")
+    if stored_ai_enabled is not None:
+        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        ai_enabled = bool(api_key.strip())
+
+    return {
+        "provider": provider,
+        "model": model,
+        "api_key": api_key,
+        "base_url": base_url,
+        "fallback_models": fallback_models,
+        "ai_timeout": float(get_cached_setting("ai_timeout", DEFAULT_AI_TIMEOUT)),
+        "ai_thinking_budget": int(get_cached_setting("ai_thinking_budget", DEFAULT_AI_THINKING_BUDGET)),
+        "ai_enabled": ai_enabled,
+        "has_ai_api_key": bool(api_key.strip()),
+    }
+
+
 async def build_diagnosis_context(
     log_ids: list[int],
     user_context: Optional[str] = None,
@@ -204,28 +258,17 @@ async def build_diagnosis_context(
     redacted_logs_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
     redacted_logs_text = truncate_logs_to_budget(redacted_logs_text)
 
-    active_db_provider = (settings.get("ai_provider") or "gemini").lower()
-    provider = (provider_override or active_db_provider).lower()
-    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else ("claude-sonnet-4-6" if provider == "anthropic" else "llama3.2"))
-    model = model_override or settings.get(f"ai_model_{provider}") or (settings.get("ai_model") if provider == active_db_provider else None) or default_model
-    api_key = (
-        settings.get(f"ai_api_key_{provider}")
-        or (settings.get("ai_api_key", "") if provider == active_db_provider else "")
+    provider_settings = resolve_ai_provider_settings(
+        settings,
+        provider_override=provider_override,
+        model_override=model_override,
+        fallback_models_override=fallback_models_override,
     )
-    base_url = settings.get(f"ai_base_url_{provider}") or (settings.get("ai_base_url") if provider == active_db_provider else None) or None
 
     system_prompt = (
         system_prompt_override.strip()
         if (system_prompt_override and system_prompt_override.strip())
         else (settings.get("ai_system_prompt") or DEFAULT_SYSTEM_PROMPT)
-    )
-
-    fallback_models_str = settings.get(f"ai_fallback_models_{provider}") or (settings.get("ai_fallback_models", "") if provider == active_db_provider else "")
-    configured_fallbacks = [m.strip() for m in fallback_models_str.split(",") if m.strip()]
-    fallback_models = (
-        fallback_models_override
-        if fallback_models_override is not None
-        else configured_fallbacks
     )
 
     redacted_host_notes = str(redact(host_notes)) if host_notes else None
@@ -250,37 +293,18 @@ async def build_diagnosis_context(
     # Estimate token count (~3.5 characters per token including system prompt and framing overhead)
     estimated_tokens = max(1, int(len(full_prompt) // 3.5 + len(system_prompt) // 3.5 + 50))
 
-    from app.core.config import get_cached_setting, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET
-    ai_timeout = float(get_cached_setting("ai_timeout", DEFAULT_AI_TIMEOUT))
-    ai_thinking_budget = int(get_cached_setting("ai_thinking_budget", DEFAULT_AI_THINKING_BUDGET))
-
-    stored_ai_enabled = settings.get("ai_enabled")
-    if stored_ai_enabled is not None:
-        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
-    else:
-        ai_enabled = bool(api_key.strip())
-    has_ai_api_key = bool(api_key.strip())
-
     return {
+        **provider_settings,
         "rows": rows,
         "source_alias": source_alias,
         "app_name": app_name,
         "redacted_logs": redacted_logs_text,
-        "provider": provider,
-        "model": model,
-        "api_key": api_key,
-        "base_url": base_url,
         "system_prompt": system_prompt,
-        "fallback_models": fallback_models,
         "redacted_user_context": redacted_user_context,
         "redacted_host_notes": redacted_host_notes,
         "redacted_prompt_override": redacted_prompt_override,
         "full_prompt": full_prompt,
         "estimated_tokens": estimated_tokens,
-        "ai_timeout": ai_timeout,
-        "ai_thinking_budget": ai_thinking_budget,
-        "ai_enabled": ai_enabled,
-        "has_ai_api_key": has_ai_api_key,
     }
 
 
@@ -345,3 +369,194 @@ async def save_diagnosis_audit(
 
 
 
+
+
+MAX_FOLLOW_UP_TURNS = 10
+
+
+def get_conversation_messages(conn: sqlite3.Connection, audit_id: int) -> list[dict[str, Any]]:
+    """Return the follow-up conversation messages for an audit entry in chronological order."""
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, role, content, tokens_used, model, created_at
+        FROM ai_conversation_messages
+        WHERE audit_id = ?
+        ORDER BY created_at ASC, id ASC
+        """,
+        (audit_id,),
+    )
+    return [
+        {
+            "id": r[0],
+            "role": r[1],
+            "content": r[2],
+            "tokens_used": r[3],
+            "model": r[4],
+            "created_at": str(r[5]),
+        }
+        for r in cursor.fetchall()
+    ]
+
+
+def count_conversation_turns(messages: list[dict[str, Any]]) -> int:
+    """Number of operator questions in a conversation thread."""
+    return sum(1 for m in messages if m["role"] == "user")
+
+
+def save_conversation_message(
+    conn: sqlite3.Connection,
+    audit_id: int,
+    role: str,
+    content: str,
+    model: str,
+    created_at: str,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    tokens_thoughts: int = 0,
+    tokens_used: int = 0,
+) -> int:
+    """Insert one conversation message without committing. Returns the new message id."""
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO ai_conversation_messages
+        (audit_id, role, content, tokens_in, tokens_out, tokens_thoughts, tokens_used, model, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (audit_id, role, content, tokens_in, tokens_out, tokens_thoughts, tokens_used, model, created_at),
+    )
+    return cursor.lastrowid
+
+
+def delete_conversation_thread(conn: sqlite3.Connection, audit_id: int) -> int:
+    """Delete every follow-up message for an audit entry without committing. Returns the number deleted."""
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ai_conversation_messages WHERE audit_id = ?", (audit_id,))
+    return cursor.rowcount
+
+
+def audit_entry_exists(conn: sqlite3.Connection, audit_id: int) -> bool:
+    """True when an ai_audit_log entry with this id exists."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM ai_audit_log WHERE id = ?", (audit_id,))
+    return cursor.fetchone() is not None
+
+
+def audit_not_found(audit_id: int) -> HTTPException:
+    """404 error for an unknown AI analysis."""
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"AI analysis {audit_id} not found.",
+    )
+
+
+def turn_limit_reached() -> HTTPException:
+    """400 error for a conversation that has used all of its follow-up questions."""
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Conversation turn limit of {MAX_FOLLOW_UP_TURNS} reached.",
+    )
+
+
+async def build_follow_up_context(
+    audit_id: int,
+    question: str,
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Reconstruct the conversation for a follow-up question: the original analysis prompt and
+    diagnosis, previous follow-up turns, then the redacted new question. Provider and model are
+    resolved from the current settings (with optional overrides), never from the audit entry, so
+    follow-ups keep working after the original model is retired or reconfigured.
+    Raises 404 for an unknown audit entry and 400 when the turn limit is reached.
+    """
+    def _fetch(conn: sqlite3.Connection):
+        cursor = conn.cursor()
+        cursor.execute("SELECT prompt_sent, response_text FROM ai_audit_log WHERE id = ?", (audit_id,))
+        audit = cursor.fetchone()
+        if audit is None:
+            return None
+        settings_dict, _ = read_ai_settings(conn)
+        return audit[0], audit[1], get_conversation_messages(conn, audit_id), settings_dict
+
+    result = await run_db_query(_fetch)
+    if result is None:
+        raise audit_not_found(audit_id)
+    prompt_sent, response_text, history, settings = result
+
+    if not (prompt_sent or "").strip() or not (response_text or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This analysis has no stored prompt and diagnosis to follow up on.",
+        )
+
+    turn_count = count_conversation_turns(history)
+    if turn_count >= MAX_FOLLOW_UP_TURNS:
+        raise turn_limit_reached()
+
+    redacted_question = str(redact(question.strip()))
+    messages = [
+        {"role": "user", "content": prompt_sent},
+        {"role": "assistant", "content": response_text},
+        *({"role": m["role"], "content": m["content"]} for m in history),
+        {"role": "user", "content": redacted_question},
+    ]
+
+    return {
+        **resolve_ai_provider_settings(settings, provider_override=provider_override, model_override=model_override),
+        "messages": messages,
+        "question": redacted_question,
+    }
+
+
+async def save_follow_up_exchange(
+    audit_id: int,
+    question: str,
+    reply: str,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    tokens_thoughts: int,
+    tokens_used: int,
+) -> tuple[dict[str, Any], int]:
+    """
+    Persist a follow-up question and the model reply in one transaction, re-checking the turn
+    limit under the write lock so concurrent requests cannot exceed it.
+    Returns (assistant_message, turn_count). Raises 404 if the audit entry was deleted meanwhile.
+    """
+    def _save(conn: sqlite3.Connection):
+        conn.execute("BEGIN IMMEDIATE")
+        if not audit_entry_exists(conn, audit_id):
+            raise audit_not_found(audit_id)
+        turn_count = count_conversation_turns(get_conversation_messages(conn, audit_id))
+        if turn_count >= MAX_FOLLOW_UP_TURNS:
+            raise turn_limit_reached()
+
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        save_conversation_message(conn, audit_id, "user", question, model, now)
+        message_id = save_conversation_message(
+            conn,
+            audit_id,
+            "assistant",
+            reply,
+            model,
+            now,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            tokens_thoughts=tokens_thoughts,
+            tokens_used=tokens_used,
+        )
+        conn.commit()
+        message = {
+            "id": message_id,
+            "role": "assistant",
+            "content": reply,
+            "tokens_used": tokens_used,
+            "model": model,
+            "created_at": now,
+        }
+        return message, turn_count + 1
+
+    return await run_db_query(_save)

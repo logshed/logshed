@@ -1,3 +1,4 @@
+
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -8,6 +9,54 @@ export class ApiError extends Error {
     this.status = status;
     this.data = data;
   }
+}
+
+/**
+ * Build an ApiError from a failed response, using the FastAPI `detail` message when present.
+ * Dispatches `logshed:unauthorized` for 401 responses outside the login and setup endpoints.
+ */
+export async function toApiError(response: Response, endpoint: string): Promise<ApiError> {
+  let errorMsg = `Request failed with status ${response.status}`;
+  let errorData = null;
+  try {
+    const text = await response.text();
+    try {
+      errorData = JSON.parse(text);
+      if (errorData?.detail) {
+        if (typeof errorData.detail === 'string') {
+          errorMsg = errorData.detail;
+        } else if (Array.isArray(errorData.detail)) {
+          errorMsg = errorData.detail
+            .map((d: any) => (typeof d === 'string' ? d : d.msg || d.message || JSON.stringify(d)))
+            .join('; ');
+        } else {
+          errorMsg = JSON.stringify(errorData.detail);
+        }
+      } else if (text && text.trim().length > 0) {
+        errorMsg = text;
+      }
+    } catch {
+      if (text && text.trim().length > 0) {
+        errorMsg = text;
+      }
+    }
+  } catch {
+    // Fallback to default message
+  }
+
+  if (
+    response.status === 401 &&
+    !endpoint.includes('/api/auth/login') &&
+    !endpoint.includes('/api/auth/setup')
+  ) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('logshed:unauthorized', { detail: { message: errorMsg } })
+      );
+    }
+  }
+
+  return new ApiError(response.status, errorMsg, errorData);
 }
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -28,47 +77,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   });
 
   if (!response.ok) {
-    let errorMsg = `Request failed with status ${response.status}`;
-    let errorData = null;
-    try {
-      const text = await response.text();
-      try {
-        errorData = JSON.parse(text);
-        if (errorData?.detail) {
-          if (typeof errorData.detail === 'string') {
-            errorMsg = errorData.detail;
-          } else if (Array.isArray(errorData.detail)) {
-            errorMsg = errorData.detail
-              .map((d: any) => (typeof d === 'string' ? d : d.msg || d.message || JSON.stringify(d)))
-              .join('; ');
-          } else {
-            errorMsg = JSON.stringify(errorData.detail);
-          }
-        } else if (text && text.trim().length > 0) {
-          errorMsg = text;
-        }
-      } catch {
-        if (text && text.trim().length > 0) {
-          errorMsg = text;
-        }
-      }
-    } catch {
-      // Fallback to default message
-    }
-
-    if (
-      response.status === 401 &&
-      !endpoint.includes('/api/auth/login') &&
-      !endpoint.includes('/api/auth/setup')
-    ) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('logshed:unauthorized', { detail: { message: errorMsg } })
-        );
-      }
-    }
-
-    throw new ApiError(response.status, errorMsg, errorData);
+    throw await toApiError(response, endpoint);
   }
 
   // Handle 204 No Content
@@ -93,47 +102,7 @@ export async function apiFetchBlob(endpoint: string, options: RequestInit = {}):
   });
 
   if (!response.ok) {
-    let errorMsg = `Request failed with status ${response.status}`;
-    let errorData = null;
-    try {
-      const text = await response.text();
-      try {
-        errorData = JSON.parse(text);
-        if (errorData?.detail) {
-          if (typeof errorData.detail === 'string') {
-            errorMsg = errorData.detail;
-          } else if (Array.isArray(errorData.detail)) {
-            errorMsg = errorData.detail
-              .map((d: any) => (typeof d === 'string' ? d : d.msg || d.message || JSON.stringify(d)))
-              .join('; ');
-          } else {
-            errorMsg = JSON.stringify(errorData.detail);
-          }
-        } else if (text && text.trim().length > 0) {
-          errorMsg = text;
-        }
-      } catch {
-        if (text && text.trim().length > 0) {
-          errorMsg = text;
-        }
-      }
-    } catch {
-      // Fallback to default message
-    }
-
-    if (
-      response.status === 401 &&
-      !endpoint.includes('/api/auth/login') &&
-      !endpoint.includes('/api/auth/setup')
-    ) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('logshed:unauthorized', { detail: { message: errorMsg } })
-        );
-      }
-    }
-
-    throw new ApiError(response.status, errorMsg, errorData);
+    throw await toApiError(response, endpoint);
   }
 
   return response.blob();

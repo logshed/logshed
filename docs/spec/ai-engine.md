@@ -32,6 +32,19 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
 - **Audit Tracking:** Automated alert analysis runs are recorded in `ai_audit_log` with `trigger_source = 'alert'` and linked to `alert_history.ai_audit_id`.
 - **Privacy and Token Safeguards:** Clear privacy, credential redaction, and token usage warnings are presented in the UI when enabling this option (inside `AlertRuleModal` and notice banners on the Rules & Alerts Hub). The UI explicitly informs administrators that triggering logs are automatically dispatched to external AI providers without manual pre-screening, that automated scrubbing operates on a best-effort basis, and that automated triggers consume API tokens. If an AI provider is not configured in Settings, AI enrichment cannot be enabled and displays a direct link to Settings.
 
+### 1.3 Follow-up Conversations
+
+- **Implementation Reference:** `execute_ai_follow_up` in [backend/app/services/ai_engine.py](file:///home/ben/workspace/logshed/backend/app/services/ai_engine.py), `build_follow_up_context` and `save_follow_up_exchange` in [backend/app/services/ai_service.py](file:///home/ben/workspace/logshed/backend/app/services/ai_service.py), and [frontend/src/components/ai/AiFollowUpThread.tsx](file:///home/ben/workspace/logshed/frontend/src/components/ai/AiFollowUpThread.tsx).
+- **Scope:** Any analysis with an `ai_audit_log` record (on-demand analyses and alert enrichments) accepts follow-up questions, from the on-demand modal or from Incident History.
+- **Turn Reconstruction:** Each request rebuilds the conversation as the stored `prompt_sent` (user turn), the stored `response_text` (assistant turn), the earlier follow-up messages from `ai_conversation_messages` in order, and the new question.
+- **Redaction:** The operator question passes through [backend/app/core/redactor.py](file:///home/ben/workspace/logshed/backend/app/core/redactor.py) before dispatch and is stored in its redacted form.
+- **System Prompt:** A dedicated follow-up system prompt (`FOLLOW_UP_SYSTEM_PROMPT`) keeps the SRE persona, the passive-log-data guard and the dual UTC/local timestamp guidance, but asks for direct conversational Markdown without the three diagnosis section headers.
+- **Provider & Model Resolution:** Resolved from the current settings (optionally overridden per request), never from the audit record, so follow-ups keep working after the original model is retired or reconfigured. The thinking budget and timeout settings apply as for diagnoses.
+- **Streaming Dispatch:** `dispatch_multi_turn_gemini`, `dispatch_multi_turn_openai` (OpenAI and OpenAI-compatible, with `stream_options.include_usage`) and `dispatch_multi_turn_anthropic` stream text chunks to the caller and return token usage.
+- **Multi-Model Failover:** Retryable failures (timeouts, 5xx, overload, rate limit, model not found) fail over through the configured fallback models, as for diagnoses. The next model streams its reply from the start.
+- **Limits:** At most 10 follow-up questions per analysis (`400` once reached; the UI shows an advisory and disables the input). Questions are 1 to 2000 characters. Follow-ups share the 10 requests per minute AI rate limit with diagnoses.
+- **Persistence:** The redacted question and the reply (with model and token usage) are saved together only after a successful reply. Clearing a thread keeps the diagnosis; deleting the audit record removes the thread by cascade.
+
 ---
 
 ## 2. AI Provider Abstraction

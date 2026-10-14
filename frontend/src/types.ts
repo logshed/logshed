@@ -221,6 +221,53 @@ export interface AiDiagnosisResponse {
   audit_id?: number;
 }
 
+export interface AiConversationMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  tokens_used: number;
+  model: string;
+  created_at: string;
+}
+
+export interface AiConversationHistoryResponse {
+  audit_id: number;
+  messages: AiConversationMessage[];
+  turn_count: number;
+  max_turns: number;
+}
+
+export interface AiFollowUpRequest {
+  message: string;
+  provider?: string;
+  model?: string;
+}
+
+export interface AiFollowUpResponse {
+  message: AiConversationMessage;
+  tokens_in: number;
+  tokens_out: number;
+  tokens_thoughts: number;
+  tokens_used: number;
+  model_used: string;
+  fallback_used: boolean;
+  fallback_attempts: string[];
+  turn_count: number;
+  max_turns: number;
+}
+
+export interface AiFollowUpStreamEvent {
+  stage: 'init' | 'calling' | 'failover' | 'delta' | 'complete' | 'error';
+  model?: string;
+  next_model?: string;
+  failed_model?: string;
+  error?: string;
+  message?: string;
+  content?: string;
+  result?: AiFollowUpResponse;
+  is_fallback?: boolean;
+}
+
 export interface AuthStatusResponse {
   setup_required: boolean;
   authenticated: boolean;

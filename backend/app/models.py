@@ -639,6 +639,57 @@ class AiModelRefreshRequest(BaseModel):
     base_url: Optional[str] = None
 
 
+class AiConversationMessage(BaseModel):
+    """A single question or reply in an AI follow-up conversation thread."""
+    id: int
+    role: str
+    content: str
+    tokens_used: int = 0
+    model: str
+    created_at: str
+
+
+class AiConversationHistoryResponse(BaseModel):
+    """Follow-up conversation thread for an AI analysis."""
+    audit_id: int
+    messages: list[AiConversationMessage] = Field(default_factory=list)
+    turn_count: int
+    max_turns: int
+
+
+class AiFollowUpRequest(BaseModel):
+    """Payload for asking a follow-up question about an AI analysis."""
+    message: str = Field(..., min_length=1, max_length=2000)
+    provider: Optional[str] = Field(None, max_length=64)
+    model: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def strip_message(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("provider", "model", mode="before")
+    @classmethod
+    def blank_override_to_none(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
+
+
+class AiFollowUpResponse(BaseModel):
+    """Model reply to a follow-up question, with token usage and turn counters."""
+    message: AiConversationMessage
+    tokens_in: int = 0
+    tokens_out: int = 0
+    tokens_thoughts: int = 0
+    tokens_used: int = 0
+    model_used: str
+    fallback_used: bool = False
+    fallback_attempts: list[str] = Field(default_factory=list)
+    turn_count: int
+    max_turns: int
+
+
 # ---------------------------------------------------------------------------
 # Drop Rules Models
 # ---------------------------------------------------------------------------
