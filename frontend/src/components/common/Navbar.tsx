@@ -316,6 +316,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <a
               href="/rules/maintenance"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                onTabChange('rules');
+                if (window.location.pathname !== '/rules/maintenance') {
+                  window.history.pushState(null, '', '/rules/maintenance');
+                }
+                window.dispatchEvent(new PopStateEvent('popstate'));
+              }}
               className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
             >
               Scheduled window

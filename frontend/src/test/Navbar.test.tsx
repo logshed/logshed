@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Navbar, getMaintenanceBannerText } from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
@@ -441,7 +441,20 @@ describe('Navbar maintenance and health handling (B11)', () => {
       expect(screen.getByText(/Maintenance window active/i)).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: /Clear/i })).toBeNull();
-    expect(screen.getByRole('link', { name: /Scheduled window/i })).toHaveAttribute('href', '/rules/maintenance');
+    const onTabChange = vi.fn();
+    cleanup();
+    render(<Navbar activeTab="stream" onTabChange={onTabChange} />);
+    const link = await screen.findByRole('link', { name: /Scheduled window/i });
+    expect(link).toHaveAttribute('href', '/rules/maintenance');
+    const popSpy = vi.fn();
+    window.addEventListener('popstate', popSpy);
+    const notPrevented = fireEvent.click(link);
+    window.removeEventListener('popstate', popSpy);
+    expect(notPrevented).toBe(false);
+    expect(onTabChange).toHaveBeenCalledWith('rules');
+    expect(window.location.pathname).toBe('/rules/maintenance');
+    expect(popSpy).toHaveBeenCalled();
+    window.history.replaceState(null, '', '/');
   });
 
   it('makes exactly one request when Clear is clicked', async () => {
