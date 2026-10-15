@@ -36,6 +36,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [isViewsLoading, setIsViewsLoading] = useState<boolean>(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
+  const [viewsError, setViewsError] = useState<string | null>(null);
 
   const loadSavedViews = useCallback(async () => {
     try {
@@ -56,24 +57,26 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   const handleTogglePin = useCallback(async (e: React.MouseEvent, view: SavedView) => {
     e.stopPropagation();
     try {
+      setViewsError(null);
       const updated = await updateSavedView(view.id, { is_pinned: !view.is_pinned });
       setSavedViews((prev) =>
         prev
           .map((v) => (v.id === view.id ? updated : v))
           .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || a.name.localeCompare(b.name))
       );
-    } catch {
-      // Ignored
+    } catch (err) {
+      setViewsError(err instanceof Error ? err.message : 'Could not update saved view');
     }
   }, []);
 
   const handleDeleteSavedView = useCallback(async (e: React.MouseEvent, viewId: number) => {
     e.stopPropagation();
     try {
+      setViewsError(null);
       await deleteSavedView(viewId);
       setSavedViews((prev) => prev.filter((v) => v.id !== viewId));
-    } catch {
-      // Ignored
+    } catch (err) {
+      setViewsError(err instanceof Error ? err.message : 'Could not delete saved view');
     }
   }, []);
 
@@ -221,7 +224,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
         {/* Action Button: Filter */}
         <button
-          onClick={onSearch}
+          onClick={() => onSearch()}
           className="bg-accent-600 hover:bg-accent-500 text-white font-medium px-3 py-1.5 rounded flex items-center gap-1 transition shadow-xs cursor-pointer shrink-0"
         >
           <Search className="w-3.5 h-3.5" />
@@ -365,6 +368,12 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           </div>
         )}
 
+        {viewsError && (
+          <span role="alert" className="text-red-400 text-[11px]">
+            {viewsError}
+          </span>
+        )}
+
         {/* Desktop Saved Views Dropdown */}
         <SavedViewsMenu
           variant="desktop"
@@ -392,6 +401,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
       >
         <div className="space-y-4 text-xs font-sans">
           {/* Mobile Saved Views Section */}
+          {viewsError && (
+            <p role="alert" className="text-red-400 text-[11px]">
+              {viewsError}
+            </p>
+          )}
           <SavedViewsMenu
             variant="mobile"
             views={savedViews}

@@ -1,7 +1,8 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { LogSearchBar } from '../components/logs/LogSearchBar.tsx';
 import { LogFilterParams } from '../types.ts';
+import * as savedViewsApi from '../api/savedViews.ts';
 
 describe('LogSearchBar Component (Items #6, #22, #31)', () => {
   it('hides the Reset button when no filters are active', () => {
@@ -186,5 +187,40 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     );
 
     expect(screen.getByText('42 logs')).toBeInTheDocument();
+  });
+});
+
+describe('LogSearchBar B11 fixes', () => {
+  it('calls onSearch without arguments when the Filter button is clicked (B-01)', () => {
+    const onSearch = vi.fn();
+    render(
+      <LogSearchBar filters={{ severity_max: 3 }} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText('Filter').closest('button') as HTMLElement);
+    expect(onSearch).toHaveBeenCalledTimes(1);
+    expect(onSearch.mock.calls[0]).toHaveLength(0);
+  });
+
+  it('shows an inline error when deleting a saved view fails (B-47)', async () => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([
+      { id: 1, name: 'Errors', query_params: {}, is_pinned: false, created_at: '2026-09-18T10:00:00Z' },
+    ] as any);
+    vi.spyOn(savedViewsApi, 'deleteSavedView').mockRejectedValue(new Error('Delete failed on server'));
+    render(<LogSearchBar filters={{}} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Saved views menu/i }));
+    fireEvent.click(await screen.findByLabelText('Delete view Errors'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete View' }));
+    expect(await screen.findByText('Delete failed on server')).toBeInTheDocument();
+  });
+
+  it('shows an inline error when pinning a saved view fails (B-47)', async () => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([
+      { id: 1, name: 'Errors', query_params: {}, is_pinned: false, created_at: '2026-09-18T10:00:00Z' },
+    ] as any);
+    vi.spyOn(savedViewsApi, 'updateSavedView').mockRejectedValue(new Error('Pin failed on server'));
+    render(<LogSearchBar filters={{}} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Saved views menu/i }));
+    fireEvent.click(await screen.findByLabelText('Pin view Errors'));
+    await waitFor(() => expect(screen.getByText('Pin failed on server')).toBeInTheDocument());
   });
 });
