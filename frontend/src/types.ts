@@ -8,7 +8,7 @@ export interface LogEntry {
   facility: number;
   severity: number;
   message: string;
-  raw: string;
+  raw?: string | null;
 }
 
 export interface LogContextResponse {
@@ -118,11 +118,12 @@ export interface StorageMetricsResponse {
 
 export interface HealthResponse {
   status: string;
-  db: string;
+  db?: string;
+  /** Not sent by the backend; kept optional so older test fixtures still type-check. */
   database?: string;
-  queue_depth: number;
-  dropped_logs: number;
-  ingest_rate: number;
+  queue_depth?: number;
+  dropped_logs?: number;
+  ingest_rate?: number;
 }
 
 export interface PruneResponse {
@@ -266,6 +267,9 @@ export interface AiFollowUpStreamEvent {
   content?: string;
   result?: AiFollowUpResponse;
   is_fallback?: boolean;
+  attempt?: number;
+  total_models?: number;
+  fallback_models?: string[];
 }
 
 export interface AuthStatusResponse {
@@ -590,8 +594,8 @@ export interface MaintenanceSchedule {
   recurrence: 'daily' | 'weekly' | 'monthly';
   start_time: string;
   duration_minutes: number;
-  day_of_week?: number;
-  day_of_month?: number;
+  day_of_week?: number | null;
+  day_of_month?: number | null;
   is_active?: boolean;
   next_run?: string | null;
 }
@@ -629,7 +633,7 @@ export interface ApiToken {
   created_at: string;
   expires_at?: string | null;
   last_used_at?: string | null;
-  created_by?: string;
+  created_by?: string | null;
 }
 
 export interface ApiTokenCreateRequest {

@@ -209,6 +209,7 @@ describe('slugify', () => {
 
 describe('downloadBlob', () => {
   it('triggers browser download with object url and cleans up', () => {
+    vi.useFakeTimers();
     let clicked = false;
     const originalCreate = URL.createObjectURL;
     const originalRevoke = URL.revokeObjectURL;
@@ -224,11 +225,14 @@ describe('downloadBlob', () => {
 
     expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
     expect(clicked).toBe(true);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    vi.runAllTimers();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
 
     clickSpy.mockRestore();
     URL.createObjectURL = originalCreate;
     URL.revokeObjectURL = originalRevoke;
+    vi.useRealTimers();
   });
 });
 
