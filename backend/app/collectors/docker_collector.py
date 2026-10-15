@@ -892,6 +892,23 @@ async def _tail_container_logs(
         backoff = min(backoff * _CONTAINER_BACKOFF_FACTOR, _CONTAINER_MAX_BACKOFF)
 
 
+def effective_source_ip(url: Optional[str], source_alias: Optional[str], endpoint_id: int) -> str:
+    """
+    Return the source_ip stamped on container logs from a Docker endpoint.
+
+    Network endpoints use the URL host name. Unix-socket endpoints use "docker" for the
+    primary endpoint (id 1) and the endpoint alias for any other endpoint.
+    """
+    url = (url or "").strip()
+    if url.startswith(("tcp://", "http://", "https://")):
+        parsed = urlparse(url)
+        if parsed.hostname:
+            return parsed.hostname
+    if endpoint_id == 1:
+        return "docker"
+    return source_alias or f"docker-{endpoint_id}"
+
+
 class _AliasDedupSet(set):
     """Deduplication set supporting (raw, display, ip) triples and legacy (raw, display) pair lookups."""
 
@@ -998,13 +1015,7 @@ class DockerTailer:
 
     def _effective_source_ip(self) -> str:
         """Derive the source IP/hostname for container logs from the endpoint URL or alias."""
-        if self.url.startswith(("tcp://", "http://", "https://")):
-            parsed = urlparse(self.url)
-            if parsed.hostname:
-                return parsed.hostname
-        if self.endpoint_id == 1:
-            return "docker"
-        return self.source_alias or f"docker-{self.endpoint_id}"
+        return effective_source_ip(self.url, self.source_alias, self.endpoint_id)
 
     def get_status(self) -> dict[str, Any]:
         """Return runtime connection health and container metrics for this host."""

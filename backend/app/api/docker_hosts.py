@@ -19,6 +19,7 @@ from app.collectors.docker_collector import (
     _build_client,
     _parse_docker_host,
     create_docker_ssl_context,
+    effective_source_ip,
 )
 from app.core.config import invalidate_settings_cache
 from app.core.security import decrypt_value, encrypt_value
@@ -369,16 +370,8 @@ async def update_docker_endpoint(
                 key_val = None
 
         old_alias_box[0] = row["source_alias"]
-        if url_val.startswith(("tcp://", "http://", "https://")):
-            parsed = urlparse(url_val)
-            if parsed.hostname:
-                effective_ip_box[0] = parsed.hostname
-            else:
-                effective_ip_box[0] = "docker" if endpoint_id == 1 else (alias_val or f"docker-{endpoint_id}")
-        elif endpoint_id == 1:
-            effective_ip_box[0] = "docker"
-        else:
-            effective_ip_box[0] = alias_val or f"docker-{endpoint_id}"
+        # Historical rows carry the source_ip derived from the endpoint's previous URL and alias
+        effective_ip_box[0] = effective_source_ip(row["url"], row["source_alias"], endpoint_id)
 
         cur.execute(
             """

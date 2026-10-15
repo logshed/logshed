@@ -484,12 +484,17 @@ async def update_settings(
         new_alias = req.docker_source_alias.strip() or "docker"
         if prev_alias and prev_alias != new_alias:
             from app.api.docker_hosts import _batch_update_docker_aliases
+            from app.collectors.docker_collector import effective_source_ip
 
             def _run_docker_batch(conn):
                 try:
+                    # This request never changes host 1's URL, so its current URL is the one
+                    # historical rows were stamped with (e.g. tcp://socket-proxy:2375).
+                    url_row = conn.execute("SELECT url FROM docker_endpoints WHERE id = 1").fetchone()
+                    old_source_ip = effective_source_ip(url_row[0] if url_row else None, prev_alias, 1)
                     _batch_update_docker_aliases(
                         conn,
-                        source_ip="docker",
+                        source_ip=old_source_ip,
                         target_alias=new_alias,
                         old_alias=prev_alias,
                         batch_size=1000,

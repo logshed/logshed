@@ -546,3 +546,48 @@ class TestDockerHostsFixes:
         assert resp.status_code == 200
         mock_decrypt.assert_not_called()
         assert mock_ctx.call_args.kwargs["client_key"] is None
+
+    @pytest.mark.asyncio
+    async def test_primary_alias_backfill_via_hosts_api_for_socket_proxy(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """B-12: a primary host reached through a socket proxy backfills rows stamped with the proxy host name."""
+        db_file = tmp_path / "docker_hosts_test.db"
+        with get_connection(db_file) as conn:
+            conn.execute("UPDATE docker_endpoints SET url = 'tcp://socket-proxy:2375', source_alias = 'old-main' WHERE id = 1")
+            conn.commit()
+        _seed_logs(db_file, [("socket-proxy", "old-main", "a"), ("socket-proxy", "old-main", "b")])
+
+        resp = await client.put("/api/docker/hosts/1", json={"source_alias": "new-main"}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert _log_aliases(db_file, "socket-proxy") == ["new-main", "new-main"]
+
+    @pytest.mark.asyncio
+    async def test_primary_alias_backfill_via_settings_for_socket_proxy(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """B-12: the settings page alias change backfills rows from a socket-proxy primary host."""
+        db_file = tmp_path / "docker_hosts_test.db"
+        with get_connection(db_file) as conn:
+            conn.execute("UPDATE docker_endpoints SET url = 'tcp://socket-proxy:2375', source_alias = 'old-main' WHERE id = 1")
+            conn.commit()
+        _seed_logs(db_file, [("socket-proxy", "old-main", "a"), ("10.9.9.9", "old-main", "syslog")])
+
+        resp = await client.post("/api/settings", json={"docker_source_alias": "new-main"}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert _log_aliases(db_file, "socket-proxy") == ["new-main"]
+        # Unrelated syslog rows are left alone
+        assert _log_aliases(db_file, "10.9.9.9") == ["old-main"]
+
+    @pytest.mark.asyncio
+    async def test_alias_backfill_for_second_unix_socket_endpoint(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """B-12: a second Unix-socket endpoint stamps rows with its old alias as source_ip; they are backfilled."""
+        db_file = tmp_path / "docker_hosts_test.db"
+        _seed_endpoint(db_file, id=2, name="Rootless", url="unix:///run/user/1000/docker.sock", source_alias="rootless-old")
+        _seed_logs(db_file, [("rootless-old", "rootless-old", "a"), ("rootless-old", "rootless-old", "b")])
+
+        resp = await client.put("/api/docker/hosts/2", json={"source_alias": "rootless-new"}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert _log_aliases(db_file, "rootless-old") == ["rootless-new", "rootless-new"]
