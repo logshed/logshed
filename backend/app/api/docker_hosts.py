@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/docker/hosts", tags=["Docker Hosts"])
 
+# Request field size limits
+PEM_MAX_LENGTH = 16384
+URL_MAX_LENGTH = 512
+TEXT_MAX_LENGTH = 512
+
 
 def _validate_docker_url_str(v: Optional[str]) -> Optional[str]:
     if v is None:
@@ -71,14 +76,14 @@ class DockerEndpointResponse(BaseModel):
 
 class DockerEndpointCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    url: str = Field(..., min_length=1)
+    url: str = Field(..., min_length=1, max_length=URL_MAX_LENGTH)
     source_alias: str = Field(default="docker", max_length=64)
     enabled: bool = True
     tls_enabled: bool = False
-    ca_cert: Optional[str] = None
-    client_cert: Optional[str] = None
-    client_key: Optional[str] = None
-    exclude_containers: Optional[str] = ""
+    ca_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    client_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    client_key: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    exclude_containers: Optional[str] = Field("", max_length=TEXT_MAX_LENGTH)
 
     @field_validator("url")
     @classmethod
@@ -90,14 +95,14 @@ class DockerEndpointCreateRequest(BaseModel):
 
 class DockerEndpointUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
-    url: Optional[str] = None
-    source_alias: Optional[str] = None
+    url: Optional[str] = Field(None, max_length=URL_MAX_LENGTH)
+    source_alias: Optional[str] = Field(None, max_length=64)
     enabled: Optional[bool] = None
     tls_enabled: Optional[bool] = None
-    ca_cert: Optional[str] = None
-    client_cert: Optional[str] = None
-    client_key: Optional[str] = None
-    exclude_containers: Optional[str] = None
+    ca_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    client_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    client_key: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    exclude_containers: Optional[str] = Field(None, max_length=TEXT_MAX_LENGTH)
 
     @field_validator("url")
     @classmethod
@@ -107,11 +112,11 @@ class DockerEndpointUpdateRequest(BaseModel):
 
 class DockerEndpointTestRequest(BaseModel):
     endpoint_id: Optional[int] = None
-    url: str
+    url: str = Field(..., max_length=URL_MAX_LENGTH)
     tls_enabled: bool = False
-    ca_cert: Optional[str] = None
-    client_cert: Optional[str] = None
-    client_key: Optional[str] = None
+    ca_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    client_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
+    client_key: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     # When false, never fall back to the certificates and key stored for endpoint_id
     use_stored_secrets: bool = True
 

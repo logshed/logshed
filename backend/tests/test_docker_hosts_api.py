@@ -591,3 +591,30 @@ class TestDockerHostsFixes:
         resp = await client.put("/api/docker/hosts/2", json={"source_alias": "rootless-new"}, headers=auth_headers)
         assert resp.status_code == 200
         assert _log_aliases(db_file, "rootless-old") == ["rootless-new", "rootless-new"]
+
+    @pytest.mark.asyncio
+    async def test_oversize_fields_rejected(self, client: AsyncClient, auth_headers: dict):
+        """S-30: oversize URL, exclusion list and PEM fields are rejected with 422."""
+        big_pem = "A" * 16385
+        cases = [
+            {"name": "Big", "url": "tcp://10.0.0.8:2375/" + "a" * 600},
+            {"name": "Big", "url": "tcp://10.0.0.8:2375", "exclude_containers": "x" * 513},
+            {"name": "Big", "url": "tcp://127.0.0.1:2376", "tls_enabled": True, "ca_cert": big_pem},
+            {"name": "Big", "url": "tcp://127.0.0.1:2376", "client_cert": big_pem},
+            {"name": "Big", "url": "tcp://127.0.0.1:2376", "client_key": big_pem},
+        ]
+        for payload in cases:
+            res = await client.post("/api/docker/hosts", json=payload, headers=auth_headers)
+            assert res.status_code == 422, payload
+
+        upd = await client.put("/api/docker/hosts/1", json={"source_alias": "s" * 600}, headers=auth_headers)
+        assert upd.status_code == 422
+        upd = await client.put("/api/docker/hosts/1", json={"client_key": big_pem}, headers=auth_headers)
+        assert upd.status_code == 422
+
+        test_res = await client.post(
+            "/api/docker/hosts/test",
+            json={"url": "tcp://127.0.0.1:2376", "ca_cert": big_pem},
+            headers=auth_headers,
+        )
+        assert test_res.status_code == 422
