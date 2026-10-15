@@ -1890,3 +1890,33 @@ class TestAlertEnrichmentAiSettings:
         assert captured["timeout"] == 90.0
         assert captured["thinking_budget"] == 2048
         assert captured["provider"] == "ollama"
+
+
+class TestInvalidAlertPatternIsNotRevalidated:
+    """E-03: a rule whose regex fails validation is marked invalid once, not re-checked per log line."""
+
+    def test_invalid_rule_never_calls_validator_after_construction(self, monkeypatch):
+        import app.core.regex_validator as regex_validator
+        import app.services.alert_evaluator as alert_evaluator_mod
+
+        calls = {"n": 0}
+        real_validate = regex_validator.validate_pattern_complexity
+
+        def _counting_validate(pattern):
+            calls["n"] += 1
+            return real_validate(pattern)
+
+        monkeypatch.setattr(regex_validator, "validate_pattern_complexity", _counting_validate)
+        monkeypatch.setattr(alert_evaluator_mod, "validate_pattern_complexity", _counting_validate, raising=False)
+
+        rule = CompiledAlertRule(
+            id=7, name="Bad", rule_type="pattern", channel_id=None, filter_app=None,
+            filter_severity=None, match_pattern="(a+)+$", threshold_count=1, window_seconds=60,
+            cooldown_seconds=60, ai_enrichment=False, is_enabled=True,
+        )
+        calls_after_init = calls["n"]
+        assert calls_after_init >= 1
+
+        for _ in range(5):
+            assert rule.matches({"message": "aaaa", "raw": "aaaa"}) is False
+        assert calls["n"] == calls_after_init

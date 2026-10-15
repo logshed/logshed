@@ -111,7 +111,8 @@ class CompiledAlertRule:
         self.compiled_regex: Optional[re.Pattern] = None
         self._match_pattern_lower: Optional[str] = None
         self._has_regex_metachars: bool = False
-        self._regex_verified: bool = False
+        # Set once when the pattern fails validation or compilation; such a rule never matches
+        self._invalid: bool = False
         if self.match_pattern and self.match_pattern.strip() and self.match_pattern.strip() != "*":
             clean_pat = self.match_pattern.strip()
             self._match_pattern_lower = clean_pat.lower()
@@ -119,7 +120,6 @@ class CompiledAlertRule:
             if self._has_regex_metachars:
                 try:
                     validate_pattern_complexity(clean_pat)
-                    self._regex_verified = True
                     self.compiled_regex = re.compile(clean_pat, re.IGNORECASE)
                 except Exception as exc:
                     logger.warning(
@@ -129,6 +129,7 @@ class CompiledAlertRule:
                         exc,
                     )
                     self.compiled_regex = None
+                    self._invalid = True
 
     def _recompute_suppress_epoch(self) -> None:
         """Parse suppress_until ISO string into a UTC epoch timestamp."""
@@ -166,37 +167,22 @@ class CompiledAlertRule:
 
         # 3. Message pattern check (prioritize substring matching when no regex metacharacters)
         if self._match_pattern_lower:
+            if self._invalid:
+                return False
+
             message = str(entry.get("message") or "")
             raw = str(entry.get("raw") or "")
 
-            has_metachars = getattr(self, "_has_regex_metachars", None)
-            if has_metachars is None:
-                has_metachars = bool(self.match_pattern and any(c in _REGEX_METACHARS for c in self.match_pattern))
-
-            if not has_metachars:
+            if not self._has_regex_metachars:
                 pat_lower = self._match_pattern_lower
                 if pat_lower not in message.lower() and (not raw or pat_lower not in raw.lower()):
                     return False
             else:
-                if not getattr(self, "_regex_verified", False):
-                    if self.match_pattern and self.match_pattern.strip() != "*":
-                        clean_pat = self.match_pattern.strip()
-                        try:
-                            validate_pattern_complexity(clean_pat)
-                            self._regex_verified = True
-                            if self.compiled_regex is None:
-                                self.compiled_regex = re.compile(clean_pat, re.IGNORECASE)
-                        except Exception:
-                            return False
-                    else:
-                        return False
-
-                if self.compiled_regex is not None:
-                    msg_cand = message[:16384]
-                    raw_cand = raw[:16384] if raw else ""
-                    if not (self.compiled_regex.search(msg_cand) or (raw_cand and self.compiled_regex.search(raw_cand))):
-                        return False
-                else:
+                if self.compiled_regex is None:
+                    return False
+                msg_cand = message[:16384]
+                raw_cand = raw[:16384] if raw else ""
+                if not (self.compiled_regex.search(msg_cand) or (raw_cand and self.compiled_regex.search(raw_cand))):
                     return False
 
         return True
