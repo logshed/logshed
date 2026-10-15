@@ -3,6 +3,7 @@ Integration tests for Docker endpoints management REST API:
 /api/docker/hosts CRUD operations, primary endpoint protection, and connectivity testing.
 """
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 import pytest
@@ -317,3 +318,83 @@ class TestDockerHostsApi:
         result = test_resp.json()
         assert result["success"] is False
         assert result["error"] is not None
+
+
+async def _idle_until_cancelled(*args, **kwargs):
+    """Stand-in for DockerTailer.run that idles until the pool cancels it."""
+    await asyncio.sleep(10)
+
+
+def _seed_endpoint(db_file: Path, **cols) -> None:
+    """Insert a docker_endpoints row directly."""
+    base = {
+        "enabled": 1,
+        "tls_enabled": 0,
+        "created_at": "2026-10-12T00:00:00Z",
+        "updated_at": "2026-10-12T00:00:00Z",
+    }
+    base.update(cols)
+    names = ", ".join(base.keys())
+    marks = ", ".join("?" for _ in base)
+    with get_connection(db_file) as conn:
+        conn.execute(f"INSERT INTO docker_endpoints ({names}) VALUES ({marks})", tuple(base.values()))
+        conn.commit()
+
+
+def _seed_logs(db_file: Path, rows: list[tuple[str, str, str]]) -> None:
+    """Insert logs as (source_ip, source_alias, message) tuples."""
+    with get_connection(db_file) as conn:
+        conn.executemany(
+            """
+            INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+            VALUES ('2026-10-12T00:00:00Z', '2026-10-12T00:00:00Z', ?, ?, 'app', 1, 6, ?, ?)
+            """,
+            [(ip, alias, msg, msg) for ip, alias, msg in rows],
+        )
+        conn.commit()
+
+
+def _log_aliases(db_file: Path, source_ip: str) -> list[str]:
+    with get_connection(db_file) as conn:
+        cur = conn.execute("SELECT source_alias FROM logs WHERE source_ip = ? ORDER BY id", (source_ip,))
+        return [r[0] for r in cur.fetchall()]
+
+
+_PEM_CERT = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+_PEM_KEY = "-----BEGIN PRIVATE KEY-----\nMIID\n-----END PRIVATE KEY-----"
+
+
+class TestDockerHostsFixes:
+    """Regression tests for the 1.3.0 Docker host fixes."""
+
+    @pytest.mark.asyncio
+    async def test_toggling_primary_host_updates_pool_master_state(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """B-10: PUT host 1 enabled flips the pool master switch and stops or starts remote tailers."""
+        from app.collectors.docker_collector import DockerTailer
+        from app.collectors.docker_pool import DockerCollectorPool
+        from app.core.pipeline import KeyedMultilineAssembler
+
+        db_file = tmp_path / "docker_hosts_test.db"
+        _seed_endpoint(db_file, id=2, name="Remote", url="tcp://10.0.0.5:2375", source_alias="remote")
+
+        pool = DockerCollectorPool(assembler=KeyedMultilineAssembler(asyncio.Queue()), db_path=db_file)
+        with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run, \
+                patch("app.main.get_docker_pool", return_value=pool):
+            mock_run.side_effect = _idle_until_cancelled
+            await pool.start()
+            try:
+                assert set(pool.get_tailers()) == {1, 2}
+
+                resp = await client.put("/api/docker/hosts/1", json={"enabled": False}, headers=auth_headers)
+                assert resp.status_code == 200
+                assert pool.pool_enabled is False
+                assert pool.get_tailers() == {}
+
+                resp = await client.put("/api/docker/hosts/1", json={"enabled": True}, headers=auth_headers)
+                assert resp.status_code == 200
+                assert pool.pool_enabled is True
+                assert set(pool.get_tailers()) == {1, 2}
+            finally:
+                await pool.stop()
