@@ -435,6 +435,7 @@ Multiple transaction queries deadlock on shared index.
                 prompt="Operator explicitly edited prompt payload",
                 system_prompt=None,
                 timeout=DEFAULT_AI_TIMEOUT,
+                thinking_budget=None,
             )
 
     @pytest.mark.asyncio
@@ -468,6 +469,7 @@ Multiple transaction queries deadlock on shared index.
                 base_url="https://api.openai.com/v1",
                 system_prompt=None,
                 timeout=45.0,
+                thinking_budget=None,
             )
 
     @pytest.mark.asyncio
@@ -500,6 +502,7 @@ Multiple transaction queries deadlock on shared index.
                 prompt=prompt_sent,
                 system_prompt=None,
                 timeout=45.0,
+                thinking_budget=None,
             )
 
     @pytest.mark.asyncio
@@ -692,6 +695,7 @@ Multiple transaction queries deadlock on shared index.
                 base_url="http://localhost:11434/v1",
                 system_prompt=None,
                 timeout=DEFAULT_AI_TIMEOUT,
+                thinking_budget=None,
             )
 
 
@@ -1426,7 +1430,7 @@ class TestAiFastFailoverAndFallback:
         """Primary model failing with 503 fails over to the configured fallback model."""
         calls = []
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0, **kwargs):
             calls.append(model)
             if model == "gemini-3.7-flash":
                 raise ai_engine.AiServiceUnavailableError("Model is overloaded", code=503)
@@ -1462,7 +1466,7 @@ class TestAiFastFailoverAndFallback:
         """Primary model timing out fails over to the configured fallback model."""
         calls = []
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=DEFAULT_AI_TIMEOUT):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=DEFAULT_AI_TIMEOUT, **kwargs):
             calls.append(model)
             if model == "gemini-3.7-flash":
                 raise asyncio.TimeoutError()
@@ -1498,7 +1502,7 @@ class TestAiFastFailoverAndFallback:
         """Primary model failing with 504 DEADLINE_EXCEEDED fails over to the configured fallback model."""
         calls = []
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=DEFAULT_AI_TIMEOUT):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=DEFAULT_AI_TIMEOUT, **kwargs):
             calls.append(model)
             if model == "gemini-3.8-flash":
                 raise ai_engine.AiServiceUnavailableError(
@@ -1538,7 +1542,7 @@ class TestAiFastFailoverAndFallback:
         """Primary model not found (404) fails over to the configured fallback model."""
         calls = []
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=DEFAULT_AI_TIMEOUT):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=DEFAULT_AI_TIMEOUT, **kwargs):
             calls.append(model)
             if model == "nonexistent-model":
                 raise ai_engine.AiServiceUnavailableError(
@@ -1578,7 +1582,7 @@ class TestAiFastFailoverAndFallback:
         """Non-retryable client errors (e.g. invalid auth) do NOT trigger fallback."""
         calls = []
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0, **kwargs):
             calls.append(model)
             raise ValueError("Invalid API key provided")
 
@@ -1603,7 +1607,7 @@ class TestAiFastFailoverAndFallback:
         """When all models in chain fail with 503, the final exception is raised."""
         calls = []
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0, **kwargs):
             calls.append(model)
             raise ai_engine.AiServiceUnavailableError(f"{model} overloaded", code=503)
 
@@ -1639,7 +1643,7 @@ class TestAiFastFailoverAndFallback:
             "## Actionable Remediation\nCheck network routing."
         )
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0, **kwargs):
             if model == "gemini-3.7-flash":
                 raise ai_engine.AiServiceUnavailableError("Model 3.7 overloaded", code=503)
             return (
@@ -1722,7 +1726,7 @@ class TestAiFastFailoverAndFallback:
             json={"ai_fallback_models": "gemini-2.5-flash"},
         )
 
-        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0):
+        async def fake_dispatch(api_key, model, prompt, system_prompt=None, timeout=60.0, **kwargs):
             if model == "gemini-3.7-flash":
                 raise ai_engine.AiServiceUnavailableError("503 Model Overloaded", code=503)
             return (
@@ -2951,6 +2955,69 @@ class TestAiFollowUpApi:
 # ===================================================================
 
 _STRUCTURED_REPLY = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nR"
+
+
+class TestAiProviderDispatch:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "provider, dispatch_name",
+        [
+            ("gemini", "dispatch_gemini_request"),
+            ("openai", "dispatch_openai_request"),
+            ("openai_compatible", "dispatch_openai_request"),
+            ("anthropic", "dispatch_anthropic_request"),
+        ],
+    )
+    async def test_every_provider_receives_thinking_budget(self, provider, dispatch_name):
+        with patch(f"app.services.ai_engine.{dispatch_name}", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = (_STRUCTURED_REPLY, 10, 5, 0, 15)
+            await ai_engine.execute_ai_analysis(
+                provider=provider,
+                model="some-model",
+                api_key="key",
+                base_url="http://llm.local/v1",
+                source_alias="router",
+                app_name="app",
+                redacted_logs="logs",
+                log_count=1,
+                thinking_budget=512,
+            )
+        assert mock_dispatch.call_args.kwargs["thinking_budget"] == 512
+
+    @pytest.mark.asyncio
+    async def test_only_openai_providers_receive_base_url(self):
+        with patch("app.services.ai_engine.dispatch_gemini_request", new_callable=AsyncMock) as mock_gemini, \
+             patch("app.services.ai_engine.dispatch_openai_request", new_callable=AsyncMock) as mock_openai:
+            mock_gemini.return_value = mock_openai.return_value = (_STRUCTURED_REPLY, 10, 5, 0, 15)
+            for provider in ("gemini", "openai_compatible"):
+                await ai_engine.execute_ai_analysis(
+                    provider=provider,
+                    model="m",
+                    api_key="key",
+                    base_url="http://llm.local/v1",
+                    source_alias="router",
+                    app_name="app",
+                    redacted_logs="logs",
+                    log_count=1,
+                )
+        assert "base_url" not in mock_gemini.call_args.kwargs
+        assert mock_openai.call_args.kwargs["base_url"] == "http://llm.local/v1"
+
+    @pytest.mark.asyncio
+    async def test_unsupported_provider_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unsupported AI provider"):
+            await ai_engine.execute_ai_analysis(
+                provider="mystery",
+                model="m",
+                api_key="key",
+                base_url=None,
+                source_alias="router",
+                app_name="app",
+                redacted_logs="logs",
+                log_count=1,
+            )
+
 
 
 class _ConnectedRequest:

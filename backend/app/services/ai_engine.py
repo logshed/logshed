@@ -904,10 +904,23 @@ async def call_anthropic(
         raise _anthropic_error(e) from e
 
 
-# Aliases for backward compatibility with existing tests and call sites
+# Single-turn dispatch names used by execute_ai_analysis. Tests patch these names
+# (including test_alert_evaluator.py), so _analysis_dispatcher resolves them at call time.
 dispatch_gemini_request = call_gemini
 dispatch_openai_request = call_openai
 dispatch_anthropic_request = call_anthropic
+
+_OPENAI_PROVIDERS = ("openai", "openai_compatible")
+
+
+def _analysis_dispatcher(provider: str) -> Optional[Callable[..., Any]]:
+    """Single-turn dispatch function for a normalised provider name, or None if unsupported."""
+    return {
+        "gemini": dispatch_gemini_request,
+        "openai": dispatch_openai_request,
+        "openai_compatible": dispatch_openai_request,
+        "anthropic": dispatch_anthropic_request,
+    }.get(provider)
 
 
 MAX_LOG_TEXT_CHARS = 100_000
@@ -1005,6 +1018,10 @@ async def execute_ai_analysis(
     norm_provider = (provider or "gemini").lower()
     primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-4o" if norm_provider == "openai" else ("claude-sonnet-4-6" if norm_provider == "anthropic" else "llama3.2")))
 
+    dispatch = _analysis_dispatcher(norm_provider)
+    if dispatch is None:
+        raise ValueError(f"Unsupported AI provider: {provider}")
+
     models_to_try = _build_model_chain(primary_model, fallback_models)
 
     fallback_attempts: list[str] = []
@@ -1014,96 +1031,28 @@ async def execute_ai_analysis(
         logger.info(
             f"AI analysis attempting model '{current_model}' (attempt {idx + 1}/{len(models_to_try)})..."
         )
-        if on_progress:
-            prog_res = on_progress({
-                "stage": "calling",
-                "model": current_model,
-                "attempt": idx + 1,
-                "total_models": len(models_to_try),
-                "is_fallback": idx > 0,
-                "message": f"Querying model {current_model}...",
-            })
-            if asyncio.iscoroutine(prog_res):
-                await prog_res
+        await _notify(on_progress, {
+            "stage": "calling",
+            "model": current_model,
+            "attempt": idx + 1,
+            "total_models": len(models_to_try),
+            "is_fallback": idx > 0,
+            "message": f"Querying model {current_model}...",
+        })
+
+        dispatch_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "model": current_model,
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "timeout": timeout,
+            "thinking_budget": thinking_budget,
+        }
+        if norm_provider in _OPENAI_PROVIDERS:
+            dispatch_kwargs["base_url"] = base_url
 
         try:
-            import inspect
-
-            if norm_provider == "gemini":
-                dispatch_kwargs = {
-                    "api_key": api_key,
-                    "model": current_model,
-                    "prompt": prompt,
-                    "system_prompt": system_prompt,
-                    "timeout": timeout,
-                }
-                if thinking_budget is not None:
-                    target_func = getattr(dispatch_gemini_request, "side_effect", None) or dispatch_gemini_request
-                    if not callable(target_func):
-                        target_func = dispatch_gemini_request
-                    try:
-                        sig = inspect.signature(target_func)
-                        if "thinking_budget" in sig.parameters:
-                            dispatch_kwargs["thinking_budget"] = thinking_budget
-                        elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) and not hasattr(dispatch_gemini_request, "side_effect"):
-                            dispatch_kwargs["thinking_budget"] = thinking_budget
-                    except Exception:
-                        dispatch_kwargs["thinking_budget"] = thinking_budget
-
-                raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_gemini_request(
-                    **dispatch_kwargs
-                )
-            elif norm_provider in ("openai", "openai_compatible"):
-                dispatch_kwargs = {
-                    "api_key": api_key,
-                    "model": current_model,
-                    "prompt": prompt,
-                    "base_url": base_url,
-                    "system_prompt": system_prompt,
-                    "timeout": timeout,
-                }
-                if thinking_budget is not None:
-                    target_func = getattr(dispatch_openai_request, "side_effect", None) or dispatch_openai_request
-                    if not callable(target_func):
-                        target_func = dispatch_openai_request
-                    try:
-                        sig = inspect.signature(target_func)
-                        if "thinking_budget" in sig.parameters:
-                            dispatch_kwargs["thinking_budget"] = thinking_budget
-                        elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) and not hasattr(dispatch_openai_request, "side_effect"):
-                            dispatch_kwargs["thinking_budget"] = thinking_budget
-                    except Exception:
-                        dispatch_kwargs["thinking_budget"] = thinking_budget
-
-                raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_openai_request(
-                    **dispatch_kwargs
-                )
-            elif norm_provider == "anthropic":
-                dispatch_kwargs = {
-                    "api_key": api_key,
-                    "model": current_model,
-                    "prompt": prompt,
-                    "system_prompt": system_prompt,
-                    "timeout": timeout,
-                }
-                if thinking_budget is not None:
-                    target_func = getattr(dispatch_anthropic_request, "side_effect", None) or dispatch_anthropic_request
-                    if not callable(target_func):
-                        target_func = dispatch_anthropic_request
-                    try:
-                        sig = inspect.signature(target_func)
-                        if "thinking_budget" in sig.parameters:
-                            dispatch_kwargs["thinking_budget"] = thinking_budget
-                        elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) and not hasattr(dispatch_anthropic_request, "side_effect"):
-                            dispatch_kwargs["thinking_budget"] = thinking_budget
-                    except Exception:
-                        dispatch_kwargs["thinking_budget"] = thinking_budget
-
-                raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch_anthropic_request(
-                    **dispatch_kwargs
-                )
-            else:
-                raise ValueError(f"Unsupported AI provider: {provider}")
+            raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch(**dispatch_kwargs)
 
             summary, root_cause, remediation = parse_structured_ai_response(raw_text)
             return (
@@ -1131,16 +1080,13 @@ async def execute_ai_analysis(
                     f"Model '{current_model}' failed with retryable error ({err_desc}). "
                     f"Failing over to fallback model '{next_model}' (attempt {idx + 2}/{len(models_to_try)})..."
                 )
-                if on_progress:
-                    prog_res = on_progress({
-                        "stage": "failover",
-                        "failed_model": current_model,
-                        "next_model": next_model,
-                        "error": err_desc,
-                        "message": f"{current_model} failed ({err_desc}). Failing over to {next_model}...",
-                    })
-                    if asyncio.iscoroutine(prog_res):
-                        await prog_res
+                await _notify(on_progress, {
+                    "stage": "failover",
+                    "failed_model": current_model,
+                    "next_model": next_model,
+                    "error": err_desc,
+                    "message": f"{current_model} failed ({err_desc}). Failing over to {next_model}...",
+                })
                 continue
             if not is_retryable_for_fallback(exc):
                 raise
