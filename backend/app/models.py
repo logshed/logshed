@@ -4,7 +4,7 @@ Pydantic v2 schemas and models for LogShed API.
 
 from datetime import datetime
 import ipaddress
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from app.core.config import DEFAULT_AI_MODEL, get_max_retention_days
@@ -889,10 +889,13 @@ class DailyDigestRunResponse(BaseModel):
 # Alert Rules, Presets & History Models
 # ---------------------------------------------------------------------------
 
+AlertRuleType = Literal["threshold", "pattern", "rate"]
+
+
 class AlertRuleCreate(BaseModel):
     """Payload for creating a new alert rule."""
     name: str = Field(..., min_length=1, max_length=100, description="Friendly alert rule name")
-    rule_type: str = Field("threshold", description="Rule type: threshold, pattern, or rate")
+    rule_type: AlertRuleType = Field("threshold", description="Rule type: threshold, pattern, or rate")
     channel_id: Optional[int] = Field(None, description="Target notification channel ID (null dispatches to all enabled channels)")
     filter_app: Optional[str] = Field(None, max_length=100, description="Optional application or container filter")
     filter_severity: Optional[int] = Field(None, ge=0, le=7, description="Maximum severity threshold (0-7, lower is more critical)")
@@ -907,7 +910,7 @@ class AlertRuleCreate(BaseModel):
 class AlertRuleUpdate(BaseModel):
     """Payload for updating an existing alert rule."""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
-    rule_type: Optional[str] = Field(None, description="Rule type: threshold, pattern, or rate")
+    rule_type: Optional[AlertRuleType] = Field(None, description="Rule type: threshold, pattern, or rate")
     channel_id: Optional[int] = None
     filter_app: Optional[str] = Field(None, max_length=100)
     filter_severity: Optional[int] = Field(None, ge=0, le=7)

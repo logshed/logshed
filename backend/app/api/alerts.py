@@ -723,6 +723,9 @@ async def update_alert_rule(
                 rule_id,
             ),
         )
+        if cur.rowcount == 0:
+            # The rule was deleted between the initial read and this update
+            return None
         cur.execute(
             """
             SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
@@ -739,6 +742,11 @@ async def update_alert_rule(
         return updated_row
 
     updated_row = await run_db_query(_update)
+    if updated_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert rule {rule_id} not found.",
+        )
     await asyncio.to_thread(get_alert_evaluator().reload_rules)
 
     return _row_to_alert_rule_response(updated_row)

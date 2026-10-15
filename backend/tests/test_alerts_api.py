@@ -642,3 +642,44 @@ class TestAlertRuleRegressions:
         assert res.status_code == 200
         assert reload_threads, "reorder must reload the alert evaluator"
         assert loop_thread not in reload_threads
+
+    @pytest.mark.asyncio
+    async def test_create_rejects_unknown_rule_type(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules", json={"name": "Bogus Type", "rule_type": "bogus"}, headers=auth_headers
+        )
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_unknown_rule_type(self, client: AsyncClient, auth_headers: dict):
+        created = await client.post(
+            "/api/alerts/rules", json={"name": "Typed Rule", "rule_type": "pattern", "match_pattern": "x"}, headers=auth_headers
+        )
+        rule_id = created.json()["id"]
+        res = await client.put(f"/api/alerts/rules/{rule_id}", json={"rule_type": "bogus"}, headers=auth_headers)
+        assert res.status_code == 422
+        res_ok = await client.put(f"/api/alerts/rules/{rule_id}", json={"rule_type": "rate"}, headers=auth_headers)
+        assert res_ok.status_code == 200
+        assert res_ok.json()["rule_type"] == "rate"
+
+    @pytest.mark.asyncio
+    async def test_update_returns_404_when_rule_deleted_mid_request(self, client: AsyncClient, auth_headers: dict, monkeypatch):
+        from app.api import alerts as alerts_api
+
+        created = await client.post(
+            "/api/alerts/rules", json={"name": "Vanishing Rule", "rule_type": "threshold"}, headers=auth_headers
+        )
+        rule_id = created.json()["id"]
+        real_run_db_query = alerts_api.run_db_query
+
+        async def _delete_before_update(fn, *args, **kwargs):
+            if getattr(fn, "__name__", "") == "_update":
+                def _delete_then_update(conn):
+                    conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
+                    return fn(conn)
+                return await real_run_db_query(_delete_then_update, *args, **kwargs)
+            return await real_run_db_query(fn, *args, **kwargs)
+
+        monkeypatch.setattr(alerts_api, "run_db_query", _delete_before_update)
+        res = await client.put(f"/api/alerts/rules/{rule_id}", json={"name": "Renamed"}, headers=auth_headers)
+        assert res.status_code == 404

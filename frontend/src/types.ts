@@ -454,6 +454,9 @@ export interface DailyDigestRunResponse {
   triggered_at?: string | null;
 }
 
+// Alert rule types accepted by the backend (create and update return 422 for anything else)
+export type AlertRuleType = 'threshold' | 'pattern' | 'rate';
+
 export interface AlertRule {
   id: number;
   name: string;
