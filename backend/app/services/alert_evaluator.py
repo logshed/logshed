@@ -591,10 +591,8 @@ class AlertEvaluator:
         # Perform AI enrichment if enabled on the rule
         if rule.ai_enrichment and triggering_logs:
             try:
-                from app.core.config import get_db_path
                 from app.api.deps import run_db_query
-                from app.core.config import DEFAULT_AI_MODEL
-                from app.services.ai_service import read_ai_settings
+                from app.services.ai_service import read_ai_settings, resolve_ai_provider_settings
                 from app.services.ai_engine import execute_ai_analysis, format_prompt_log_line
 
                 ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
@@ -621,13 +619,12 @@ class AlertEvaluator:
                     else:
                         incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
                 else:
-                    ai_provider = (ai_settings.get("ai_provider") or "gemini").lower()
-                    default_model = DEFAULT_AI_MODEL if ai_provider == "gemini" else ("gpt-4o" if ai_provider == "openai" else ("claude-sonnet-4-6" if ai_provider == "anthropic" else "llama3.2"))
-                    ai_model = ai_settings.get(f"ai_model_{ai_provider}") or ai_settings.get("ai_model") or default_model
-                    ai_key = ai_settings.get(f"ai_api_key_{ai_provider}") or ai_settings.get("ai_api_key", "")
-                    ai_base = ai_settings.get(f"ai_base_url_{ai_provider}") or ai_settings.get("ai_base_url")
-                    fallback_str = ai_settings.get(f"ai_fallback_models_{ai_provider}") or ai_settings.get("ai_fallback_models", "")
-                    fallback_models = [m.strip() for m in fallback_str.split(",") if m.strip()]
+                    provider_settings = resolve_ai_provider_settings(ai_settings)
+                    ai_provider = provider_settings["provider"]
+                    ai_model = provider_settings["model"]
+                    ai_key = provider_settings["api_key"]
+                    ai_base = provider_settings["base_url"]
+                    fallback_models = provider_settings["fallback_models"]
 
                     # Format and redact log window
                     raw_lines = [
@@ -686,6 +683,8 @@ class AlertEvaluator:
                         log_count=len(triggering_logs),
                         prompt_override=prompt,
                         fallback_models=fallback_models,
+                        timeout=provider_settings["ai_timeout"],
+                        thinking_budget=provider_settings["ai_thinking_budget"],
                     )
                     if len(ai_res) == 11:
                         summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res

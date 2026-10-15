@@ -1838,3 +1838,55 @@ class TestAlertEvaluatorWindowPruningAndLightweightRecords:
 
 
 
+
+
+class TestAlertEnrichmentAiSettings:
+    """B-71: alert AI enrichment uses the configured AI timeout and thinking budget."""
+
+    @pytest.mark.asyncio
+    async def test_enrichment_passes_configured_timeout_and_thinking_budget(self, tmp_path: Path, monkeypatch):
+        db_file = tmp_path / "alerts_ai.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, match_pattern, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES ('Timeout Probe', 'threshold', 'boom', 1, 60, 300, 1, 1, ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        conn.execute(
+            "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_provider', 'ollama', datetime('now'), 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        import app.services.ai_service as ai_service
+        configured = {"ai_timeout": "90", "ai_thinking_budget": "2048"}
+        monkeypatch.setattr(ai_service, "get_cached_setting", lambda key, default=None: configured.get(key, default))
+
+        captured: dict = {}
+
+        async def mock_execute_ai_analysis(**kwargs):
+            captured.update(kwargs)
+            return ("summary", "", "", "raw", "prompt", 1, 1, 0, 2, kwargs.get("model"), [])
+
+        import app.services.ai_engine as ai_engine
+        monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_execute_ai_analysis)
+
+        async def mock_send(self, title, body, channel_id=None):
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(db_file)
+        await evaluator.evaluate_batch(
+            [{"id": 1, "app_name": "svc", "message": "boom", "timestamp": datetime.now(timezone.utc).isoformat()}]
+        )
+        await evaluator.stop()
+
+        assert captured["timeout"] == 90.0
+        assert captured["thinking_budget"] == 2048
+        assert captured["provider"] == "ollama"
