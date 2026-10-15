@@ -612,3 +612,33 @@ class TestMaintenanceWindowApi:
         assert eval_ids.index(r3_id) < eval_ids.index(r1_id) < eval_ids.index(r2_id)
 
 
+
+
+class TestAlertRuleRegressions:
+    """Regression tests for alert rule API fixes in 1.3.0."""
+
+    @pytest.mark.asyncio
+    async def test_reorder_reloads_rules_off_the_event_loop(self, client: AsyncClient, auth_headers: dict, monkeypatch):
+        import threading
+
+        from app.services.alert_evaluator import AlertEvaluator
+
+        created = await client.post(
+            "/api/alerts/rules", json={"name": "Reorder Probe", "rule_type": "threshold"}, headers=auth_headers
+        )
+        assert created.status_code == 201
+        all_ids = [r["id"] for r in (await client.get("/api/alerts/rules", headers=auth_headers)).json()]
+
+        loop_thread = threading.get_ident()
+        reload_threads: list[int] = []
+        original_reload = AlertEvaluator.reload_rules
+
+        def _spy_reload(self, conn=None):
+            reload_threads.append(threading.get_ident())
+            return original_reload(self, conn)
+
+        monkeypatch.setattr(AlertEvaluator, "reload_rules", _spy_reload)
+        res = await client.put("/api/alerts/rules/reorder", json={"rule_ids": all_ids}, headers=auth_headers)
+        assert res.status_code == 200
+        assert reload_threads, "reorder must reload the alert evaluator"
+        assert loop_thread not in reload_threads

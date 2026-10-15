@@ -988,6 +988,41 @@ class TestDropRuleUpdateRegressions:
         assert res.json()["dropped_count"] == 0
 
     @pytest.mark.asyncio
+    async def test_reorder_reloads_rules_off_the_event_loop(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        import threading
+
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        loop_thread = threading.get_ident()
+        reload_threads: list[int] = []
+        original_reload = DropFilter.reload_rules
+
+        def _spy_reload(self, conn=None):
+            reload_threads.append(threading.get_ident())
+            return original_reload(self, conn)
+
+        monkeypatch.setattr(DropFilter, "reload_rules", _spy_reload)
+        res = await client.put("/api/drop-rules/reorder", json={"rule_ids": [rule_id]})
+        assert res.status_code == 200
+        assert reload_threads, "reorder must reload the drop filter"
+        assert loop_thread not in reload_threads
+
+    def test_reload_uses_configured_connection_helper(self, tmp_path: Path, monkeypatch):
+        from app.services import drop_filter as drop_filter_mod
+
+        calls: list[str] = []
+        real_get_connection = get_connection
+
+        def _spy(db_path, *args, **kwargs):
+            calls.append(str(db_path))
+            return real_get_connection(db_path, *args, **kwargs)
+
+        monkeypatch.setattr(drop_filter_mod, "get_connection", _spy)
+        flt = DropFilter(tmp_path / "logs.db")
+        flt.reload_rules()
+        assert calls, "reload_rules must open SQLite through get_connection so the WAL and busy_timeout pragmas apply"
+
+    @pytest.mark.asyncio
     async def test_failed_commit_keeps_in_memory_counter(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
         import sqlite3
 

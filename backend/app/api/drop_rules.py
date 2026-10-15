@@ -410,7 +410,7 @@ async def reorder_drop_rules(
         conn.commit()
 
     await run_db_query(_reorder)
-    get_drop_filter().reload_rules()
+    await asyncio.to_thread(get_drop_filter().reload_rules)
     return await list_drop_rules(user=user)
 
 

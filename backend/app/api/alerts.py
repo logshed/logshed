@@ -615,7 +615,7 @@ async def reorder_alert_rules(
         conn.commit()
 
     await run_db_query(_reorder)
-    get_alert_evaluator().reload_rules()
+    await asyncio.to_thread(get_alert_evaluator().reload_rules)
     return await list_alert_rules(user=user)
 
 

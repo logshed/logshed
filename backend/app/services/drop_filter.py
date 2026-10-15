@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from app.core.config import get_db_path
+from app.core.migrations import get_connection
 from app.core.regex_validator import compile_safe_regex, safe_regex_search
 from app.core.utils import match_wildcard
 
@@ -210,7 +211,7 @@ class DropFilter:
         if conn is not None:
             _do_update(conn)
         elif effective_db and Path(effective_db).exists():
-            c = sqlite3.connect(str(effective_db), timeout=5.0)
+            c = get_connection(effective_db)
             try:
                 _do_update(c)
             finally:
@@ -244,7 +245,7 @@ class DropFilter:
         if conn is not None:
             rows = _load(conn)
         elif effective_db and Path(effective_db).exists():
-            c = sqlite3.connect(str(effective_db), timeout=5.0)
+            c = get_connection(effective_db)
             try:
                 rows = _load(c)
             finally:
