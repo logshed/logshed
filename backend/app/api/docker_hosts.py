@@ -5,12 +5,17 @@ Provides CRUD operations, live connection health metrics, and ad-hoc connection 
 
 import asyncio
 import datetime
+import ipaddress
 import logging
+import os
+import socket
 import sqlite3
+import ssl
 import time
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
@@ -35,6 +40,55 @@ URL_MAX_LENGTH = 512
 TEXT_MAX_LENGTH = 512
 
 
+# Link-local ranges and cloud metadata service addresses are never valid Docker targets
+_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fe80::/10"),
+)
+_BLOCKED_ADDRESSES = frozenset({
+    ipaddress.ip_address("100.100.100.200"),
+    ipaddress.ip_address("fd00:ec2::254"),
+})
+_BLOCKED_TARGET_MESSAGE = "Docker URL points to a link-local or cloud metadata address, which is not allowed."
+_SOCKET_NOT_ALLOWED_MESSAGE = (
+    "Unix socket path must end in docker.sock or be listed in the DOCKER_ALLOWED_SOCKETS environment variable."
+)
+_RESOLVE_TIMEOUT_SECONDS = 3.0
+
+
+def _parse_ip(host: str) -> Optional[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        ip = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def _is_blocked_address(host: str) -> bool:
+    ip = _parse_ip(host)
+    if ip is None:
+        return False
+    return ip in _BLOCKED_ADDRESSES or any(ip in net for net in _BLOCKED_NETWORKS)
+
+
+def _allowed_socket_paths() -> set[str]:
+    paths = {
+        os.path.normpath(p.strip())
+        for p in os.environ.get("DOCKER_ALLOWED_SOCKETS", "").split(",")
+        if p.strip()
+    }
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
+    if docker_host.startswith("unix://") and docker_host[len("unix://"):].strip():
+        paths.add(os.path.normpath(docker_host[len("unix://"):].strip()))
+    return paths
+
+
+def _is_allowed_socket_path(path: str) -> bool:
+    return path.endswith("docker.sock") or os.path.normpath(path) in _allowed_socket_paths()
+
+
 def _validate_docker_url_str(v: Optional[str]) -> Optional[str]:
     if v is None:
         return v
@@ -45,13 +99,65 @@ def _validate_docker_url_str(v: Optional[str]) -> Optional[str]:
         sock_path = v[len("unix://"):].strip()
         if not sock_path:
             raise ValueError("Unix socket path cannot be empty.")
+        if not _is_allowed_socket_path(sock_path):
+            raise ValueError(_SOCKET_NOT_ALLOWED_MESSAGE)
         return v
     if v.startswith(("tcp://", "http://", "https://")):
         parsed = urlparse(v)
         if not parsed.hostname:
             raise ValueError("Network Docker URL must specify a valid host.")
+        if _is_blocked_address(parsed.hostname):
+            raise ValueError(_BLOCKED_TARGET_MESSAGE)
         return v
     raise ValueError("Docker URL scheme must be unix://, tcp://, http://, or https://.")
+
+
+async def _resolve_host_addresses(host: str) -> list[str]:
+    """Resolve a host name off the event loop; an unresolvable name yields no addresses."""
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, type=socket.SOCK_STREAM),
+            timeout=_RESOLVE_TIMEOUT_SECONDS,
+        )
+    except (OSError, UnicodeError, asyncio.TimeoutError):
+        return []
+    return [str(info[4][0]) for info in infos]
+
+
+async def _ensure_url_target_allowed(url: Optional[str]) -> None:
+    """Reject network URLs whose host name resolves to a link-local or metadata address."""
+    if not url or not url.startswith(("tcp://", "http://", "https://")):
+        return
+    host = urlparse(url).hostname
+    if not host or _parse_ip(host) is not None:
+        # IP literals are already checked by _validate_docker_url_str
+        return
+    addresses = await _resolve_host_addresses(host)
+    if any(_is_blocked_address(addr) for addr in addresses):
+        raise HTTPException(status_code=422, detail=_BLOCKED_TARGET_MESSAGE)
+
+
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _describe_connection_error(exc: BaseException) -> str:
+    """Map a connection test failure to generic text that does not echo the probed service."""
+    chain = list(_iter_exception_chain(exc))
+    text = " ".join(str(e) for e in chain)
+    if any(isinstance(e, ssl.SSLError) for e in chain) or "SSL" in text or "CERTIFICATE_VERIFY_FAILED" in text:
+        return "Connection test failed: TLS error."
+    if any(isinstance(e, (httpx.TimeoutException, TimeoutError)) for e in chain):
+        return "Connection test failed: timeout."
+    if any(isinstance(e, (httpx.ConnectError, ConnectionError, FileNotFoundError)) for e in chain):
+        return "Connection test failed: connection refused."
+    return "Connection test failed: not a Docker API."
 
 
 class DockerEndpointResponse(BaseModel):
@@ -192,6 +298,7 @@ async def create_docker_endpoint(
     user: dict = Depends(get_current_user),
 ) -> DockerEndpointResponse:
     """Create a new Docker endpoint and spawn its worker task if enabled."""
+    await _ensure_url_target_allowed(payload.url)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     enc_key = None
     if payload.client_key and payload.client_key.strip():
@@ -306,6 +413,7 @@ async def update_docker_endpoint(
     user: dict = Depends(get_current_user),
 ) -> DockerEndpointResponse:
     """Update configuration for a Docker endpoint and reload its worker."""
+    await _ensure_url_target_allowed(payload.url)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     old_alias_box: list[Optional[str]] = [None]
     effective_ip_box: list[str] = ["docker"]
@@ -509,6 +617,7 @@ async def test_docker_connection(
     user: dict = Depends(get_current_user),
 ) -> DockerEndpointTestResponse:
     """Test connectivity to a remote or local Docker daemon without saving."""
+    await _ensure_url_target_allowed(payload.url)
     ca_cert = payload.ca_cert
     client_cert = payload.client_cert
     client_key = payload.client_key
@@ -550,9 +659,10 @@ async def test_docker_connection(
                 client_key=client_key,
             )
         except Exception as exc:
+            logger.info("Docker connection test TLS setup failed: %r", exc)
             return DockerEndpointTestResponse(
                 success=False,
-                error=f"TLS configuration error: {exc}",
+                error="TLS configuration error: check the CA certificate, client certificate and client key.",
             )
 
     base_url, uds_path = _parse_docker_host(
@@ -571,9 +681,14 @@ async def test_docker_connection(
         async with _build_client(base_url, uds_path, read_timeout=5.0, ssl_context=ssl_ctx) as client:
             ping_resp = await client.get("/_ping", timeout=5.0)
             if ping_resp.status_code != 200:
+                logger.info(
+                    "Docker connection test to %s: /_ping returned HTTP %s",
+                    uds_path or base_url,
+                    ping_resp.status_code,
+                )
                 return DockerEndpointTestResponse(
                     success=False,
-                    error=f"Docker daemon returned ping status {ping_resp.status_code}.",
+                    error="Connection test failed: not a Docker API.",
                 )
 
             latency = round((time.monotonic() - t0) * 1000, 2)
@@ -582,7 +697,9 @@ async def test_docker_connection(
                 ver_resp = await client.get("/version", timeout=5.0)
                 if ver_resp.status_code == 200:
                     v_data = ver_resp.json()
-                    version_str = v_data.get("Version") or version_str
+                    reported = v_data.get("Version") if isinstance(v_data, dict) else None
+                    if isinstance(reported, str) and 0 < len(reported) <= 64:
+                        version_str = reported
             except Exception:
                 pass
 
@@ -592,7 +709,9 @@ async def test_docker_connection(
                 latency_ms=latency,
             )
     except Exception as exc:
+        # Keep probe details in the server log only
+        logger.info("Docker connection test to %s failed: %r", uds_path or base_url, exc)
         return DockerEndpointTestResponse(
             success=False,
-            error=str(exc),
+            error=_describe_connection_error(exc),
         )

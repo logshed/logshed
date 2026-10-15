@@ -618,3 +618,130 @@ class TestDockerHostsFixes:
             headers=auth_headers,
         )
         assert test_res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_link_local_and_metadata_targets_rejected(self, client: AsyncClient, auth_headers: dict):
+        """S-17: link-local and cloud metadata addresses are refused for create and test."""
+        for bad_url in (
+            "tcp://169.254.169.254:2375",
+            "http://169.254.10.1:2375",
+            "tcp://[fe80::1]:2375",
+            "tcp://100.100.100.200:2375",
+            "tcp://[fd00:ec2::254]:2375",
+            "tcp://[::ffff:169.254.169.254]:2375",
+        ):
+            res = await client.post(
+                "/api/docker/hosts/test", json={"url": bad_url}, headers=auth_headers
+            )
+            assert res.status_code == 422, bad_url
+            res = await client.post(
+                "/api/docker/hosts", json={"name": "Meta", "url": bad_url}, headers=auth_headers
+            )
+            assert res.status_code == 422, bad_url
+
+    @pytest.mark.asyncio
+    async def test_names_resolving_to_metadata_targets_rejected(self, client: AsyncClient, auth_headers: dict):
+        """S-17: a host name that resolves to a link-local address is refused."""
+        async def _fake_resolve(host: str) -> list[str]:
+            return ["169.254.169.254"] if host == "metadata.internal" else []
+
+        with patch("app.api.docker_hosts._resolve_host_addresses", side_effect=_fake_resolve):
+            res = await client.post(
+                "/api/docker/hosts/test", json={"url": "tcp://metadata.internal:2375"}, headers=auth_headers
+            )
+            assert res.status_code == 422
+            res = await client.post(
+                "/api/docker/hosts", json={"name": "Meta", "url": "tcp://metadata.internal:2375"}, headers=auth_headers
+            )
+            assert res.status_code == 422
+            res = await client.put(
+                "/api/docker/hosts/1", json={"url": "tcp://metadata.internal:2375"}, headers=auth_headers
+            )
+            assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_unix_socket_paths_restricted(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
+    ):
+        """S-17: only Docker socket paths (or ones listed in DOCKER_ALLOWED_SOCKETS) are accepted."""
+        monkeypatch.delenv("DOCKER_ALLOWED_SOCKETS", raising=False)
+        monkeypatch.delenv("DOCKER_HOST", raising=False)
+        for bad_url in ("unix:///etc/passwd", "unix:///run/postgresql/.s.PGSQL.5432", "unix:///tmp/docker.sock.bak"):
+            res = await client.post("/api/docker/hosts/test", json={"url": bad_url}, headers=auth_headers)
+            assert res.status_code == 422, bad_url
+
+        monkeypatch.setenv("DOCKER_ALLOWED_SOCKETS", "/run/podman/podman.sock, /run/other.sock")
+        res = await client.post(
+            "/api/docker/hosts", json={"name": "Podman", "url": "unix:///run/podman/podman.sock"}, headers=auth_headers
+        )
+        assert res.status_code == 200
+
+        monkeypatch.setenv("DOCKER_HOST", "unix:///run/custom/engine.sock")
+        res = await client.post(
+            "/api/docker/hosts", json={"name": "Custom", "url": "unix:///run/custom/engine.sock"}, headers=auth_headers
+        )
+        assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_connection_test_errors_are_generic(self, client: AsyncClient, auth_headers: dict):
+        """S-17: probe failures return generic text and keep the details in the server log."""
+        import httpx
+
+        class _FailingClient:
+            def __init__(self, exc):
+                self._exc = exc
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, *args, **kwargs):
+                raise self._exc
+
+        cases = [
+            (httpx.ConnectError("[Errno 111] Connection refused to secret-internal:2375"), "connection refused"),
+            (httpx.ConnectTimeout("timed out reaching secret-internal"), "timeout"),
+            (httpx.ReadTimeout("read timed out secret-internal"), "timeout"),
+            (
+                httpx.ConnectError(
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate secret-internal"
+                ),
+                "TLS error",
+            ),
+            (httpx.RemoteProtocolError("illegal status line secret-internal"), "not a Docker API"),
+        ]
+        for exc, expected in cases:
+            with patch("app.api.docker_hosts._build_client", return_value=_FailingClient(exc)):
+                resp = await client.post(
+                    "/api/docker/hosts/test", json={"url": "tcp://10.0.0.12:2375"}, headers=auth_headers
+                )
+            body = resp.json()
+            assert body["success"] is False
+            assert expected in body["error"], (exc, body)
+            assert "secret-internal" not in body["error"]
+
+    @pytest.mark.asyncio
+    async def test_connection_test_non_docker_reply_is_generic(self, client: AsyncClient, auth_headers: dict):
+        """S-17: a reachable service that is not Docker reports 'not a Docker API' without echoing the reply."""
+        class _Resp:
+            status_code = 404
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, *args, **kwargs):
+                return _Resp()
+
+        with patch("app.api.docker_hosts._build_client", return_value=_Client()):
+            resp = await client.post(
+                "/api/docker/hosts/test", json={"url": "tcp://10.0.0.14:2375"}, headers=auth_headers
+            )
+        body = resp.json()
+        assert body["success"] is False
+        assert "not a Docker API" in body["error"]
