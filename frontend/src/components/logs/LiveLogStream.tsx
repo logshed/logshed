@@ -17,6 +17,7 @@ import { LogEntry, LogFilterParams, DockerEndpoint } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
 import { LogDetailModal } from './LogDetailModal.tsx';
 import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
+import { getAuthStatus } from '../../api/auth.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
@@ -380,6 +381,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [hasMoreLogs, setHasMoreLogs] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [streamDisconnected, setStreamDisconnected] = useState<boolean>(false);
+  const [streamReconnectNonce, setStreamReconnectNonce] = useState<number>(0);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [totalCapped, setTotalCapped] = useState<boolean>(false);
   const historicalOffsetRef = useRef<number>(0);
@@ -877,6 +881,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     try {
       setIsLoadingHistory(true);
       historicalOffsetRef.current = 0;
+      setLoadError(null);
       setHasMoreLogs(true);
       if (flushTimerRef.current !== null) {
         clearTimeout(flushTimerRef.current);
@@ -920,6 +925,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     } catch (err) {
       if (reqId === fetchRequestIdRef.current) {
         console.error('Failed to load initial logs', err);
+        setLoadError(err instanceof Error ? err.message : 'Failed to load logs');
       }
     } finally {
       if (reqId === fetchRequestIdRef.current) {
@@ -1019,12 +1025,17 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     return a.join(',');
   }, [filters.apps, filters.app_name]);
 
+  const streamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamRetryAttemptRef = useRef<number>(0);
+
   // Connect to SSE stream
   useEffect(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+
+    setStreamDisconnected(false);
 
     // If viewing a bounded historical range (to is specified), pause/skip live incoming SSE events
     if (filters.to) {
@@ -1072,11 +1083,39 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
     });
 
+    es.onopen = () => {
+      streamRetryAttemptRef.current = 0;
+      setStreamDisconnected(false);
+    };
+
     es.onerror = (e) => {
-      console.warn('SSE stream disconnected, reconnecting...', e);
+      console.warn('SSE stream error', e);
+      // EventSource.CLOSED (2): the browser will not reconnect on its own (non-200 response, 401, proxy restart)
+      if (es.readyState !== 2) return;
+      setStreamDisconnected(true);
+      if (streamRetryTimerRef.current !== null) return;
+      const attempt = streamRetryAttemptRef.current++;
+      const delayMs = Math.min(2000 * 2 ** attempt, 30000);
+      streamRetryTimerRef.current = setTimeout(async () => {
+        streamRetryTimerRef.current = null;
+        try {
+          const status = await getAuthStatus();
+          if (!status.authenticated) {
+            window.dispatchEvent(new CustomEvent('logshed:unauthorized', { detail: { message: 'Session expired' } }));
+            return;
+          }
+        } catch {
+          // apiFetch dispatches logshed:unauthorized on a 401; other errors fall through to a retry
+        }
+        setStreamReconnectNonce((n) => n + 1);
+      }, delayMs);
     };
 
     return () => {
+      if (streamRetryTimerRef.current !== null) {
+        clearTimeout(streamRetryTimerRef.current);
+        streamRetryTimerRef.current = null;
+      }
       es.close();
       eventSourceRef.current = null;
       if (flushTimerRef.current !== null) {
@@ -1085,7 +1124,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       incomingBufferRef.current = [];
     };
-  }, [filters.severity_max, filters.to, sourcesKey, appsKey, flushIncomingLogs]);
+  }, [filters.severity_max, filters.to, sourcesKey, appsKey, flushIncomingLogs, streamReconnectNonce]);
 
   // Scroll detection to pause auto-scroll when scrolling down, and load more when near bottom
   const handleScroll = () => {
@@ -1413,6 +1452,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       await deleteLogs({ log_ids: targetIds });
       const targetSet = new Set(targetIds);
       setLogs((prev) => prev.filter((l) => !targetSet.has(l.id)));
+      setTotalCount((prev) => (prev === null ? prev : Math.max(0, prev - targetSet.size)));
       setSelectedLogIds(new Set());
       setLastSelectedLogIndex(null);
       setShowDeleteSelectedConfirm(false);
@@ -1466,7 +1506,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         <LogSearchBar
           filters={filters}
           onFilterChange={setFilters}
-          onSearch={loadInitialLogs}
+          onSearch={() => loadInitialLogs()}
           onReset={handleResetFilters}
           availableSources={availableSourcesForSelectedApps}
           availableApps={availableAppsForSelectedHosts}
@@ -1607,6 +1647,34 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           </div>
         )}
 
+        {loadError && (
+          <div role="alert" className="shrink-0 px-3 py-1.5 bg-red-950/60 border-b border-red-800 text-xs text-red-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+        )}
+
+        {streamDisconnected && !filters.to && (
+          <div role="status" className="shrink-0 px-3 py-1.5 bg-amber-950/60 border-b border-amber-800 text-xs text-amber-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Live stream disconnected</span>
+            <button
+              type="button"
+              onClick={() => {
+                if (streamRetryTimerRef.current !== null) {
+                  clearTimeout(streamRetryTimerRef.current);
+                  streamRetryTimerRef.current = null;
+                }
+                streamRetryAttemptRef.current = 0;
+                setStreamReconnectNonce((n) => n + 1);
+              }}
+              className="underline hover:text-white cursor-pointer font-medium"
+            >
+              Reconnect
+            </button>
+          </div>
+        )}
+
         {/* Scrollable Virtualized Area */}
         <div
           ref={parentRef}
@@ -1678,7 +1746,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
             <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
-             - Reached beginning of log history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
+             - Reached the end of loaded history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
             </div>
           )}
         </div>
@@ -1758,7 +1826,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             </button>
 
             <button
-              onClick={() => setShowDeleteSelectedConfirm(true)}
+              onClick={() => {
+                setDeleteSelectedError(null);
+                setShowDeleteSelectedConfirm(true);
+              }}
               className="text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer bg-red-600 hover:bg-red-500"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -1842,6 +1913,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }}
         onDeleteLog={(deletedLog) => {
           setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));
+          setTotalCount((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
+          lastSelectedLogIndexRef.current = null;
+          setLastSelectedLogIndex(null);
           setSelectedLogIds((prev) => {
             const next = new Set(prev);
             next.delete(deletedLog.id);

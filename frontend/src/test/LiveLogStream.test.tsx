@@ -5,6 +5,7 @@ import { LiveLogStream, formatLocalTimestamp, matchesSearchQuery } from '../comp
 import * as logsApi from '../api/logs.ts';
 import * as aliasesApi from '../api/aliases.ts';
 import * as dockerHostsApi from '../api/dockerHosts.ts';
+import * as authApi from '../api/auth.ts';
 import { LogEntry } from '../types.ts';
 import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 
@@ -32,6 +33,7 @@ class MockEventSource {
   url: string;
   listeners: Record<string, ((event: any) => void)[]> = {};
   onerror: ((e: any) => void) | null = null;
+  readyState = 1;
 
   constructor(url: string) {
     this.url = url;
@@ -827,7 +829,7 @@ describe('LiveLogStream Component', () => {
 
     // Total of 750 logs loaded, and end-of-history banner appears
     await waitFor(() => {
-      expect(screen.getByText(/Reached beginning of log history \(750 logs loaded\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Reached the end of loaded history \(750 logs loaded\)/i)).toBeInTheDocument();
     });
 
     // Verify fetchLogs was called with offset 0 and then offset 500
@@ -1756,3 +1758,125 @@ describe('matchesSearchQuery Helper Function', () => {
 
 
 
+
+describe('LiveLogStream B11 fixes', () => {
+  const renderStream = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as any;
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({
+      logs: [...sampleLogs],
+      total: sampleLogs.length,
+      limit: 500,
+      offset: 0,
+    });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({
+      sources: ['homelab-host', 'opnsense-router'],
+      apps: ['nginx'],
+      host_to_apps: {},
+      app_to_hosts: {},
+    } as any);
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+  });
+
+  it('Filter button loads logs with the current filters (B-01)', async () => {
+    const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    const severitySelect = screen.getByText('Severity:').parentElement!.querySelector('select') as HTMLSelectElement;
+    fireEvent.change(severitySelect, { target: { value: '3' } });
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ severity_max: 3 }));
+    });
+    fetchSpy.mockClear();
+    fireEvent.click(screen.getByText('Filter').closest('button') as HTMLElement);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const arg = fetchSpy.mock.calls[0][0] as any;
+    expect(arg.severity_max).toBe(3);
+    expect(arg.limit).toBe(500);
+  });
+
+  it('shows the error message when loading logs fails (B-25)', async () => {
+    vi.spyOn(logsApi, 'fetchLogs').mockRejectedValue(new Error('fts5: syntax error near "("'));
+    renderStream();
+    expect(await screen.findByText('fts5: syntax error near "("')).toBeInTheDocument();
+  });
+
+  it('shows a disconnected pill and retries when the live stream closes (B-09)', async () => {
+    renderStream();
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[0] as any;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      es.readyState = 2;
+      act(() => {
+        es.onerror?.(new Event('error'));
+      });
+      expect(screen.getByText('Live stream disconnected')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+      vi.spyOn(authApi, 'getAuthStatus').mockResolvedValue({ setup_required: false, authenticated: true });
+      const before = MockEventSource.instances.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2100);
+      });
+      expect(MockEventSource.instances.length).toBeGreaterThan(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispatches logshed:unauthorized when the stream closes and the session is gone (B-09)', async () => {
+    renderStream();
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    const es = MockEventSource.instances[0] as any;
+    const handler = vi.fn();
+    window.addEventListener('logshed:unauthorized', handler);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.spyOn(authApi, 'getAuthStatus').mockResolvedValue({ setup_required: false, authenticated: false });
+      es.readyState = 2;
+      act(() => {
+        es.onerror?.(new Event('error'));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2100);
+      });
+      expect(handler).toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('logshed:unauthorized', handler);
+      vi.useRealTimers();
+    }
+  });
+
+  it('resets the shift-click anchor after a delete (B-75)', async () => {
+    vi.spyOn(logsApi, 'deleteLogs').mockResolvedValue({ deleted: 1 } as any);
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    let rows = document.querySelectorAll('.log-row');
+    fireEvent.click(rows[2].firstElementChild as HTMLElement);
+    expect(screen.getByText('1 log selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Delete (1)'));
+    fireEvent.click(screen.getByText('Confirm Delete'));
+    await waitFor(() => expect(document.querySelectorAll('.log-row').length).toBe(3));
+    rows = document.querySelectorAll('.log-row');
+    fireEvent.click(rows[0].firstElementChild as HTMLElement, { shiftKey: true });
+    expect(screen.getByText('1 log selected')).toBeInTheDocument();
+  });
+});
