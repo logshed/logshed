@@ -119,6 +119,35 @@ class TestApiTokenUnit:
         # Empty requirement allows any token
         assert has_scope_permission(scopes, []) is True
 
+    def test_rate_limiter_status_remaining_and_reset(self):
+        """check_request reports remaining quota and the wait until the oldest request leaves the window."""
+        from app.core.api_tokens import ApiTokenRateLimiter
+        from app.core.rate_limiter import SlidingWindowLimiter
+
+        now = [1000.0]
+        limiter = ApiTokenRateLimiter(max_requests=3, window_seconds=60.0, clock=lambda: now[0])
+        assert isinstance(limiter, SlidingWindowLimiter)
+
+        first = limiter.check_request("token_1")
+        assert (first.allowed, first.remaining, first.limit, first.reset_seconds) == (True, 2, 3, 60)
+        now[0] += 10
+        assert limiter.check_request("token_1").remaining == 1
+        now[0] += 10
+        assert limiter.check_request("token_1").remaining == 0
+
+        limited = limiter.check_request("token_1")
+        assert (limited.allowed, limited.remaining, limited.reset_seconds) == (False, 0, 40)
+        assert limiter.count("token_1") == 3
+
+        # The oldest request leaves the window after 60 seconds, freeing one slot
+        now[0] += 40
+        assert limiter.check_request("token_1").allowed is True
+        assert limiter.record_request("token_1") is False
+
+        # max_requests stays adjustable at runtime (tests and ingest tune it)
+        limiter.max_requests = 10
+        assert limiter.record_request("token_1") is True
+
 
 class TestApiTokensApi:
     """Integration tests for token CRUD and external verification."""
@@ -359,16 +388,16 @@ class TestTokenRevocationCleanup:
         assert (await client.get("/api/v1/auth/verify", headers=bearer)).status_code == 200
         assert (await client.post("/api/v1/ingest", json=[{"message": "x"}], headers=bearer)).status_code == 200
         key = f"token_{token_id}"
-        assert key in api_token_rate_limiter._requests
-        assert key in ingest_rate_limiter._requests
+        assert key in api_token_rate_limiter
+        assert key in ingest_rate_limiter
         assert token_id in _last_used_timestamps
         assert any(info["id"] == token_id for _, info in _token_cache.values())
 
         del_res = await client.delete(f"/api/tokens/{token_id}", headers=auth_headers)
         assert del_res.status_code == 200
 
-        assert key not in api_token_rate_limiter._requests
-        assert key not in ingest_rate_limiter._requests
+        assert key not in api_token_rate_limiter
+        assert key not in ingest_rate_limiter
         assert token_id not in _last_used_timestamps
         assert not any(info["id"] == token_id for _, info in _token_cache.values())
 

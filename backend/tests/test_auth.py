@@ -745,3 +745,136 @@ class TestCLIPasswordReset:
         assert ph.verify(row[0], "PromptedSecretPassword123")
 
 
+
+
+# ===================================================================
+# Login limiter: concurrency, global cap, IPv6 buckets, Argon2 pool
+# ===================================================================
+
+def _slow_counting_verify(calls: list[str], result: bool = False, delay: float = 0.05):
+    """Replacement for verify_password that records the calling thread and holds it briefly."""
+    import threading
+    import time as _time
+
+    def _verify(_hash: str, _password: str) -> bool:
+        calls.append(threading.current_thread().name)
+        _time.sleep(delay)
+        return result
+
+    return _verify
+
+
+class TestLoginLimiterHardening:
+
+    @pytest.mark.asyncio
+    async def test_concurrent_bad_logins_from_one_ip_cannot_exceed_limit(self, client: AsyncClient, monkeypatch):
+        """20 concurrent bad guesses from one IP: at most 5 reach password verification."""
+        import asyncio
+
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+        calls: list[str] = []
+        monkeypatch.setattr("app.api.auth.verify_password", _slow_counting_verify(calls))
+
+        responses = await asyncio.gather(
+            *(client.post("/api/auth/login", json={"password": f"guess-{i}"}) for i in range(20))
+        )
+
+        assert len(calls) <= 5
+        statuses = [r.status_code for r in responses]
+        assert set(statuses) <= {401, 429}
+        assert statuses.count(401) == len(calls)
+
+        # Later sequential guesses from the same IP stay within the 5 per minute budget
+        for i in range(10):
+            await client.post("/api/auth/login", json={"password": f"late-{i}"})
+        assert len(calls) <= 5
+
+    @pytest.mark.asyncio
+    async def test_login_in_flight_cap_per_ip(self, client: AsyncClient, monkeypatch):
+        """While 2 attempts from one IP are being verified, a third is rejected without verifying."""
+        import asyncio
+
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+        calls: list[str] = []
+        monkeypatch.setattr("app.api.auth.verify_password", _slow_counting_verify(calls))
+
+        responses = await asyncio.gather(
+            *(client.post("/api/auth/login", json={"password": f"guess-{i}"}) for i in range(3))
+        )
+
+        assert len(calls) == 2
+        assert sorted(r.status_code for r in responses) == [401, 401, 429]
+
+    @pytest.mark.asyncio
+    async def test_global_failed_login_limit_across_many_ips(self, client: AsyncClient):
+        """30 failed logins per minute across all IPs trips a global limit for every IP."""
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+
+        # Loopback peer is a trusted proxy, so each X-Forwarded-For value is a distinct client
+        for i in range(30):
+            res = await client.post(
+                "/api/auth/login",
+                json={"password": "wrong_password"},
+                headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+            )
+            assert res.status_code == 401
+
+        res_new_ip = await client.post(
+            "/api/auth/login",
+            json={"password": "wrong_password"},
+            headers={"X-Forwarded-For": "198.51.100.200"},
+        )
+        assert res_new_ip.status_code == 429
+        assert "Too many failed login attempts" in res_new_ip.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_successful_logins_do_not_count_toward_global_limit(self, client: AsyncClient):
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+
+        for i in range(40):
+            res = await client.post(
+                "/api/auth/login",
+                json={"password": "correct_password"},
+                headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+            )
+            assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_ipv6_addresses_in_one_slash_64_share_a_bucket(self, client: AsyncClient):
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+
+        for i in range(5):
+            res = await client.post(
+                "/api/auth/login",
+                json={"password": "wrong_password"},
+                headers={"X-Forwarded-For": f"2001:db8:1:2::{i + 1:x}"},
+            )
+            assert res.status_code == 401
+
+        # Another address in the same /64 is limited
+        res_same_64 = await client.post(
+            "/api/auth/login",
+            json={"password": "wrong_password"},
+            headers={"X-Forwarded-For": "2001:db8:1:2:ffff:ffff:ffff:1"},
+        )
+        assert res_same_64.status_code == 429
+
+        # An address in an adjacent /64 has its own bucket
+        res_other_64 = await client.post(
+            "/api/auth/login",
+            json={"password": "wrong_password"},
+            headers={"X-Forwarded-For": "2001:db8:1:3::1"},
+        )
+        assert res_other_64.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_password_verification_runs_on_dedicated_executor(self, client: AsyncClient, monkeypatch):
+        """Argon2 runs on its own small pool so a login burst cannot starve DB reads."""
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+        calls: list[str] = []
+        monkeypatch.setattr("app.api.auth.verify_password", _slow_counting_verify(calls, delay=0.0))
+
+        res = await client.post("/api/auth/login", json={"password": "wrong_password"})
+        assert res.status_code == 401
+        assert len(calls) == 1
+        assert calls[0].startswith("logshed-argon2")

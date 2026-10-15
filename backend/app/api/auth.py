@@ -7,6 +7,8 @@ import asyncio
 import datetime
 import ipaddress
 import os
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.deps import (
@@ -15,7 +17,7 @@ from app.api.deps import (
     invalidate_admin_auth_cache,
     run_db_query,
 )
-from app.core.rate_limiter import login_rate_limiter
+from app.core.rate_limiter import ip_bucket_key, login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
     create_session_token,
@@ -204,41 +206,56 @@ async def setup_admin(req: SetupRequest, request: Request, response: Response) -
 
 _DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$gu2N9vYOMcHlRxyHZpufkw$qwwgz3w/Hzgd+c8DfOpw9Pe/YQjiKQ6G8SiO917I3M8"
 
+# Argon2id verification (64 MiB, t=3) gets its own small pool so a burst of login attempts
+# cannot occupy the default to_thread pool that run_db_query uses for every DB read.
+_ARGON2_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="logshed-argon2")
+
+_LOGIN_RATE_LIMITED_DETAIL = "Too many failed login attempts. Please try again in a minute."
+
+
+async def _verify_password_off_loop(password_hash: str, password: str) -> bool:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_ARGON2_EXECUTOR, verify_password, password_hash, password)
+
 
 @router.post("/login", response_model=MessageResponse)
 async def login(req: LoginRequest, request: Request, response: Response) -> MessageResponse:
     """
     Session login endpoint.
-    Enforces strict in-memory rate limiting on failed attempts per IP.
+    Enforces strict in-memory rate limiting on login attempts: per client IP (IPv6 by /64),
+    per-IP concurrency, and a global cap on failed attempts across all IPs.
     """
-    client_ip = _get_client_ip(request)
+    limiter_key = ip_bucket_key(_get_client_ip(request))
 
-    # Check brute-force rate limit
-    if login_rate_limiter.is_rate_limited(client_ip):
+    # Reserve the attempt before any await so concurrent requests count against each other.
+    attempt = login_rate_limiter.begin(limiter_key)
+    if attempt is None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed login attempts. Please try again in a minute.",
+            detail=_LOGIN_RATE_LIMITED_DETAIL,
         )
 
-    def _get_admin(conn):
-        cursor = conn.cursor()
-        cursor.execute("SELECT password_hash FROM admin_auth WHERE id = 1")
-        row = cursor.fetchone()
-        return row[0] if row else None
+    is_valid = False
+    try:
+        def _get_admin(conn):
+            cursor = conn.cursor()
+            cursor.execute("SELECT password_hash FROM admin_auth WHERE id = 1")
+            row = cursor.fetchone()
+            return row[0] if row else None
 
-    stored_hash = await run_db_query(_get_admin)
-    target_hash = stored_hash if stored_hash else _DUMMY_PASSWORD_HASH
-    is_valid = await asyncio.to_thread(verify_password, target_hash, req.password) and bool(stored_hash)
+        stored_hash = await run_db_query(_get_admin)
+        target_hash = stored_hash if stored_hash else _DUMMY_PASSWORD_HASH
+        is_valid = await _verify_password_off_loop(target_hash, req.password) and bool(stored_hash)
+    finally:
+        # A success releases the reservation and clears this IP's history; anything else
+        # (wrong password, error, cancellation) stays counted as a failed attempt.
+        login_rate_limiter.finish(attempt, success=is_valid)
 
     if not is_valid:
-        login_rate_limiter.record_failure(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid password.",
         )
-
-    # Reset failed attempts on success
-    login_rate_limiter.record_success(client_ip)
 
     token = create_session_token(user_id=1)
     response.set_cookie(

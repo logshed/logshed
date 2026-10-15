@@ -9,8 +9,9 @@ import math
 import secrets
 import threading
 import time
-from collections import defaultdict
-from typing import Any, DefaultDict, Optional
+from typing import Any, Optional
+
+from app.core.rate_limiter import SlidingWindowLimiter
 
 TOKEN_PREFIX_LIVE = "ls_live_"
 
@@ -115,46 +116,30 @@ class RateLimitStatus:
     allowed: bool
 
 
-class ApiTokenRateLimiter:
+class ApiTokenRateLimiter(SlidingWindowLimiter):
     """
     In-memory sliding window rate limiter for external API token calls.
     Allows up to max_requests per window_seconds per token ID.
+    Called only from async handlers on the event loop, so it needs no thread lock.
     """
 
-    def __init__(self, max_requests: int = 120, window_seconds: float = 60.0):
-        self.max_requests = max_requests
-        self.window_seconds = window_seconds
-        self._requests: DefaultDict[str, list[float]] = defaultdict(list)
-        self._lock = threading.Lock()
-
-    def _cleanup_key(self, key: str, now: float) -> None:
-        cutoff = now - self.window_seconds
-        self._requests[key] = [t for t in self._requests[key] if t > cutoff]
-        if not self._requests[key]:
-            self._requests.pop(key, None)
-
-    def is_rate_limited(self, key: str) -> bool:
-        with self._lock:
-            now = time.time()
-            self._cleanup_key(key, now)
-            return len(self._requests.get(key, [])) >= self.max_requests
+    def __init__(self, max_requests: int = 120, window_seconds: float = 60.0, **kwargs):
+        super().__init__(max_requests, window_seconds, **kwargs)
 
     def check_request(self, key: str) -> RateLimitStatus:
         """
         Record a request timestamp if allowed and return the resulting window status.
         When limited, nothing is recorded and reset_seconds is the wait until a slot frees.
         """
-        with self._lock:
-            now = time.time()
-            self._cleanup_key(key, now)
-            timestamps = self._requests.get(key, [])
-            oldest = timestamps[0] if timestamps else now
-            reset_seconds = max(1, math.ceil(oldest + self.window_seconds - now))
-            if len(timestamps) >= self.max_requests:
-                return RateLimitStatus(self.max_requests, 0, reset_seconds, False)
-            self._requests[key].append(now)
-            remaining = self.max_requests - len(self._requests[key])
-            return RateLimitStatus(self.max_requests, remaining, reset_seconds, True)
+        now = self._clock()
+        window = self._prune(key, now)
+        used = len(window) if window else 0
+        oldest = window[0] if window else now
+        reset_seconds = max(1, math.ceil(oldest + self.window_seconds - now))
+        if used >= self.max_requests:
+            return RateLimitStatus(self.max_requests, 0, reset_seconds, False)
+        self._append(key, now)
+        return RateLimitStatus(self.max_requests, self.max_requests - used - 1, reset_seconds, True)
 
     def record_request(self, key: str) -> bool:
         """
@@ -162,15 +147,6 @@ class ApiTokenRateLimiter:
         Returns True if request is allowed, False if rate limited.
         """
         return self.check_request(key).allowed
-
-    def reset(self) -> None:
-        with self._lock:
-            self._requests.clear()
-
-    def forget(self, key: str) -> None:
-        """Drop the sliding window state for a single key (e.g. when a token is revoked)."""
-        with self._lock:
-            self._requests.pop(key, None)
 
 
 # Global rate limiter instance for API tokens (120 req/min)
