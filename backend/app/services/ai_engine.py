@@ -262,17 +262,17 @@ async def fetch_available_models(
                     or getattr(m, "supported_generation_methods", None)
                     or []
                 )
-    
+
                 if actions and not any("generateContent" in a or "generate_content" in a for a in actions):
                     continue
-    
+
                 low_id = model_id.lower()
                 if "gemini" not in low_id:
                     continue
-    
+
                 if not is_text_generation_model(model_id, description):
                     continue
-    
+
                 supports_thinking = supports_gemini_thinking(model_id)
                 discovered_models.append({
                     "id": model_id,
@@ -304,7 +304,7 @@ async def fetch_available_models(
                     continue
                 if "-search-" in low_id or low_id.endswith(("-search-preview", "-search-api")):
                     continue
-    
+
                 supports_thinking = supports_openai_reasoning(model_id)
                 discovered_models.append({
                     "id": model_id,
@@ -327,7 +327,7 @@ async def fetch_available_models(
                 display_name = getattr(m, "display_name", None) or model_id
                 if not is_text_generation_model(model_id):
                     continue
-    
+
                 supports_thinking = supports_claude_thinking(model_id)
                 discovered_models.append({
                     "id": model_id,
