@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
+from app.api.aliases import keyset_alias_backfill
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.docker_collector import (
     _build_client,
@@ -277,39 +278,19 @@ def _batch_update_docker_aliases(
     Retroactively update source_alias for existing logs from a Docker endpoint in chunked batches.
     Prevents long table locks on large datasets while interleaving concurrent writes.
     """
-    cursor = conn.cursor()
     if source_ip != "docker":
         if not old_alias or old_alias == target_alias:
             return
-        update_query = """
-            UPDATE logs SET source_alias = ?
-            WHERE source_ip = ? AND source_alias = ? AND id IN (
-                SELECT id FROM logs
-                WHERE source_ip = ? AND source_alias = ?
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        """
-        params = (target_alias, source_ip, old_alias, source_ip, old_alias, batch_size)
+        keyset_alias_backfill(conn, source_ip, "+source_alias = ?", (old_alias,), target_alias, batch_size)
     else:
-        update_query = """
-            UPDATE logs SET source_alias = ?
-            WHERE source_ip = 'docker' AND (source_alias != ? OR source_alias IS NULL) AND id IN (
-                SELECT id FROM logs
-                WHERE source_ip = 'docker' AND (source_alias != ? OR source_alias IS NULL)
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        """
-        params = (target_alias, target_alias, target_alias, batch_size)
-
-    while True:
-        cursor.execute(update_query, params)
-        count = cursor.rowcount
-        conn.commit()
-        if count < batch_size:
-            break
-        time.sleep(0.005)
+        keyset_alias_backfill(
+            conn,
+            "docker",
+            "+source_alias != ? OR +source_alias IS NULL",
+            (target_alias,),
+            target_alias,
+            batch_size,
+        )
 
 
 @router.put("/{endpoint_id}", response_model=DockerEndpointResponse)

@@ -6,6 +6,8 @@ import asyncio
 import datetime
 import logging
 import time
+from typing import Optional
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 logger = logging.getLogger(__name__)
@@ -37,24 +39,71 @@ async def list_aliases(user: dict = Depends(get_current_user)) -> list[HostAlias
     return await run_db_query(_get_all)
 
 
+def keyset_alias_backfill(
+    conn,
+    source_ip: str,
+    alias_filter_sql: str,
+    alias_filter_params: tuple,
+    target_alias: str,
+    batch_size: int = 1000,
+) -> int:
+    """
+    Set source_alias = target_alias on rows with this source_ip that match alias_filter_sql,
+    newest first, in batches of batch_size committed separately.
+
+    Each batch starts below the lowest id of the previous one (keyset batching), so rows
+    already updated are never walked again. alias_filter_sql must write the column as
+    `+source_alias`: the unary plus keeps SQLite on the (source_ip, rowid) index, so each
+    batch is a range seek instead of a scan of every remaining row for that alias.
+    Returns the number of rows updated.
+    """
+    cursor = conn.cursor()
+    where_sql = f"source_ip = ? AND ({alias_filter_sql})"
+    where_params = (source_ip, *alias_filter_params)
+    upper_id: Optional[int] = None
+    total = 0
+    while True:
+        bound_sql = "" if upper_id is None else " AND id < ?"
+        bound_params: tuple = () if upper_id is None else (upper_id,)
+        cursor.execute(
+            f"""
+            SELECT MIN(id), COUNT(*) FROM (
+                SELECT id FROM logs WHERE {where_sql}{bound_sql} ORDER BY id DESC LIMIT ?
+            )
+            """,
+            (*where_params, *bound_params, batch_size),
+        )
+        low_id, count = cursor.fetchone()
+        if not count:
+            break
+        cursor.execute(
+            f"UPDATE logs SET source_alias = ? WHERE {where_sql} AND id >= ?{bound_sql}",
+            (target_alias, *where_params, low_id, *bound_params),
+        )
+        total += max(cursor.rowcount, 0)
+        conn.commit()
+        if count < batch_size:
+            break
+        upper_id = low_id
+        time.sleep(0.005)
+    return total
+
+
 def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_size: int = 1000) -> None:
     """
     Retroactively update or revert source_alias for existing logs in chunked batches.
     Prevents long table locks on large datasets while interleaving concurrent writes.
     Protects Docker logs from being clobbered by Syslog host IP alias updates.
     """
-    cursor = conn.cursor()
     if source_ip == "docker":
-        update_query = """
-            UPDATE logs SET source_alias = ?
-            WHERE source_ip = 'docker' AND (source_alias != ? OR source_alias IS NULL) AND id IN (
-                SELECT id FROM logs
-                WHERE source_ip = 'docker' AND (source_alias != ? OR source_alias IS NULL)
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        """
-        params = (target_alias, target_alias, target_alias, batch_size)
+        keyset_alias_backfill(
+            conn,
+            "docker",
+            "+source_alias != ? OR +source_alias IS NULL",
+            (target_alias,),
+            target_alias,
+            batch_size,
+        )
     else:
         docker_aliases: list[str] = []
         try:
@@ -75,27 +124,14 @@ def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_siz
 
         docker_aliases = list(set(docker_aliases) | {"docker"})
         placeholders = ",".join("?" for _ in docker_aliases)
-        update_query = f"""
-            UPDATE logs SET source_alias = ?
-            WHERE source_ip = ?
-              AND (source_alias IS NULL OR source_alias NOT IN ({placeholders}))
-              AND id IN (
-                SELECT id FROM logs
-                WHERE source_ip = ?
-                  AND (source_alias IS NULL OR (source_alias != ? AND source_alias NOT IN ({placeholders})))
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        """
-        params = (target_alias, source_ip, *docker_aliases, source_ip, target_alias, *docker_aliases, batch_size)
-
-    while True:
-        cursor.execute(update_query, params)
-        count = cursor.rowcount
-        conn.commit()
-        if count < batch_size:
-            break
-        time.sleep(0.005)
+        keyset_alias_backfill(
+            conn,
+            source_ip,
+            f"+source_alias IS NULL OR (+source_alias != ? AND +source_alias NOT IN ({placeholders}))",
+            (target_alias, *docker_aliases),
+            target_alias,
+            batch_size,
+        )
 
 
 @router.post("", response_model=HostAliasResponse)
