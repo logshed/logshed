@@ -425,3 +425,103 @@ class TestPresetEdgeCasesAndConventions:
             assert drops_dir.is_dir()
 
 
+
+
+# A sample log line per shipped preset that the preset is meant to catch (S-11)
+ALERT_PRESET_SAMPLES = {
+    "oom_killer": "Out of memory: Killed process 1234 (node) total-vm:1024kB",
+    "proxy_auth_flood": '192.168.1.1 - - [18/Sep/2026:12:00:00 +0000] "GET /admin HTTP/1.1" 401 123',
+    "ssh_bruteforce": "FAILED PASSWORD for invalid user admin from 10.0.0.5 port 22 ssh2",
+    "sudo_escalation": "alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/bin/bash",
+}
+DROP_PRESET_SAMPLES = {
+    "cron_noise": "(root) CMD (run-parts /etc/cron.hourly)",
+    "docker_healthcheck": "container 3f2a health_status: healthy",
+    "systemd_session": "pam_unix(systemd-user:session): session closed for user bob",
+}
+
+
+class TestShippedPresetsWithUserRegexEngine:
+    """Every shipped preset still validates and still matches its sample on the `regex` engine."""
+
+    def test_every_alert_preset_with_a_pattern_has_a_sample(self):
+        with_pattern = {p["id"] for p in get_alert_presets() if p.get("match_pattern")}
+        assert with_pattern == set(ALERT_PRESET_SAMPLES)
+        drop_ids = {p["id"] for p in get_drop_presets()}
+        assert drop_ids == set(DROP_PRESET_SAMPLES)
+
+    @pytest.mark.parametrize("preset_id", sorted(ALERT_PRESET_SAMPLES))
+    def test_alert_preset_validates_and_matches_sample(self, preset_id: str):
+        from app.core.regex_validator import check_regex_safety
+        from app.services.alert_evaluator import CompiledAlertRule
+
+        preset = get_alert_preset_by_id(preset_id)
+        assert check_regex_safety(preset["match_pattern"]) == (True, None)
+        rule = CompiledAlertRule(
+            id=1, name=preset["name"], rule_type=preset["rule_type"], channel_id=None,
+            filter_app=None, filter_severity=None, match_pattern=preset["match_pattern"],
+            threshold_count=1, window_seconds=60, cooldown_seconds=60, ai_enrichment=False, is_enabled=True,
+        )
+        sample = ALERT_PRESET_SAMPLES[preset_id]
+        assert rule.matches({"message": sample, "raw": sample}) is True
+        assert rule.matches({"message": "routine heartbeat ok", "raw": "routine heartbeat ok"}) is False
+
+    @pytest.mark.parametrize("preset_id", sorted(DROP_PRESET_SAMPLES))
+    def test_drop_preset_validates_and_matches_sample(self, preset_id: str, tmp_path: Path):
+        from app.core.migrations import get_connection
+        from app.core.regex_validator import check_regex_safety
+        from app.services.drop_filter import DropFilter
+
+        preset = get_drop_preset_by_id(preset_id)
+        if preset.get("is_regex"):
+            assert check_regex_safety(preset["message_pattern"]) == (True, None)
+        db_file = tmp_path / "preset_drop.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            "INSERT INTO drop_rules (name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
+            "VALUES (?, NULL, NULL, ?, ?, 1, 0, datetime('now'))",
+            (preset["name"], preset["message_pattern"], 1 if preset.get("is_regex") else 0),
+        )
+        conn.commit()
+        conn.close()
+        flt = DropFilter(db_file)
+        assert len(flt._rules) == 1, "preset must compile on the drop rule engine"
+        assert flt.should_drop(None, None, None, DROP_PRESET_SAMPLES[preset_id]) is not None
+        assert flt.should_drop(None, None, None, "routine heartbeat ok") is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("preset_id", sorted(ALERT_PRESET_SAMPLES) + ["log_storm_detection"])
+    async def test_every_alert_preset_installs(self, client: AsyncClient, auth_headers: dict, preset_id: str):
+        res = await client.post(f"/api/alerts/presets/{preset_id}/install", headers=auth_headers)
+        assert res.status_code == 201
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("preset_id", sorted(DROP_PRESET_SAMPLES))
+    async def test_every_drop_preset_installs(self, client: AsyncClient, auth_headers: dict, preset_id: str):
+        res = await client.post(f"/api/drop-rules/presets/{preset_id}/install", headers=auth_headers)
+        assert res.status_code == 201
+
+    @pytest.mark.asyncio
+    async def test_custom_alert_preset_with_dangerous_pattern_is_refused(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        user_dir = tmp_path / "presets" / "alerts"
+        user_dir.mkdir(parents=True, exist_ok=True)
+        (user_dir / "alert_custom_bad.json").write_text(
+            json.dumps({
+                "id": "custom_bad",
+                "name": "Custom Bad",
+                "description": "Overlapping alternation",
+                "rule_type": "pattern",
+                "match_pattern": r"(\w|\d)+$",
+                "threshold_count": 1,
+                "window_seconds": 60,
+                "cooldown_seconds": 300,
+                "ai_enrichment": False,
+            }),
+            encoding="utf-8",
+        )
+        res = await client.post("/api/alerts/presets/custom_bad/install", headers=auth_headers)
+        assert res.status_code == 400
+        assert "catastrophic backtracking" in res.json()["detail"].lower()

@@ -683,3 +683,52 @@ class TestAlertRuleRegressions:
         monkeypatch.setattr(alerts_api, "run_db_query", _delete_before_update)
         res = await client.put(f"/api/alerts/rules/{rule_id}", json={"name": "Renamed"}, headers=auth_headers)
         assert res.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("pattern", [r"(a|a)+$", r"(\w|\d)+$", r"(\s|\W)+$", r"(.*a){20}", r".*.*.*.*="])
+    async def test_bypass_patterns_rejected_on_create_update_import_and_test(
+        self, client: AsyncClient, auth_headers: dict, pattern: str
+    ):
+        create_res = await client.post(
+            "/api/alerts/rules", json={"name": "Bypass", "rule_type": "pattern", "match_pattern": pattern}, headers=auth_headers
+        )
+        assert create_res.status_code == 400
+        assert "catastrophic backtracking" in create_res.json()["detail"].lower()
+
+        ok = await client.post(
+            "/api/alerts/rules", json={"name": "Fine", "rule_type": "pattern", "match_pattern": "fine"}, headers=auth_headers
+        )
+        assert ok.status_code == 201
+        update_res = await client.put(
+            f"/api/alerts/rules/{ok.json()['id']}", json={"match_pattern": pattern}, headers=auth_headers
+        )
+        assert update_res.status_code == 400
+
+        import_res = await client.post(
+            "/api/alerts/import",
+            json={"alert_rules": [{"name": "Imported Bypass", "rule_type": "pattern", "match_pattern": pattern}]},
+            headers=auth_headers,
+        )
+        assert import_res.status_code == 200
+        assert import_res.json()["imported"] == 0
+        assert "catastrophic backtracking" in import_res.json()["errors"][0].lower()
+
+        test_res = await client.post(
+            "/api/alerts/test",
+            json={"rule_type": "pattern", "match_pattern": pattern, "sample_message": "aaaa"},
+            headers=auth_headers,
+        )
+        assert test_res.status_code == 200
+        assert test_res.json()["matched"] is False
+        assert "catastrophic backtracking" in test_res.json()["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_regex_is_case_insensitive(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/test",
+            json={"rule_type": "pattern", "match_pattern": r"failed (password|publickey)", "sample_message": "FAILED PASSWORD for root"},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["matched"] is True
+        assert res.json()["error"] is None

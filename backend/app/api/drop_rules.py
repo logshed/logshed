@@ -29,7 +29,7 @@ from app.models import (
 )
 from app.services.drop_filter import CompiledDropRule, get_drop_filter
 from app.services.drop_presets import get_drop_presets, get_drop_preset_by_id
-from app.core.regex_validator import check_regex_safety, validate_regex_pattern
+from app.core.regex_validator import check_regex_safety, compile_user_pattern, validate_regex_pattern
 
 router = APIRouter(prefix="/drop-rules", tags=["Drop Rules"])
 
@@ -241,11 +241,6 @@ async def import_drop_rules(
             is_safe, err_str = check_regex_safety(msg)
             if not is_safe:
                 errors.append(f"Item #{idx + 1}: regex safety check failed: {err_str}")
-                continue
-            try:
-                re.compile(msg)
-            except re.error as e:
-                errors.append(f"Item #{idx + 1}: invalid regex pattern: {e}")
                 continue
 
         dedup_key = (
@@ -614,7 +609,7 @@ async def test_drop_rule(
         is_safe, err = check_regex_safety(msg_pat)
         if not is_safe:
             return DropRuleTestResponse(matched=False, error=err)
-        compiled_re = re.compile(msg_pat, re.IGNORECASE)
+        compiled_re = compile_user_pattern(msg_pat, re.IGNORECASE)
 
     rule = CompiledDropRule(
         id=0,

@@ -9,7 +9,6 @@ import asyncio
 import datetime
 import json
 import logging
-import re
 import sqlite3
 from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
@@ -390,11 +389,6 @@ async def import_alert_rules(
             is_safe, err_str = check_regex_safety(match_pattern)
             if not is_safe:
                 errors.append(f"Rule '{name}': regex safety check failed: {err_str}")
-                continue
-            try:
-                re.compile(match_pattern)
-            except re.error as e:
-                errors.append(f"Rule '{name}': invalid regex pattern: {e}")
                 continue
 
         threshold_count = raw_item.get("threshold_count", 1)
@@ -865,6 +859,10 @@ async def install_preset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Alert preset '{preset_id}' not found.",
         )
+
+    # Custom presets in the data directory are user-written, so they get the same checks as a new rule
+    if preset.get("match_pattern"):
+        validate_regex_pattern(preset["match_pattern"])
 
     channel_id = payload.channel_id if payload else None
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()

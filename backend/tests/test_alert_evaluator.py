@@ -753,11 +753,12 @@ class TestQueueConsumerAlertIntegration:
 
     def test_proxy_and_oom_presets_filter_false_positives(self):
         """Verify proxy 401/403 and OOM presets don't trigger on benign text containing 401/403 or generic kill."""
+        from app.core.regex_validator import compile_user_pattern
         from app.services.alert_presets import get_security_preset_by_id
         import re
 
         proxy_preset = get_security_preset_by_id("proxy_auth_flood")
-        proxy_re = re.compile(proxy_preset["match_pattern"], re.IGNORECASE)
+        proxy_re = compile_user_pattern(proxy_preset["match_pattern"], re.IGNORECASE)
 
         # Genuine proxy logs match
         assert proxy_re.search('192.168.1.1 - - [18/Sep/2026:12:00:00 +0000] "GET /admin HTTP/1.1" 401 123')
@@ -772,7 +773,7 @@ class TestQueueConsumerAlertIntegration:
         assert not proxy_re.search("Listening on port 4010")
 
         oom_preset = get_security_preset_by_id("oom_killer")
-        oom_re = re.compile(oom_preset["match_pattern"], re.IGNORECASE)
+        oom_re = compile_user_pattern(oom_preset["match_pattern"], re.IGNORECASE)
 
         # Genuine OOM matches
         assert oom_re.search("Out of memory: Kill process 1234 (node)")
@@ -1920,3 +1921,43 @@ class TestInvalidAlertPatternIsNotRevalidated:
         for _ in range(5):
             assert rule.matches({"message": "aaaa", "raw": "aaaa"}) is False
         assert calls["n"] == calls_after_init
+
+
+class TestAlertRuleUserRegexEngine:
+    """S-11: alert rule patterns run on the `regex` engine with a real per-match timeout."""
+
+    def _rule(self, pattern: str) -> CompiledAlertRule:
+        return CompiledAlertRule(
+            id=11, name="Probe", rule_type="pattern", channel_id=None, filter_app=None,
+            filter_severity=None, match_pattern=pattern, threshold_count=1, window_seconds=60,
+            cooldown_seconds=60, ai_enrichment=False, is_enabled=True,
+        )
+
+    def test_ordinary_and_case_insensitive_patterns_match(self):
+        rule = self._rule(r"disk (full|quota exceeded)")
+        assert rule.matches({"message": "DISK FULL on /var"}) is True
+        assert rule.matches({"message": "Disk Quota Exceeded for bob"}) is True
+        assert rule.matches({"message": "disk healthy"}) is False
+        # A match in the raw line still counts when the parsed message differs
+        assert rule.matches({"message": "short", "raw": "<3>host app: disk full"}) is True
+
+    def test_catastrophic_pattern_times_out_as_no_match(self, monkeypatch, caplog):
+        import logging
+        import time
+
+        import app.core.regex_validator as regex_validator
+
+        regex_validator.reset_user_regex_timeout_stats()
+        monkeypatch.setattr(regex_validator, "is_catastrophic_backtracking_pattern", lambda p: False)
+        rule = self._rule(r"(a|aa)+$")
+        assert rule.compiled_regex is not None
+
+        adversarial = "a" * 16383 + "!"
+        caplog.set_level(logging.WARNING, logger="app.core.regex_validator")
+        started = time.monotonic()
+        assert rule.matches({"message": adversarial, "raw": adversarial}) is False
+        assert time.monotonic() - started < 0.5
+        counts = regex_validator.get_user_regex_timeout_counts()
+        assert counts == {"alert rule 11 (Probe)": 1}
+        assert any("alert rule 11" in r.getMessage() for r in caplog.records)
+        regex_validator.reset_user_regex_timeout_stats()

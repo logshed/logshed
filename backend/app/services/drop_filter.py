@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
+import regex
+
 from app.core.config import get_db_path
 from app.core.migrations import get_connection
-from app.core.regex_validator import compile_safe_regex, safe_regex_search
+from app.core.regex_validator import compile_user_pattern, safe_regex_search, user_pattern_search
 from app.core.utils import match_wildcard
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CompiledDropRule:
-    """Compiled drop rule representation with pre-compiled regex."""
+    """Compiled drop rule representation with a pre-compiled user regex (`regex` engine)."""
     id: int
     source_pattern: Optional[str]
     app_pattern: Optional[str]
@@ -32,7 +34,7 @@ class CompiledDropRule:
     is_regex: bool
     is_enabled: bool
     severity_threshold: Optional[int] = None
-    compiled_regex: Optional[re.Pattern] = None
+    compiled_regex: Optional[regex.Pattern] = None
     display_order: int = 0
 
     def match_message(self, message: str) -> bool:
@@ -47,7 +49,9 @@ class CompiledDropRule:
         if self.is_regex:
             if self.compiled_regex is None:
                 return False
-            return safe_regex_search(self.compiled_regex, message)
+            if not message:
+                return False
+            return user_pattern_search(self.compiled_regex, message, rule_label=f"drop rule {self.id}")
         else:
             pattern = self.message_pattern.strip()
             if "*" in pattern or "?" in pattern:
@@ -103,7 +107,7 @@ def match_message(
     message: Optional[str] = None,
     pattern: Optional[str] = None,
     is_regex: bool = False,
-    compiled_regex: Optional[re.Pattern] = None,
+    compiled_regex: Optional[regex.Pattern] = None,
 ) -> bool:
     """
     Safely evaluate a message against a CompiledDropRule or pattern string.
@@ -267,7 +271,7 @@ class DropFilter:
             compiled_re = None
             if is_regex:
                 try:
-                    compiled_re = compile_safe_regex(msg_pat, re.IGNORECASE)
+                    compiled_re = compile_user_pattern(msg_pat, re.IGNORECASE)
                 except Exception as e:
                     logger.warning(f"Drop rule {rule_id} has invalid regex '{msg_pat}': {e}")
                     continue

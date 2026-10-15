@@ -1054,3 +1054,82 @@ class TestDropRuleUpdateRegressions:
             await client.put(f"/api/drop-rules/{rule_id}", json={"message_pattern": "DHCPNAK"})
 
         assert flt.get_pending_count(rule_id) == 1
+
+
+# ===================================================================
+# 6. User regex engine for drop rules (S-11)
+# ===================================================================
+
+DROP_BYPASS_PATTERNS = [r"(a|a)+$", r"(\w|\d)+$", r"(\s|\W)+$", r"(.*a){20}", r".*.*.*.*="]
+
+
+class TestDropRuleUserRegexEngine:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("pattern", DROP_BYPASS_PATTERNS)
+    async def test_bypass_patterns_rejected_on_create_update_and_import(
+        self, client: AsyncClient, auth_cookie: dict, pattern: str
+    ):
+        client.cookies = auth_cookie
+        create_res = await client.post("/api/drop-rules", json={"message_pattern": pattern, "is_regex": True})
+        assert create_res.status_code == 400
+        assert "catastrophic backtracking" in create_res.json()["detail"].lower()
+
+        ok = await client.post("/api/drop-rules", json={"message_pattern": "plain", "is_regex": True})
+        assert ok.status_code == 201
+        update_res = await client.put(f"/api/drop-rules/{ok.json()['id']}", json={"message_pattern": pattern})
+        assert update_res.status_code == 400
+
+        import_res = await client.post(
+            "/api/drop-rules/import", json={"drop_rules": [{"message_pattern": pattern, "is_regex": True}]}
+        )
+        assert import_res.status_code == 200
+        assert import_res.json()["imported"] == 0
+        assert "catastrophic backtracking" in import_res.json()["errors"][0].lower()
+
+        test_res = await client.post(
+            "/api/drop-rules/test",
+            json={"message_pattern": pattern, "is_regex": True, "sample_message": "aaaa"},
+        )
+        assert test_res.status_code == 200
+        assert test_res.json()["matched"] is False
+        assert "catastrophic backtracking" in test_res.json()["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_regex_is_case_insensitive(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await client.post(
+            "/api/drop-rules/test",
+            json={"message_pattern": r"health(check|_status)", "is_regex": True, "sample_message": "HEALTHCHECK ok"},
+        )
+        assert res.status_code == 200
+        assert res.json() == {"matched": True, "error": None}
+
+    def test_catastrophic_stored_rule_times_out_as_no_match(self, tmp_path: Path, monkeypatch, caplog):
+        import logging
+        import time
+
+        import app.core.regex_validator as regex_validator
+
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        conn.execute(
+            "INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
+            "VALUES (NULL, NULL, '(a|aa)+$', 1, 1, 0, datetime('now'))"
+        )
+        conn.commit()
+        conn.close()
+
+        regex_validator.reset_user_regex_timeout_stats()
+        monkeypatch.setattr(regex_validator, "is_catastrophic_backtracking_pattern", lambda p: False)
+        flt = DropFilter(db_file)
+        assert len(flt._rules) == 1
+        rule_id = flt._rules[0].id
+
+        caplog.set_level(logging.WARNING, logger="app.core.regex_validator")
+        started = time.monotonic()
+        assert flt.should_drop(None, None, None, "a" * 16383 + "!") is None
+        assert time.monotonic() - started < 0.5
+        assert regex_validator.get_user_regex_timeout_counts() == {f"drop rule {rule_id}": 1}
+        assert any(f"drop rule {rule_id}" in r.getMessage() for r in caplog.records)
+        regex_validator.reset_user_regex_timeout_stats()

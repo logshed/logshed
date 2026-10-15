@@ -19,9 +19,11 @@ import threading
 import time
 from typing import Any, Optional, Union
 
+import regex
+
 from app.core.pipeline import SKIP_ALERT_RULES_KEY
 from app.core.redactor import redact
-from app.core.regex_validator import validate_pattern_complexity
+from app.core.regex_validator import compile_user_pattern, user_pattern_search
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
@@ -108,7 +110,7 @@ class CompiledAlertRule:
         else:
             self._filter_apps = ()
 
-        self.compiled_regex: Optional[re.Pattern] = None
+        self.compiled_regex: Optional[regex.Pattern] = None
         self._match_pattern_lower: Optional[str] = None
         self._has_regex_metachars: bool = False
         # Set once when the pattern fails validation or compilation; such a rule never matches
@@ -119,8 +121,7 @@ class CompiledAlertRule:
             self._has_regex_metachars = any(c in _REGEX_METACHARS for c in clean_pat)
             if self._has_regex_metachars:
                 try:
-                    validate_pattern_complexity(clean_pat)
-                    self.compiled_regex = re.compile(clean_pat, re.IGNORECASE)
+                    self.compiled_regex = compile_user_pattern(clean_pat, re.IGNORECASE)
                 except Exception as exc:
                     logger.warning(
                         "Alert rule %s pattern '%s' failed regex validation: %s",
@@ -180,9 +181,13 @@ class CompiledAlertRule:
             else:
                 if self.compiled_regex is None:
                     return False
-                msg_cand = message[:16384]
-                raw_cand = raw[:16384] if raw else ""
-                if not (self.compiled_regex.search(msg_cand) or (raw_cand and self.compiled_regex.search(raw_cand))):
+                label = f"alert rule {self.id} ({self.name})"
+                if user_pattern_search(self.compiled_regex, message, rule_label=label):
+                    return True
+                # Searching identical text again cannot change the result
+                if not raw or raw == message:
+                    return False
+                if not user_pattern_search(self.compiled_regex, raw, rule_label=label):
                     return False
 
         return True
