@@ -2944,3 +2944,26 @@ class TestAiFollowUpApi:
         count = conn.execute("SELECT COUNT(*) FROM ai_conversation_messages").fetchone()[0]
         conn.close()
         assert count == 0
+
+
+# ===================================================================
+# Provider dispatch, SDK client lifecycle and stream heartbeats
+# ===================================================================
+
+_STRUCTURED_REPLY = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nR"
+
+
+
+class TestAiModelRefreshRedaction:
+
+    @pytest.mark.asyncio
+    async def test_refresh_error_redacts_credentials(self, auth_client, caplog):
+        exc = RuntimeError("Connection refused for http://admin:hunter2secret@10.0.0.5:11434/v1/models")
+        with patch("app.api.ai.fetch_available_models", new=AsyncMock(side_effect=exc)), \
+             caplog.at_level("WARNING", logger="app.api.ai"):
+            res = await auth_client.post("/api/ai/models/refresh?provider=openai_compatible")
+        assert res.status_code == 200
+        error = res.json()["error"]
+        assert error.startswith("Failed to load models from openai_compatible")
+        assert "hunter2secret" not in error
+        assert "hunter2secret" not in caplog.text

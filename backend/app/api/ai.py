@@ -308,7 +308,8 @@ async def refresh_available_models(
             error=None,
         )
     except Exception as exc:
-        logger.warning(f"Failed to fetch live models from provider '{clean_provider}': {exc}")
+        clean_err = str(redact(str(exc)[:500]))
+        logger.warning(f"Failed to fetch live models from provider '{clean_provider}': {clean_err}")
         # If we have a stale cache, return it with a non-fatal warning error
         if cached_json:
             try:
@@ -323,7 +324,7 @@ async def refresh_available_models(
                     has_api_key=True,
                     cached_at=str(cached_updated_at) if cached_updated_at else None,
                     is_live=False,
-                    error=f"Could not refresh models from {clean_provider}: {exc}. Displaying cached list.",
+                    error=f"Could not refresh models from {clean_provider}: {clean_err}. Displaying cached list.",
                 )
             except Exception:
                 pass
@@ -333,7 +334,7 @@ async def refresh_available_models(
             models=[],
             has_api_key=True,
             is_live=False,
-            error=f"Failed to load models from {clean_provider}: {exc}",
+            error=f"Failed to load models from {clean_provider}: {clean_err}",
         )
 
 
