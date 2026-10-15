@@ -2953,6 +2953,35 @@ class TestAiFollowUpApi:
 _STRUCTURED_REPLY = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nR"
 
 
+class _ConnectedRequest:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+class TestAiStreamHeartbeat:
+
+    @pytest.mark.asyncio
+    async def test_slow_worker_yields_ping_comment(self, monkeypatch):
+        from app.api import ai as ai_api
+
+        monkeypatch.setattr(ai_api, "AI_STREAM_HEARTBEAT_SECONDS", 0.01)
+        queue: asyncio.Queue = asyncio.Queue()
+        release = asyncio.Event()
+
+        async def worker():
+            await release.wait()
+            await queue.put({"stage": "complete"})
+            await queue.put(None)
+
+        frames = []
+        async for frame in ai_api._stream_worker_events(_ConnectedRequest(), queue, worker):
+            frames.append(frame)
+            if frame == ": ping\n\n":
+                release.set()
+
+        assert ": ping\n\n" in frames
+        assert frames[-1] == 'data: {"stage": "complete"}\n\n'
+
 
 class TestAiModelRefreshRedaction:
 

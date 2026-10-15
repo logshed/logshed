@@ -125,9 +125,14 @@ def _sse_response(events) -> StreamingResponse:
     )
 
 
+AI_STREAM_HEARTBEAT_SECONDS = 15.0
+
+
 async def _stream_worker_events(request: Request, queue: asyncio.Queue, worker):
     """
     Run worker() as a task and yield the events it queues as SSE frames until it queues None.
+    While the worker is quiet (a slow model call), an SSE comment ping is sent every
+    AI_STREAM_HEARTBEAT_SECONDS so reverse proxies do not close the idle connection.
     The worker is cancelled if the client disconnects.
     """
     task = asyncio.create_task(worker())
@@ -136,7 +141,11 @@ async def _stream_worker_events(request: Request, queue: asyncio.Queue, worker):
             if await request.is_disconnected():
                 task.cancel()
                 break
-            item = await queue.get()
+            try:
+                item = await asyncio.wait_for(queue.get(), AI_STREAM_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
             if item is None:
                 break
             yield f"data: {json.dumps(item)}\n\n"
