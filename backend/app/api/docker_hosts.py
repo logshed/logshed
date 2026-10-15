@@ -339,6 +339,16 @@ async def update_docker_endpoint(
                     detail="Cannot rename the primary Docker endpoint.",
                 )
             name_val = payload.name.strip()
+            if name_val != row["name"]:
+                cur.execute(
+                    "SELECT id FROM docker_endpoints WHERE name = ? AND id != ?",
+                    (name_val, endpoint_id),
+                )
+                if cur.fetchone():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"A Docker endpoint named '{name_val}' already exists.",
+                    )
 
         url_val = payload.url.strip() if payload.url is not None else row["url"]
         alias_val = payload.source_alias.strip() if payload.source_alias is not None else row["source_alias"]

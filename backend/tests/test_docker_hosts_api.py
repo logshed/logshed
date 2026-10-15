@@ -398,3 +398,20 @@ class TestDockerHostsFixes:
                 assert set(pool.get_tailers()) == {1, 2}
             finally:
                 await pool.stop()
+
+    @pytest.mark.asyncio
+    async def test_rename_to_existing_name_returns_409(self, client: AsyncClient, auth_headers: dict):
+        """B-11: renaming an endpoint onto another endpoint's name is a 409, not a 500."""
+        for name, url in (("Host A", "tcp://10.0.0.6:2375"), ("Host B", "tcp://10.0.0.7:2375")):
+            res = await client.post("/api/docker/hosts", json={"name": name, "url": url}, headers=auth_headers)
+            assert res.status_code == 200
+        hosts = (await client.get("/api/docker/hosts", headers=auth_headers)).json()
+        host_b = next(h for h in hosts if h["name"] == "Host B")
+
+        resp = await client.put(f"/api/docker/hosts/{host_b['id']}", json={"name": "Host A"}, headers=auth_headers)
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "A Docker endpoint named 'Host A' already exists."
+
+        # Keeping its own name is still fine
+        resp = await client.put(f"/api/docker/hosts/{host_b['id']}", json={"name": "Host B"}, headers=auth_headers)
+        assert resp.status_code == 200
