@@ -213,6 +213,26 @@ def is_text_generation_model(model_id: str, description: Optional[str] = None) -
     return True
 
 
+async def _close_gemini_client(client: genai.Client) -> None:
+    """Release both HTTP connection pools of a per-call google-genai client. Close failures are only logged."""
+    try:
+        await client.aio.aclose()
+    except Exception as exc:
+        logger.debug(f"Failed to close Gemini async client: {exc}")
+    try:
+        client.close()
+    except Exception as exc:
+        logger.debug(f"Failed to close Gemini client: {exc}")
+
+
+async def _close_sdk_client(client: Any) -> None:
+    """Release the HTTP connection pool of a per-call openai or anthropic async client. Close failures are only logged."""
+    try:
+        await client.close()
+    except Exception as exc:
+        logger.debug(f"Failed to close AI SDK client: {exc}")
+
+
 async def fetch_available_models(
     provider: str,
     api_key: Optional[str] = None,
@@ -230,101 +250,113 @@ async def fetch_available_models(
         if not api_key:
             return []
         client = genai.Client(api_key=api_key)
-        pager = await client.aio.models.list()
-        async for m in pager:
-            raw_name = getattr(m, "name", "") or ""
-            model_id = raw_name.replace("models/", "").replace("publishers/google/models/", "")
-            display_name = getattr(m, "display_name", None) or model_id
-            description = getattr(m, "description", None) or ""
-            actions = (
-                getattr(m, "supported_actions", None)
-                or getattr(m, "supported_generation_methods", None)
-                or []
-            )
-
-            if actions and not any("generateContent" in a or "generate_content" in a for a in actions):
-                continue
-
-            low_id = model_id.lower()
-            if "gemini" not in low_id:
-                continue
-
-            if not is_text_generation_model(model_id, description):
-                continue
-
-            supports_thinking = supports_gemini_thinking(model_id)
-            discovered_models.append({
-                "id": model_id,
-                "name": display_name,
-                "description": description,
-                "supports_thinking": supports_thinking,
-                "is_deprecated": False,
-            })
+        try:
+            pager = await client.aio.models.list()
+            async for m in pager:
+                raw_name = getattr(m, "name", "") or ""
+                model_id = raw_name.replace("models/", "").replace("publishers/google/models/", "")
+                display_name = getattr(m, "display_name", None) or model_id
+                description = getattr(m, "description", None) or ""
+                actions = (
+                    getattr(m, "supported_actions", None)
+                    or getattr(m, "supported_generation_methods", None)
+                    or []
+                )
+    
+                if actions and not any("generateContent" in a or "generate_content" in a for a in actions):
+                    continue
+    
+                low_id = model_id.lower()
+                if "gemini" not in low_id:
+                    continue
+    
+                if not is_text_generation_model(model_id, description):
+                    continue
+    
+                supports_thinking = supports_gemini_thinking(model_id)
+                discovered_models.append({
+                    "id": model_id,
+                    "name": display_name,
+                    "description": description,
+                    "supports_thinking": supports_thinking,
+                    "is_deprecated": False,
+                })
+        finally:
+            await _close_gemini_client(client)
 
     elif clean_provider == "openai":
         if not api_key:
             return []
         client = AsyncOpenAI(api_key=api_key)
-        paginator = client.models.list()
-        async for m in paginator:
-            model_id = m.id
-            low_id = model_id.lower()
-            is_chat = low_id.startswith(("gpt-", "chatgpt-", "ft:gpt-")) or bool(re.match(r"^(ft:)?o\d+", low_id))
-            if not is_chat:
-                continue
-            if not is_text_generation_model(model_id):
-                continue
-            # Filter out dated point-in-time snapshots and specialized search variants
-            # to keep the selection dropdown streamlined.
-            if re.search(r"-(?:\d{4}|\d{8}|\d{4}-\d{2}-\d{2})$", low_id):
-                continue
-            if "-search-" in low_id or low_id.endswith(("-search-preview", "-search-api")):
-                continue
-
-            supports_thinking = supports_openai_reasoning(model_id)
-            discovered_models.append({
-                "id": model_id,
-                "name": model_id,
-                "description": None,
-                "supports_thinking": supports_thinking,
-                "is_deprecated": False,
-            })
+        try:
+            paginator = client.models.list()
+            async for m in paginator:
+                model_id = m.id
+                low_id = model_id.lower()
+                is_chat = low_id.startswith(("gpt-", "chatgpt-", "ft:gpt-")) or bool(re.match(r"^(ft:)?o\d+", low_id))
+                if not is_chat:
+                    continue
+                if not is_text_generation_model(model_id):
+                    continue
+                # Filter out dated point-in-time snapshots and specialized search variants
+                # to keep the selection dropdown streamlined.
+                if re.search(r"-(?:\d{4}|\d{8}|\d{4}-\d{2}-\d{2})$", low_id):
+                    continue
+                if "-search-" in low_id or low_id.endswith(("-search-preview", "-search-api")):
+                    continue
+    
+                supports_thinking = supports_openai_reasoning(model_id)
+                discovered_models.append({
+                    "id": model_id,
+                    "name": model_id,
+                    "description": None,
+                    "supports_thinking": supports_thinking,
+                    "is_deprecated": False,
+                })
+        finally:
+            await _close_sdk_client(client)
 
     elif clean_provider == "anthropic":
         if not api_key:
             return []
         client = AsyncAnthropic(api_key=api_key)
-        pager = await client.models.list()
-        async for m in pager:
-            model_id = m.id
-            display_name = getattr(m, "display_name", None) or model_id
-            if not is_text_generation_model(model_id):
-                continue
-
-            supports_thinking = supports_claude_thinking(model_id)
-            discovered_models.append({
-                "id": model_id,
-                "name": display_name,
-                "description": None,
-                "supports_thinking": supports_thinking,
-                "is_deprecated": False,
-            })
+        try:
+            pager = await client.models.list()
+            async for m in pager:
+                model_id = m.id
+                display_name = getattr(m, "display_name", None) or model_id
+                if not is_text_generation_model(model_id):
+                    continue
+    
+                supports_thinking = supports_claude_thinking(model_id)
+                discovered_models.append({
+                    "id": model_id,
+                    "name": display_name,
+                    "description": None,
+                    "supports_thinking": supports_thinking,
+                    "is_deprecated": False,
+                })
+        finally:
+            await _close_sdk_client(client)
 
     elif clean_provider == "openai_compatible":
         client = AsyncOpenAI(api_key=api_key or "no-key", base_url=base_url or "http://localhost:11434/v1")
-        paginator = client.models.list()
-        async for m in paginator:
-            model_id = m.id
-            if not is_text_generation_model(model_id):
-                continue
-            supports_thinking = supports_openai_reasoning(model_id)
-            discovered_models.append({
-                "id": model_id,
-                "name": model_id,
-                "description": None,
-                "supports_thinking": supports_thinking,
-                "is_deprecated": False,
-            })
+        try:
+            paginator = client.models.list()
+            async for m in paginator:
+                model_id = m.id
+                if not is_text_generation_model(model_id):
+                    continue
+                supports_thinking = supports_openai_reasoning(model_id)
+                discovered_models.append({
+                    "id": model_id,
+                    "name": model_id,
+                    "description": None,
+                    "supports_thinking": supports_thinking,
+                    "is_deprecated": False,
+                })
+        finally:
+            await _close_sdk_client(client)
 
     # Sort descending by model id so newer versions appear at the top
     discovered_models.sort(key=lambda item: item["id"].lower(), reverse=True)
@@ -697,6 +729,7 @@ async def call_gemini(
 
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
 
+    client = None
     try:
         client = _gemini_client(api_key, timeout, max_retries)
 
@@ -725,6 +758,9 @@ async def call_gemini(
         raise
     except Exception as e:
         raise _gemini_error(e) from e
+    finally:
+        if client is not None:
+            await _close_gemini_client(client)
 
 
 def _openai_error(e: Exception) -> Exception:
@@ -763,6 +799,7 @@ async def call_openai(
     effective_base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
 
+    client = None
     try:
         client = AsyncOpenAI(
             api_key=api_key or "not-needed",
@@ -801,6 +838,9 @@ async def call_openai(
         raise
     except Exception as e:
         raise _openai_error(e) from e
+    finally:
+        if client is not None:
+            await _close_sdk_client(client)
 
 
 def _anthropic_request_kwargs(
@@ -902,6 +942,8 @@ async def call_anthropic(
         raise
     except Exception as e:
         raise _anthropic_error(e) from e
+    finally:
+        await _close_sdk_client(client)
 
 
 # Single-turn dispatch names used by execute_ai_analysis. Tests patch these names
@@ -1140,6 +1182,7 @@ async def dispatch_multi_turn_gemini(
     if not api_key:
         raise ValueError("Google Gemini API key is not configured in settings.")
 
+    client = None
     try:
         client = _gemini_client(api_key, timeout)
         contents = [
@@ -1182,6 +1225,9 @@ async def dispatch_multi_turn_gemini(
         raise
     except Exception as e:
         raise _gemini_error(e) from e
+    finally:
+        if client is not None:
+            await _close_gemini_client(client)
 
 
 async def dispatch_multi_turn_openai(
@@ -1200,6 +1246,7 @@ async def dispatch_multi_turn_openai(
     """
     effective_base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
 
+    client = None
     try:
         client = AsyncOpenAI(
             api_key=api_key or "not-needed",
@@ -1249,6 +1296,9 @@ async def dispatch_multi_turn_openai(
         raise
     except Exception as e:
         raise _openai_error(e) from e
+    finally:
+        if client is not None:
+            await _close_sdk_client(client)
 
 
 async def dispatch_multi_turn_anthropic(
@@ -1303,6 +1353,8 @@ async def dispatch_multi_turn_anthropic(
         raise
     except Exception as e:
         raise _anthropic_error(e) from e
+    finally:
+        await _close_sdk_client(client)
 
 
 async def execute_ai_follow_up(

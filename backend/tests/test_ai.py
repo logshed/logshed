@@ -3019,6 +3019,140 @@ class TestAiProviderDispatch:
             )
 
 
+def _gemini_client_mock(mock_genai) -> MagicMock:
+    inst = MagicMock()
+    inst.aio.aclose = AsyncMock()
+    inst.close = MagicMock()
+    mock_genai.Client.return_value = inst
+    return inst
+
+
+def _sdk_client_mock(mock_cls) -> MagicMock:
+    inst = MagicMock()
+    inst.close = AsyncMock()
+    mock_cls.return_value = inst
+    return inst
+
+
+class TestAiClientLifecycle:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fail", [False, True])
+    async def test_call_gemini_closes_client(self, fail):
+        response = MagicMock(text=_STRUCTURED_REPLY, usage_metadata=None)
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            inst = _gemini_client_mock(mock_genai)
+            inst.aio.models.generate_content = AsyncMock(
+                side_effect=RuntimeError("boom") if fail else None, return_value=response
+            )
+            if fail:
+                with pytest.raises(RuntimeError):
+                    await ai_engine.call_gemini(api_key="k", model="gemini-3.7-flash", prompt="p")
+            else:
+                await ai_engine.call_gemini(api_key="k", model="gemini-3.7-flash", prompt="p")
+        inst.aio.aclose.assert_awaited_once()
+        inst.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fail", [False, True])
+    async def test_call_openai_closes_client(self, fail):
+        response = MagicMock(usage=None)
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = _STRUCTURED_REPLY
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            inst = _sdk_client_mock(mock_cls)
+            inst.chat.completions.create = AsyncMock(
+                side_effect=RuntimeError("boom") if fail else None, return_value=response
+            )
+            if fail:
+                with pytest.raises(RuntimeError):
+                    await ai_engine.call_openai(api_key="k", model="gpt-4o", prompt="p")
+            else:
+                await ai_engine.call_openai(api_key="k", model="gpt-4o", prompt="p")
+        inst.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fail", [False, True])
+    async def test_call_anthropic_closes_client(self, fail):
+        response = MagicMock(content=[MagicMock(type="text", text=_STRUCTURED_REPLY)], usage=None)
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            inst = _sdk_client_mock(mock_cls)
+            inst.messages.create = AsyncMock(
+                side_effect=RuntimeError("boom") if fail else None, return_value=response
+            )
+            if fail:
+                with pytest.raises(RuntimeError):
+                    await ai_engine.call_anthropic(api_key="k", model="claude-3-5-haiku-20241022", prompt="p")
+            else:
+                await ai_engine.call_anthropic(api_key="k", model="claude-3-5-haiku-20241022", prompt="p")
+        inst.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_dispatchers_close_clients_on_failure(self):
+        messages = [{"role": "user", "content": "q"}]
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            gemini = _gemini_client_mock(mock_genai)
+            gemini.aio.models.generate_content_stream = AsyncMock(side_effect=RuntimeError("boom"))
+            with pytest.raises(RuntimeError):
+                await ai_engine.dispatch_multi_turn_gemini(
+                    api_key="k", model="gemini-3.7-flash", messages=messages, system_prompt="s"
+                )
+        gemini.aio.aclose.assert_awaited_once()
+        gemini.close.assert_called_once()
+
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            openai_inst = _sdk_client_mock(mock_cls)
+            openai_inst.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
+            with pytest.raises(RuntimeError):
+                await ai_engine.dispatch_multi_turn_openai(
+                    api_key="k", model="gpt-4o", messages=messages, system_prompt="s"
+                )
+        openai_inst.close.assert_awaited_once()
+
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            anthropic_inst = _sdk_client_mock(mock_cls)
+            anthropic_inst.messages.stream = MagicMock(side_effect=RuntimeError("boom"))
+            with pytest.raises(RuntimeError):
+                await ai_engine.dispatch_multi_turn_anthropic(
+                    api_key="k", model="claude-3-5-haiku-20241022", messages=messages, system_prompt="s"
+                )
+        anthropic_inst.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_fetch_available_models_closes_clients(self):
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            gemini = _gemini_client_mock(mock_genai)
+            gemini.aio.models.list = AsyncMock(return_value=_aiter([]))
+            await ai_engine.fetch_available_models("gemini", api_key="k")
+        gemini.aio.aclose.assert_awaited_once()
+        gemini.close.assert_called_once()
+
+        for provider in ("openai", "openai_compatible"):
+            with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+                openai_inst = _sdk_client_mock(mock_cls)
+                openai_inst.models.list = MagicMock(return_value=_aiter([]))
+                await ai_engine.fetch_available_models(provider, api_key="k")
+            openai_inst.close.assert_awaited_once()
+
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            anthropic_inst = _sdk_client_mock(mock_cls)
+            anthropic_inst.models.list = AsyncMock(side_effect=RuntimeError("boom"))
+            with pytest.raises(RuntimeError):
+                await ai_engine.fetch_available_models("anthropic", api_key="k")
+        anthropic_inst.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_failure_does_not_mask_result(self):
+        response = MagicMock(usage=None)
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = _STRUCTURED_REPLY
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            inst = _sdk_client_mock(mock_cls)
+            inst.chat.completions.create = AsyncMock(return_value=response)
+            inst.close = AsyncMock(side_effect=RuntimeError("close failed"))
+            text, *_ = await ai_engine.call_openai(api_key="k", model="gpt-4o", prompt="p")
+        assert text == _STRUCTURED_REPLY
+
 
 class _ConnectedRequest:
     async def is_disconnected(self) -> bool:
