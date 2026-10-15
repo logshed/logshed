@@ -907,3 +907,115 @@ class TestDropRulesIngestionPipeline:
         item = queue.get_nowait()
         assert item["message"] == "High memory consumption warning"
         assert item["severity"] == 4
+
+
+# ===================================================================
+# 5. Drop rule update and reorder regressions (B-04, B-13, B-60)
+# ===================================================================
+
+class TestDropRuleUpdateRegressions:
+
+    async def _create(self, client: AsyncClient) -> int:
+        res = await client.post(
+            "/api/drop-rules",
+            json={
+                "name": "Scoped Rule",
+                "source_pattern": "192.168.1.*",
+                "app_pattern": "dnsmasq",
+                "message_pattern": "DHCPACK",
+            },
+        )
+        assert res.status_code == 201
+        return res.json()["id"]
+
+    @pytest.mark.asyncio
+    async def test_update_with_null_source_and_app_clears_them(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        res = await client.put(
+            f"/api/drop-rules/{rule_id}",
+            json={"source_pattern": None, "app_pattern": None},
+        )
+        assert res.status_code == 200
+        assert res.json()["source_pattern"] is None
+        assert res.json()["app_pattern"] is None
+        listed = next(r for r in (await client.get("/api/drop-rules")).json() if r["id"] == rule_id)
+        assert listed["source_pattern"] is None
+        assert listed["app_pattern"] is None
+        # The in-memory filter now drops the message from any host and app
+        assert get_drop_filter().should_drop("other-host", "10.0.0.1", "nginx", "DHCPACK seen") == rule_id
+
+    @pytest.mark.asyncio
+    async def test_update_with_empty_string_clears_source_and_app(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        res = await client.put(
+            f"/api/drop-rules/{rule_id}",
+            json={"source_pattern": "", "app_pattern": "  "},
+        )
+        assert res.status_code == 200
+        assert res.json()["source_pattern"] is None
+        assert res.json()["app_pattern"] is None
+
+    @pytest.mark.asyncio
+    async def test_update_without_fields_keeps_source_app_and_name(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        res = await client.put(f"/api/drop-rules/{rule_id}", json={"is_enabled": False})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["source_pattern"] == "192.168.1.*"
+        assert data["app_pattern"] == "dnsmasq"
+        assert data["name"] == "Scoped Rule"
+
+    @pytest.mark.asyncio
+    async def test_update_with_null_name_falls_back_to_derived_name(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        res = await client.put(f"/api/drop-rules/{rule_id}", json={"name": None})
+        assert res.status_code == 200
+        assert res.json()["name"] == "dnsmasq"
+
+    @pytest.mark.asyncio
+    async def test_clearing_source_counts_as_criteria_change(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        flt = get_drop_filter()
+        assert flt.should_drop("router", "192.168.1.5", "dnsmasq", "DHCPACK") == rule_id
+        flt.flush_counts()
+        res = await client.put(f"/api/drop-rules/{rule_id}", json={"source_pattern": None})
+        assert res.status_code == 200
+        assert res.json()["dropped_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_failed_commit_keeps_in_memory_counter(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        import sqlite3
+
+        from app.api import drop_rules as drop_rules_api
+
+        client.cookies = auth_cookie
+        rule_id = await self._create(client)
+        flt = get_drop_filter()
+        assert flt.should_drop("router", "192.168.1.5", "dnsmasq", "DHCPACK") == rule_id
+        assert flt.get_pending_count(rule_id) == 1
+
+        class _FailingCommitConn:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            def commit(self):
+                raise sqlite3.OperationalError("database is locked")
+
+        real_run_db_query = drop_rules_api.run_db_query
+
+        async def _run_with_failing_commit(fn, *args, **kwargs):
+            return await real_run_db_query(lambda conn: fn(_FailingCommitConn(conn)), *args, **kwargs)
+
+        monkeypatch.setattr(drop_rules_api, "run_db_query", _run_with_failing_commit)
+        with pytest.raises(sqlite3.OperationalError):
+            await client.put(f"/api/drop-rules/{rule_id}", json={"message_pattern": "DHCPNAK"})
+
+        assert flt.get_pending_count(rule_id) == 1

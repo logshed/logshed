@@ -9,7 +9,7 @@ import asyncio
 import datetime
 import json
 import re
-from typing import Any
+from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 
 from app.api.deps import get_current_user, run_db_query
@@ -420,7 +420,18 @@ async def update_drop_rule(
     payload: DropRuleUpdate,
     user: dict = Depends(get_current_user),
 ) -> DropRuleResponse:
-    """Update criteria or status for an existing drop rule."""
+    """
+    Update criteria or status for an existing drop rule.
+
+    A field that is present in the payload as null or an empty string clears the stored
+    value; a field that is absent keeps it.
+    """
+    fields = payload.model_fields_set
+
+    def _clean(value: Optional[str]) -> Optional[str]:
+        stripped = value.strip() if value is not None else ""
+        return stripped or None
+
     def _update(conn):
         cur = conn.cursor()
         cur.execute(
@@ -432,21 +443,11 @@ async def update_drop_rule(
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Drop rule not found.")
 
-        new_name = (
-            payload.name.strip()
-            if payload.name is not None and payload.name.strip()
-            else (existing["name"] or "Drop Rule")
-        )
-        new_source = (
-            payload.source_pattern.strip()
-            if payload.source_pattern is not None
-            else existing["source_pattern"]
-        )
-        new_app = (
-            payload.app_pattern.strip()
-            if payload.app_pattern is not None
-            else existing["app_pattern"]
-        )
+        existing_source = existing["source_pattern"] if existing["source_pattern"] else None
+        existing_app = existing["app_pattern"] if existing["app_pattern"] else None
+
+        source_normalized = _clean(payload.source_pattern) if "source_pattern" in fields else existing_source
+        app_normalized = _clean(payload.app_pattern) if "app_pattern" in fields else existing_app
         new_message = (
             payload.message_pattern
             if payload.message_pattern is not None
@@ -464,24 +465,27 @@ async def update_drop_rule(
         )
         new_severity_threshold = (
             payload.severity_threshold
-            if "severity_threshold" in payload.model_fields_set
+            if "severity_threshold" in fields
             else existing["severity_threshold"]
         )
+        if "name" in fields:
+            new_name = _clean(payload.name) or (
+                app_normalized
+                or source_normalized
+                or (f"Drop {new_message}" if new_message and new_message != "*" else "Drop Rule")
+            )
+        else:
+            new_name = existing["name"] or "Drop Rule"
 
         if new_is_regex and new_message != "*":
             validate_regex_pattern(new_message)
 
-        source_normalized = new_source if new_source else None
-        app_normalized = new_app if new_app else None
-        existing_source = existing["source_pattern"] if existing["source_pattern"] else None
-        existing_app = existing["app_pattern"] if existing["app_pattern"] else None
-
         criteria_changed = (
-            (payload.source_pattern is not None and source_normalized != existing_source)
-            or (payload.app_pattern is not None and app_normalized != existing_app)
+            source_normalized != existing_source
+            or app_normalized != existing_app
             or (payload.message_pattern is not None and new_message != existing["message_pattern"])
             or (payload.is_regex is not None and new_is_regex != bool(existing["is_regex"]))
-            or ("severity_threshold" in payload.model_fields_set and new_severity_threshold != existing["severity_threshold"])
+            or ("severity_threshold" in fields and new_severity_threshold != existing["severity_threshold"])
         )
         should_reset = (payload.reset_counter is True) or criteria_changed
 
@@ -510,13 +514,12 @@ async def update_drop_rule(
         )
         if should_reset:
             cur.execute("UPDATE drop_rules SET dropped_count = 0 WHERE id = ?", (rule_id,))
-            get_drop_filter().reset_rule_count(rule_id)
             live_count = 0
         else:
             live_count = existing["dropped_count"] + get_drop_filter().get_pending_count(rule_id)
         conn.commit()
 
-        return DropRuleResponse(
+        response = DropRuleResponse(
             id=rule_id,
             name=new_name,
             source_pattern=source_normalized,
@@ -529,8 +532,12 @@ async def update_drop_rule(
             display_order=existing["display_order"] if "display_order" in existing.keys() else 0,
             created_at=str(existing["created_at"]),
         )
+        return response, should_reset
 
-    result = await run_db_query(_update)
+    result, counter_reset = await run_db_query(_update)
+    if counter_reset:
+        # Only clear the in-memory count once the stored reset has been committed
+        get_drop_filter().reset_rule_count(rule_id)
     await asyncio.to_thread(get_drop_filter().reload_rules)
     return result
 
