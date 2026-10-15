@@ -147,8 +147,9 @@ _QUANTIFIER_RE = re.compile(r"[+*?]|\{(\d*)(,?)(\d*)\}")
 # A branch made of exactly one single-character atom: escape, character class, dot or literal
 _SINGLE_ATOM_RE = re.compile(r"^(?:\\[^0-9]|\[\^?\]?(?:\\.|[^\]\\])*\]|[^\\\[\]()*+?{}|^$])$")
 _WILDCARD_RUN_RE = re.compile(r"(?:\.[*+][?+]?){3,}")
+# Non-ASCII samples: e-acute, Arabic-Indic digit three, em space, ideographic space, CJK ideograph, Cyrillic Zhe, line separator
 _OVERLAP_SAMPLE_CHARS = [chr(c) for c in range(0x250)] + [
-    "é", "٣", " ", "　", "中", "Ж", " ",
+    "\u00e9", "\u0663", "\u2003", "\u3000", "\u4e2d", "\u0416", "\u2028",
 ]
 
 
