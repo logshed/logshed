@@ -15,9 +15,11 @@ interface AiFollowUpThreadProps {
   provider?: string;
   /** Optional model override; the provider's configured model is used when omitted. */
   model?: string;
+  /** Called with true while a follow-up reply is being sent or streamed, and false once it settles. */
+  onSendingChange?: (sending: boolean) => void;
 }
 
-export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, provider, model }) => {
+export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, provider, model, onSendingChange }) => {
   const [messages, setMessages] = useState<AiConversationMessage[]>([]);
   const [maxTurns, setMaxTurns] = useState<number>(DEFAULT_MAX_TURNS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -35,6 +37,25 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef<boolean>(true);
+  const sendAbortRef = useRef<AbortController | null>(null);
+  const onSendingChangeRef = useRef(onSendingChange);
+
+  useEffect(() => {
+    onSendingChangeRef.current = onSendingChange;
+  });
+
+  useEffect(() => {
+    onSendingChangeRef.current?.(isSending);
+  }, [isSending]);
+
+  // Stop reading a reply that is still streaming when the thread is unmounted
+  useEffect(
+    () => () => {
+      sendAbortRef.current?.abort();
+      onSendingChangeRef.current?.(false);
+    },
+    []
+  );
 
   const turnCount = messages.filter((m) => m.role === 'user').length;
   const tokenTally = messages.reduce((sum, m) => sum + (m.tokens_used || 0), 0);
@@ -55,6 +76,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
   }, [auditId]);
 
   useEffect(() => {
+    sendAbortRef.current?.abort();
     setMessages([]);
     setDraft('');
     setSendError(null);
@@ -89,8 +111,14 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
     setStreamStatus(null);
     setDraft('');
 
+    sendAbortRef.current?.abort();
+    const controller = new AbortController();
+    sendAbortRef.current = controller;
+    const aborted = () => controller.signal.aborted;
+
     try {
       const res = await sendAiFollowUp(auditId, { message: question, provider, model }, (evt) => {
+        if (aborted()) return;
         if (evt.stage === 'delta' && evt.content) {
           setStreamText((prev) => prev + evt.content);
         } else if (evt.stage === 'calling') {
@@ -103,10 +131,12 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
           setStreamText('');
           setStreamStatus(`${evt.failed_model} failed. Failing over to ${evt.next_model}...`);
         }
-      });
+      }, { signal: controller.signal });
+      if (aborted()) return;
 
       try {
         const history = await fetchConversationMessages(auditId);
+        if (aborted()) return;
         setMessages(history.messages);
         setMaxTurns(history.max_turns);
       } catch {
@@ -126,9 +156,11 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
         setMaxTurns(res.max_turns);
       }
     } catch (err: any) {
+      if (aborted()) return;
       setSendError(err.message || 'AI follow-up request failed.');
       setDraft(question);
     } finally {
+      if (sendAbortRef.current === controller) sendAbortRef.current = null;
       setIsSending(false);
       setPendingQuestion(null);
       setStreamText('');

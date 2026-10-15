@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AiAnalysisModal } from '../components/ai/AiAnalysisModal.tsx';
 import { LogEntry } from '../types.ts';
@@ -90,7 +90,8 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
 
     await waitFor(() => {
       expect(aiApi.previewAiPrompt).toHaveBeenCalledWith(
-        expect.objectContaining({ log_ids: [1, 2] })
+        expect.objectContaining({ log_ids: [1, 2] }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
 
@@ -215,7 +216,9 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
         expect.objectContaining({
           log_ids: [1, 2],
           prompt_override: 'Pruned prompt by operator for faster diagnosis.',
-        })
+        }),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
   });
@@ -316,7 +319,9 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
           log_ids: [1, 2],
           prompt_override: 'Custom user logs payload.',
           system_prompt_override: 'Custom operator persona for network triage.',
-        })
+        }),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
   });
@@ -573,7 +578,9 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       expect(aiApi.diagnoseLogs).toHaveBeenCalledWith(
         expect.objectContaining({
           fallback_models: ['custom-fallback-model'],
-        })
+        }),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
   });
@@ -849,7 +856,110 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       expect(aiApi.getAiModels).toHaveBeenCalledWith('anthropic');
     });
   });
+
+  describe('stale runs and follow-up streaming', () => {
+    const otherLogs: LogEntry[] = [{ ...sampleLogs[0], id: 3, message: 'other log line' }];
+
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    };
+
+    it('aborts the diagnosis on close and ignores its late result after reopening for other logs', async () => {
+      const pending = deferred<any>();
+      let signal: AbortSignal | undefined;
+      vi.spyOn(aiApi, 'diagnoseLogs').mockImplementation((_req, _onEvent, options) => {
+        signal = options?.signal;
+        return pending.promise;
+      });
+
+      const { rerender } = render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+      await waitFor(() => expect(aiApi.diagnoseLogs).toHaveBeenCalledTimes(1));
+
+      rerender(<AiAnalysisModal isOpen={false} onClose={vi.fn()} selectedLogs={[]} />);
+      expect(signal?.aborted).toBe(true);
+
+      rerender(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={otherLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+
+      await act(async () => {
+        pending.resolve({
+          summary: 'Stale summary.',
+          root_cause: 'Stale cause.',
+          remediation: 'Stale remediation.',
+          model_used: 'gemini-3.7-flash',
+          tokens_used: 10,
+          audit_id: 99,
+        });
+      });
+
+      expect(screen.queryByText('Stale remediation.')).not.toBeInTheDocument();
+      const runBtn = screen.getByRole('button', { name: /Run AI Analysis/i });
+      expect(runBtn).not.toBeDisabled();
+    });
+
+    it('ignores a late preview from a closed run', async () => {
+      const firstPreview = deferred<any>();
+      let firstSignal: AbortSignal | undefined;
+      vi.spyOn(aiApi, 'previewAiPrompt')
+        .mockImplementationOnce((_req, options) => {
+          firstSignal = options?.signal;
+          return firstPreview.promise;
+        })
+        .mockResolvedValueOnce({ ...samplePreview, app_name: 'fresh-app' });
+
+      const { rerender } = render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await waitFor(() => expect(aiApi.previewAiPrompt).toHaveBeenCalledTimes(1));
+
+      rerender(<AiAnalysisModal isOpen={false} onClose={vi.fn()} selectedLogs={[]} />);
+      expect(firstSignal?.aborted).toBe(true);
+      rerender(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={otherLogs} />);
+      expect(await screen.findByText(/fresh-app/)).toBeInTheDocument();
+
+      await act(async () => {
+        firstPreview.resolve({ ...samplePreview, app_name: 'stale-app' });
+      });
+
+      expect(screen.queryByText(/stale-app/)).not.toBeInTheDocument();
+      expect(screen.getByText(/fresh-app/)).toBeInTheDocument();
+    });
+
+    it('disables Back to Preview while a follow-up reply is streaming and aborts it on close', async () => {
+      const reply = deferred<any>();
+      let followUpSignal: AbortSignal | undefined;
+      vi.spyOn(aiApi, 'sendAiFollowUp').mockImplementation((_id, _req, _onEvent, options) => {
+        followUpSignal = options?.signal;
+        return reply.promise;
+      });
+
+      const { rerender } = render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+
+      const input = await screen.findByLabelText('Follow-up question');
+      const backBtn = screen.getByRole('button', { name: /Back to Preview/i });
+      expect(backBtn).not.toBeDisabled();
+
+      fireEvent.change(input, { target: { value: 'Which port?' } });
+      fireEvent.click(screen.getByTitle('Send (Ctrl+Enter or Cmd+Enter)'));
+
+      await waitFor(() => expect(screen.getByRole('button', { name: /Back to Preview/i })).toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: /Back to Preview/i }));
+      expect(screen.getByText('Which port?')).toBeInTheDocument();
+
+      rerender(<AiAnalysisModal isOpen={false} onClose={vi.fn()} selectedLogs={[]} />);
+      expect(followUpSignal?.aborted).toBe(true);
+
+      rerender(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+      await screen.findByLabelText('Follow-up question');
+      expect(screen.getByRole('button', { name: /Back to Preview/i })).not.toBeDisabled();
+    });
+  });
 });
-
-
-

@@ -59,6 +59,10 @@ export async function toApiError(response: Response, endpoint: string): Promise<
   return new ApiError(response.status, errorMsg, errorData);
 }
 
+/**
+ * Fetch a JSON API endpoint with the session cookie and CSRF header.
+ * `options.signal` (optional) is passed through to fetch so callers can abort the request.
+ */
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
 

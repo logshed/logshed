@@ -88,7 +88,8 @@ describe('AiFollowUpThread', () => {
     expect(sendSpy).toHaveBeenCalledWith(
       7,
       { message: 'How do I test DNS?', provider: 'gemini', model: 'gemini-3.7-flash' },
-      expect.any(Function)
+      expect.any(Function),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
     expect(screen.getByText('How do I test DNS?')).toBeInTheDocument();
     expect(screen.getByText('Waiting for reply...')).toBeInTheDocument();
@@ -144,6 +145,43 @@ describe('AiFollowUpThread', () => {
 
     expect(await screen.findByText(/Rate limit exceeded/)).toBeInTheDocument();
     expect((screen.getByLabelText('Follow-up question') as HTMLTextAreaElement).value).toBe('Why port 53?');
+  });
+
+  it('reports sending state and aborts a streaming reply when unmounted', async () => {
+    vi.spyOn(aiApi, 'fetchConversationMessages').mockResolvedValue({ audit_id: 7, messages: [], turn_count: 0, max_turns: 10 });
+    let signal: AbortSignal | undefined;
+    vi.spyOn(aiApi, 'sendAiFollowUp').mockImplementation((_id, _req, _onEvent, options) => {
+      signal = options?.signal;
+      return new Promise(() => {});
+    });
+    const onSendingChange = vi.fn();
+
+    const { unmount } = render(<AiFollowUpThread auditId={7} onSendingChange={onSendingChange} />);
+    const input = await screen.findByLabelText('Follow-up question');
+    fireEvent.change(input, { target: { value: 'q' } });
+    fireEvent.click(screen.getByTitle('Send (Ctrl+Enter or Cmd+Enter)'));
+
+    await waitFor(() => expect(onSendingChange).toHaveBeenLastCalledWith(true));
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(onSendingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('reports sending as finished once the reply settles', async () => {
+    vi.spyOn(aiApi, 'fetchConversationMessages').mockResolvedValue({ audit_id: 7, messages: [], turn_count: 0, max_turns: 10 });
+    vi.spyOn(aiApi, 'sendAiFollowUp').mockRejectedValue(new Error('Request timed out'));
+    const onSendingChange = vi.fn();
+
+    render(<AiFollowUpThread auditId={7} onSendingChange={onSendingChange} />);
+    const input = await screen.findByLabelText('Follow-up question');
+    fireEvent.change(input, { target: { value: 'q' } });
+    fireEvent.click(screen.getByTitle('Send (Ctrl+Enter or Cmd+Enter)'));
+
+    expect(await screen.findByText('Request timed out')).toBeInTheDocument();
+    expect(onSendingChange).toHaveBeenCalledWith(true);
+    expect(onSendingChange).toHaveBeenLastCalledWith(false);
   });
 
   it('does not send on plain Enter or with an empty question', async () => {

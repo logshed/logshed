@@ -21,7 +21,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
-import { previewAiPrompt, diagnoseLogs, getAiModels } from '../../api/ai.ts';
+import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
@@ -102,9 +102,28 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   });
   const [analysisResult, setAnalysisResult] = useState<AiDiagnosisResponse | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isFollowUpSending, setIsFollowUpSending] = useState<boolean>(false);
 
   const { copied: copiedPrompt, copy: copyPrompt } = useClipboard();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Each preview and diagnosis run gets an id and an AbortController, so a run that finishes
+  // after the modal was closed (or reopened for other logs) is cancelled and its result ignored.
+  const previewRunRef = useRef<number>(0);
+  const previewAbortRef = useRef<AbortController | null>(null);
+  const diagnoseRunRef = useRef<number>(0);
+  const diagnoseAbortRef = useRef<AbortController | null>(null);
+
+  const cancelInFlightRuns = () => {
+    previewRunRef.current += 1;
+    diagnoseRunRef.current += 1;
+    previewAbortRef.current?.abort();
+    diagnoseAbortRef.current?.abort();
+    previewAbortRef.current = null;
+    diagnoseAbortRef.current = null;
+  };
+
+  useEffect(() => cancelInFlightRuns, []);
 
   const buildCombinedPrompt = (basePrompt: string, ctx: string) => {
     if (!ctx.trim()) return basePrompt;
@@ -153,9 +172,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const isAiUnavailable = Boolean(isAiDisabled || isAiMissingKey);
 
   useEffect(() => {
+    cancelInFlightRuns();
+    setIsDiagnosing(false);
     if (isOpen && selectedLogs.length > 0) {
       loadPreview();
     } else {
+      setIsLoadingPreview(false);
+      setIsFollowUpSending(false);
       setPreview(null);
       setAnalysisResult(null);
       setPreviewError(null);
@@ -219,6 +242,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       return;
     }
 
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+    const runId = ++previewRunRef.current;
+    const isStale = () => runId !== previewRunRef.current;
+
     try {
       setIsLoadingPreview(true);
       setPreviewError(null);
@@ -228,13 +257,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
       // Fetch preview and system settings in parallel to initialize provider configs
       const [res, settRes] = await Promise.all([
-        previewAiPrompt({
-          log_ids: validLogIds,
-          client_timezone,
-          client_utc_offset_minutes,
-        }),
+        previewAiPrompt(
+          {
+            log_ids: validLogIds,
+            client_timezone,
+            client_utc_offset_minutes,
+          },
+          { signal: controller.signal },
+        ),
         fetchSettings().catch(() => null),
       ]);
+      if (isStale()) return;
 
       setPreview(res);
       const activeP = res.provider || 'gemini';
@@ -282,9 +315,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       setFullPromptText(buildFullEnvelope(initialSys, initialUser));
       loadModels(activeP, res);
     } catch (err: any) {
+      if (isStale() || isAbortError(err)) return;
       setPreviewError(err.message || 'Failed to generate redacted AI preview.');
     } finally {
-      setIsLoadingPreview(false);
+      if (!isStale()) {
+        setIsLoadingPreview(false);
+        previewAbortRef.current = null;
+      }
     }
   };
 
@@ -445,6 +482,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       .map((m) => m.trim())
       .filter(Boolean);
 
+    diagnoseAbortRef.current?.abort();
+    const controller = new AbortController();
+    diagnoseAbortRef.current = controller;
+    const runId = ++diagnoseRunRef.current;
+    const isStale = () => runId !== diagnoseRunRef.current;
+
     try {
       setIsDiagnosing(true);
       setAnalysisError(null);
@@ -492,6 +535,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         client_timezone,
         client_utc_offset_minutes,
         onEvent: (evt) => {
+          if (isStale()) return;
           if (evt.stage === 'calling') {
             setStreamProgress((prev) => ({
               ...prev,
@@ -526,12 +570,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             }));
           }
         },
-      });
+      }, undefined, { signal: controller.signal });
+      if (isStale()) return;
       setAnalysisResult(res);
     } catch (err: any) {
+      if (isStale() || isAbortError(err)) return;
       setAnalysisError(err.message || 'AI diagnosis request failed.');
     } finally {
-      setIsDiagnosing(false);
+      if (!isStale()) {
+        setIsDiagnosing(false);
+        diagnoseAbortRef.current = null;
+      }
     }
   };
 
@@ -1262,7 +1311,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <MessageSquare className="w-3.5 h-3.5" />
                   Follow-up Discussion
                 </h4>
-                <AiFollowUpThread auditId={analysisResult.audit_id} provider={provider} model={model} />
+                <AiFollowUpThread
+                  auditId={analysisResult.audit_id}
+                  provider={provider}
+                  model={model}
+                  onSendingChange={setIsFollowUpSending}
+                />
               </div>
             )}
 
@@ -1277,8 +1331,11 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             {/* Action Buttons */}
             <div className="flex items-center justify-between pt-2">
               <button
+                type="button"
                 onClick={() => setAnalysisResult(null)}
-                className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                disabled={isFollowUpSending}
+                title={isFollowUpSending ? 'Wait for the follow-up reply to finish' : undefined}
+                className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-slate-400"
               >
                 Back to Preview & Edit
               </button>
