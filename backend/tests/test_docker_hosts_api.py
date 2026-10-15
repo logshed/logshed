@@ -415,3 +415,134 @@ class TestDockerHostsFixes:
         # Keeping its own name is still fine
         resp = await client.put(f"/api/docker/hosts/{host_b['id']}", json={"name": "Host B"}, headers=auth_headers)
         assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_update_with_empty_certs_clears_them(self, client: AsyncClient, auth_headers: dict):
+        """B-08: an empty string for ca_cert or client_cert clears the stored value; null keeps it."""
+        res = await client.post(
+            "/api/docker/hosts",
+            json={
+                "name": "TLS Local",
+                "url": "tcp://127.0.0.1:2376",
+                "tls_enabled": True,
+                "ca_cert": _PEM_CERT,
+                "client_cert": _PEM_CERT,
+            },
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        ep_id = res.json()["id"]
+
+        keep = await client.put(f"/api/docker/hosts/{ep_id}", json={"ca_cert": None}, headers=auth_headers)
+        assert keep.status_code == 200
+        assert keep.json()["ca_cert"] == _PEM_CERT
+
+        cleared = await client.put(
+            f"/api/docker/hosts/{ep_id}", json={"ca_cert": "", "client_cert": ""}, headers=auth_headers
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["ca_cert"] is None
+        assert cleared.json()["client_cert"] is None
+
+    @pytest.mark.asyncio
+    async def test_connection_test_without_stored_secrets_never_decrypts_key(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """B-08: use_stored_secrets false never loads the stored client key or certs."""
+        res = await client.post(
+            "/api/docker/hosts",
+            json={
+                "name": "TLS Host",
+                "url": "tcp://127.0.0.1:2376",
+                "tls_enabled": True,
+                "ca_cert": _PEM_CERT,
+                "client_cert": _PEM_CERT,
+                "client_key": _PEM_KEY,
+            },
+            headers=auth_headers,
+        )
+        ep_id = res.json()["id"]
+
+        with patch("app.api.docker_hosts.decrypt_value") as mock_decrypt, \
+                patch("app.api.docker_hosts.create_docker_ssl_context", side_effect=ValueError("bad pem")) as mock_ctx:
+            resp = await client.post(
+                "/api/docker/hosts/test",
+                json={
+                    "endpoint_id": ep_id,
+                    "url": "tcp://127.0.0.1:2376",
+                    "tls_enabled": True,
+                    "use_stored_secrets": False,
+                },
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        mock_decrypt.assert_not_called()
+        kwargs = mock_ctx.call_args.kwargs
+        assert kwargs["client_key"] is None
+        assert kwargs["client_cert"] is None
+        assert kwargs["ca_cert"] is None
+
+    @pytest.mark.asyncio
+    async def test_connection_test_with_stored_secrets_uses_them_for_same_url(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """The stored key is still used when the test targets the stored URL."""
+        res = await client.post(
+            "/api/docker/hosts",
+            json={
+                "name": "TLS Host",
+                "url": "tcp://127.0.0.1:2376",
+                "tls_enabled": True,
+                "ca_cert": _PEM_CERT,
+                "client_cert": _PEM_CERT,
+                "client_key": _PEM_KEY,
+            },
+            headers=auth_headers,
+        )
+        ep_id = res.json()["id"]
+
+        with patch("app.api.docker_hosts.create_docker_ssl_context", side_effect=ValueError("bad pem")) as mock_ctx:
+            resp = await client.post(
+                "/api/docker/hosts/test",
+                json={"endpoint_id": ep_id, "url": "tcp://127.0.0.1:2376", "tls_enabled": True},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        kwargs = mock_ctx.call_args.kwargs
+        assert kwargs["client_key"] == _PEM_KEY
+        assert kwargs["ca_cert"] == _PEM_CERT
+
+    @pytest.mark.asyncio
+    async def test_connection_test_to_other_url_does_not_load_stored_key(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """S-14: an endpoint_id combined with a different URL must not send the stored key elsewhere."""
+        res = await client.post(
+            "/api/docker/hosts",
+            json={
+                "name": "TLS Host",
+                "url": "tcp://127.0.0.1:2376",
+                "tls_enabled": True,
+                "ca_cert": _PEM_CERT,
+                "client_cert": _PEM_CERT,
+                "client_key": _PEM_KEY,
+            },
+            headers=auth_headers,
+        )
+        ep_id = res.json()["id"]
+
+        with patch("app.api.docker_hosts.decrypt_value") as mock_decrypt, \
+                patch("app.api.docker_hosts.create_docker_ssl_context", side_effect=ValueError("bad pem")) as mock_ctx:
+            resp = await client.post(
+                "/api/docker/hosts/test",
+                json={
+                    "endpoint_id": ep_id,
+                    "url": "tcp://127.0.0.2:2376",
+                    "tls_enabled": True,
+                    "ca_cert": _PEM_CERT,
+                },
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        mock_decrypt.assert_not_called()
+        assert mock_ctx.call_args.kwargs["client_key"] is None

@@ -199,3 +199,115 @@ describe('DockerHostsTab Component', () => {
     });
   });
 });
+
+const tlsEndpoint: DockerEndpoint = {
+  id: 3,
+  name: 'TLS Worker',
+  url: 'tcp://192.168.1.70:2376',
+  source_alias: 'tls-worker',
+  enabled: true,
+  tls_enabled: true,
+  ca_cert: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
+  client_cert: '-----BEGIN CERTIFICATE-----\nCLIENT\n-----END CERTIFICATE-----',
+  has_client_key: true,
+  exclude_containers: '',
+  created_at: '2026-10-10T12:00:00Z',
+  updated_at: '2026-10-10T12:00:00Z',
+  is_connected: true,
+  active_containers: 1,
+};
+
+const openEditFor = async (hostName: string) => {
+  await waitFor(() => {
+    expect(screen.getByText(hostName)).toBeInTheDocument();
+  });
+  const row = screen.getByText(hostName).closest('tr') as HTMLElement;
+  const editBtn = Array.from(row.querySelectorAll('button')).find(
+    (b) => b.getAttribute('title') === 'Edit Host'
+  ) as HTMLButtonElement;
+  fireEvent.click(editBtn);
+  expect(screen.getByRole('heading', { name: 'Edit Docker Host' })).toBeInTheDocument();
+};
+
+describe('DockerHostsTab TLS credential handling', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends empty strings to clear stored certificates on update', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([tlsEndpoint]);
+    const updateSpy = vi
+      .spyOn(dockerHostsApi, 'updateDockerEndpoint')
+      .mockResolvedValue({ ...tlsEndpoint, ca_cert: null, client_cert: null });
+
+    render(<DockerHostsTab />);
+    await openEditFor('TLS Worker');
+
+    fireEvent.change(screen.getByLabelText('CA Certificate'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Client Certificate'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Host' }));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        3,
+        expect.objectContaining({ ca_cert: '', client_cert: '' })
+      );
+    });
+  });
+
+  it('tells the backend not to use stored secrets when the stored key is marked for removal', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([tlsEndpoint]);
+    const testSpy = vi.spyOn(dockerHostsApi, 'testDockerEndpoint').mockResolvedValue({
+      success: false,
+      error: 'TLS error',
+    });
+
+    render(<DockerHostsTab />);
+    await openEditFor('TLS Worker');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove stored key' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Test Connection/i }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ endpoint_id: 3, client_key: null, use_stored_secrets: false })
+      );
+    });
+  });
+
+  it('tells the backend not to use stored secrets when a stored certificate was cleared', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([tlsEndpoint]);
+    const testSpy = vi.spyOn(dockerHostsApi, 'testDockerEndpoint').mockResolvedValue({
+      success: false,
+      error: 'TLS error',
+    });
+
+    render(<DockerHostsTab />);
+    await openEditFor('TLS Worker');
+
+    fireEvent.change(screen.getByLabelText('Client Certificate'), { target: { value: '' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Test Connection/i }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({ use_stored_secrets: false }));
+    });
+  });
+
+  it('keeps using stored secrets when the TLS fields are unchanged', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([tlsEndpoint]);
+    const testSpy = vi.spyOn(dockerHostsApi, 'testDockerEndpoint').mockResolvedValue({
+      success: true,
+      version: '27.3.1',
+      latency_ms: 3,
+    });
+
+    render(<DockerHostsTab />);
+    await openEditFor('TLS Worker');
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Test Connection/i }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({ use_stored_secrets: true }));
+    });
+  });
+});

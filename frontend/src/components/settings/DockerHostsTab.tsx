@@ -201,6 +201,10 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
     setModalTestResult(null);
     setModalError(null);
     try {
+      // Do not let the backend fall back to stored credentials the form is about to remove
+      const certsCleared =
+        (Boolean(editingHost?.ca_cert) && !caCert.trim()) ||
+        (Boolean(editingHost?.client_cert) && !clientCert.trim());
       const res = await testDockerEndpoint({
         endpoint_id: editingHost?.id,
         url: url.trim(),
@@ -208,6 +212,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
         ca_cert: caCert.trim() || null,
         client_cert: clientCert.trim() || null,
         client_key: clearClientKey ? null : (clientKey.trim() || null),
+        use_stored_secrets: !(clearClientKey || certsCleared),
       });
       setModalTestResult(res);
     } catch (err: any) {
@@ -238,8 +243,9 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           exclude_containers: excludeContainers.trim(),
           enabled,
           tls_enabled: tlsEnabled,
-          ca_cert: caCert.trim() || null,
-          client_cert: clientCert.trim() || null,
+          // An empty string clears a stored certificate (null would keep it)
+          ca_cert: caCert.trim(),
+          client_cert: clientCert.trim(),
         };
         if (clearClientKey) {
           updatePayload.client_key = '';

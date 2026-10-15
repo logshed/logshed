@@ -701,6 +701,8 @@ export interface DockerEndpointTestRequest {
   ca_cert?: string | null;
   client_cert?: string | null;
   client_key?: string | null;
+  /** When false, the backend never falls back to the certificates and key stored for endpoint_id. */
+  use_stored_secrets?: boolean;
 }
 
 export interface DockerEndpointTestResult {

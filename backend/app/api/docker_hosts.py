@@ -110,6 +110,8 @@ class DockerEndpointTestRequest(BaseModel):
     ca_cert: Optional[str] = None
     client_cert: Optional[str] = None
     client_key: Optional[str] = None
+    # When false, never fall back to the certificates and key stored for endpoint_id
+    use_stored_secrets: bool = True
 
     @field_validator("url")
     @classmethod
@@ -354,8 +356,9 @@ async def update_docker_endpoint(
         alias_val = payload.source_alias.strip() if payload.source_alias is not None else row["source_alias"]
         enabled_val = (1 if payload.enabled else 0) if payload.enabled is not None else row["enabled"]
         tls_val = (1 if payload.tls_enabled else 0) if payload.tls_enabled is not None else row["tls_enabled"]
-        ca_val = payload.ca_cert.strip() if payload.ca_cert is not None else row["ca_cert"]
-        cert_val = payload.client_cert.strip() if payload.client_cert is not None else row["client_cert"]
+        # None keeps the stored certificate; an empty string clears it (as for client_key)
+        ca_val = (payload.ca_cert.strip() or None) if payload.ca_cert is not None else row["ca_cert"]
+        cert_val = (payload.client_cert.strip() or None) if payload.client_cert is not None else row["client_cert"]
         excl_val = payload.exclude_containers.strip() if payload.exclude_containers is not None else row["exclude_containers"]
 
         key_val = row["client_key"]
@@ -531,27 +534,33 @@ async def test_docker_connection(
     client_cert = payload.client_cert
     client_key = payload.client_key
 
-    if payload.endpoint_id and payload.tls_enabled and not (client_key and client_key.strip()):
+    if payload.endpoint_id and payload.tls_enabled and payload.use_stored_secrets:
         def _get_stored_tls(conn: sqlite3.Connection):
             cur = conn.cursor()
             cur.execute(
-                "SELECT ca_cert, client_cert, client_key FROM docker_endpoints WHERE id = ?",
+                "SELECT url, ca_cert, client_cert, client_key FROM docker_endpoints WHERE id = ?",
                 (payload.endpoint_id,),
             )
             return cur.fetchone()
 
         db_row = await run_db_query(_get_stored_tls)
-        if db_row:
-            if not ca_cert:
+        # Stored credentials only ever go to the URL they were saved for
+        if db_row and str(db_row["url"] or "").strip() == payload.url.strip():
+            if not (ca_cert and ca_cert.strip()):
                 ca_cert = db_row["ca_cert"]
-            if not client_cert:
+            if not (client_cert and client_cert.strip()):
                 client_cert = db_row["client_cert"]
             stored_enc_key = db_row["client_key"]
-            if stored_enc_key and str(stored_enc_key).strip():
+            if not (client_key and client_key.strip()) and stored_enc_key and str(stored_enc_key).strip():
                 try:
                     client_key = decrypt_value(stored_enc_key.strip())
                 except Exception as e:
                     logger.warning("Failed to decrypt stored client key for endpoint %s: %s", payload.endpoint_id, e)
+        elif db_row:
+            logger.info(
+                "Docker connection test for endpoint %s targets a different URL; stored TLS credentials not used.",
+                payload.endpoint_id,
+            )
 
     ssl_ctx = None
     if payload.tls_enabled:
