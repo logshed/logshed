@@ -6,8 +6,10 @@ Provides setup lockout, Argon2id verification, rate-limited login, and session c
 import asyncio
 import datetime
 import ipaddress
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -32,7 +34,46 @@ from app.models import (
     SetupRequest,
 )
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
+
+DOCKER_BRIDGE_NETWORK = "172.16.0.0/12"
+_docker_proxy_warning_logged = False
+
+
+@asynccontextmanager
+async def _auth_lifespan(_app):
+    """
+    Router lifespan, merged into the app lifespan by include_router (it runs after the app
+    lifespan has started, so settings are readable). Resolves the trusted proxy settings once
+    so the trust_docker_proxies WARNING appears at startup rather than on the first login.
+    """
+    try:
+        _get_trusted_networks()
+    except Exception as exc:  # never block startup on a diagnostic
+        logger.debug("Could not check trusted proxy settings at startup: %s", exc)
+    yield
+
+
+router = APIRouter(prefix="/auth", tags=["Authentication"], lifespan=_auth_lifespan)
+
+
+def _warn_trust_docker_proxies_once() -> None:
+    """
+    Log a one-time WARNING when trust_docker_proxies is in effect. Behind the Docker userland
+    proxy or hairpin NAT, LAN clients reach LogShed from the bridge gateway, which this setting
+    trusts, so they can set X-Forwarded-For to any address and get a fresh login limiter bucket.
+    """
+    global _docker_proxy_warning_logged
+    if _docker_proxy_warning_logged:
+        return
+    _docker_proxy_warning_logged = True
+    logger.warning(
+        "trust_docker_proxies is enabled: every address in %s may set X-Forwarded-For. "
+        "If clients can reach LogShed through the Docker userland proxy or hairpin NAT, they appear "
+        "as the bridge gateway and can spoof their address to avoid per-IP login limits. "
+        "Set TRUSTED_PROXIES=<reverse proxy container IP> instead.",
+        DOCKER_BRIDGE_NETWORK,
+    )
 
 
 def _clean_ip(ip_str: str) -> str:
@@ -71,7 +112,8 @@ def _get_trusted_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Networ
     # If trusted_proxies is unset or empty, check trust_docker_proxies (and legacy aliases)
     trust_docker = bool(get_cached_setting("trust_docker_proxies", False))
     if trust_docker:
-        return [ipaddress.ip_network("172.16.0.0/12", strict=False)]
+        _warn_trust_docker_proxies_once()
+        return [ipaddress.ip_network(DOCKER_BRIDGE_NETWORK, strict=False)]
 
     return []
 

@@ -878,3 +878,81 @@ class TestLoginLimiterHardening:
         assert res.status_code == 401
         assert len(calls) == 1
         assert calls[0].startswith("logshed-argon2")
+
+
+class TestTrustDockerProxiesWarning:
+
+    def test_warning_logged_once_when_trust_docker_proxies_in_effect(self, monkeypatch, caplog):
+        import logging
+
+        import app.api.auth as auth_mod
+        from app.core.config import invalidate_settings_cache
+
+        monkeypatch.setattr(auth_mod, "_docker_proxy_warning_logged", False)
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        monkeypatch.setenv("TRUST_DOCKER_PROXIES", "true")
+        invalidate_settings_cache()
+
+        with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+            networks = auth_mod._get_trusted_networks()
+            auth_mod._get_trusted_networks()
+
+        assert [str(n) for n in networks] == ["172.16.0.0/12"]
+        warnings = [r for r in caplog.records if r.name == "app.api.auth" and r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        message = warnings[0].getMessage()
+        assert "trust_docker_proxies" in message
+        assert "TRUSTED_PROXIES=" in message
+
+    @pytest.mark.parametrize(
+        "env",
+        [
+            {"TRUST_DOCKER_PROXIES": "false"},
+            # An explicit TRUSTED_PROXIES list takes precedence, so the Docker range is not trusted
+            {"TRUST_DOCKER_PROXIES": "true", "TRUSTED_PROXIES": "10.0.0.5"},
+        ],
+    )
+    def test_no_warning_when_docker_range_not_trusted(self, monkeypatch, caplog, env):
+        import logging
+
+        import app.api.auth as auth_mod
+        from app.core.config import invalidate_settings_cache
+
+        monkeypatch.setattr(auth_mod, "_docker_proxy_warning_logged", False)
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        invalidate_settings_cache()
+
+        with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+            auth_mod._get_trusted_networks()
+
+        assert not [r for r in caplog.records if r.name == "app.api.auth"]
+
+    @pytest.mark.asyncio
+    async def test_warning_logged_at_app_startup(self, monkeypatch, caplog):
+        """The auth router lifespan is merged into the app lifespan and logs the warning on startup."""
+        import logging
+        from contextlib import asynccontextmanager
+
+        import app.api.auth as auth_mod
+        import app.main as main_mod
+        from app.core.config import invalidate_settings_cache
+
+        @asynccontextmanager
+        async def _no_workers_lifespan(_app):
+            yield
+
+        # Skip the real workers; only the merged router lifespans run
+        monkeypatch.setattr(main_mod, "lifespan", _no_workers_lifespan)
+        monkeypatch.setattr(auth_mod, "_docker_proxy_warning_logged", False)
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        monkeypatch.setenv("TRUST_DOCKER_PROXIES", "true")
+        invalidate_settings_cache()
+
+        app = create_app.uncached()
+        with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+            async with app.router.lifespan_context(app):
+                warnings = [r for r in caplog.records if r.name == "app.api.auth"]
+                assert len(warnings) == 1
+                assert "trust_docker_proxies" in warnings[0].getMessage()
