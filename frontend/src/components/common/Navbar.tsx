@@ -8,7 +8,20 @@ import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { formatMaintenanceTime } from '../../utils/formatters.ts';
-import { apiFetch } from '../../api/client.ts';
+
+export const formatInitiator = (initiatedBy: string): string => {
+  if (!initiatedBy) return '';
+  if (initiatedBy === 'web_ui' || initiatedBy.startsWith('admin: ') || initiatedBy === 'admin') {
+    return ' (Web UI)';
+  }
+  if (initiatedBy === 'mcp' || initiatedBy.startsWith('MCP') || initiatedBy.startsWith('mcp: ')) {
+    return ' (MCP)';
+  }
+  if (initiatedBy.startsWith('api_token: ')) {
+    return ` (API: ${initiatedBy.slice('api_token: '.length)})`;
+  }
+  return ` (${initiatedBy})`;
+};
 
 export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse): string => {
   const untilFormatted = formatMaintenanceTime(maintenance.until);
@@ -20,13 +33,7 @@ export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse)
 
   if (activeCount === 1) {
     const singleSession = sessions[0];
-    let initiator = singleSession?.initiated_by || '';
-    if (initiator.startsWith('api_token: ')) {
-      initiator = initiator.replace('api_token: ', '');
-    } else if (initiator.startsWith('cookie: ') || initiator.startsWith('admin: ')) {
-      initiator = 'Web UI';
-    }
-    const label = initiator ? ` (API: ${initiator})` : '';
+    const label = formatInitiator(singleSession?.initiated_by || '');
     return `Maintenance active${label} - ${actionText} until ${untilFormatted}`;
   }
 
@@ -40,15 +47,12 @@ export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse)
 interface NavbarProps {
   activeTab: AppTab;
   onTabChange: (tab: AppTab) => void;
-  onSelectTab?: (tab: string) => void;
-  isStreaming?: boolean;
   pullTouchHandlers?: PullTouchHandlers;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onTabChange,
-  onSelectTab,
   pullTouchHandlers,
 }) => {
   const { logout } = useAuth();
@@ -63,7 +67,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       const res = await fetchHealth();
       setHealth(res);
     } catch {
-      // Health fetch error handled gracefully
+      setHealth({ status: 'degraded' });
     }
   };
 
@@ -114,10 +118,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const handleClearMaintenance = async () => {
     try {
       const res = await setMaintenanceWindow(null);
-      await apiFetch('/api/v1/maintenance/disable', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      }).catch(() => {});
       setMaintenance(res);
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
     } catch {
@@ -126,9 +126,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const handleLogoClick = () => {
-    if (onSelectTab) {
-      onSelectTab('console');
-    }
     onTabChange('stream');
   };
 
@@ -163,6 +160,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Ingestion & Queue Health */}
           {health && (
             <div className="flex items-center space-x-2.5 sm:space-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-2.5 sm:pl-4">
+              {health.status !== 'ok' && (
+                <span
+                  role="img"
+                  aria-label="Health degraded"
+                  title="Health check degraded or unreachable"
+                  data-testid="health-degraded"
+                  className="inline-block w-2 h-2 rounded-full bg-amber-400"
+                />
+              )}
               <span title="Ingestion Rate" className="text-[11px] sm:text-xs">
                 <span className="hidden sm:inline">Rate:{' '}</span>
                 <span className="text-slate-200">
@@ -170,12 +176,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               </span>
               <span title="Queue Depth" className="hidden sm:inline">
-                Queue: <span className="text-slate-200">{health.queue_depth}</span>
+                Queue: <span className="text-slate-200">{health.queue_depth ?? 0}</span>
               </span>
               <span title="Dropped Logs Total" className="hidden sm:inline">
                 Dropped:{' '}
-                <span className={health.dropped_logs > 0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
-                  {health.dropped_logs}
+                <span className={(health.dropped_logs ?? 0) > 0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
+                  {health.dropped_logs ?? 0}
                 </span>
               </span>
             </div>
@@ -299,13 +305,22 @@ export const Navbar: React.FC<NavbarProps> = ({
               {getMaintenanceBannerText(maintenance)}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={handleClearMaintenance}
-            className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
-          >
-            Clear
-          </button>
+          {maintenance.on_demand_until || (maintenance.sessions?.length ?? 0) > 0 ? (
+            <button
+              type="button"
+              onClick={handleClearMaintenance}
+              className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
+            >
+              Clear
+            </button>
+          ) : (
+            <a
+              href="/rules/maintenance"
+              className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
+            >
+              Scheduled window
+            </a>
+          )}
         </div>
       )}
 

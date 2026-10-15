@@ -27,13 +27,11 @@ describe('Navbar Component', () => {
     });
 
     const onTabChange = vi.fn();
-    const onSelectTab = vi.fn();
 
     render(
       <Navbar
         activeTab="settings"
         onTabChange={onTabChange}
-        onSelectTab={onSelectTab}
       />
     );
 
@@ -45,7 +43,6 @@ describe('Navbar Component', () => {
     fireEvent.click(brandLogo);
 
     expect(onTabChange).toHaveBeenCalledWith('stream');
-    expect(onSelectTab).toHaveBeenCalledWith('console');
   });
 
   it('does not render LIVE / IDLE indicator and displays live rate when health is fetched', async () => {
@@ -88,13 +85,11 @@ describe('Navbar Component', () => {
     });
 
     const onTabChange = vi.fn();
-    const onSelectTab = vi.fn();
 
     render(
       <Navbar
         activeTab="settings"
         onTabChange={onTabChange}
-        onSelectTab={onSelectTab}
       />
     );
 
@@ -109,14 +104,11 @@ describe('Navbar Component', () => {
     // Test Enter key
     fireEvent.keyDown(brandLogo, { key: 'Enter' });
     expect(onTabChange).toHaveBeenCalledWith('stream');
-    expect(onSelectTab).toHaveBeenCalledWith('console');
 
     // Test Space key
     onTabChange.mockClear();
-    onSelectTab.mockClear();
     fireEvent.keyDown(brandLogo, { key: ' ' });
     expect(onTabChange).toHaveBeenCalledWith('stream');
-    expect(onSelectTab).toHaveBeenCalledWith('console');
   });
 
   it('renders all four navigation tabs and switches tabs on click', async () => {
@@ -274,6 +266,7 @@ describe('Navbar Component', () => {
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
       active: true,
       until: '2026-09-26T14:30:00Z',
+      on_demand_until: '2026-09-26T14:30:00Z',
     });
 
     render(
@@ -301,6 +294,7 @@ describe('Navbar Component', () => {
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
       active: true,
       until: '2026-09-26T14:30:00Z',
+      on_demand_until: '2026-09-26T14:30:00Z',
     });
     const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
       active: false,
@@ -426,3 +420,80 @@ describe('Navbar Component', () => {
 });
 
 
+
+describe('Navbar maintenance and health handling (B11)', () => {
+  const okHealth = { status: 'ok', db: 'ok', queue_depth: 0, dropped_logs: 0, ingest_rate: 0 };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows a Scheduled window link instead of Clear for schedule-only windows', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(okHealth);
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+      schedule_name: 'Nightly',
+      sessions: [],
+    });
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText(/Maintenance window active/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /Clear/i })).toBeNull();
+    expect(screen.getByRole('link', { name: /Scheduled window/i })).toHaveAttribute('href', '/rules/maintenance');
+  });
+
+  it('makes exactly one request when Clear is clicked', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(okHealth);
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+      on_demand_until: '2026-09-26T14:30:00Z',
+    });
+    const setSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    const btn = await screen.findByRole('button', { name: /Clear/i });
+    fetchSpy.mockClear();
+    fireEvent.click(btn);
+    await waitFor(() => expect(setSpy).toHaveBeenCalledTimes(1));
+    const disableCalls = fetchSpy.mock.calls.filter((c) => String(c[0]).includes('/maintenance/disable'));
+    expect(disableCalls).toHaveLength(0);
+  });
+
+  it.each([
+    ['web_ui', '(Web UI)'],
+    ['admin: ben', '(Web UI)'],
+    ['mcp', '(MCP)'],
+    ['MCP client', '(MCP)'],
+    ['api_token: Backup', '(API: Backup)'],
+  ])('maps initiated_by %s to %s in the banner', (initiatedBy, expected) => {
+    const text = getMaintenanceBannerText({
+      active: true,
+      until: '2026-09-26T14:30:00Z',
+      active_sessions_count: 1,
+      sessions: [
+        {
+          session_id: 's',
+          initiated_by: initiatedBy,
+          reason: '',
+          log_handling: 'alerts_only',
+          target_app: null,
+          target_host: null,
+          expires_at: '2026-09-26T14:30:00Z',
+        },
+      ],
+    } as any);
+    expect(text).toContain(expected);
+    expect(text).not.toContain('API: web_ui');
+    expect(text).not.toContain('API: mcp');
+  });
+
+  it('shows a degraded indicator when the health check throws', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockRejectedValue(new Error('Service Unavailable'));
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    expect(await screen.findByTestId('health-degraded')).toBeInTheDocument();
+  });
+});

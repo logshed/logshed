@@ -217,7 +217,6 @@ export const App: React.FC = () => {
       <Navbar
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        isStreaming={activeTab === 'stream'}
         pullTouchHandlers={pullTouchHandlers}
       />
 
