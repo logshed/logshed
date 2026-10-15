@@ -13,84 +13,136 @@ import {
 } from '../types.ts';
 import { isTextModel } from '../utils/aiPrompt.ts';
 
-export async function previewAiPrompt(req: AiPreviewRequest): Promise<AiPreviewResponse> {
+/** Options shared by the AI request helpers. Aborting `signal` cancels the request or stream. */
+export interface AiRequestOptions {
+  signal?: AbortSignal;
+}
+
+/** An AI stream reported an `error` event, or ended before delivering its result. */
+export class AiStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AiStreamError';
+  }
+}
+
+/** True for the rejection produced by aborting a fetch or stream read. */
+export function isAbortError(err: unknown): boolean {
+  return (err as { name?: string } | null)?.name === 'AbortError';
+}
+
+/** Parse one SSE frame into its JSON payload. Comment lines (`: ping`) and malformed frames yield null. */
+function parseSseFrame<T>(frame: string): T | null {
+  const data = frame
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(line.startsWith('data: ') ? 6 : 5))
+    .join('\n');
+  if (!data) return null;
+  try {
+    return JSON.parse(data) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Yield the JSON events of an SSE response body. The reader is cancelled once iteration stops. */
+async function* readSseEvents<T>(body: ReadableStream<Uint8Array>): AsyncGenerator<T> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+
+      for (const frame of frames) {
+        const event = parseSseFrame<T>(frame);
+        if (event) yield event;
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
+/** POST a JSON body to an SSE endpoint and return the response, rejecting with an ApiError when it is refused. */
+async function postStream(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<Response> {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) {
+    throw await toApiError(response, endpoint);
+  }
+  return response;
+}
+
+export async function previewAiPrompt(
+  req: AiPreviewRequest,
+  options: AiRequestOptions = {},
+): Promise<AiPreviewResponse> {
   return apiFetch<AiPreviewResponse>('/api/ai/preview', {
     method: 'POST',
     body: JSON.stringify(req),
+    signal: options.signal,
   });
 }
 
+/**
+ * Run an AI diagnosis. With an `onEvent` callback, progress is streamed over SSE.
+ * The analysis is never run twice: the non-streaming endpoint is used only when the stream
+ * request could not be sent at all or the browser cannot read a streamed body. A refused request
+ * rejects with an ApiError; an `error` event, or a stream that ends without a result, rejects
+ * with an AiStreamError.
+ */
 export async function diagnoseLogs(
   req: AiDiagnosisRequest,
   onEventCallback?: (event: AiDiagnosisStreamEvent) => void,
+  options: AiRequestOptions = {},
 ): Promise<AiDiagnosisResponse> {
   const { onEvent: reqOnEvent, ...payload } = req;
   const onEvent = onEventCallback || reqOnEvent;
+  const { signal } = options;
 
   if (onEvent && typeof window !== 'undefined' && typeof fetch === 'function') {
+    const streamEndpoint = '/api/ai/diagnose/stream';
+    let response: Response | null = null;
     try {
-      const response = await fetch('/api/ai/diagnose/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
+      response = await postStream(streamEndpoint, payload, signal);
+    } catch (err) {
+      if (err instanceof ApiError || isAbortError(err)) throw err;
+      // The stream request never reached a response; use the standard endpoint below
+    }
 
-      if (response.ok && response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let finalResult: AiDiagnosisResponse | null = null;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('data: ')) {
-              let data: AiDiagnosisStreamEvent | null = null;
-              try {
-                data = JSON.parse(trimmed.slice(6));
-                if (data) {
-                  onEvent(data);
-                  if (data.stage === 'complete' && data.result) {
-                    finalResult = data.result;
-                  } else if (data.stage === 'error') {
-                    throw new Error(data.message || 'AI diagnosis failed');
-                  }
-                }
-              } catch (e: any) {
-                if (e.message === 'AI diagnosis failed' || data?.stage === 'error') {
-                  throw e;
-                }
-              }
-            }
-          }
+    if (response?.body) {
+      for await (const event of readSseEvents<AiDiagnosisStreamEvent>(response.body)) {
+        onEvent(event);
+        if (event.stage === 'complete' && event.result) {
+          return event.result;
         }
-
-        if (finalResult) {
-          return finalResult;
+        if (event.stage === 'error') {
+          throw new AiStreamError(event.message || 'AI diagnosis failed.');
         }
       }
-    } catch (streamErr: any) {
-      if (streamErr instanceof ApiError || streamErr.message === 'AI diagnosis failed') {
-        throw streamErr;
-      }
-      // Fall through to standard apiFetch on stream failure
+      throw new AiStreamError('The AI diagnosis stream ended before a result was received.');
     }
   }
 
   return apiFetch<AiDiagnosisResponse>('/api/ai/diagnose', {
     method: 'POST',
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
@@ -140,70 +192,38 @@ export async function clearConversationThread(auditId: number): Promise<{ status
 /**
  * Ask a follow-up question about an AI analysis. With `onEvent`, the reply is streamed over SSE
  * (`delta` events carry text chunks); without it the synchronous endpoint is used.
- * Request errors (turn limit, rate limit, validation) reject with an ApiError.
+ * Request errors (turn limit, rate limit, validation) reject with an ApiError; an `error` event
+ * or a stream that ends without a reply rejects with an AiStreamError.
  */
 export async function sendAiFollowUp(
   auditId: number,
   req: AiFollowUpRequest,
   onEvent?: (event: AiFollowUpStreamEvent) => void,
+  options: AiRequestOptions = {},
 ): Promise<AiFollowUpResponse> {
   const endpoint = `/api/ai/audit/${auditId}/follow-up`;
   if (!onEvent) {
     return apiFetch<AiFollowUpResponse>(endpoint, {
       method: 'POST',
       body: JSON.stringify(req),
+      signal: options.signal,
     });
   }
 
-  const streamEndpoint = `${endpoint}/stream`;
-  const response = await fetch(streamEndpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'XMLHttpRequest',
-    },
-    credentials: 'include',
-    body: JSON.stringify(req),
-  });
-  if (!response.ok) {
-    throw await toApiError(response, streamEndpoint);
-  }
+  const response = await postStream(`${endpoint}/stream`, req, options.signal);
   if (!response.body) {
     throw new Error('Streaming is not supported by this browser.');
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop() || '';
-
-    for (const frame of frames) {
-      const trimmed = frame.trim();
-      if (!trimmed.startsWith('data: ')) continue;
-      let event: AiFollowUpStreamEvent;
-      try {
-        event = JSON.parse(trimmed.slice(6));
-      } catch {
-        continue;
-      }
-      onEvent(event);
-      if (event.stage === 'complete' && event.result) {
-        await reader.cancel();
-        return event.result;
-      }
-      if (event.stage === 'error') {
-        await reader.cancel();
-        throw new Error(event.message || 'AI follow-up failed.');
-      }
+  for await (const event of readSseEvents<AiFollowUpStreamEvent>(response.body)) {
+    onEvent(event);
+    if (event.stage === 'complete' && event.result) {
+      return event.result;
+    }
+    if (event.stage === 'error') {
+      throw new AiStreamError(event.message || 'AI follow-up failed.');
     }
   }
 
-  throw new Error('The AI follow-up stream ended before a reply was received.');
+  throw new AiStreamError('The AI follow-up stream ended before a reply was received.');
 }
