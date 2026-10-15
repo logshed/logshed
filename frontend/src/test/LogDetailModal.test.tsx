@@ -479,3 +479,52 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
   });
 });
 
+
+describe('LogDetailModal context handling (B-25)', () => {
+  const mk = (id: number): LogEntry => ({
+    id,
+    timestamp: '2026-08-29T14:30:00.000Z',
+    received_at: '2026-08-29T14:30:00.100Z',
+    source_ip: '10.0.0.1',
+    source_alias: 'host-a',
+    app_name: 'app',
+    facility: 1,
+    severity: 3,
+    message: `message ${id}`,
+    raw: `raw ${id}`,
+  });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows "Could not load context" when the context request fails', async () => {
+    vi.spyOn(logsApi, 'fetchLogContext').mockRejectedValue(new Error('boom'));
+    render(<LogDetailModal log={mk(1)} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+    fireEvent.click(screen.getByText(/Load Surrounding Context/i));
+    expect(await screen.findByText('Could not load context')).toBeInTheDocument();
+  });
+
+  it('ignores a slow context response for a previous log', async () => {
+    let resolveFirst: (v: any) => void = () => {};
+    const spy = vi.spyOn(logsApi, 'fetchLogContext').mockImplementation((id: number) => {
+      if (id === 1) {
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve({ target_id: 2, logs: [mk(2), { ...mk(77), message: 'context for two' }] });
+    });
+    const { rerender } = render(
+      <LogDetailModal log={mk(1)} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText(/Load Surrounding Context/i));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(1, 10, false));
+    rerender(<LogDetailModal log={mk(2)} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+    expect(await screen.findByText('context for two')).toBeInTheDocument();
+    resolveFirst({ target_id: 1, logs: [{ ...mk(55), message: 'stale context for one' }] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText('stale context for one')).toBeNull();
+    expect(screen.getByText('context for two')).toBeInTheDocument();
+  });
+});

@@ -58,6 +58,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   const { copied: copiedMsg, copy: copyMsg } = useClipboard();
   const [contextLogs, setContextLogs] = useState<LogEntry[]>([]);
   const [isLoadingContext, setIsLoadingContext] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(false);
   const [sameAppOnly, setSameAppOnly] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -89,23 +90,28 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     }
   };
 
+  const logId = log?.id;
   useEffect(() => {
-    if (isOpen && log && showContext) {
-      loadContext(log.id, sameAppOnly);
-    }
-  }, [isOpen, log, showContext, sameAppOnly]);
-
-  const loadContext = async (logId: number, sameApp: boolean = false) => {
-    try {
-      setIsLoadingContext(true);
-      const res = await fetchLogContext(logId, 10, sameApp);
-      setContextLogs(res.logs);
-    } catch (err) {
-      console.error('Failed to load log context', err);
-    } finally {
-      setIsLoadingContext(false);
-    }
-  };
+    if (!(isOpen && logId !== undefined && showContext)) return;
+    let cancelled = false;
+    setContextLogs([]);
+    setContextError(null);
+    setIsLoadingContext(true);
+    fetchLogContext(logId, 10, sameAppOnly)
+      .then((res) => {
+        if (!cancelled) setContextLogs(res.logs);
+      })
+      .catch((err) => {
+        console.error('Failed to load log context', err);
+        if (!cancelled) setContextError('Could not load context');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingContext(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, logId, showContext, sameAppOnly]);
 
   // Transfer target log plus loaded surrounding context logs strictly respecting single-host constraint
   const targetAndContextLogs = useMemo(() => {
@@ -190,7 +196,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
   const handleCopyRaw = async () => {
     if (!log) return;
-    await copyRaw(log.raw);
+    await copyRaw(log.raw ?? '');
   };
 
   const handleCopyMsg = async () => {
@@ -489,6 +495,8 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <div className="bg-dark-950 border border-dark-700 rounded-lg overflow-hidden">
               {isLoadingContext ? (
                 <div className="p-4 text-center text-slate-400 font-mono">Loading surrounding context...</div>
+              ) : contextError ? (
+                <div role="alert" className="p-4 text-center text-red-400 font-mono">{contextError}</div>
               ) : contextLogs.length === 0 ? (
                 <div className="p-4 text-center text-slate-500 font-mono">No surrounding logs found.</div>
               ) : (
