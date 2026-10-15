@@ -1865,18 +1865,21 @@ describe('LiveLogStream B11 fixes', () => {
     }
   });
 
-  it('resets the shift-click anchor after a delete (B-75)', async () => {
-    vi.spyOn(logsApi, 'deleteLogs').mockResolvedValue({ deleted: 1 } as any);
+  it('resets the shift-click anchor after deleting a log from the detail modal (B-75)', async () => {
+    vi.spyOn(logsApi, 'deleteSingleLog').mockResolvedValue(undefined as any);
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
-    let rows = document.querySelectorAll('.log-row');
-    fireEvent.click(rows[2].firstElementChild as HTMLElement);
+    // Anchor the range at row index 2 (id 103)
+    fireEvent.click(document.querySelectorAll('.log-row')[2].firstElementChild as HTMLElement);
     expect(screen.getByText('1 log selected')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Delete (1)'));
+    // Open log 101 (row 0) and delete it from the detail modal
+    fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
+    await screen.findByText(/Log Record #101/i);
+    fireEvent.click(screen.getByTitle('Delete this log record permanently'));
     fireEvent.click(screen.getByText('Confirm Delete'));
     await waitFor(() => expect(document.querySelectorAll('.log-row').length).toBe(3));
-    rows = document.querySelectorAll('.log-row');
-    fireEvent.click(rows[0].firstElementChild as HTMLElement, { shiftKey: true });
-    expect(screen.getByText('1 log selected')).toBeInTheDocument();
+    // Shift-click row 0 (id 102): with a stale anchor this would select a whole range of 3
+    fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement, { shiftKey: true });
+    expect(screen.getByText('2 logs selected')).toBeInTheDocument();
   });
 });
