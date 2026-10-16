@@ -451,13 +451,48 @@ class TestExposure:
     ):
         with get_connection(db_path) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30)
+            ms.disable_maintenance_sessions(conn, session_id=data["session_id"])
         res = await client.delete("/api/alerts/history", headers=auth_headers)
         assert res.status_code == 200
         assert _history_rows(db_path, data["session_id"]) == []
         assert _session_row(db_path, data["session_id"]) is not None
-        # Finalizing a session whose history row was cleared must not fail
+
+    def test_ending_session_without_history_row_does_not_fail(self, db_path: Path):
         with get_connection(db_path) as conn:
+            data = ms.create_maintenance_session(conn, duration_minutes=30)
+            conn.execute("DELETE FROM alert_history WHERE maintenance_session_id = ?", (data["session_id"],))
+            conn.commit()
+            ms.record_maintenance_drop(data["session_id"])
             ms.disable_maintenance_sessions(conn, session_id=data["session_id"])
+        assert _session_row(db_path, data["session_id"])["end_reason"] == "terminated"
+
+    @pytest.mark.asyncio
+    async def test_clear_history_keeps_rows_of_running_windows(
+        self, client: AsyncClient, auth_headers: dict, db_path: Path
+    ):
+        with get_connection(db_path) as conn:
+            running = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
+            ended = ms.create_maintenance_session(conn, duration_minutes=30)
+            ms.disable_maintenance_sessions(conn, session_id=ended["session_id"])
+            conn.execute(
+                "INSERT INTO alert_history (rule_name, trigger_count, triggered_at) VALUES ('Disk', 1, ?)",
+                (datetime.datetime.now(datetime.timezone.utc).isoformat(),),
+            )
+            conn.commit()
+
+        res = await client.delete("/api/alerts/history", headers=auth_headers)
+        assert res.status_code == 200
+
+        with get_connection(db_path) as conn:
+            remaining = conn.execute("SELECT maintenance_session_id FROM alert_history").fetchall()
+        assert [r["maintenance_session_id"] for r in remaining] == [running["session_id"]]
+
+        # The running window still has an audit row to update when it ends
+        for _ in range(3):
+            ms.record_maintenance_drop(running["session_id"])
+        with get_connection(db_path) as conn:
+            ms.disable_maintenance_sessions(conn, session_id=running["session_id"])
+        assert _history_rows(db_path, running["session_id"])[0]["trigger_count"] == 3
 
     @pytest.mark.asyncio
     async def test_maintenance_rows_excluded_from_alert_state(
@@ -570,8 +605,6 @@ class TestReadOnlyStatus:
         assert ms.get_pending_dropped_counts() == {}
         assert _session_row(db_path, live["session_id"])["dropped_count"] == 2
         assert _history_rows(db_path, live["session_id"])[0]["trigger_count"] == 2
-
-
 
 
 class TestShutdownFlush:

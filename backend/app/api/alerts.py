@@ -1076,10 +1076,25 @@ async def delete_alert_history_item(
 
 @router.delete("/history", response_model=MessageResponse)
 async def clear_alert_history(user: dict = Depends(get_current_user)) -> MessageResponse:
-    """Clear all historical alert firing records and AI audit logs."""
+    """
+    Clear historical alert firing records and AI audit logs.
+    Rows of maintenance windows that are still running are kept, so the window can record its
+    end and drop count when it closes.
+    """
     def _clear(conn):
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         cur = conn.cursor()
-        cur.execute("DELETE FROM alert_history")
+        cur.execute(
+            """
+            DELETE FROM alert_history
+            WHERE maintenance_session_id IS NULL
+               OR maintenance_session_id NOT IN (
+                   SELECT session_id FROM maintenance_sessions
+                   WHERE is_active = 1 AND expires_at > ?
+               )
+            """,
+            (now_iso,),
+        )
         count = cur.rowcount
         cur.execute("DELETE FROM ai_audit_log")
         conn.commit()
