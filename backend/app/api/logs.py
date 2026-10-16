@@ -532,7 +532,10 @@ async def delete_single_log(
     """
     db_path = get_db_path()
     req = LogDeleteRequest(log_ids=[id])
-    result = await execute_delete_logs_async(db_path, req)
+    try:
+        result = await execute_delete_logs_async(db_path, req)
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "deleting a log entry")
     if result["deleted_count"] == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -549,6 +552,7 @@ async def delete_logs_batch(
     """
     Delete logs matching criteria or specific IDs.
     Guards against unconstrained requests unless delete_all=True.
+    A locked database (for example during VACUUM) returns 503 so the client can retry.
     """
     db_path = get_db_path()
     try:
@@ -559,6 +563,8 @@ async def delete_logs_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "deleting logs")
 
 
 @router.post("/delete/preview", response_model=LogDeletePreviewResponse)
@@ -578,4 +584,5 @@ async def preview_delete_logs(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "counting logs to delete")

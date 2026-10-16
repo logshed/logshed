@@ -1295,3 +1295,26 @@ class TestTimeBoundsAndErrors:
         res = await client.get("/api/logs", params={"query": "boundary"})
         assert res.status_code == 503
         assert "locked" not in res.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_routes_map_lock_errors_to_503(
+        self, client: AsyncClient, auth_cookie: dict, monkeypatch
+    ):
+        from app.api import logs as logs_mod
+
+        async def _locked(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        monkeypatch.setattr(logs_mod, "execute_delete_logs_async", _locked)
+        monkeypatch.setattr(logs_mod, "count_matching_logs_async", _locked)
+
+        res_batch = await client.post("/api/logs/delete", json={"apps": ["web"]})
+        assert res_batch.status_code == 503
+        assert "busy" in res_batch.json()["detail"].lower()
+
+        res_single = await client.delete("/api/logs/1")
+        assert res_single.status_code == 503
+
+        res_preview = await client.post("/api/logs/delete/preview", json={"apps": ["web"]})
+        assert res_preview.status_code == 503
