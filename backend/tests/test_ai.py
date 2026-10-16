@@ -839,32 +839,36 @@ class TestAiPreviewAndGating:
 
     @pytest.mark.asyncio
     async def test_preview_truncates_massive_log_text(self, populated_db, auth_client):
+        # 120K characters spread over lines shorter than the redactor's per-line cap,
+        # so the prompt budget (not the redactor) does the truncation.
         conn = sqlite3.connect(populated_db)
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "2026-03-01T10:00:00Z",
-                "2026-03-01T10:00:00Z",
-                "192.168.1.1",
-                "router",
-                "dnsmasq",
-                1,
-                3,
-                "A" * 120_000,
-                "raw_big",
-            ),
-        )
-        big_log_id = cursor.lastrowid
+        big_log_ids = []
+        for _ in range(8):
+            cursor.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "2026-03-01T10:00:00Z",
+                    "2026-03-01T10:00:00Z",
+                    "192.168.1.1",
+                    "router",
+                    "dnsmasq",
+                    1,
+                    3,
+                    "A" * 15_000,
+                    "raw_big",
+                ),
+            )
+            big_log_ids.append(cursor.lastrowid)
         conn.commit()
         conn.close()
 
         res = await auth_client.post(
             "/api/ai/preview",
-            json={"log_ids": [big_log_id]},
+            json={"log_ids": big_log_ids},
         )
         assert res.status_code == 200
         data = res.json()
