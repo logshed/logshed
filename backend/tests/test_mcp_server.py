@@ -8,10 +8,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 import asyncio
+import os
+import sys
 import json
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from mcp.server.fastmcp import FastMCP
 
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps, hash_token
@@ -1339,6 +1342,98 @@ class TestMCPCli:
         with pytest.raises(SystemExit) as exc_info:
             cli_mod.run_mcp_stdio()
         assert exc_info.value.code == 1
+
+
+def _make_db_with_app(db_path: Path, app_name: str, enable_mcp_setting: bool) -> None:
+    run_migrations(db_path)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+            VALUES (?, ?, '10.0.0.9', 'other-host', ?, 1, 6, 'hello from the other database', 'raw')
+            """,
+            (now_iso, now_iso, app_name),
+        )
+        if enable_mcp_setting:
+            conn.execute(
+                "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('enable_mcp', 'true', ?, 0)",
+                (now_iso,),
+            )
+        conn.commit()
+
+
+class TestMCPStdio:
+    """B-22: the stdio transport uses --db-path and reports what a separate process cannot see."""
+
+    def test_db_path_flag_points_the_server_at_that_database(self, tmp_path: Path, monkeypatch):
+        # MCP is enabled only in the database named by --db-path, so the enable check must read it too
+        other_db = tmp_path / "other" / "logs.db"
+        other_db.parent.mkdir()
+        _make_db_with_app(other_db, "only-in-other-db", enable_mcp_setting=True)
+        _make_db_with_app(tmp_path / "logs.db", "only-in-default-db", enable_mcp_setting=False)
+        invalidate_settings_cache()
+
+        seen: dict = {}
+
+        def fake_run(self, transport="stdio", **kwargs):
+            seen["transport"] = transport
+            seen["db_path"] = os.environ.get("DB_PATH")
+            seen["services"] = asyncio.run(self._tool_manager._tools["list_services"].fn())
+
+        monkeypatch.setattr(FastMCP, "run", fake_run)
+        monkeypatch.setattr(sys, "argv", ["app.cli", "mcp", "--db-path", str(other_db)])
+        cli_mod.main()
+
+        assert seen["transport"] == "stdio"
+        assert seen["db_path"] == str(other_db)
+        assert seen["services"]["apps"] == ["only-in-other-db"]
+
+    def test_without_flag_the_configured_database_is_used(self, tmp_path: Path, monkeypatch):
+        _make_db_with_app(tmp_path / "logs.db", "only-in-default-db", enable_mcp_setting=True)
+        invalidate_settings_cache()
+        seen: dict = {}
+
+        def fake_run(self, transport="stdio", **kwargs):
+            seen["services"] = asyncio.run(self._tool_manager._tools["list_services"].fn())
+
+        monkeypatch.setattr(FastMCP, "run", fake_run)
+        monkeypatch.setattr(sys, "argv", ["app.cli", "mcp"])
+        cli_mod.main()
+        assert os.environ["DB_PATH"] == str(tmp_path / "logs.db")
+        assert seen["services"]["apps"] == ["only-in-default-db"]
+
+    @pytest.mark.asyncio
+    async def test_stdio_metrics_report_live_counters_as_unavailable(self, tmp_path: Path):
+        seed_sample_data(tmp_path / "logs.db")
+        stdio_metrics = await create_mcp_server(stdio=True)._tool_manager._tools["get_system_metrics"].fn()
+        assert stdio_metrics["live_counters_available"] is False
+        for key in ("ingest_rate", "queue_depth", "dropped_logs", "dropped_by_filter"):
+            assert stdio_metrics[key] is None, key
+        # Database-backed figures are still reported
+        assert stdio_metrics["error_count_24h"] == 2
+        assert stdio_metrics["total_logs_count"] >= 0
+
+        with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
+            http_metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
+        assert http_metrics["live_counters_available"] is True
+        assert isinstance(http_metrics["queue_depth"], int)
+        assert isinstance(http_metrics["ingest_rate"], float)
+
+    @pytest.mark.asyncio
+    async def test_stdio_maintenance_tools_note_the_sync_delay(self, tmp_path: Path):
+        tools = create_mcp_server(stdio=True)._tool_manager._tools
+        started = await tools["enable_maintenance"].fn(duration_minutes=5)
+        assert "30 seconds" in started["note"]
+        ended = await tools["disable_maintenance"].fn(session_id=started["session_id"])
+        assert "30 seconds" in ended["note"]
+
+        with mcp_access_context(McpAccess(scopes=("maintenance:write",), token_id=None, token_name="t")):
+            http_tools = create_mcp_server()._tool_manager._tools
+            started = await http_tools["enable_maintenance"].fn(duration_minutes=5)
+            assert "note" not in started
+            ended = await http_tools["disable_maintenance"].fn(session_id=started["session_id"])
+            assert "note" not in ended
 
 
 class TestMCPCsrfExemption:

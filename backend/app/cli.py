@@ -151,15 +151,28 @@ def seed_logs(
         conn.close()
 
 
-def run_mcp_stdio(db_path: str = _DEFAULT_DB_PATH) -> None:
-    """Run built-in MCP server over stdio transport."""
-    from app.core.config import get_cached_setting
+def run_mcp_stdio(db_path: str | None = None) -> None:
+    """
+    Run built-in MCP server over stdio transport.
+
+    All database access resolves its path through DB_PATH (see app.core.config.get_db_path),
+    so --db-path is applied by setting it before anything reads settings or opens the database.
+    Without the flag, DB_PATH / DATA_DIR from the environment are used, like the web process.
+    """
+    import os
+
+    from app.core.config import get_cached_setting, invalidate_settings_cache
+
+    if db_path:
+        os.environ["DB_PATH"] = db_path
+        invalidate_settings_cache()
+
     if not get_cached_setting("enable_mcp", False):
         print("Error: Model Context Protocol (MCP) is disabled in system settings.", file=sys.stderr)
         sys.exit(1)
 
     from app.mcp.server import create_mcp_server
-    server = create_mcp_server()
+    server = create_mcp_server(stdio=True)
     server.run(transport="stdio")
 
 
@@ -178,8 +191,8 @@ def main() -> None:
     )
     mcp_parser.add_argument(
         "--db-path",
-        default=_DEFAULT_DB_PATH,
-        help=f"Path to SQLite database (default: {_DEFAULT_DB_PATH})",
+        default=None,
+        help="Path to SQLite database (default: DB_PATH, or logs.db in DATA_DIR, as for the web process)",
     )
 
     # reset-admin subcommand

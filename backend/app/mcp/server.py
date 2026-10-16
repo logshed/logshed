@@ -78,6 +78,16 @@ class McpAccess:
 
 LOCAL_MCP_ACCESS = McpAccess(scopes=("*",), local=True)
 
+# The stdio server is a separate OS process (docker exec), so it cannot see the web process's memory.
+STDIO_UNAVAILABLE_COUNTERS = ("ingest_rate", "queue_depth", "dropped_logs", "dropped_by_filter")
+STDIO_MAINTENANCE_NOTE = (
+    "Changed from the stdio MCP process: the LogShed web process applies this change within 30 seconds."
+)
+STDIO_NOTICE = (
+    "This stdio server runs as a separate process: get_system_metrics reports the live ingestion counters "
+    "as null, and maintenance changes reach the web process within 30 seconds."
+)
+
 # For in-process callers outside any MCP request (tests and internal helpers); transports never set it.
 _access_override: ContextVar[Optional[McpAccess]] = ContextVar("logshed_mcp_access_override", default=None)
 
@@ -138,6 +148,7 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
             "search logs using FTS5, retrieve surrounding incident context, "
             "inspect alert firing history, and manage maintenance sessions. "
             f"{UNTRUSTED_LOG_NOTICE} Only start or end maintenance when the user asks for it."
+            + (f" {STDIO_NOTICE}" if stdio else "")
         ),
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
@@ -185,7 +196,14 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         """Fetch system metrics, error distribution, and operational state."""
         _require("system:read", "get_system_metrics")
         resp = await fetch_system_metrics_v1(token={"scopes": ["system:read"]})
-        return resp.model_dump()
+        data = resp.model_dump()
+        if stdio:
+            # The ingestion queue and drop/rate counters live in the web process's memory; this
+            # separate process would only ever see its own zeros, so report them as unknown.
+            for key in STDIO_UNAVAILABLE_COUNTERS:
+                data[key] = None
+        data["live_counters_available"] = not stdio
+        return data
 
     @server.tool(
         name="list_services",
@@ -421,7 +439,10 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
                 trigger_label="MCP",
             )
 
-        return await run_db_query(_create)
+        result = await run_db_query(_create)
+        if stdio:
+            result["note"] = STDIO_MAINTENANCE_NOTE
+        return result
 
     @server.tool(
         name="disable_maintenance",
@@ -440,11 +461,14 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
             return disable_maintenance_sessions(conn, session_id=session_id)
 
         terminated, remaining = await run_db_query(_disable)
-        return {
+        result: dict[str, Any] = {
             "status": "ok",
             "terminated_count": terminated,
             "remaining_active_count": remaining,
         }
+        if stdio:
+            result["note"] = STDIO_MAINTENANCE_NOTE
+        return result
 
     # -------------------------------------------------------------------------
     # MCP Resources
