@@ -286,7 +286,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               Rule Name <span className="text-red-400">*</span>
             </label>
             <a
-              href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#drop-rules"
+              href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#ingestion-drop-rules"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"

@@ -132,4 +132,10 @@ describe('CreateDropRuleModal Component', () => {
     expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('links the drop rules guide to the Ingestion Drop Rules anchor (B-49)', () => {
+    render(<CreateDropRuleModal isOpen={true} onClose={onClose} onSuccess={onSuccess} ruleToEdit={null} />);
+    const link = screen.getByTitle('Open Drop Rules Documentation');
+    expect(link.getAttribute('href')).toMatch(/RULES_GUIDE\.md#ingestion-drop-rules$/);
+  });
 });
