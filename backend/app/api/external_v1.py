@@ -167,6 +167,7 @@ async def disable_maintenance_window(
     """
     Stop an on-demand maintenance window.
     Terminates the specified session, or clears all active sessions if session_id is omitted.
+    An unknown or already ended session_id returns 404, like the MCP disable_maintenance tool.
     """
     session_id = payload.session_id if payload else None
 
@@ -174,6 +175,12 @@ async def disable_maintenance_window(
         return disable_maintenance_sessions(conn, session_id=session_id)
 
     terminated_count, remaining_active = await run_db_query(_disable)
+    # Raise after the query so the expired-session sweep inside disable_maintenance_sessions still commits
+    if session_id and session_id.strip() and terminated_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active maintenance session with ID {session_id.strip()}.",
+        )
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     return ExternalMaintenanceDisableResponse(

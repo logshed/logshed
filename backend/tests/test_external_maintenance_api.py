@@ -201,6 +201,39 @@ class TestExternalMaintenanceApi:
         assert res_clear_all.json()["active"] is False
 
     @pytest.mark.asyncio
+    async def test_disable_unknown_or_ended_session_returns_404(
+        self, client: AsyncClient, api_token_headers: dict
+    ):
+        keep = await client.post(
+            "/api/v1/maintenance/enable", json={"duration_minutes": 30}, headers=api_token_headers
+        )
+        ended = await client.post(
+            "/api/v1/maintenance/enable", json={"duration_minutes": 30}, headers=api_token_headers
+        )
+        ended_id = ended.json()["session_id"]
+        res = await client.post(
+            "/api/v1/maintenance/disable", json={"session_id": ended_id}, headers=api_token_headers
+        )
+        assert res.status_code == 200
+
+        # Same rule as the MCP disable_maintenance tool and the web UI route
+        for session_id in ("does-not-exist", ended_id):
+            res = await client.post(
+                "/api/v1/maintenance/disable", json={"session_id": session_id}, headers=api_token_headers
+            )
+            assert res.status_code == 404
+            assert res.json()["detail"] == f"No active maintenance session with ID {session_id}."
+
+        res_status = await client.get("/api/v1/maintenance/status", headers=api_token_headers)
+        assert [s["session_id"] for s in res_status.json()["sessions"]] == [keep.json()["session_id"]]
+
+        # Omitting session_id (or sending a blank one) still ends every session
+        for body, expected in (({"session_id": "  "}, 1), ({}, 0)):
+            res = await client.post("/api/v1/maintenance/disable", json=body, headers=api_token_headers)
+            assert res.status_code == 200
+            assert res.json()["terminated_sessions"] == expected
+
+    @pytest.mark.asyncio
     async def test_in_memory_error_drop_filter(
         self, client: AsyncClient, api_token_headers: dict, tmp_path: Path
     ):
