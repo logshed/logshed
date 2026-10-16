@@ -427,6 +427,31 @@ class TestInternalLogHandler:
 
         assert q.qsize() == 20
 
+    def test_queue_full_drop_is_counted_without_loop(self):
+        """An internal log dropped because the queue is full counts towards the dropped total."""
+        handler = InternalLogHandler(level="WARNING")
+        q = get_queue()
+        while not q.full():
+            q.put_nowait({"message": "filler"})
+        before = pipeline_mod.get_dropped_count()
+
+        handler.emit(self._make_record(level=logging.WARNING, msg="No room"))
+
+        assert pipeline_mod.get_dropped_count() == before + 1
+
+    @pytest.mark.asyncio
+    async def test_queue_full_drop_is_counted_on_event_loop(self):
+        """On the event loop thread, a queue-full drop of an internal log is counted too."""
+        handler = InternalLogHandler(level="WARNING")
+        q = get_queue()
+        while not q.full():
+            q.put_nowait({"message": "filler"})
+        before = pipeline_mod.get_dropped_count()
+
+        handler.emit(self._make_record(level=logging.ERROR, msg="No room on loop"))
+
+        assert pipeline_mod.get_dropped_count() == before + 1
+
     def test_internal_log_preserves_raw_message(self):
         """InternalLogHandler retains raw messages without redundant redaction (redaction occurs on-demand for AI prompts)."""
         q = get_queue()

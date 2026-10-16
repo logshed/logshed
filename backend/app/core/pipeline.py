@@ -186,57 +186,29 @@ class InternalLogHandler(logging.Handler):
             if self._is_alert_exempt(record.name):
                 log_entry[SKIP_ALERT_RULES_KEY] = True
 
-            from app.services.drop_filter import get_drop_filter
-            drop_filter = get_drop_filter()
-            if drop_filter.should_drop(
-                log_entry.get("source_alias"),
-                log_entry.get("source_ip"),
-                log_entry.get("app_name"),
-                log_entry.get("message", ""),
-                severity=log_entry.get("severity"),
-            ) is not None:
-                increment_dropped_by_filter_count(1)
+            if should_discard(log_entry):
                 return
 
-            from app.services.maintenance_service import record_maintenance_drop, should_drop_maintenance_error
-            maint_session_id = should_drop_maintenance_error(
-                log_entry.get("source_alias"),
-                log_entry.get("source_ip"),
-                log_entry.get("app_name"),
-                log_entry.get("severity"),
-            )
-            if maint_session_id is not None:
-                record_maintenance_drop(maint_session_id)
-                increment_dropped_by_filter_count(1)
-                return
+            # enqueue_entry counts a full queue as a drop; anything else is logged at debug level
+            # (this module's logger is in IGNORED_LOGGERS, so it cannot loop back here).
+            def _enqueue(entry: dict) -> None:
+                try:
+                    enqueue_entry(entry)
+                except Exception as e:
+                    logger.debug("Internal log entry could not be queued: %s", e)
 
             try:
-                queue = get_queue()
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
                     loop = None
 
-                if loop and loop.is_running():
-                    if threading.current_thread() is threading.main_thread():
-                        try:
-                            queue.put_nowait(log_entry)
-                        except Exception:
-                            pass
-                    else:
-                        def _threadsafe_put(q, entry):
-                            try:
-                                q.put_nowait(entry)
-                            except Exception:
-                                pass
-                        loop.call_soon_threadsafe(_threadsafe_put, queue, log_entry)
+                if loop is not None and threading.current_thread() is not threading.main_thread():
+                    loop.call_soon_threadsafe(_enqueue, log_entry)
                 else:
-                    try:
-                        queue.put_nowait(log_entry)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    _enqueue(log_entry)
+            except Exception as e:
+                logger.debug("Internal log entry could not be scheduled: %s", e)
         finally:
             self._thread_local.in_emit = False
 
@@ -276,6 +248,57 @@ def get_dropped_by_filter_count() -> int:
     """Returns the total number of logs discarded by drop rules."""
     with _dropped_by_filter_lock:
         return _dropped_by_filter_total
+
+
+def should_discard(entry: dict) -> bool:
+    """
+    Apply the drop rules, then the maintenance drop_errors sessions, to a complete log entry.
+    Returns True (and counts the drop) when the entry must not be stored.
+    """
+    from app.services.drop_filter import get_drop_filter
+    if get_drop_filter().should_drop(
+        entry.get("source_alias"),
+        entry.get("source_ip"),
+        entry.get("app_name"),
+        entry.get("message", ""),
+        severity=entry.get("severity"),
+    ) is not None:
+        increment_dropped_by_filter_count(1)
+        return True
+
+    from app.services.maintenance_service import record_maintenance_drop, should_drop_maintenance_error
+    maint_session_id = should_drop_maintenance_error(
+        entry.get("source_alias"),
+        entry.get("source_ip"),
+        entry.get("app_name"),
+        entry.get("severity"),
+    )
+    if maint_session_id is not None:
+        record_maintenance_drop(maint_session_id)
+        increment_dropped_by_filter_count(1)
+        return True
+
+    return False
+
+
+def enqueue_entry(entry: dict) -> bool:
+    """Put an entry on the shared queue without waiting. A full queue counts as a drop; returns False then."""
+    try:
+        get_queue().put_nowait(entry)
+    except asyncio.QueueFull:
+        increment_dropped_count(1)
+        return False
+    return True
+
+
+def filter_and_enqueue(entry: dict) -> bool:
+    """
+    Single path from a complete log entry to the shared queue: drop rules, maintenance
+    drop_errors, then a non-blocking enqueue. Returns True if the entry was queued.
+    """
+    if should_discard(entry):
+        return False
+    return enqueue_entry(entry)
 
 
 class IngestionRateTracker:
@@ -632,36 +655,7 @@ class KeyedMultilineAssembler:
             merged_entry['raw'] = merged_raw
             merged_entry['severity'] = min_severity
 
-        # Check drop rules before enqueuing
-        from app.services.drop_filter import get_drop_filter
-        drop_filter = get_drop_filter()
-        if drop_filter.should_drop(
-            merged_entry.get('source_alias'),
-            merged_entry.get('source_ip'),
-            merged_entry.get('app_name'),
-            merged_entry.get('message', ''),
-            severity=merged_entry.get('severity'),
-        ) is not None:
-            increment_dropped_by_filter_count(1)
-            return
-
-        from app.services.maintenance_service import record_maintenance_drop, should_drop_maintenance_error
-        maint_session_id = should_drop_maintenance_error(
-            merged_entry.get('source_alias'),
-            merged_entry.get('source_ip'),
-            merged_entry.get('app_name'),
-            merged_entry.get('severity'),
-        )
-        if maint_session_id is not None:
-            record_maintenance_drop(maint_session_id)
-            increment_dropped_by_filter_count(1)
-            return
-
-        queue = get_queue()
-        try:
-            queue.put_nowait(merged_entry)
-        except asyncio.QueueFull:
-            increment_dropped_count(1)
+        filter_and_enqueue(merged_entry)
 
     async def flush_all(self) -> None:
         """Flush all streams. Called on shutdown."""

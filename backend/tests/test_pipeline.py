@@ -361,6 +361,61 @@ class TestBoundedQueueAndDrops:
         assert get_dropped_count() == num_threads * increments_per_thread
 
 
+class _FakeDropFilter:
+    """Drops entries whose message contains the given text."""
+
+    def __init__(self, needle: str):
+        self.needle = needle
+
+    def should_drop(self, source_alias, source_ip, app_name, message, severity=None):
+        return 7 if self.needle in (message or "") else None
+
+
+class TestFilterAndEnqueue:
+    """The shared drop rule, maintenance and enqueue path used by every log source."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, monkeypatch):
+        from app.services import drop_filter as drop_filter_mod
+        from app.services import maintenance_service
+
+        monkeypatch.setattr(drop_filter_mod, "_drop_filter", _FakeDropFilter("NOISE"))
+        monkeypatch.setattr(maintenance_service, "_active_maintenance_sessions", [])
+        monkeypatch.setattr(maintenance_service, "_dropped_counters", {})
+        monkeypatch.setattr(pipeline_mod, "_dropped_by_filter_total", 0)
+
+    def test_kept_entry_is_queued(self):
+        assert pipeline_mod.filter_and_enqueue(_make_entry(message="useful")) is True
+        assert get_queue().qsize() == 1
+
+    def test_drop_rule_discards_and_counts(self):
+        assert pipeline_mod.filter_and_enqueue(_make_entry(message="NOISE here")) is False
+        assert get_queue().qsize() == 0
+        assert pipeline_mod.get_dropped_by_filter_count() == 1
+
+    def test_maintenance_drop_errors_discards_and_counts(self, monkeypatch):
+        from app.services import maintenance_service
+
+        future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
+        monkeypatch.setattr(
+            maintenance_service,
+            "_active_maintenance_sessions",
+            [{"session_id": "m1", "log_handling": "drop_errors", "expires_at": future}],
+        )
+        assert pipeline_mod.filter_and_enqueue(_make_entry(severity=3, message="boom")) is False
+        assert pipeline_mod.filter_and_enqueue(_make_entry(severity=6, message="fine")) is True
+        assert get_queue().qsize() == 1
+        assert maintenance_service.get_pending_dropped_counts() == {"m1": 1}
+        assert pipeline_mod.get_dropped_by_filter_count() == 1
+
+    def test_full_queue_counts_drop(self):
+        q = get_queue()
+        while not q.full():
+            q.put_nowait(_make_entry())
+        assert pipeline_mod.filter_and_enqueue(_make_entry(message="late")) is False
+        assert get_dropped_count() == 1
+
+
 # ===================================================================
 # 4. Ingestion Rate Tracking
 # ===================================================================
