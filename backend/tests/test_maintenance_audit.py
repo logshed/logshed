@@ -574,6 +574,32 @@ class TestReadOnlyStatus:
 
 
 
+class TestShutdownFlush:
+    """B-20: drop counts recorded since the last sweep survive a shutdown."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_flushes_pending_drop_counts(self, db_path: Path, monkeypatch):
+        import app.main as main_mod
+
+        async def _idle_sweep_worker(_db_path) -> None:
+            await asyncio.Event().wait()
+
+        # Keep the 30s sweep worker out of the way so only the shutdown sequence can flush
+        monkeypatch.setattr(main_mod, "_maintenance_sweep_worker", _idle_sweep_worker)
+        with get_connection(db_path) as conn:
+            data = ms.create_maintenance_session(
+                conn, duration_minutes=30, log_handling="drop_errors", target_app="batch"
+            )
+
+        async with main_mod.lifespan(create_app()):
+            for _ in range(5):
+                ms.record_maintenance_drop(data["session_id"])
+
+        assert ms.get_pending_dropped_counts() == {}
+        assert _session_row(db_path, data["session_id"])["dropped_count"] == 5
+        assert _history_rows(db_path, data["session_id"])[0]["trigger_count"] == 5
+
+
 class TestAtomicCap:
     """B-64: the session cap holds under concurrent creates from separate connections."""
 

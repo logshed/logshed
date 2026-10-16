@@ -496,6 +496,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Error flushing drop filter counts during shutdown: {e}")
 
+    # Persist maintenance drop counts recorded since the last 30s sweep (the consumer is stopped,
+    # so no new drops arrive). Bounded so a locked database cannot hang shutdown.
+    try:
+        from app.services.maintenance_service import sweep_maintenance_sessions
+        await asyncio.wait_for(
+            run_db_query(sweep_maintenance_sessions, custom_db_path=Path(db_path)),
+            timeout=10.0,
+        )
+    except Exception as e:
+        logger.warning(f"Error flushing maintenance drop counts during shutdown: {e}")
+
     for task in _background_tasks:
         task.cancel()
         try:
