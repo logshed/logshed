@@ -71,7 +71,7 @@ describe('ApiTokensTab Component', () => {
         id: 3,
         name: 'Cursor MCP',
         token_prefix: 'ls_live_9999...0000',
-        scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
+        scopes: ['logs:read', 'alerts:read', 'system:read'],
         created_at: '2026-10-09T12:00:00Z',
         expires_at: '2027-01-07T10:00:00Z',
         last_used_at: null,
@@ -102,7 +102,8 @@ describe('ApiTokensTab Component', () => {
     await waitFor(() => {
       expect(createSpy).toHaveBeenCalledWith({
         name: 'Cursor MCP',
-        scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
+        // The default MCP preset is read-only: maintenance:write must be chosen explicitly
+        scopes: ['logs:read', 'alerts:read', 'system:read'],
         expires_days: 90,
       });
       expect(screen.getByText('Token Generated')).toBeInTheDocument();
@@ -179,11 +180,72 @@ describe('ApiTokensTab Component', () => {
 
   it('correctly maps scope arrays to human-readable preset names', () => {
     expect(getPresetName(['*'])).toBe('Full Access');
-    expect(getPresetName(['logs:read', 'alerts:read', 'system:read', 'maintenance:write'])).toBe('AI Assistant / MCP');
+    // Existing tokens created with the old four-scope MCP bundle keep a clear name
+    expect(getPresetName(['logs:read', 'alerts:read', 'system:read', 'maintenance:write'])).toBe(
+      'AI Assistant / MCP + Maintenance'
+    );
     expect(getPresetName(['logs:read', 'alerts:read', 'system:read'])).toBe('Read Only');
     expect(getPresetName(['maintenance:write', 'maintenance:read'])).toBe('Maintenance Only');
     expect(getPresetName(['logs:write'])).toBe('Edge Shipper / Ingest');
     expect(getPresetName(['custom:read'])).toBe('custom:read');
+  });
+
+  it('offers a read-only AI assistant preset by default and a separate preset with maintenance:write', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+    const createSpy = vi.spyOn(tokensApi, 'createApiToken').mockResolvedValue({
+      token: {
+        id: 4,
+        name: 'Deploy Agent',
+        token_prefix: 'ls_live_1111...2222',
+        scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
+        created_at: '2026-10-09T12:00:00Z',
+        expires_at: null,
+        last_used_at: null,
+      },
+      raw_token: 'ls_live_1111222233334444555566667777888899990000',
+    });
+
+    render(<ApiTokensTab />);
+    await waitFor(() => {
+      expect(screen.getByText('No API tokens generated yet')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Generate Token/i }));
+
+    const readOnlyAssistant = screen.getByRole('radio', { name: /AI Assistant \/ MCP \(Read Only\)/ });
+    const maintenanceAssistant = screen.getByRole('radio', { name: /AI Assistant \/ MCP \+ Maintenance/ });
+    expect(readOnlyAssistant).toBeChecked();
+    expect(maintenanceAssistant).not.toBeChecked();
+
+    fireEvent.click(maintenanceAssistant);
+    expect(maintenanceAssistant).toBeChecked();
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Home Assistant or Claude Desktop'), {
+      target: { value: 'Deploy Agent' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create Token/i }));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith({
+        name: 'Deploy Agent',
+        scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
+        expires_days: 90,
+      });
+    });
+  });
+
+  it('explains MCP scopes in the help text', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+
+    render(<ApiTokensTab settings={{ enable_mcp: true }} />);
+    await waitFor(() => {
+      expect(screen.getByText(/Model Context Protocol \(MCP\)/i)).toBeInTheDocument();
+    });
+
+    const help = screen.getByText(/needs a Bearer token with at least/i);
+    expect(help).toHaveTextContent('logs:read');
+    expect(help).toHaveTextContent('maintenance:write');
+    expect(help).toHaveTextContent(/untrusted/i);
   });
 
   it('renders MCP section disabled by default and shows disabled message', async () => {

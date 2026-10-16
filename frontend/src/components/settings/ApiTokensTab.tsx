@@ -47,9 +47,18 @@ const SCOPE_PRESETS: ScopePreset[] = [
     scopes: ['logs:read', 'alerts:read', 'system:read'],
   },
   {
+    // Default preset of the token dialog: least privilege for AI assistants
     id: 'ai_mcp',
-    name: 'AI Assistant / MCP',
-    description: 'Recommended for Claude Desktop, Cursor, and Model Context Protocol integrations.',
+    name: 'AI Assistant / MCP (Read Only)',
+    description:
+      'Recommended for Claude Desktop, Cursor, and other MCP clients. The assistant can search logs, alerts, and metrics but cannot start or end maintenance windows.',
+    scopes: ['logs:read', 'alerts:read', 'system:read'],
+  },
+  {
+    id: 'ai_mcp_maintenance',
+    name: 'AI Assistant / MCP + Maintenance',
+    description:
+      'Adds maintenance:write so the assistant can start and end maintenance windows. Choose it only when needed: log text is untrusted and can try to steer an assistant.',
     scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
   },
   {
@@ -69,8 +78,9 @@ export const getPresetName = (scopes: string[]): string => {
   const hasLogsWrite = scopes.includes('logs:write');
 
   if (hasMaintWrite && hasLogsRead && hasAlertsRead && hasSystemRead) {
-    return 'AI Assistant / MCP';
+    return 'AI Assistant / MCP + Maintenance';
   }
+  // Shared by the Read Only and AI Assistant / MCP (Read Only) presets, which grant the same scopes
   if (hasLogsRead && hasAlertsRead && hasSystemRead && !hasMaintWrite) {
     return 'Read Only';
   }
@@ -545,9 +555,14 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
             <div className="p-3 bg-dark-950 border border-dark-800 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div className="text-slate-400">
                 <span className="text-slate-300 font-medium">Authentication: </span>
-                Network SSE requires a Bearer token with the{' '}
-                <span className="text-accent-400 font-mono text-[11px]">AI Assistant / MCP</span>{' '}
-                scope bundle.
+                Every network MCP client needs a Bearer token with at least{' '}
+                <code className="text-accent-400 font-mono text-[11px]">logs:read</code>. The{' '}
+                <span className="text-accent-400 font-mono text-[11px]">AI Assistant / MCP (Read Only)</span>{' '}
+                preset lets the assistant search logs, alerts, and metrics. Choose{' '}
+                <span className="text-accent-400 font-mono text-[11px]">AI Assistant / MCP + Maintenance</span>{' '}
+                (adds <code className="text-accent-400 font-mono text-[11px]">maintenance:write</code>) only if
+                the assistant should start and end maintenance windows: log text is untrusted and can try to steer
+                an assistant.
               </div>
               <button
                 type="button"
