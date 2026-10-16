@@ -5,7 +5,7 @@ Provides FastMCP server implementation exposing tools, resources, and prompts
 for AI assistants to inspect telemetry, query logs, examine incident context,
 and manage maintenance windows.
 
-Authorization: connecting needs only `logs:read` (checked by the transport routes in
+Access control: connecting needs only `logs:read` (checked by the transport routes in
 app.api.mcp); every tool and resource then checks its own scope against the caller.
 The HTTP transports attach the verified caller to the ASGI scope of the request that
 carries each JSON-RPC message (MCP_ACCESS_SCOPE_KEY). The MCP library hands that request
