@@ -41,6 +41,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
 
+# Facet lists (and each mapping value) are capped: syslog is unauthenticated, so random
+# APP-NAME or host values could otherwise grow the facets response without limit.
+FACET_LIMIT = 500
+# Recursive skip-scans stop after this many rows (the extra rows detect truncation).
+_FACET_SCAN_LIMIT = FACET_LIMIT + 2
+# Upper bound on distinct (source, app) pairs read for the host and app mappings.
+_FACET_PAIR_LIMIT = 20 * FACET_LIMIT
+
 
 @router.get("", response_model=LogListResponse)
 async def list_logs(
@@ -243,8 +251,11 @@ async def get_log_facets(
     user: dict = Depends(get_current_user),
 ) -> LogFacetsResponse:
     """
-    Fetch all distinct sources, apps, and their bidirectional mappings
+    Fetch distinct sources, apps, and their bidirectional mappings
     across the entire database, including configured host aliases.
+    Each list (and each mapping value) holds at most FACET_LIMIT entries in alphabetical
+    order; `truncated` is true when anything was left out. Syslog is unauthenticated, so
+    random APP-NAME or host values must not grow the response without limit.
     """
     def _fetch_facets(conn):
         cursor = conn.cursor()
@@ -254,13 +265,14 @@ async def get_log_facets(
 
         # 1. Distinct sources
         cursor.execute(
-            """
+            f"""
             WITH RECURSIVE distinct_sources AS (
                 SELECT MIN(source_alias) AS val FROM logs WHERE source_alias != ''
                 UNION ALL
                 SELECT (SELECT MIN(source_alias) FROM logs WHERE source_alias > s.val AND source_alias != '')
                 FROM distinct_sources s
                 WHERE s.val IS NOT NULL
+                LIMIT {_FACET_SCAN_LIMIT}
             )
             SELECT s.val, (SELECT source_ip FROM logs WHERE source_alias = s.val LIMIT 1)
             FROM distinct_sources s
@@ -271,13 +283,14 @@ async def get_log_facets(
 
         # 2. Distinct fallback IPs for logs where source_alias is empty
         cursor.execute(
-            """
+            f"""
             WITH RECURSIVE distinct_ips AS (
                 SELECT MIN(source_ip) AS val FROM logs WHERE source_alias = '' AND source_ip != ''
                 UNION ALL
                 SELECT (SELECT MIN(source_ip) FROM logs WHERE source_alias = '' AND source_ip > s.val AND source_ip != '')
                 FROM distinct_ips s
                 WHERE s.val IS NOT NULL
+                LIMIT {_FACET_SCAN_LIMIT}
             )
             SELECT val FROM distinct_ips WHERE val IS NOT NULL;
             """
@@ -286,13 +299,14 @@ async def get_log_facets(
 
         # 3. Distinct apps
         cursor.execute(
-            """
+            f"""
             WITH RECURSIVE distinct_apps AS (
                 SELECT MIN(app_name) AS val FROM logs WHERE app_name != ''
                 UNION ALL
                 SELECT (SELECT MIN(app_name) FROM logs WHERE app_name > a.val AND app_name != '')
                 FROM distinct_apps a
                 WHERE a.val IS NOT NULL
+                LIMIT {_FACET_SCAN_LIMIT}
             )
             SELECT val FROM distinct_apps WHERE val IS NOT NULL;
             """
@@ -301,7 +315,7 @@ async def get_log_facets(
 
         # 4. Distinct (source_alias, app_name, source_ip) pairs via covering index skip-scan
         cursor.execute(
-            """
+            f"""
             WITH RECURSIVE cte(s, a, ip) AS (
                 SELECT s.source_alias, s.app_name, s.source_ip
                 FROM (
@@ -318,20 +332,30 @@ async def get_log_facets(
                     (SELECT id FROM logs WHERE source_alias = cte.s AND app_name > cte.a AND app_name != '' ORDER BY app_name ASC LIMIT 1),
                     (SELECT id FROM logs WHERE source_alias > cte.s AND source_alias != '' AND app_name != '' ORDER BY source_alias ASC, app_name ASC LIMIT 1)
                 )
+                LIMIT {_FACET_PAIR_LIMIT}
             )
             SELECT s AS source_alias, a AS app_name, ip AS source_ip FROM cte;
             """
         )
         pairs = cursor.fetchall()
+        truncated = (
+            len(sources) > FACET_LIMIT
+            or len(fallback_ips) > FACET_LIMIT
+            or len(apps_res) > FACET_LIMIT
+            or len(pairs) >= _FACET_PAIR_LIMIT
+        )
 
         # Edge case: Mappings for fallback IPs where source_alias was empty
         if fallback_ips:
             for ip in fallback_ips:
                 cursor.execute(
-                    "SELECT DISTINCT app_name FROM logs WHERE source_alias = '' AND source_ip = ? AND app_name != ''",
-                    (ip,),
+                    "SELECT DISTINCT app_name FROM logs WHERE source_alias = '' AND source_ip = ? AND app_name != '' LIMIT ?",
+                    (ip, FACET_LIMIT + 1),
                 )
-                for r in cursor.fetchall():
+                ip_apps = cursor.fetchall()
+                if len(ip_apps) > FACET_LIMIT:
+                    truncated = True
+                for r in ip_apps:
                     pairs.append((ip, r[0], ip))
 
         cursor.execute("SELECT ip, alias FROM host_aliases")
@@ -428,13 +452,35 @@ async def get_log_facets(
                         hosts.remove(ip)
                         hosts.add(alias)
 
-        mapping = {h: sorted(apps) for h, apps in sorted(host_to_apps.items())}
+        def _capped(values) -> list[str]:
+            nonlocal truncated
+            ordered = sorted(values)
+            if len(ordered) > FACET_LIMIT:
+                truncated = True
+                ordered = ordered[:FACET_LIMIT]
+            return ordered
+
+        sources_out = _capped(sources_set)
+        apps_out = _capped(apps_set)
+        kept_sources = set(sources_out)
+        kept_apps = set(apps_out)
+        mapping = {
+            h: _capped(apps) for h, apps in sorted(host_to_apps.items()) if h in kept_sources
+        }
+        if len(mapping) < len(host_to_apps):
+            truncated = True
+        app_mapping = {
+            a: _capped(hosts) for a, hosts in sorted(app_to_hosts.items()) if a in kept_apps
+        }
+        if len(app_mapping) < len(app_to_hosts):
+            truncated = True
         return {
-            "sources": sorted(sources_set),
-            "apps": sorted(apps_set),
+            "sources": sources_out,
+            "apps": apps_out,
             "host_to_apps": mapping,
             "source_app_mapping": mapping,
-            "app_to_hosts": {a: sorted(hosts) for a, hosts in sorted(app_to_hosts.items())},
+            "app_to_hosts": app_mapping,
+            "truncated": truncated,
         }
 
     data = await run_db_query(_fetch_facets)

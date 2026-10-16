@@ -295,6 +295,7 @@ export interface LogFacetsResponse {
   apps: string[];
   host_to_apps: Record<string, string[]>;
   app_to_hosts: Record<string, string[]>;
+  truncated?: boolean;
 }
 
 export interface AiModelInfo {

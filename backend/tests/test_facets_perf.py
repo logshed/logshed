@@ -290,3 +290,56 @@ class TestFacetsPerformanceAndEdgeCases:
                 assert r[1] != ""  # app_name
                 assert r[2].startswith("10.0.0.")  # source_ip
 
+
+
+class TestFacetsCaps:
+    """Unauthenticated syslog can create any number of app or host names; facets stay bounded."""
+
+    def _insert(self, db_file: Path, rows: list[tuple]) -> None:
+        with get_connection(db_file) as conn:
+            conn.executemany(
+                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                   VALUES ('2026-10-15T12:00:00+00:00', '2026-10-15T12:00:00+00:00', ?, ?, ?, 1, 6, 'm', 'r')""",
+                rows,
+            )
+            conn.commit()
+
+    @pytest.mark.asyncio
+    async def test_600_apps_are_capped_at_500(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        self._insert(tmp_path / "logs.db", [("10.0.0.1", "host-a", f"app-{i:04d}") for i in range(600)])
+
+        res = await client.get("/api/logs/facets")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["truncated"] is True
+        assert len(data["apps"]) == 500
+        assert data["apps"] == sorted(data["apps"])
+        assert len(data["app_to_hosts"]) <= 500
+        assert all(len(apps) <= 500 for apps in data["host_to_apps"].values())
+
+    @pytest.mark.asyncio
+    async def test_600_hosts_are_capped_at_500(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        rows = [(f"10.0.{i // 250}.{i % 250}", f"host-{i:04d}", "web") for i in range(300)]
+        rows += [(f"10.1.{i // 250}.{i % 250}", "", "web") for i in range(300)]
+        self._insert(tmp_path / "logs.db", rows)
+
+        res = await client.get("/api/logs/facets")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["truncated"] is True
+        assert len(data["sources"]) == 500
+        assert len(data["host_to_apps"]) <= 500
+        assert all(len(hosts) <= 500 for hosts in data["app_to_hosts"].values())
+
+    @pytest.mark.asyncio
+    async def test_small_databases_are_not_truncated(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        self._insert(tmp_path / "logs.db", [("10.0.0.1", "host-a", "web"), ("10.0.0.2", "", "db")])
+
+        res = await client.get("/api/logs/facets")
+        data = res.json()
+        assert data["truncated"] is False
+        assert "10.0.0.2" in data["sources"]
+        assert data["host_to_apps"]["10.0.0.2"] == ["db"]
