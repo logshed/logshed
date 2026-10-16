@@ -3,6 +3,7 @@ import { CheckCircle2, AlertTriangle, RefreshCw, FlaskConical } from 'lucide-rea
 import { AlertRule } from '../../types.ts';
 import { testAlertRule } from '../../api/alerts.ts';
 import { Modal } from '../common/Modal.tsx';
+import { SEVERITIES } from '../common/SeverityBadge.tsx';
 
 export interface AlertTestModalProps {
   isOpen: boolean;
@@ -86,8 +87,8 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
     try {
       const res = await testAlertRule({
         rule_type: rule.rule_type,
-        filter_app: testSampleApp.trim() || null,
-        filter_severity: testSampleSeverity,
+        filter_app: rule.filter_app ?? null,
+        filter_severity: rule.filter_severity ?? null,
         match_pattern: rule.match_pattern,
         sample_message: testSampleMessage,
         sample_app: testSampleApp.trim() || null,
@@ -122,8 +123,9 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label className="text-slate-300 font-medium">Sample App</label>
+            <label htmlFor="test-sample-app" className="text-slate-300 font-medium">Sample App</label>
             <input
+              id="test-sample-app"
               type="text"
               list="test-sample-apps-list"
               value={testSampleApp}
@@ -139,17 +141,18 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             )}
           </div>
           <div className="space-y-1">
-            <label className="text-slate-300 font-medium">Sample Severity</label>
+            <label htmlFor="test-sample-severity" className="text-slate-300 font-medium">Sample Severity</label>
             <select
+              id="test-sample-severity"
               value={testSampleSeverity}
               onChange={(e) => setTestSampleSeverity(Number(e.target.value))}
               className="w-full bg-dark-800 border border-dark-700 rounded px-2.5 py-1.5 text-slate-200"
             >
-              <option value="1">1 - Alert</option>
-              <option value="2">2 - Critical</option>
-              <option value="3">3 - Error</option>
-              <option value="4">4 - Warning</option>
-              <option value="6">6 - Info</option>
+              {SEVERITIES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.value} - {s.name}
+                </option>
+              ))}
             </select>
           </div>
         </div>

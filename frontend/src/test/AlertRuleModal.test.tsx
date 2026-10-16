@@ -341,4 +341,22 @@ describe('AlertRuleModal Component', () => {
     expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('lists all 8 severities plus Any in the max severity filter (E-25)', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+    expect(screen.getByRole('option', { name: 'Any Severity' })).toBeInTheDocument();
+    const texts = ['0 - Emergency', '1 - Alert', '2 - Critical', '3 - Error', '4 - Warning', '5 - Notice', '6 - Info', '7 - Debug'];
+    for (const t of texts) {
+      expect(screen.getByRole('option', { name: t })).toBeInTheDocument();
+    }
+  });
 });

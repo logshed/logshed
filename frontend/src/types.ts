@@ -460,7 +460,7 @@ export type AlertRuleType = 'threshold' | 'pattern' | 'rate';
 export interface AlertRule {
   id: number;
   name: string;
-  rule_type: string;
+  rule_type: AlertRuleType;
   channel_id?: number | null;
   filter_app?: string | null;
   filter_severity?: number | null;
@@ -479,7 +479,7 @@ export interface AlertRule {
 
 export interface AlertRuleCreate {
   name: string;
-  rule_type: string;
+  rule_type: AlertRuleType;
   channel_id?: number | null;
   filter_app?: string | null;
   filter_severity?: number | null;
@@ -493,7 +493,7 @@ export interface AlertRuleCreate {
 
 export interface AlertRuleUpdate {
   name?: string;
-  rule_type?: string;
+  rule_type?: AlertRuleType;
   channel_id?: number | null;
   filter_app?: string | null;
   filter_severity?: number | null;

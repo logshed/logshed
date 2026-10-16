@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
-import { AlertRule, AlertRuleCreate, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
+import { AlertRule, AlertRuleCreate, AlertRuleType, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
 import { createAlertRule, updateAlertRule } from '../../api/alerts.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { Modal } from '../common/Modal.tsx';
+import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 
 export interface AlertRuleModalProps {
@@ -28,7 +29,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   onSuccess,
 }) => {
   const [formName, setFormName] = useState<string>('');
-  const [formRuleType, setFormRuleType] = useState<string>('threshold');
+  const [formRuleType, setFormRuleType] = useState<AlertRuleType>('threshold');
   const [formChannelId, setFormChannelId] = useState<number | null>(null);
   const [formFilterApps, setFormFilterApps] = useState<string[]>([]);
   const [formFilterSeverity, setFormFilterSeverity] = useState<number | ''>('');
@@ -270,7 +271,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             <label className="text-slate-300 font-medium">Rule Type</label>
             <select
               value={formRuleType}
-              onChange={(e) => setFormRuleType(e.target.value)}
+              onChange={(e) => setFormRuleType(e.target.value as AlertRuleType)}
               className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
             >
               <option value="threshold">Threshold (Sliding Window)</option>
@@ -410,14 +411,11 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
             >
               <option value="">Any Severity</option>
-              <option value="0">0 - Emergency</option>
-              <option value="1">1 - Alert</option>
-              <option value="2">2 - Critical</option>
-              <option value="3">3 - Error</option>
-              <option value="4">4 - Warning</option>
-              <option value="5">5 - Notice</option>
-              <option value="6">6 - Info</option>
-              <option value="7">7 - Debug</option>
+              {SEVERITIES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.value} - {s.name}
+                </option>
+              ))}
             </select>
           </div>
         </div>

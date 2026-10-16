@@ -1,11 +1,12 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { AlertRule } from '../types.ts';
 import { AlertsPanel, pathToAlertSubTab, alertSubTabToPath } from '../components/alerts/AlertsPanel.tsx';
 import * as alertsApi from '../api/alerts.ts';
 import * as notificationsApi from '../api/notifications.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
 
-const mockRules = [
+const mockRules: AlertRule[] = [
   {
     id: 1,
     name: 'SSH Brute-Force Detection',
@@ -603,7 +604,7 @@ describe('AlertsPanel Component', () => {
   });
 
   it('highlights inactive or missing notification channel on rules without extra pill', async () => {
-    const rulesWithBadChannel = [
+    const rulesWithBadChannel: AlertRule[] = [
       {
         id: 99,
         name: 'Orphan Channel Rule',

@@ -13,6 +13,17 @@ export interface SeverityInfo {
   borderClass: string;
 }
 
+export const SEVERITIES: { value: number; name: string }[] = [
+  { value: 0, name: 'Emergency' },
+  { value: 1, name: 'Alert' },
+  { value: 2, name: 'Critical' },
+  { value: 3, name: 'Error' },
+  { value: 4, name: 'Warning' },
+  { value: 5, name: 'Notice' },
+  { value: 6, name: 'Info' },
+  { value: 7, name: 'Debug' },
+];
+
 export function getSeverityInfo(severity: number): SeverityInfo {
   switch (severity) {
     case 0:
