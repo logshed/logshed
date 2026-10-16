@@ -914,15 +914,38 @@ def effective_source_ip(url: Optional[str], source_alias: Optional[str], endpoin
     return source_alias or f"docker-{endpoint_id}"
 
 
-class _AliasDedupSet(set):
-    """Deduplication set supporting (raw, display, ip) triples and legacy (raw, display) pair lookups."""
+_ALIAS_DEDUP_MAX_ENTRIES = 2000
+
+
+class _AliasDedupSet:
+    """
+    Bounded LRU of (raw_name, display_name, source_ip) triples already backfilled.
+
+    Short-lived containers with random names would otherwise grow it forever. When full,
+    the least recently seen triple is dropped; a dropped triple at worst triggers one more
+    (idempotent) backfill if that container shows up again.
+    """
+
+    def __init__(self, max_entries: int = _ALIAS_DEDUP_MAX_ENTRIES):
+        self._max_entries = max_entries
+        # dict keeps insertion order: the first key is the least recently seen
+        self._items: dict[tuple, None] = {}
 
     def __contains__(self, item: Any) -> bool:
-        if super().__contains__(item):
-            return True
-        if isinstance(item, tuple) and len(item) == 2:
-            return any(isinstance(x, tuple) and x[:2] == item for x in self)
-        return False
+        return item in self._items
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __repr__(self) -> str:
+        return f"_AliasDedupSet(size={len(self._items)}, max_entries={self._max_entries})"
+
+    def add(self, item: tuple) -> None:
+        """Insert item, or mark it most recently seen if present, evicting the oldest when full."""
+        self._items.pop(item, None)
+        self._items[item] = None
+        while len(self._items) > self._max_entries:
+            del self._items[next(iter(self._items))]
 
 
 class DockerTailer:
@@ -1009,7 +1032,7 @@ class DockerTailer:
         self.tls_enabled = ssl_context is not None
 
         self._current_client: Optional[httpx.AsyncClient] = None
-        self._updated_app_aliases: set[Any] = _AliasDedupSet()
+        self._updated_app_aliases = _AliasDedupSet()
         self._bg_tasks: set[asyncio.Task] = set()
 
         # Connection health and latency status
@@ -1053,6 +1076,7 @@ class DockerTailer:
         effective_ip = source_ip or self._effective_source_ip()
         triple = (raw_name, display_name, effective_ip)
         if triple in self._updated_app_aliases:
+            self._updated_app_aliases.add(triple)  # refresh recency
             return
         self._updated_app_aliases.add(triple)
 

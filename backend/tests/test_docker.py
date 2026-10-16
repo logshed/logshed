@@ -2425,7 +2425,7 @@ class TestBatchUpdateAppAliases:
 
         # First dispatch schedules update and registers in deduplication set
         tailer._schedule_app_alias_update("homelab_radarr_1", "radarr")
-        assert ("homelab_radarr_1", "radarr") in tailer._updated_app_aliases
+        assert ("homelab_radarr_1", "radarr", "docker") in tailer._updated_app_aliases
         assert len(tailer._updated_app_aliases) == 1
 
         # Second dispatch for identical pair is ignored
@@ -2505,10 +2505,47 @@ class TestBatchUpdateAppAliases:
         assert entries[0]["message"] == "Web request completed"
 
         # Check deduplication tracking set recorded the update
-        assert ("prod_web_1", "web") in tailer._updated_app_aliases
+        assert ("prod_web_1", "web", tailer._effective_source_ip()) in tailer._updated_app_aliases
 
         await tailer.stop()
 
 
 
 
+
+
+class TestAppAliasDedupBound:
+    """E-61: the renamed-container dedup set is a bounded LRU."""
+
+    @pytest.mark.asyncio
+    async def test_dedup_set_stays_bounded_and_keeps_recent_entries(self, tmp_path: Path):
+        db = tmp_path / "dedup.db"
+        run_migrations(db)
+        tailer = DockerTailer(KeyedMultilineAssembler(), db_path=db)
+
+        async def _noop(*args, **kwargs):
+            return None
+
+        def _add(i: int) -> None:
+            tailer._schedule_app_alias_update(f"stack_app{i}_1", f"app{i}", source_ip="docker")
+
+        with patch("app.collectors.docker_collector.asyncio.to_thread", side_effect=_noop) as mock_to_thread:
+            for i in range(2500):
+                _add(i)
+            assert len(tailer._updated_app_aliases) == 2000
+            # Oldest entries were evicted, the newest are still deduplicated
+            assert ("stack_app0_1", "app0", "docker") not in tailer._updated_app_aliases
+            assert ("stack_app2499_1", "app2499", "docker") in tailer._updated_app_aliases
+            calls_before = mock_to_thread.call_count
+            _add(2499)
+            assert mock_to_thread.call_count == calls_before
+
+            # A re-seen entry is refreshed and survives further inserts
+            _add(600)
+            for i in range(2500, 3500):
+                _add(i)
+            assert ("stack_app600_1", "app600", "docker") in tailer._updated_app_aliases
+            assert len(tailer._updated_app_aliases) == 2000
+            await asyncio.sleep(0)
+
+        await tailer.stop()
