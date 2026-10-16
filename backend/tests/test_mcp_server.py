@@ -604,6 +604,35 @@ class TestPerToolScopes:
         assert "untrusted" in prompt
 
 
+class TestMCPListServicesTruncation:
+    """P-02: list_services passes on the facets cap flag."""
+
+    @pytest.mark.asyncio
+    async def test_small_database_is_not_truncated(self, tmp_path: Path):
+        seed_sample_data(tmp_path / "logs.db")
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["list_services"]
+        res = await tool.fn()
+        assert res["truncated"] is False
+        assert "500" in tool.description
+
+    @pytest.mark.asyncio
+    async def test_more_than_500_apps_is_truncated(self, tmp_path: Path):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with get_connection(tmp_path / "logs.db") as conn:
+            conn.executemany(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '10.0.0.1', 'node-1', ?, 1, 6, 'hello', 'hello')
+                """,
+                [(now_iso, now_iso, f"app-{i:04d}") for i in range(510)],
+            )
+            conn.commit()
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["list_services"]
+        res = await tool.fn()
+        assert res["truncated"] is True
+        assert len(res["apps"]) == 500
+
+
 class TestMCPServer:
     """Tests for in-process FastMCP server tools, resources, and prompts."""
 

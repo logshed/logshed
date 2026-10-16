@@ -217,7 +217,9 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         name="list_services",
         description=(
             "Discover all distinct applications (app_name) and host sources "
-            "(source_alias / source_ip) currently sending logs to LogShed."
+            "(source_alias / source_ip) currently sending logs to LogShed. "
+            "truncated=true means the host and app lists (and their mappings) were capped at "
+            "500 entries each, so some services are not listed; use count_logs with group_by to explore further."
         ),
     )
     async def list_services() -> dict[str, Any]:
@@ -229,6 +231,7 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
             "sources": facets.sources,
             "host_to_apps": facets.host_to_apps,
             "app_to_hosts": facets.app_to_hosts,
+            "truncated": facets.truncated,
         }
 
     @server.tool(
