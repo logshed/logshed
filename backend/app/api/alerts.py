@@ -945,8 +945,9 @@ async def list_alert_history(
 ) -> AlertHistoryListResponse:
     """Retrieve historical alert, AI analysis and maintenance window events with pagination."""
     def _query(conn):
-        from app.services.maintenance_service import get_pending_dropped_counts, sweep_maintenance_sessions
-        sweep_maintenance_sessions(conn)
+        from app.services.maintenance_service import get_pending_dropped_counts, sweep_maintenance_sessions_if_needed
+        # Write only when there are pending drop counts or overdue sessions, so history reads stay read-only
+        sweep_maintenance_sessions_if_needed(conn)
         pending_drops = get_pending_dropped_counts()
         cur = conn.cursor()
         where_sql = "WHERE h.rule_id = ?" if rule_id is not None else ""

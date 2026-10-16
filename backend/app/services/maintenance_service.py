@@ -280,12 +280,6 @@ def flush_dropped_counts(conn: sqlite3.Connection) -> int:
     return len(pending)
 
 
-def _has_maintenance_sessions_table(conn: sqlite3.Connection) -> bool:
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='maintenance_sessions'")
-    return cur.fetchone() is not None
-
-
 def get_cached_maintenance_sessions() -> list[dict[str, Any]]:
     """Return a copy of the in-memory active maintenance sessions list."""
     with _active_sessions_lock:
@@ -313,20 +307,8 @@ def _sweep_expired_sessions(conn: sqlite3.Connection, now_iso: str) -> None:
     conn.commit()
 
 
-def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """
-    Query active and unexpired maintenance sessions from SQLite and refresh in-memory cache.
-    Also sweeps expired sessions to keep database state current and flushes drop counters.
-    """
-    if not _has_maintenance_sessions_table(conn):
-        update_cached_maintenance_sessions([])
-        return []
-
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    now_iso = now_utc.isoformat()
-
-    _sweep_expired_sessions(conn, now_iso)
-
+def _load_active_sessions(conn: sqlite3.Connection, now_iso: str) -> list[dict[str, Any]]:
+    """Read the active, unexpired sessions from SQLite (read-only: no sweep, no cache update)."""
     cur = conn.cursor()
     cur.execute(
         """
@@ -338,10 +320,8 @@ def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """,
         (now_iso,),
     )
-    rows = cur.fetchall()
-    sessions = []
-    for r in rows:
-        sessions.append({
+    return [
+        {
             "session_id": r["session_id"],
             "token_id": r["token_id"],
             "initiated_by": r["initiated_by"],
@@ -351,7 +331,20 @@ def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "target_host": r["target_host"],
             "created_at": r["created_at"],
             "expires_at": r["expires_at"],
-        })
+        }
+        for r in cur.fetchall()
+    ]
+
+
+def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """
+    Sweep expired sessions, flush drop counters, then reload the active sessions from SQLite
+    into the in-memory cache. This writes, so it belongs to the sweep worker and to the
+    create and disable paths, never to status reads.
+    """
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    _sweep_expired_sessions(conn, now_iso)
+    sessions = _load_active_sessions(conn, now_iso)
     update_cached_maintenance_sessions(sessions)
     return sessions
 
@@ -425,15 +418,12 @@ def create_maintenance_session(
     Start a new on-demand maintenance session, record its incident history row,
     and update the in-memory cache.
 
+    The active-session count and the INSERTs run in one BEGIN IMMEDIATE transaction, so
+    concurrent creates from REST, MCP and the web UI cannot push past the cap.
     Raises MaintenanceSessionLimitError when MAX_ACTIVE_MAINTENANCE_SESSIONS are already active.
     """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    refresh_maintenance_cache(conn)
-    if len(get_cached_maintenance_sessions()) >= MAX_ACTIVE_MAINTENANCE_SESSIONS:
-        raise MaintenanceSessionLimitError(
-            f"Too many active maintenance sessions (maximum {MAX_ACTIVE_MAINTENANCE_SESSIONS}). "
-            "End an existing session first."
-        )
+    now_iso = now_utc.isoformat()
     if expires_at is not None:
         expires_dt = expires_at.astimezone(datetime.timezone.utc)
         computed_duration = max(1, int((expires_dt - now_utc).total_seconds() / 60))
@@ -442,39 +432,56 @@ def create_maintenance_session(
         expires_dt = now_utc + datetime.timedelta(minutes=duration_mins)
         computed_duration = duration_mins
     session_id = str(uuid.uuid4())
-
-    now_iso = now_utc.isoformat()
     expires_iso = expires_dt.isoformat()
 
-    conn.execute(
-        """
-        INSERT INTO maintenance_sessions (
-            session_id, token_id, initiated_by, reason, log_handling,
-            target_app, target_host, created_at, expires_at, is_active, trigger_label
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-        """,
-        (
-            session_id,
-            token_id,
-            initiated_by,
-            reason,
-            log_handling,
-            target_app,
-            target_host,
-            now_iso,
-            expires_iso,
-            trigger_label,
-        ),
-    )
-    conn.execute(
-        """
-        INSERT INTO alert_history (rule_name, trigger_count, triggered_at, maintenance_session_id)
-        VALUES (?, 0, ?, ?)
-        """,
-        (MAINTENANCE_HISTORY_RULE_NAME, now_iso, session_id),
-    )
-    conn.commit()
-    refresh_maintenance_cache(conn)
+    # Close out expired sessions (and flush their drop counts) before counting
+    _sweep_expired_sessions(conn, now_iso)
+
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        active_count = conn.execute(
+            "SELECT COUNT(*) FROM maintenance_sessions WHERE is_active = 1 AND expires_at > ?",
+            (now_iso,),
+        ).fetchone()[0]
+        if active_count >= MAX_ACTIVE_MAINTENANCE_SESSIONS:
+            raise MaintenanceSessionLimitError(
+                f"Too many active maintenance sessions (maximum {MAX_ACTIVE_MAINTENANCE_SESSIONS}). "
+                "End an existing session first."
+            )
+        conn.execute(
+            """
+            INSERT INTO maintenance_sessions (
+                session_id, token_id, initiated_by, reason, log_handling,
+                target_app, target_host, created_at, expires_at, is_active, trigger_label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """,
+            (
+                session_id,
+                token_id,
+                initiated_by,
+                reason,
+                log_handling,
+                target_app,
+                target_host,
+                now_iso,
+                expires_iso,
+                trigger_label,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO alert_history (rule_name, trigger_count, triggered_at, maintenance_session_id)
+            VALUES (?, 0, ?, ?)
+            """,
+            (MAINTENANCE_HISTORY_RULE_NAME, now_iso, session_id),
+        )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    update_cached_maintenance_sessions(_load_active_sessions(conn, now_iso))
 
     return {
         "session_id": session_id,
@@ -498,9 +505,6 @@ def disable_maintenance_sessions(
     Terminate one or all active maintenance sessions.
     Returns (terminated_count, remaining_active_count).
     """
-    if not _has_maintenance_sessions_table(conn):
-        return 0, 0
-
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     cur = conn.cursor()
 
@@ -538,23 +542,23 @@ def disable_maintenance_sessions(
         )
 
     conn.commit()
-    refresh_maintenance_cache(conn)
-
-    cur.execute(
-        "SELECT COUNT(*) FROM maintenance_sessions WHERE is_active = 1 AND expires_at > ?",
-        (now_iso,),
-    )
-    remaining = cur.fetchone()[0]
-    return terminated, remaining
+    sessions = _load_active_sessions(conn, now_iso)
+    update_cached_maintenance_sessions(sessions)
+    return terminated, len(sessions)
 
 
 def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowResponse:
-    """Compute overall maintenance window status including on-demand, external API sessions, and recurring schedules."""
+    """
+    Compute overall maintenance window status including on-demand, external API sessions, and recurring schedules.
+    Read-only: it never sweeps, flushes or commits, so status reads (metrics, alert dispatch, the UI)
+    do not take the SQLite write lock. Sessions past expires_at are reported inactive even before
+    the sweep worker marks them expired.
+    """
     now_local, tz_name = _get_server_time_info()
     now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-    # 1. Sweep and load active on-demand API sessions
-    active_sessions = refresh_maintenance_cache(conn)
+    # 1. Load active on-demand API sessions (SELECT only; another process may have created them)
+    active_sessions = _load_active_sessions(conn, now_utc.isoformat())
 
     # 2. Check legacy on-demand maintenance_until
     cur = conn.cursor()
@@ -657,3 +661,21 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
 def sweep_maintenance_sessions(conn: sqlite3.Connection) -> None:
     """Periodic maintenance upkeep: close expired sessions, flush drop counts, refresh the cache."""
     refresh_maintenance_cache(conn)
+
+
+def sweep_maintenance_sessions_if_needed(conn: sqlite3.Connection) -> bool:
+    """
+    Run the sweep only when there is something to write: pending drop counts, or an active
+    session already past its planned end. Lets history pages show fresh totals without taking
+    the write lock on every read. Returns True when a sweep ran.
+    """
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if not get_pending_dropped_counts():
+        overdue = conn.execute(
+            "SELECT 1 FROM maintenance_sessions WHERE is_active = 1 AND expires_at <= ? LIMIT 1",
+            (now_iso,),
+        ).fetchone()
+        if overdue is None:
+            return False
+    refresh_maintenance_cache(conn)
+    return True

@@ -3,8 +3,10 @@ Tests for maintenance window audit history: session lifecycle columns, incident 
 per-session drop counting, input limits, retention pruning, and external/MCP exposure.
 """
 
+import asyncio
 import datetime
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -470,3 +472,146 @@ class TestExposure:
         assert alert_state["active"] is False
         assert alert_state["recent_firing_count"] == 0
         assert alert_state["last_rule_name"] is None
+
+
+def _deny_writes(conn: sqlite3.Connection) -> None:
+    """Make any INSERT, UPDATE or DELETE on this connection fail."""
+    blocked = (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE)
+
+    def _authorizer(action, *_args):
+        return sqlite3.SQLITE_DENY if action in blocked else sqlite3.SQLITE_OK
+
+    conn.set_authorizer(_authorizer)
+
+
+def _set_expires(db_path: Path, session_id: str, minutes_from_now: int) -> str:
+    value = (
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes_from_now)
+    ).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "UPDATE maintenance_sessions SET expires_at = ? WHERE session_id = ?", (value, session_id)
+        )
+        conn.commit()
+    return value
+
+
+class TestReadOnlyStatus:
+    """E-04: status reads must not take the SQLite write lock."""
+
+    def test_status_performs_no_writes(self, db_path: Path):
+        with get_connection(db_path) as conn:
+            live = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
+            stale = ms.create_maintenance_session(conn, duration_minutes=30)
+        _set_expires(db_path, stale["session_id"], -5)
+        ms.record_maintenance_drop(live["session_id"])
+
+        conn = get_connection(db_path)
+        try:
+            _deny_writes(conn)
+            status = ms.get_maintenance_status(conn)
+        finally:
+            conn.close()
+
+        assert status.active is True
+        assert [s.session_id for s in status.sessions] == [live["session_id"]]
+        assert status.log_handling == "drop_errors"
+        # Sweeping and flushing are left to the worker and to create/disable calls
+        assert _session_row(db_path, stale["session_id"])["is_active"] == 1
+        assert ms.get_pending_dropped_counts() == {live["session_id"]: 1}
+
+    def test_expired_session_reported_inactive_before_sweep(self, db_path: Path):
+        with get_connection(db_path) as conn:
+            data = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
+        _set_expires(db_path, data["session_id"], -1)
+
+        conn = get_connection(db_path)
+        try:
+            _deny_writes(conn)
+            status = ms.get_maintenance_status(conn)
+        finally:
+            conn.close()
+
+        assert status.active is False
+        assert status.sessions == []
+        assert status.active_sessions_count == 0
+        assert status.log_handling == "silence_alerts"
+        assert _session_row(db_path, data["session_id"])["is_active"] == 1
+
+    def test_history_upkeep_without_pending_work_does_not_write(self, db_path: Path):
+        with get_connection(db_path) as conn:
+            ms.create_maintenance_session(conn, duration_minutes=30)
+        conn = get_connection(db_path)
+        try:
+            _deny_writes(conn)
+            ms.sweep_maintenance_sessions_if_needed(conn)
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_history_shows_flushed_counts_and_expiry(
+        self, client: AsyncClient, auth_headers: dict, db_path: Path
+    ):
+        with get_connection(db_path) as conn:
+            live = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
+            expired = ms.create_maintenance_session(conn, duration_minutes=30)
+        planned_end = _set_expires(db_path, expired["session_id"], -2)
+        for _ in range(2):
+            ms.record_maintenance_drop(live["session_id"])
+
+        res = await client.get("/api/alerts/history", headers=auth_headers)
+        assert res.status_code == 200
+        items = {i["maintenance_session_id"]: i for i in res.json()["items"]}
+        assert items[live["session_id"]]["maintenance_dropped_count"] == 2
+        assert items[expired["session_id"]]["maintenance_end_reason"] == "expired"
+        assert items[expired["session_id"]]["maintenance_ended_at"] == planned_end
+
+        # Pending counts were written through, not only added for display
+        assert ms.get_pending_dropped_counts() == {}
+        assert _session_row(db_path, live["session_id"])["dropped_count"] == 2
+        assert _history_rows(db_path, live["session_id"])[0]["trigger_count"] == 2
+
+
+
+
+class TestAtomicCap:
+    """B-64: the session cap holds under concurrent creates from separate connections."""
+
+    def test_concurrent_creates_never_exceed_cap(self, db_path: Path):
+        attempts = ms.MAX_ACTIVE_MAINTENANCE_SESSIONS + 5
+        barrier = threading.Barrier(attempts)
+        outcomes: list[str] = []
+        outcomes_lock = threading.Lock()
+
+        def _create() -> None:
+            conn = get_connection(db_path)
+            try:
+                barrier.wait()
+                try:
+                    ms.create_maintenance_session(conn, duration_minutes=30)
+                    outcome = "created"
+                except ms.MaintenanceSessionLimitError:
+                    outcome = "limit"
+            finally:
+                conn.close()
+            with outcomes_lock:
+                outcomes.append(outcome)
+
+        threads = [threading.Thread(target=_create) for _ in range(attempts)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert len(outcomes) == attempts
+        assert outcomes.count("created") == ms.MAX_ACTIVE_MAINTENANCE_SESSIONS
+        assert outcomes.count("limit") == 5
+        with get_connection(db_path) as conn:
+            active = conn.execute(
+                "SELECT COUNT(*) FROM maintenance_sessions WHERE is_active = 1"
+            ).fetchone()[0]
+            history = conn.execute(
+                "SELECT COUNT(*) FROM alert_history WHERE maintenance_session_id IS NOT NULL"
+            ).fetchone()[0]
+        assert active == ms.MAX_ACTIVE_MAINTENANCE_SESSIONS
+        assert history == ms.MAX_ACTIVE_MAINTENANCE_SESSIONS
