@@ -405,6 +405,38 @@ class TestTokenRevocationCleanup:
         assert (await client.get("/api/v1/auth/verify", headers=bearer)).status_code == 401
         assert (await client.post("/api/v1/ingest", json=[{"message": "x"}], headers=bearer)).status_code == 401
 
+    @pytest.mark.asyncio
+    async def test_revoke_closes_the_tokens_mcp_sse_sessions(self, client: AsyncClient, auth_headers: dict):
+        from uuid import uuid4
+
+        import app.api.mcp as mcp_api
+
+        revoked = (await client.post("/api/tokens", json={"name": "A", "scopes": ["logs:read"]}, headers=auth_headers)).json()
+        kept = (await client.post("/api/tokens", json={"name": "B", "scopes": ["logs:read"]}, headers=auth_headers)).json()
+        revoked_id, kept_id = revoked["token"]["id"], kept["token"]["id"]
+
+        revoked_session = mcp_api._SseSession(token_id=revoked_id, session_id=uuid4())
+        kept_session = mcp_api._SseSession(token_id=kept_id, session_id=uuid4())
+        mcp_api._sse_sessions.clear()
+        mcp_api._sse_token_cache.clear()
+        mcp_api._sse_sessions[revoked_session.session_id] = revoked_session
+        mcp_api._sse_sessions[kept_session.session_id] = kept_session
+        mcp_api._sse_token_cache[revoked_id] = (0.0, {"id": revoked_id})
+        mcp_api._sse_token_cache[kept_id] = (0.0, {"id": kept_id})
+        try:
+            assert (await client.delete(f"/api/tokens/{revoked_id}", headers=auth_headers)).status_code == 200
+
+            assert revoked_session.closed is True
+            assert revoked_session.session_id not in mcp_api._sse_sessions
+            assert revoked_id not in mcp_api._sse_token_cache
+            # Other tokens' sessions are untouched
+            assert kept_session.closed is False
+            assert mcp_api._sse_sessions[kept_session.session_id] is kept_session
+            assert kept_id in mcp_api._sse_token_cache
+        finally:
+            mcp_api._sse_sessions.clear()
+            mcp_api._sse_token_cache.clear()
+
     def test_forget_helpers(self):
         from app.core.api_tokens import ApiTokenRateLimiter, forget_last_used
 
