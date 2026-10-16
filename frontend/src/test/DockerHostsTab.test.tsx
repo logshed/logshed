@@ -377,3 +377,39 @@ describe('DockerHostsTab TLS host name verification', () => {
     });
   });
 });
+
+describe('DockerHostsTab row enable toggle', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('ignores a second click while the toggle request is pending', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue(mockEndpoints);
+    let resolveUpdate: (value: DockerEndpoint) => void = () => {};
+    const updateSpy = vi.spyOn(dockerHostsApi, 'updateDockerEndpoint').mockImplementation(
+      () =>
+        new Promise<DockerEndpoint>((resolve) => {
+          resolveUpdate = resolve;
+        })
+    );
+
+    render(<DockerHostsTab />);
+    await waitFor(() => {
+      expect(screen.getByText('Remote Worker')).toBeInTheDocument();
+    });
+
+    const row = screen.getByText('Remote Worker').closest('tr') as HTMLElement;
+    const toggle = row.querySelector('button[title="Disable Host"]') as HTMLButtonElement;
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledWith(2, { enabled: false });
+    expect(toggle).toBeDisabled();
+
+    resolveUpdate({ ...mockEndpoints[1], enabled: false });
+    await waitFor(() => {
+      expect(toggle).not.toBeDisabled();
+    });
+  });
+});

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Box,
   Plus,
@@ -56,6 +56,10 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   // Row testing feedback
   const [testingRowId, setTestingRowId] = useState<number | null>(null);
   const [rowTestResults, setRowTestResults] = useState<Record<number, DockerEndpointTestResult>>({});
+
+  // Row enable toggles with a request in flight
+  const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
+  const togglingIdsRef = useRef<Set<number>>(new Set());
 
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -285,11 +289,18 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   };
 
   const handleToggleEnabled = async (host: DockerEndpoint) => {
+    // One enable/disable request per host at a time (double clicks would send overlapping PUTs)
+    if (togglingIdsRef.current.has(host.id)) return;
+    togglingIdsRef.current.add(host.id);
+    setTogglingIds(new Set(togglingIdsRef.current));
     try {
       await updateDockerEndpoint(host.id, { enabled: !host.enabled });
       await loadHosts();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to update Docker host status.');
+    } finally {
+      togglingIdsRef.current.delete(host.id);
+      setTogglingIds(new Set(togglingIdsRef.current));
     }
   };
 
@@ -499,7 +510,8 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     <button
                       type="button"
                       onClick={() => handleToggleEnabled(host)}
-                      className={`text-[11px] font-medium px-2 py-1 rounded transition cursor-pointer border ${
+                      disabled={togglingIds.has(host.id)}
+                      className={`text-[11px] font-medium px-2 py-1 rounded transition cursor-pointer border disabled:opacity-50 ${
                         host.enabled
                           ? 'text-slate-400 hover:text-slate-200 border-dark-700 bg-dark-950'
                           : 'text-emerald-400 hover:text-emerald-300 border-emerald-800 bg-emerald-950/30'
@@ -629,7 +641,8 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                           <button
                             type="button"
                             onClick={() => handleToggleEnabled(host)}
-                            className={`p-1 rounded transition cursor-pointer ${
+                            disabled={togglingIds.has(host.id)}
+                            className={`p-1 rounded transition cursor-pointer disabled:opacity-50 ${
                               host.enabled
                                 ? 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
                                 : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40'
