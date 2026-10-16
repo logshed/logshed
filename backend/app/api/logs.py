@@ -3,7 +3,6 @@ Log querying, streaming (SSE), and context API endpoints for LogShed.
 """
 
 import asyncio
-import json
 import logging
 import sqlite3
 from typing import Any, AsyncGenerator, Optional
@@ -48,6 +47,9 @@ FACET_LIMIT = 500
 _FACET_SCAN_LIMIT = FACET_LIMIT + 2
 # Upper bound on distinct (source, app) pairs read for the host and app mappings.
 _FACET_PAIR_LIMIT = 20 * FACET_LIMIT
+
+# Keep-alive comment interval for idle live log streams.
+SSE_PING_INTERVAL_SECONDS = 15
 
 
 @router.get("", response_model=LogListResponse)
@@ -204,11 +206,9 @@ async def stream_logs(
             while True:
                 if max_events is not None and sent >= max_events:
                     break
-                if await request.is_disconnected():
-                    break
 
                 try:
-                    entry = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    entry = await asyncio.wait_for(queue.get(), timeout=SSE_PING_INTERVAL_SECONDS)
 
                     # Apply optional stream filters
                     if severity_max is not None and entry.get("severity", 6) > severity_max:
@@ -226,10 +226,13 @@ async def stream_logs(
                     if parsed_apps and entry.get("app_name") not in parsed_apps:
                         continue
 
-                    data = json.dumps(entry)
+                    # Pre-encoded once per entry by the broadcaster, without private keys
+                    data = entry.data
                     sent += 1
                     yield f"event: log\ndata: {data}\n\n"
                 except asyncio.TimeoutError:
+                    # A disconnect while events flow surfaces as a failed send; while idle it
+                    # is checked here, once per ping.
                     if await request.is_disconnected():
                         break
                     yield ": ping\n\n"

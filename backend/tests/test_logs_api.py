@@ -1385,3 +1385,46 @@ class TestSseLimitsAndPayload:
         await sse_manager.unsubscribe(queues.pop())
         queues.append(await sse_manager.subscribe())
         assert sse_manager.subscriber_count() == MAX_SSE_SUBSCRIBERS
+
+    @pytest.mark.asyncio
+    async def test_streamed_event_has_no_internal_keys(self, client: AsyncClient, auth_cookie: dict):
+        import json as json_mod
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        entry = {
+            "id": 7,
+            "timestamp": "2026-10-15T12:00:00+00:00",
+            "received_at": "2026-10-15T12:00:00+00:00",
+            "source_ip": "10.0.0.1",
+            "source_alias": "srv1",
+            "app_name": "web",
+            "facility": 1,
+            "severity": 3,
+            "message": "internal keys test",
+            "raw": "raw",
+            "_epoch_ts": 1.0,
+        }
+
+        async def _broadcast_then_mutate():
+            for _ in range(50):
+                if sse_manager.subscriber_count() > 0:
+                    break
+                await asyncio.sleep(0.01)
+            await sse_manager.broadcast_batch([entry])
+            # The alert evaluator adds private keys to the shared dict after the broadcast
+            entry["_skip_alert_rules"] = True
+
+        task = asyncio.create_task(_broadcast_then_mutate())
+        async with client.stream("GET", "/api/logs/stream", params={"max_events": 1}) as response:
+            data_lines = [l[len("data: "):] async for l in response.aiter_lines() if l.startswith("data: ")]
+        await task
+
+        assert len(data_lines) == 1
+        payload = json_mod.loads(data_lines[0])
+        assert payload["message"] == "internal keys test"
+        assert not [k for k in payload if k.startswith("_")]
+
+    def test_ping_interval_is_15_seconds(self):
+        from app.api import logs as logs_mod
+
+        assert logs_mod.SSE_PING_INTERVAL_SECONDS == 15
