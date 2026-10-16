@@ -15,11 +15,11 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
-from urllib.parse import parse_qs
 from uuid import UUID
 
 import anyio
@@ -75,6 +75,14 @@ class _SseSession:
 _sse_sessions: dict[UUID, _SseSession] = {}
 # Token id -> (monotonic time cached, token record) for session-only /messages posts.
 _sse_token_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+
+QUERY_TOKEN_WARNING_INTERVAL_SECONDS = 600.0
+_last_query_token_warning = 0.0
+
+QUERY_TOKEN_DESCRIPTION = (
+    "Deprecated and refused by default: accepted only when MCP_ALLOW_QUERY_TOKEN=true. "
+    "Send the token in the Authorization: Bearer header instead."
+)
 
 _ENDPOINT_EVENT_RE = re.compile(rb"event:\s*endpoint")
 _ENDPOINT_SESSION_RE = re.compile(rb"session_id=([0-9a-fA-F]{32})")
@@ -196,6 +204,44 @@ def _unauthorized(detail: str) -> HTTPException:
         detail=detail,
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def query_token_allowed() -> bool:
+    """?token= is off by default because URLs (and so the token) are written to reverse proxy access logs."""
+    return os.environ.get("MCP_ALLOW_QUERY_TOKEN", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _warn_query_token_used() -> None:
+    global _last_query_token_warning
+    now = time.monotonic()
+    if _last_query_token_warning and (now - _last_query_token_warning) < QUERY_TOKEN_WARNING_INTERVAL_SECONDS:
+        return
+    _last_query_token_warning = now
+    logger.warning(
+        "An MCP client sent its API token in the URL query string (?token=). This form is deprecated and "
+        "accepted only because MCP_ALLOW_QUERY_TOKEN=true; URLs are written to proxy access logs, so move "
+        "the client to the Authorization: Bearer header."
+    )
+
+
+def _extract_raw_token(request: Request, query_token: Optional[str]) -> Optional[str]:
+    """Token from the Authorization header (Bearer or raw value), else from ?token= when allowed."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.strip():
+        value = auth_header.strip()
+        if value.startswith("Bearer "):
+            return value[7:].strip() or None
+        return value
+    if query_token and query_token.strip():
+        if not query_token_allowed():
+            raise _unauthorized(
+                "API tokens in the URL query string are disabled because they are written to proxy access logs. "
+                "Send the token in the Authorization: Bearer header (MCP_ALLOW_QUERY_TOKEN=true accepts "
+                "query string tokens again)."
+            )
+        _warn_query_token_used()
+        return query_token.strip()
+    return None
 
 
 def _parse_session_id(session_id: Optional[str]) -> Optional[UUID]:
@@ -340,23 +386,6 @@ async def _reverify_sse_session_token(session: _SseSession) -> dict[str, Any]:
     return dict(record)
 
 
-def extract_raw_token(headers: list[tuple[bytes, bytes]], query_string: bytes) -> Optional[str]:
-    """Extract raw token string from Authorization header or ?token= query parameter."""
-    for name, value in headers:
-        if name.lower() == b"authorization":
-            val_str = value.decode("latin1", errors="replace").strip()
-            if val_str.startswith("Bearer "):
-                return val_str[7:].strip()
-
-    if query_string:
-        parsed = parse_qs(query_string.decode("latin1", errors="replace"))
-        token_vals = parsed.get("token")
-        if token_vals and token_vals[0].strip():
-            return token_vals[0].strip()
-
-    return None
-
-
 async def _dispatch_streamable_http(request: Request, token: Optional[str] = None) -> Response:
     """Validate token and dispatch request to the Streamable HTTP session manager."""
     # 1. Verify enable_mcp setting
@@ -367,23 +396,9 @@ async def _dispatch_streamable_http(request: Request, token: Optional[str] = Non
         )
 
     # 2. Extract and validate Bearer token
-    auth_header = request.headers.get("Authorization")
-    raw_token = None
-    if auth_header:
-        auth_header_clean = auth_header.strip()
-        if auth_header_clean.startswith("Bearer "):
-            raw_token = auth_header_clean[7:].strip()
-        elif auth_header_clean:
-            raw_token = auth_header_clean
-    elif token and token.strip():
-        raw_token = token.strip()
-
+    raw_token = _extract_raw_token(request, token)
     if not raw_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization Bearer token required.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unauthorized("Authorization Bearer token required.")
 
     token_info = await validate_mcp_token(raw_token)
 
@@ -423,7 +438,7 @@ async def _dispatch_streamable_http(request: Request, token: Optional[str] = Non
 @router.delete("/")
 async def handle_mcp_streamable_http_root(
     request: Request,
-    token: Optional[str] = Query(None),
+    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
 ):
     """Handle Streamable HTTP transport requests on the root MCP endpoint."""
     return await _dispatch_streamable_http(request, token)
@@ -434,7 +449,7 @@ async def handle_mcp_streamable_http_root(
 @router.delete("/sse")
 async def handle_mcp_streamable_http_sse(
     request: Request,
-    token: Optional[str] = Query(None),
+    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
 ):
     """Handle Streamable HTTP requests directed at the SSE sub-path."""
     return await _dispatch_streamable_http(request, token)
@@ -443,7 +458,7 @@ async def handle_mcp_streamable_http_sse(
 @router.get("/sse")
 async def handle_mcp_sse(
     request: Request,
-    token: Optional[str] = Query(None),
+    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
 ):
     """
     Handle incoming SSE transport stream for Model Context Protocol.
@@ -458,23 +473,9 @@ async def handle_mcp_sse(
         )
 
     # 2. Extract and validate Bearer token
-    auth_header = request.headers.get("Authorization")
-    raw_token = None
-    if auth_header:
-        auth_header_clean = auth_header.strip()
-        if auth_header_clean.startswith("Bearer "):
-            raw_token = auth_header_clean[7:].strip()
-        elif auth_header_clean:
-            raw_token = auth_header_clean
-    elif token and token.strip():
-        raw_token = token.strip()
-
+    raw_token = _extract_raw_token(request, token)
     if not raw_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization Bearer token required.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unauthorized("Authorization Bearer token required.")
 
     token_info = await validate_mcp_token(raw_token)
 
@@ -511,7 +512,7 @@ async def handle_mcp_sse(
 @router.post("/messages/")
 async def handle_mcp_messages(
     request: Request,
-    token: Optional[str] = Query(None),
+    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
     session_id: Optional[str] = Query(None),
 ):
     """Handle incoming JSON-RPC client messages linked to active SSE transport sessions."""
@@ -525,16 +526,7 @@ async def handle_mcp_messages(
     sse = get_sse_transport()
 
     # 2. Check token authentication if presented
-    auth_header = request.headers.get("Authorization")
-    raw_token = None
-    if auth_header:
-        auth_header_clean = auth_header.strip()
-        if auth_header_clean.startswith("Bearer "):
-            raw_token = auth_header_clean[7:].strip()
-        elif auth_header_clean:
-            raw_token = auth_header_clean
-    elif token and token.strip():
-        raw_token = token.strip()
+    raw_token = _extract_raw_token(request, token)
 
     session_uuid = _parse_session_id(session_id)
     session = _sse_sessions.get(session_uuid) if session_uuid is not None else None

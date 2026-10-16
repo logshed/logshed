@@ -997,9 +997,10 @@ class TestMCPApiAndTransport:
         assert "Model Context Protocol is disabled in system settings" in post_res.json()["detail"]
 
     @pytest.mark.asyncio
-    async def test_mcp_sse_accepts_query_token_parameter(
-        self, client: AsyncClient, auth_headers: dict
+    async def test_mcp_sse_accepts_query_token_parameter_when_allowed(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
     ):
+        monkeypatch.setenv("MCP_ALLOW_QUERY_TOKEN", "true")
         await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
         token_res = await client.post(
             "/api/tokens",
@@ -1255,6 +1256,67 @@ class TestMCPApiAndTransport:
         assert data["breakdown"]["error"] == 2
 
 
+class TestQueryStringToken:
+    """S-20: ?token= ends up in proxy access logs, so it is refused unless MCP_ALLOW_QUERY_TOKEN=true."""
+
+    @pytest.mark.asyncio
+    async def test_query_token_rejected_by_default(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        accept = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+
+        for res in (
+            await client.post(f"/mcp?token={token['raw']}", json=INIT_PAYLOAD, headers=accept),
+            await client.post(f"/api/v1/mcp?token={token['raw']}", json=INIT_PAYLOAD, headers=accept),
+            await client.post(f"/api/v1/mcp/sse?token={token['raw']}", json=INIT_PAYLOAD, headers=accept),
+        ):
+            assert res.status_code == 401
+            assert "Authorization" in res.json()["detail"]
+            assert "query string" in res.json()["detail"]
+
+        # Legacy SSE connect (driven over ASGI so an accepted stream cannot hang the test)
+        query_sse = await LegacySseClient(query=f"token={token['raw']}").connect()
+        await query_sse.close()
+        assert query_sse.status == 401
+
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            res = await client.post(f"{sse.endpoint}&token={token['raw']}", json=INIT_PAYLOAD)
+            assert res.status_code == 401
+            assert "query string" in res.json()["detail"]
+            # The header form keeps working
+            await sse_initialize(client, sse, headers=bearer(token["raw"]))
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_query_token_accepted_with_flag_and_logs_a_warning(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch, caplog
+    ):
+        monkeypatch.setenv("MCP_ALLOW_QUERY_TOKEN", "true")
+        mcp_api_mod._last_query_token_warning = 0.0
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        accept = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+
+        with caplog.at_level("WARNING", logger="app.api.mcp"):
+            res = await client.post(f"/mcp?token={token['raw']}", json=INIT_PAYLOAD, headers=accept)
+        assert res.status_code == 200
+        assert "LogShed" in res.text
+        assert any("deprecated" in r.getMessage() and "MCP_ALLOW_QUERY_TOKEN" in r.getMessage() for r in caplog.records)
+        assert token["raw"] not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_header_wins_over_query_token(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        res = await client.post(
+            "/mcp?token=ls_live_ignored",
+            json=INIT_PAYLOAD,
+            headers=_streamable_headers(token["raw"]),
+        )
+        assert res.status_code == 200
+
 
 class TestMCPCli:
     """Tests for CLI subcommand integration."""
@@ -1289,8 +1351,9 @@ class TestMCPCsrfExemption:
 
     @pytest.mark.asyncio
     async def test_raw_token_post_without_csrf_header_not_rejected_by_csrf(
-        self, client: AsyncClient, auth_headers: dict
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
     ):
+        monkeypatch.setenv("MCP_ALLOW_QUERY_TOKEN", "true")
         await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
         token_res = await client.post(
             "/api/tokens",
