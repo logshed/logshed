@@ -1053,7 +1053,7 @@ class TestLogStreamAndFacets:
 
     @pytest.mark.asyncio
     async def test_logs_datetime_parameters_validation(self, client: AsyncClient, auth_cookie: dict):
-        """Validates ISO-8601 formatting for from and to query params on /api/logs."""
+        """Validates ISO-8601 or relative time formatting for from and to query params on /api/logs."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
 
         # Valid ISO datetime
@@ -1069,7 +1069,7 @@ class TestLogStreamAndFacets:
         assert "Invalid datetime format" in res_bad_from.json()["detail"]
 
         # Malformed 'to' parameter
-        res_bad_to = await client.get("/api/logs", params={"to": "yesterday"})
+        res_bad_to = await client.get("/api/logs", params={"to": "the day before"})
         assert res_bad_to.status_code == 422
         assert "Invalid datetime format" in res_bad_to.json()["detail"]
 
@@ -1147,3 +1147,151 @@ class TestLogStreamAndFacets:
 
 
 
+# ===================================================================
+# 4. Time bounds, FTS error handling and database busy mapping
+# ===================================================================
+
+class _LockedFtsCursor:
+    """Cursor proxy that fails every FTS MATCH statement with a lock error."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, sql, *args, **kwargs):
+        if "MATCH" in sql:
+            raise sqlite3.OperationalError("database is locked")
+        return self._cursor.execute(sql, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _LockedFtsConnection:
+    """Connection proxy whose FTS MATCH statements fail with a lock error."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self):
+        return _LockedFtsCursor(self._conn.cursor())
+
+    def execute(self, sql, *args, **kwargs):
+        if "MATCH" in sql:
+            raise sqlite3.OperationalError("database is locked")
+        return self._conn.execute(sql, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def _patch_locked_fts(monkeypatch, module) -> None:
+    real_run_db_query = module.run_db_query
+
+    async def _locked_run_db_query(fn, *args, **kwargs):
+        return await real_run_db_query(lambda conn: fn(_LockedFtsConnection(conn)), *args, **kwargs)
+
+    monkeypatch.setattr(module, "run_db_query", _locked_run_db_query)
+
+
+def _utc_row(ts: str, app_name: str = "web", message: str = "boundary row") -> dict:
+    return {
+        "timestamp": ts,
+        "received_at": ts,
+        "source_ip": "10.0.0.1",
+        "source_alias": "srv1",
+        "app_name": app_name,
+        "facility": 1,
+        "severity": 6,
+        "message": message,
+        "raw": message,
+    }
+
+
+class TestTimeBoundsAndErrors:
+
+    @pytest.mark.asyncio
+    async def test_row_exactly_at_browser_bound_is_included(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """The browser sends toISOString() (milliseconds and Z); a row stored at that instant must match."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        stored = datetime.datetime(2026, 10, 15, 12, 0, tzinfo=datetime.timezone.utc).isoformat()
+        _seed_logs(tmp_path / "logs.db", [_utc_row(stored)])
+
+        res_from = await client.get("/api/logs", params={"from": "2026-10-15T12:00:00.000Z"})
+        assert res_from.status_code == 200
+        assert res_from.json()["total"] == 1
+
+        res_to = await client.get("/api/logs", params={"to": "2026-10-15T12:00:00.000Z"})
+        assert res_to.status_code == 200
+        assert res_to.json()["total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_offset_bounds_are_converted_to_utc(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        inside = datetime.datetime(2026, 10, 15, 10, 30, tzinfo=datetime.timezone.utc).isoformat()
+        outside = datetime.datetime(2026, 10, 15, 11, 30, tzinfo=datetime.timezone.utc).isoformat()
+        _seed_logs(tmp_path / "logs.db", [_utc_row(inside, message="inside"), _utc_row(outside, message="outside")])
+
+        # 12:00+02:00 to 13:00+02:00 is 10:00 to 11:00 UTC
+        res = await client.get(
+            "/api/logs",
+            params={"from": "2026-10-15T12:00:00+02:00", "to": "2026-10-15T13:00:00+02:00"},
+        )
+        assert res.status_code == 200
+        assert [log["message"] for log in res.json()["logs"]] == ["inside"]
+
+    @pytest.mark.asyncio
+    async def test_relative_from_is_accepted(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        recent = (now - datetime.timedelta(minutes=10)).isoformat()
+        old = (now - datetime.timedelta(hours=3)).isoformat()
+        _seed_logs(tmp_path / "logs.db", [_utc_row(recent, message="recent"), _utc_row(old, message="old")])
+
+        res = await client.get("/api/logs", params={"from": "1h"})
+        assert res.status_code == 200
+        assert [log["message"] for log in res.json()["logs"]] == ["recent"]
+
+    @pytest.mark.asyncio
+    async def test_delete_preview_count_matches_list_at_boundaries(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        rows = [
+            _utc_row(datetime.datetime(2026, 10, 15, 10, 0, tzinfo=datetime.timezone.utc).isoformat()),
+            _utc_row(datetime.datetime(2026, 10, 15, 10, 30, 0, 250000, tzinfo=datetime.timezone.utc).isoformat()),
+            _utc_row(datetime.datetime(2026, 10, 15, 11, 0, tzinfo=datetime.timezone.utc).isoformat()),
+            _utc_row(datetime.datetime(2026, 10, 15, 11, 0, 1, tzinfo=datetime.timezone.utc).isoformat()),
+        ]
+        _seed_logs(tmp_path / "logs.db", rows)
+
+        bounds = {"from": "2026-10-15T12:00:00.000+02:00", "to": "2026-10-15T11:00:00.000Z"}
+        res_list = await client.get("/api/logs", params=bounds)
+        assert res_list.status_code == 200
+        assert res_list.json()["total"] == 3
+
+        res_preview = await client.post("/api/logs/delete/preview", json=bounds)
+        assert res_preview.status_code == 200
+        assert res_preview.json()["matched_count"] == 3
+
+        res_delete = await client.post("/api/logs/delete", json=bounds)
+        assert res_delete.status_code == 200
+        assert res_delete.json()["deleted_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_fts_lock_error_returns_503_not_empty_results(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, monkeypatch
+    ):
+        """Only FTS syntax errors fall back to escaped tokens; a locked database is reported as busy."""
+        from app.api import logs as logs_mod
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        _seed_logs(tmp_path / "logs.db", [_utc_row("2026-10-15T12:00:00+00:00")])
+        _patch_locked_fts(monkeypatch, logs_mod)
+
+        res = await client.get("/api/logs", params={"query": "boundary"})
+        assert res.status_code == 503
+        assert "locked" not in res.json()["detail"].lower()

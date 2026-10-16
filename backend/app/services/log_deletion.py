@@ -8,20 +8,15 @@ and storage metrics updates.
 """
 
 import asyncio
-import datetime
 import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional, Union
 
 from app.core.migrations import get_connection
-from app.core.utils import (
-    escape_fts_tokens,
-    expand_source_aliases,
-    format_fts_query,
-    parse_multi_values,
-)
+from app.core.utils import expand_source_aliases, parse_multi_values
 from app.models import LogDeleteRequest
+from app.services.log_query import add_fts_filter, execute_with_fts_fallback, to_utc_bound
 
 logger = logging.getLogger(__name__)
 
@@ -78,34 +73,29 @@ def build_deletion_filter(
         where_clauses.append("logs.severity <= :severity_max")
         params["severity_max"] = criteria.severity_max
 
-    # 5. Datetime bounds
+    # 5. Datetime bounds (ISO-8601 with any offset, or relative such as '1h'), compared in UTC
     if criteria.from_:
         has_filter = True
         try:
-            datetime.datetime.fromisoformat(criteria.from_)
-        except (ValueError, TypeError):
+            from_time = to_utc_bound(criteria.from_)
+        except ValueError:
             raise ValueError(f"Invalid 'from' datetime format: {criteria.from_}")
         where_clauses.append("logs.timestamp >= :from_time")
-        params["from_time"] = criteria.from_
+        params["from_time"] = from_time
 
     if criteria.to:
         has_filter = True
         try:
-            datetime.datetime.fromisoformat(criteria.to)
-        except (ValueError, TypeError):
+            to_time = to_utc_bound(criteria.to)
+        except ValueError:
             raise ValueError(f"Invalid 'to' datetime format: {criteria.to}")
         where_clauses.append("logs.timestamp <= :to_time")
-        params["to_time"] = criteria.to
+        params["to_time"] = to_time
 
     # 6. FTS search query
     if criteria.query and criteria.query.strip():
         has_filter = True
-        fts_term = format_fts_query(criteria.query)
-        if not fts_term.strip():
-            where_clauses.append("0")
-        else:
-            where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
-            params["fts_term"] = fts_term
+        add_fts_filter(where_clauses, params, criteria.query)
 
     if not has_filter and not criteria.delete_all:
         raise ValueError("Deletion request must specify at least one filter criterion or set delete_all=True.")
@@ -124,18 +114,13 @@ def count_matching_logs(db_path: Union[str, Path], criteria: LogDeleteRequest) -
         where_sql, params = build_deletion_filter(criteria, conn=conn)
         cursor = conn.cursor()
         count_sql = f"SELECT COUNT(*) FROM logs {where_sql}"
-        try:
-            cursor.execute(count_sql, params)
+
+        def _count(run_params: dict[str, Any]) -> int:
+            cursor.execute(count_sql, run_params)
             row = cursor.fetchone()
             return row[0] if row else 0
-        except sqlite3.OperationalError:
-            if "fts_term" in params and criteria.query:
-                fallback_term = escape_fts_tokens(criteria.query)
-                params["fts_term"] = fallback_term
-                cursor.execute(count_sql, params)
-                row = cursor.fetchone()
-                return row[0] if row else 0
-            raise
+
+        return execute_with_fts_fallback(_count, params, criteria.query, empty=0)
     finally:
         conn.close()
 
@@ -191,27 +176,18 @@ def execute_delete_logs(
                     LIMIT :batch_limit
                 )
             """
-            try:
+
+            def _delete_batches(run_params: dict[str, Any]) -> int:
+                deleted = 0
                 while True:
-                    cursor.execute(delete_sql, {**params, "batch_limit": batch_size})
+                    cursor.execute(delete_sql, {**run_params, "batch_limit": batch_size})
                     count = cursor.rowcount
                     conn.commit()
-                    total_deleted += count
+                    deleted += count
                     if count == 0:
-                        break
-            except sqlite3.OperationalError:
-                if "fts_term" in params and criteria.query:
-                    fallback_term = escape_fts_tokens(criteria.query)
-                    params["fts_term"] = fallback_term
-                    while True:
-                        cursor.execute(delete_sql, {**params, "batch_limit": batch_size})
-                        count = cursor.rowcount
-                        conn.commit()
-                        total_deleted += count
-                        if count == 0:
-                            break
-                else:
-                    raise
+                        return deleted
+
+            total_deleted += execute_with_fts_fallback(_delete_batches, params, criteria.query, empty=0)
 
         # Compact FTS5 index if a significant volume of rows was deleted
         if total_deleted >= 5000:

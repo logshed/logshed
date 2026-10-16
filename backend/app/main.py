@@ -541,16 +541,8 @@ def create_app() -> FastAPI:
             content={"detail": clean_detail},
         )
 
-    # FTS search consistency middleware: ensures pending unindexed logs are caught up
-    # prior to executing full-text search queries by signaling the background worker.
-    @app.middleware("http")
-    async def fts_search_consistency(request: Request, call_next):
-        if request.url.path == "/api/logs" and request.query_params.get("query"):
-            from app.services.fts_indexer import get_fts_worker
-            worker = get_fts_worker()
-            if worker:
-                worker.notify_new_logs()
-        return await call_next(request)
+    # Full-text searches wake the FTS indexer from the shared query path
+    # (app.services.log_query.execute_with_fts_fallback), which MCP calls also pass through.
 
     # Security headers middleware
     @app.middleware("http")

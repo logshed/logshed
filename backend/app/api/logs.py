@@ -3,9 +3,9 @@ Log querying, streaming (SSE), and context API endpoints for LogShed.
 """
 
 import asyncio
-import datetime
 import json
 import logging
+import sqlite3
 from typing import Any, AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -24,14 +24,17 @@ from app.models import (
     LogListResponse,
 )
 from app.core.utils import (
-    escape_fts_tokens,
     expand_source_aliases,
-    format_fts_query,
     parse_multi_values,
 )
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
-
-import sqlite3
+from app.services.log_query import (
+    INVALID_DATETIME_DETAIL,
+    add_fts_filter,
+    db_busy_exception,
+    execute_with_fts_fallback,
+    to_utc_bound,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +47,8 @@ async def list_logs(
     source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip (multi-value supported)"),
     app_name: Optional[list[str]] = Query(None, description="Filter by application name (multi-value supported)"),
     severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0-7, lower is more severe)"),
-    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter"),
-    to: Optional[str] = Query(None, description="ISO datetime end filter"),
+    from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h')"),
+    to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
     limit: int = Query(100, ge=1, le=1000, description="Max logs to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     user: dict = Depends(get_current_user),
@@ -53,42 +56,20 @@ async def list_logs(
     """
     Query logs with full-text search, source/app filtering, severity range, and time bounds.
     Supports native SQLite FTS5 query syntax (e.g. column filters, AND/OR/NOT, wildcards)
-    and automatic prefix matching for search-as-you-type.
+    and automatic prefix matching for search-as-you-type. Time bounds accept ISO-8601
+    strings with any offset or relative durations such as '1h', and are compared in UTC.
     """
-    if from_:
-        try:
-            datetime.datetime.fromisoformat(from_)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string.",
-            )
-
-    if to:
-        try:
-            datetime.datetime.fromisoformat(to)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid datetime format. Expected ISO-8601 string.",
-            )
+    try:
+        from_time = to_utc_bound(from_)
+        to_time = to_utc_bound(to)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=INVALID_DATETIME_DETAIL)
 
     def _query_db(conn):
         where_clauses: list[str] = []
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
-        is_fts = bool(query and query.strip())
-
-        if is_fts:
-            fts_term = format_fts_query(query)
-            if not fts_term.strip():
-                where_clauses.append("0")
-            else:
-                # Uncorrelated subquery: FTS5 evaluates the MATCH exactly once. A JOIN lets the planner
-                # drive from a relational index (e.g. app_name) and re-run the MATCH per candidate row,
-                # rebuilding the full doclist of auto-prefixed terms each time (quadratic cost).
-                where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
-                params["fts_term"] = fts_term
+        add_fts_filter(where_clauses, params, query)
 
         parsed_sources = expand_source_aliases(source, conn=conn)
         if parsed_sources:
@@ -110,13 +91,13 @@ async def list_logs(
             where_clauses.append("logs.severity <= :severity_max")
             params["severity_max"] = severity_max
 
-        if from_:
+        if from_time:
             where_clauses.append("logs.timestamp >= :from_time")
-            params["from_time"] = from_
+            params["from_time"] = from_time
 
-        if to:
+        if to_time:
             where_clauses.append("logs.timestamp <= :to_time")
-            params["to_time"] = to
+            params["to_time"] = to_time
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -135,30 +116,14 @@ async def list_logs(
         """
 
         cursor = conn.cursor()
-        try:
-            cursor.execute(count_sql, params)
-            total = cursor.fetchone()[0]
-            cursor.execute(select_sql, params)
-            rows = cursor.fetchall()
-        except sqlite3.OperationalError as e:
-            if is_fts:
-                logger.info(f"FTS5 query '{params.get('fts_term')}' failed ({e}), falling back to escaped token search.")
-                fallback_term = escape_fts_tokens(query)
-                if not fallback_term.strip():
-                    total = 0
-                    rows = []
-                else:
-                    params["fts_term"] = fallback_term
-                    try:
-                        cursor.execute(count_sql, params)
-                        total = cursor.fetchone()[0]
-                        cursor.execute(select_sql, params)
-                        rows = cursor.fetchall()
-                    except sqlite3.OperationalError:
-                        total = 0
-                        rows = []
-            else:
-                raise
+
+        def _run(run_params: dict[str, Any]):
+            cursor.execute(count_sql, run_params)
+            run_total = cursor.fetchone()[0]
+            cursor.execute(select_sql, run_params)
+            return run_total, cursor.fetchall()
+
+        total, rows = execute_with_fts_fallback(_run, params, query, empty=(0, []))
 
         logs = [
             LogEntry(
@@ -179,7 +144,10 @@ async def list_logs(
         total_capped = bool(total >= count_limit)
         return logs, total, total_capped
 
-    logs, total, total_capped = await run_db_query(_query_db)
+    try:
+        logs, total, total_capped = await run_db_query(_query_db)
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "listing logs")
     return LogListResponse(
         logs=logs,
         total=total,

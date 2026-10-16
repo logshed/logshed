@@ -23,6 +23,7 @@ from app.core.sse import sse_manager
 from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
+from app.services.fts_indexer import index_pending_logs
 
 
 @pytest.fixture(autouse=True)
@@ -785,3 +786,91 @@ class TestKeysetPagination:
         assert "SCAN logs" not in details
         # Only ties on the same timestamp are sorted ("LAST TERM"), never the whole result set
         assert "TEMP B-TREE FOR ORDER BY" not in details
+
+
+class TestFtsFallbackAndConsistency:
+    """FTS5 syntax error fallback, busy mapping and indexer wake-up on the v1 log endpoints."""
+
+    def _seed(self, db_path: Path) -> None:
+        with get_connection(db_path) as conn:
+            for i, message in enumerate(
+                ["key=value pair seen", "foo-bar happened", "unbalanced quote", "a:b ratio", "plain row"], start=1
+            ):
+                ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
+                _insert_log_at(conn, ts, message=message)
+            conn.commit()
+        index_pending_logs(db_path)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query", ['"unbalanced', "foo AND", "a:b", "foo-bar", "key=value", "-foo", "user@host"]
+    )
+    async def test_unusual_queries_never_return_500(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path, query: str
+    ):
+        self._seed(tmp_path / "logs.db")
+        res = await client.get("/api/v1/logs", params={"query": query}, headers=logs_token_headers)
+        assert res.status_code == 200, res.text
+        res_count = await client.get(
+            "/api/v1/logs/count", params={"query": query}, headers=logs_token_headers
+        )
+        assert res_count.status_code == 200, res_count.text
+        assert res_count.json()["total"] == res.json()["total"]
+
+    @pytest.mark.asyncio
+    async def test_fallback_still_finds_punctuated_terms(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+        res = await client.get("/api/v1/logs", params={"query": "foo-bar"}, headers=logs_token_headers)
+        assert res.status_code == 200
+        assert [e["message"] for e in res.json()["logs"]] == ["foo-bar happened"]
+
+    @pytest.mark.asyncio
+    async def test_lock_error_returns_503(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path, monkeypatch
+    ):
+        from app.api import external_v1 as v1_mod
+        from tests.test_logs_api import _patch_locked_fts
+
+        self._seed(tmp_path / "logs.db")
+        _patch_locked_fts(monkeypatch, v1_mod)
+        for path in ("/api/v1/logs", "/api/v1/logs/count"):
+            res = await client.get(path, params={"query": "plain"}, headers=logs_token_headers)
+            assert res.status_code == 503, path
+            assert "locked" not in res.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_fts_query_wakes_the_indexer(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        from unittest.mock import MagicMock
+        from app.services.fts_indexer import set_fts_worker
+
+        self._seed(tmp_path / "logs.db")
+        worker = MagicMock()
+        set_fts_worker(worker)
+        try:
+            res = await client.get("/api/v1/logs", headers=logs_token_headers)
+            assert res.status_code == 200
+            assert not worker.notify_new_logs.called
+
+            res = await client.get("/api/v1/logs", params={"query": "plain"}, headers=logs_token_headers)
+            assert res.status_code == 200
+            assert worker.notify_new_logs.call_count == 1
+
+            res = await client.get("/api/v1/logs/count", params={"query": "plain"}, headers=logs_token_headers)
+            assert res.status_code == 200
+            assert worker.notify_new_logs.call_count == 2
+        finally:
+            set_fts_worker(None)
+
+    @pytest.mark.asyncio
+    async def test_v1_and_ui_agree_on_time_bounds(
+        self, client: AsyncClient, logs_token_headers: dict, auth_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+        bounds = {"from": "2026-01-01T02:00:02.000+02:00", "to": "2026-01-01T00:00:04.000Z"}
+        res_v1 = await client.get("/api/v1/logs/count", params=bounds, headers=logs_token_headers)
+        res_ui = await client.get("/api/logs", params=bounds, headers=auth_headers)
+        assert res_v1.json()["total"] == res_ui.json()["total"] == 3

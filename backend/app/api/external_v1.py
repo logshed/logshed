@@ -9,6 +9,7 @@ import base64
 import datetime
 import json
 import logging
+import sqlite3
 import threading
 import time
 from typing import Any, Optional
@@ -26,11 +27,9 @@ from app.core.pipeline import (
 )
 from app.core.utils import (
     expand_source_aliases,
-    format_fts_query,
     format_severity_label,
     parse_iso_to_utc_datetime,
     parse_multi_values,
-    parse_relative_or_iso_time,
     resolve_severity,
 )
 from app.models import (
@@ -72,6 +71,13 @@ from app.services.retention import (
     execute_prune_async,
     execute_vacuum,
     get_effective_retention_days,
+)
+from app.services.log_query import (
+    INVALID_DATETIME_DETAIL,
+    add_fts_filter,
+    db_busy_exception,
+    execute_with_fts_fallback,
+    to_utc_bound,
 )
 from app.services.storage_metrics import get_cached_storage_metrics
 from app.version import APP_VERSION
@@ -525,14 +531,7 @@ def build_log_where_clause(
     where_clauses: list[str] = []
     params: dict[str, Any] = {}
 
-    is_fts = bool(query and query.strip())
-    if is_fts:
-        fts_term = format_fts_query(query)
-        if not fts_term.strip():
-            where_clauses.append("0")
-        else:
-            where_clauses.append("logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)")
-            params["fts_term"] = fts_term
+    add_fts_filter(where_clauses, params, query)
 
     parsed_sources = expand_source_aliases(source, conn=conn)
     if parsed_sources:
@@ -554,10 +553,13 @@ def build_log_where_clause(
         where_clauses.append("logs.severity <= :severity_max")
         params["severity_max"] = severity_max
 
+    # Bounds are compared as strings, so they must use the stored UTC isoformat() layout
+    from_ts = to_utc_bound(from_ts)
     if from_ts:
         where_clauses.append("logs.timestamp >= :from_ts")
         params["from_ts"] = from_ts
 
+    to_ts = to_utc_bound(to_ts)
     if to_ts:
         where_clauses.append("logs.timestamp <= :to_ts")
         params["to_ts"] = to_ts
@@ -565,10 +567,6 @@ def build_log_where_clause(
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     return where_sql, params
 
-
-_INVALID_DATETIME_DETAIL = (
-    "Invalid datetime format. Expected ISO-8601 string or relative duration (e.g. '1h', '24h')."
-)
 
 _LOG_BASE_COLUMNS = (
     "logs.id, logs.timestamp, logs.received_at, logs.source_ip, "
@@ -595,17 +593,11 @@ def _parse_log_filters(
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-    if from_:
-        try:
-            from_ = parse_relative_or_iso_time(from_)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=422, detail=_INVALID_DATETIME_DETAIL)
-
-    if to:
-        try:
-            to = parse_relative_or_iso_time(to)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=422, detail=_INVALID_DATETIME_DETAIL)
+    try:
+        from_ = to_utc_bound(from_) if from_ else from_
+        to = to_utc_bound(to) if to else to
+    except ValueError:
+        raise HTTPException(status_code=422, detail=INVALID_DATETIME_DETAIL)
 
     return effective_severity_max, from_, to
 
@@ -692,19 +684,16 @@ async def search_logs_v1(
 
         # Total: capped count of all rows matching the filters (independent of the cursor
         # position), which avoids full table scans on broad queries.
-        db_cursor = conn.cursor()
         count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
-        db_cursor.execute(count_sql, {**params, "count_limit": _TOTAL_CAP})
-        total = db_cursor.fetchone()[0]
 
-        page_params = {**params, "fetch_limit": limit + 1}
         page_where = where_sql
+        cursor_params: dict[str, Any] = {}
         if cursor_pos is not None:
             keyset_sql = (
                 "(logs.timestamp < :cursor_ts OR (logs.timestamp = :cursor_ts AND logs.id < :cursor_id))"
             )
             page_where = f"{where_sql} AND {keyset_sql}" if where_sql else f"WHERE {keyset_sql}"
-            page_params["cursor_ts"], page_params["cursor_id"] = cursor_pos
+            cursor_params["cursor_ts"], cursor_params["cursor_id"] = cursor_pos
 
         select_sql = f"""
             SELECT {_log_columns(include_raw)}
@@ -713,8 +702,15 @@ async def search_logs_v1(
             ORDER BY logs.timestamp DESC, logs.id DESC
             LIMIT :fetch_limit
         """
-        db_cursor.execute(select_sql, page_params)
-        rows = db_cursor.fetchall()
+        db_cursor = conn.cursor()
+
+        def _run(run_params: dict[str, Any]):
+            db_cursor.execute(count_sql, {**run_params, "count_limit": _TOTAL_CAP})
+            run_total = db_cursor.fetchone()[0]
+            db_cursor.execute(select_sql, {**run_params, **cursor_params, "fetch_limit": limit + 1})
+            return run_total, db_cursor.fetchall()
+
+        total, rows = execute_with_fts_fallback(_run, params, query, empty=(0, []))
 
         # One extra row signals another page exists
         has_more = len(rows) > limit
@@ -723,7 +719,10 @@ async def search_logs_v1(
         logs_list = [_row_to_log_entry(r, include_raw) for r in rows]
         return logs_list, total, next_cursor
 
-    logs_out, total_count, next_cursor = await run_db_query(_query_db)
+    try:
+        logs_out, total_count, next_cursor = await run_db_query(_query_db)
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "searching logs")
     return ExternalLogListResponse(
         logs=logs_out,
         total=total_count,
@@ -762,11 +761,11 @@ async def count_logs_v1(
         cursor = conn.cursor()
         valid_group = (group_by or "").lower().strip()
 
-        def _total_count() -> int:
-            cursor.execute(f"SELECT COUNT(*) FROM logs {where_sql}", params)
+        def _total_count(run_params: dict[str, Any]) -> int:
+            cursor.execute(f"SELECT COUNT(*) FROM logs {where_sql}", run_params)
             return cursor.fetchone()[0]
 
-        def _limited_group(expr: str, label: str):
+        def _limited_group(run_params: dict[str, Any], expr: str, label: str):
             """Run a capped GROUP BY, fetching one extra row to detect truncation."""
             group_sql = f"""
                 SELECT {expr} as grp, COUNT(*) as cnt
@@ -776,17 +775,17 @@ async def count_logs_v1(
                 ORDER BY cnt DESC, grp ASC
                 LIMIT :group_fetch_limit
             """
-            cursor.execute(group_sql, {**params, "group_fetch_limit": group_limit + 1})
+            cursor.execute(group_sql, {**run_params, "group_fetch_limit": group_limit + 1})
             rows = cursor.fetchall()
             truncated = len(rows) > group_limit
             rows = rows[:group_limit]
             breakdown = {r["grp"]: r["cnt"] for r in rows}
             # When every group was returned, the group counts sum to the exact total,
             # so the extra COUNT query is only needed when the breakdown is truncated.
-            total = _total_count() if truncated else sum(breakdown.values())
+            total = _total_count(run_params) if truncated else sum(breakdown.values())
             return total, label, breakdown, truncated
 
-        if valid_group in ("severity", "level"):
+        def _severity_groups(run_params: dict[str, Any]):
             group_sql = f"""
                 SELECT logs.severity, COUNT(*) as cnt
                 FROM logs
@@ -794,7 +793,7 @@ async def count_logs_v1(
                 GROUP BY logs.severity
                 ORDER BY logs.severity ASC
             """
-            cursor.execute(group_sql, params)
+            cursor.execute(group_sql, run_params)
             rows = cursor.fetchall()
             breakdown: dict[str, int] = {}
             total = 0
@@ -806,16 +805,23 @@ async def count_logs_v1(
                 breakdown[label] = cnt
             return total, "severity", breakdown, False
 
+        if valid_group in ("severity", "level"):
+            run, label = _severity_groups, "severity"
         elif valid_group in ("app", "app_name"):
-            return _limited_group("COALESCE(logs.app_name, 'unknown')", "app")
-
+            run, label = (lambda p: _limited_group(p, "COALESCE(logs.app_name, 'unknown')", "app")), "app"
         elif valid_group in ("source", "source_alias", "host"):
-            return _limited_group("COALESCE(logs.source_alias, logs.source_ip, 'unknown')", "source")
-
+            run, label = (
+                lambda p: _limited_group(p, "COALESCE(logs.source_alias, logs.source_ip, 'unknown')", "source")
+            ), "source"
         else:
-            return _total_count(), None, {}, False
+            run, label = (lambda p: (_total_count(p), None, {}, False)), None
 
-    total, grouped_by_out, breakdown_out, truncated_out = await run_db_query(_count_db)
+        return execute_with_fts_fallback(run, params, query, empty=(0, label, {}, False))
+
+    try:
+        total, grouped_by_out, breakdown_out, truncated_out = await run_db_query(_count_db)
+    except sqlite3.OperationalError as exc:
+        raise db_busy_exception(exc, "counting logs")
     return LogCountResponse(
         total=total,
         grouped_by=grouped_by_out,

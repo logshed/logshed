@@ -4,7 +4,7 @@ Adversarial stress harness for Milestone 2:
 - Crash resilience and worker recovery across restarts with partial batches
 - Unindexed deletion safety (confirm NO database disk image is malformed)
 - Mixed boundary deletions and updates across indexed and unindexed boundaries
-- FTS search consistency middleware and retention coordination under stress
+- FTS indexer wake-up on search and retention coordination under stress
 """
 
 import asyncio
@@ -517,14 +517,14 @@ class TestAdversarialRetentionPruning:
 
 
 # ===================================================================
-# 5. Middleware, Special Tokens & Concurrency Stress
+# 5. Search Wake-up, Special Tokens & Concurrency Stress
 # ===================================================================
 
-class TestAdversarialMiddlewareAndConcurrency:
+class TestAdversarialSearchWakeupAndConcurrency:
 
     @pytest.mark.asyncio
-    async def test_search_consistency_middleware_indexes_on_query(self, db_path: Path, monkeypatch):
-        """HTTP GET /api/logs?query= signals running FTSIndexWorker via notify_new_logs without opening competing transactions."""
+    async def test_search_query_wakes_indexer(self, db_path: Path, monkeypatch):
+        """HTTP GET /api/logs?query= signals the running FTSIndexWorker via notify_new_logs (from the shared query path) without opening competing transactions."""
         from unittest.mock import MagicMock
         from httpx import ASGITransport, AsyncClient
         from app.main import app
@@ -595,7 +595,7 @@ class TestAdversarialMiddlewareAndConcurrency:
                 resp = await client.get(f"/api/logs?query={unique_search_term}")
                 assert resp.status_code == 200
 
-            # Worker was signaled by middleware; wait for background indexing to complete
+            # Worker was signaled by the search; wait for background indexing to complete
             last_id_after = 0
             for _ in range(50):
                 conn = get_connection(db_path)
