@@ -916,3 +916,66 @@ class TestAliasLessHosts:
         res = await client.get("/api/v1/logs", params={"source": "10.0.0.2"}, headers=logs_token_headers)
         assert res.status_code == 200
         assert {e["source_alias"] for e in res.json()["logs"]} == {"10.0.0.2"}
+
+
+class TestKeysetPlans:
+    """The OR keyset predicate is already turned into an index range by SQLite (B-17 guard)."""
+
+    @pytest.mark.parametrize(
+        "where, index",
+        [
+            ("logs.app_name IN ('web') AND ", "idx_logs_app_time"),
+            ("logs.source_alias IN ('host-a') AND ", "idx_logs_src_time"),
+            ("logs.severity <= 3 AND ", "idx_logs_time_sev"),
+            ("logs.timestamp >= '2026-01-01T00:00:10+00:00' AND ", "idx_logs_time_sev"),
+        ],
+    )
+    def test_filtered_cursor_page_searches_a_time_index(self, tmp_path: Path, where: str, index: str):
+        db_path = tmp_path / "logs.db"
+        run_migrations(db_path)
+        with get_connection(db_path) as conn:
+            for i in range(1, 300):
+                _insert_log(conn, i, "10.0.0.1", "host-a" if i % 3 else "host-b", "web" if i % 2 else "db", severity=i % 8)
+            conn.commit()
+            plan = conn.execute(
+                f"""
+                EXPLAIN QUERY PLAN
+                SELECT logs.id, logs.message FROM logs
+                WHERE {where}(logs.timestamp < :ts OR (logs.timestamp = :ts AND logs.id < :id))
+                ORDER BY logs.timestamp DESC, logs.id DESC
+                LIMIT 51
+                """,
+                {"ts": (_BASE_TS + timedelta(seconds=150)).isoformat(), "id": 150},
+            ).fetchall()
+        details = " | ".join(str(r[-1]) for r in plan)
+        assert "SEARCH logs USING" in details and index in details and "timestamp<?" in details
+        assert "TEMP B-TREE FOR ORDER BY" not in details
+
+    def test_context_queries_search_the_source_time_index(self, tmp_path: Path):
+        db_path = tmp_path / "logs.db"
+        run_migrations(db_path)
+        with get_connection(db_path) as conn:
+            for i in range(1, 300):
+                _insert_log(conn, i, "10.0.0.1", "host-a", "web")
+            conn.commit()
+            params = {"ts": (_BASE_TS + timedelta(seconds=150)).isoformat(), "id": 150}
+            before = conn.execute(
+                """
+                EXPLAIN QUERY PLAN SELECT * FROM logs
+                WHERE source_alias = 'host-a' AND (timestamp < :ts OR (timestamp = :ts AND id < :id))
+                ORDER BY timestamp DESC, id DESC LIMIT 10
+                """,
+                params,
+            ).fetchall()
+            after = conn.execute(
+                """
+                EXPLAIN QUERY PLAN SELECT * FROM logs
+                WHERE source_alias = '' AND source_ip = '10.0.0.1' AND (timestamp > :ts OR (timestamp = :ts AND id > :id))
+                ORDER BY timestamp ASC, id ASC LIMIT 10
+                """,
+                params,
+            ).fetchall()
+        before_details = " | ".join(str(r[-1]) for r in before)
+        after_details = " | ".join(str(r[-1]) for r in after)
+        assert "idx_logs_src_time (source_alias=? AND timestamp<?)" in before_details
+        assert "idx_logs_src_time (source_alias=? AND timestamp>?)" in after_details
