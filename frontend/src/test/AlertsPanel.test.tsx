@@ -1125,6 +1125,136 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(configureBtn);
     expect(onNavigateToSettings).toHaveBeenCalled();
   });
+
+  describe('reordering and history paging', () => {
+    const makeRule = (id: number, name: string): AlertRule => ({ ...mockRules[0], id, name, display_order: id });
+    const ruleOrder = () =>
+      screen
+        .getAllByLabelText(/Move rule \d+ up/)
+        .map((el) => Number(el.getAttribute('aria-label')!.match(/\d+/)![0]));
+
+    it('sends reorder requests one at a time and ends on the last move (B-50)', async () => {
+      const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B'), makeRule(3, 'Rule C')];
+      vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
+      const resolvers: Array<(r: AlertRule[]) => void> = [];
+      const reorderSpy = vi.spyOn(alertsApi, 'reorderAlertRules').mockImplementation(
+        () => new Promise<AlertRule[]>((resolve) => resolvers.push(resolve))
+      );
+
+      render(<AlertsPanel />);
+      await waitFor(() => expect(screen.getByText('Rule A')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByLabelText('Move rule 1 down'));
+      expect(ruleOrder()).toEqual([2, 1, 3]);
+      fireEvent.click(screen.getByLabelText('Move rule 1 down'));
+      expect(ruleOrder()).toEqual([2, 3, 1]);
+
+      // Only one request is in flight at a time
+      expect(reorderSpy).toHaveBeenCalledTimes(1);
+      expect(reorderSpy).toHaveBeenLastCalledWith([2, 1, 3]);
+
+      await act(async () => {
+        resolvers[0]([rules[1], rules[0], rules[2]]);
+      });
+      await waitFor(() => expect(reorderSpy).toHaveBeenCalledTimes(2));
+      expect(reorderSpy).toHaveBeenLastCalledWith([2, 3, 1]);
+      // The older server response must not overwrite the newer optimistic order
+      expect(ruleOrder()).toEqual([2, 3, 1]);
+
+      await act(async () => {
+        resolvers[1]([rules[1], rules[2], rules[0]]);
+      });
+      expect(ruleOrder()).toEqual([2, 3, 1]);
+    });
+
+    it('rolls back to the last server-confirmed order when a reorder fails (B-50)', async () => {
+      const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B'), makeRule(3, 'Rule C')];
+      vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
+      const calls: Array<{ resolve: (r: AlertRule[]) => void; reject: (e: Error) => void }> = [];
+      const reorderSpy = vi.spyOn(alertsApi, 'reorderAlertRules').mockImplementation(
+        () => new Promise<AlertRule[]>((resolve, reject) => calls.push({ resolve, reject }))
+      );
+
+      render(<AlertsPanel />);
+      await waitFor(() => expect(screen.getByText('Rule A')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByLabelText('Move rule 1 down'));
+      fireEvent.click(screen.getByLabelText('Move rule 1 down'));
+      expect(ruleOrder()).toEqual([2, 3, 1]);
+
+      await act(async () => {
+        calls[0].reject(new Error('boom'));
+      });
+      await waitFor(() => expect(ruleOrder()).toEqual([1, 2, 3]));
+      expect(reorderSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('boom')).toBeInTheDocument();
+    });
+
+    it('clears the dragged row state when a drag ends outside a row (B-51)', async () => {
+      const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B')];
+      vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
+      render(<AlertsPanel />);
+      await waitFor(() => expect(screen.getByText('Rule A')).toBeInTheDocument());
+
+      const row = screen.getByText('Rule A').closest('[draggable="true"]') as HTMLElement;
+      fireEvent.dragStart(row, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+      expect(row.className).toContain('opacity-40');
+      fireEvent.dragEnd(row);
+      expect(row.className).not.toContain('opacity-40');
+    });
+
+    it('keeps the drop rules badge at its loaded count while the Drop Rules tab loads (B-51)', async () => {
+      render(<AlertsPanel />);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Drop Rules.*1\s*\/\s*2/i })).toBeInTheDocument();
+      });
+
+      let resolveDrops: (r: typeof mockDropRules) => void = () => {};
+      vi.spyOn(dropRulesApi, 'fetchDropRules').mockImplementation(
+        () => new Promise((resolve) => { resolveDrops = resolve; })
+      );
+      fireEvent.click(screen.getByRole('button', { name: /Drop Rules/i }));
+      await waitFor(() => expect(dropRulesApi.fetchDropRules).toHaveBeenCalled());
+
+      expect(screen.queryByRole('button', { name: /Drop Rules.*0\s*\/\s*0/i })).toBeNull();
+      expect(screen.getByRole('button', { name: /Drop Rules.*1\s*\/\s*2/i })).toBeInTheDocument();
+      await act(async () => {
+        resolveDrops(mockDropRules);
+      });
+      expect(screen.getByRole('button', { name: /Drop Rules.*1\s*\/\s*2/i })).toBeInTheDocument();
+    });
+
+    it('steps back a page when deleting the only row on the last history page (B-52)', async () => {
+      const item = (id: number) => ({ ...mockHistory.items[0], id, rule_name: `Rule ${id}` });
+      const page1 = { items: [item(1)], total: 51, limit: 50, offset: 0 };
+      const page2 = { items: [item(2)], total: 51, limit: 50, offset: 50 };
+      const afterDelete = { items: [item(1)], total: 50, limit: 50, offset: 0 };
+      let deleted = false;
+      const fetchSpy = vi.spyOn(alertsApi, 'fetchAlertHistory').mockImplementation(async (_limit, offset) => {
+        if (deleted) {
+          // The server only has 50 rows now, so offset 50 is an empty page
+          return offset ? { items: [], total: 50, limit: 50, offset: offset ?? 0 } : afterDelete;
+        }
+        return offset ? page2 : page1;
+      });
+      vi.spyOn(alertsApi, 'deleteAlertHistoryItem').mockImplementation(async () => {
+        deleted = true;
+        return { status: 'ok' };
+      });
+      render(<AlertsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /^History/i }));
+      await waitFor(() => expect(screen.getByText('Rule 1')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+      await waitFor(() => expect(screen.getByText('Rule 2')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByLabelText('Delete record 2'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete Record' }));
+
+      await waitFor(() => expect(screen.getByText('Rule 1')).toBeInTheDocument());
+      expect(screen.queryByText('Rule 2')).toBeNull();
+      expect(fetchSpy).toHaveBeenLastCalledWith(50, 0);
+    });
+  });
 });
 
 

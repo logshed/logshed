@@ -251,6 +251,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                   onDragStart={(e) => handleDragStart(e, index)}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, index)}
+                  onDragEnd={() => setDraggedIndex(null)}
                   className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                     draggedIndex === index ? 'opacity-40 bg-dark-800/60' : ''
                   } ${

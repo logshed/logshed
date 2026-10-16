@@ -28,6 +28,7 @@ import {
 import { fetchLogFacets } from '../../../api/logs.ts';
 import { downloadBlob, slugify } from '../../../utils/formatters.ts';
 import { Modal } from '../../common/Modal.tsx';
+import { useSerialReorder } from '../../../utils/useSerialReorder.ts';
 import { getSeverityInfo } from '../../common/SeverityBadge.tsx';
 import { CreateDropRuleModal } from '../CreateDropRuleModal.tsx';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
@@ -43,6 +44,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
   const [presets, setPresets] = useState<DropPreset[]>([]);
   const [isPresetsModalOpen, setIsPresetsModalOpen] = useState<boolean>(false);
   const [installingPresetId, setInstallingPresetId] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [ruleToEdit, setRuleToEdit] = useState<DropRule | null>(null);
@@ -57,6 +59,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
       setIsLoading(true);
       const data = await fetchDropRules();
       setRules(data);
+      setHasLoaded(true);
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to load drop rules.', isError: true });
     } finally {
@@ -85,22 +88,18 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
   }, [loadRules, loadPresets]);
 
   useEffect(() => {
+    if (!hasLoaded) return;
     onRulesChange?.(rules);
-  }, [rules, onRulesChange]);
+  }, [rules, hasLoaded, onRulesChange]);
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  const handleReorder = async (newRules: DropRule[]) => {
-    const previousRules = [...rules];
-    setRules(newRules);
-    try {
-      const updated = await reorderDropRules(newRules.map((r) => r.id));
-      setRules(updated);
-    } catch (err: any) {
-      setRules(previousRules);
-      setFeedbackMsg({ text: err.message || 'Failed to update rule order.', isError: true });
-    }
-  };
+  const handleReorder = useSerialReorder<DropRule>(
+    rules,
+    setRules,
+    reorderDropRules,
+    (message) => setFeedbackMsg({ text: message, isError: true })
+  );
 
   const handleMoveRule = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
@@ -370,6 +369,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                 onDragStart={(e) => handleDragStart(e, index)}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={() => setDraggedIndex(null)}
                 className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                   draggedIndex === index ? 'opacity-40 bg-dark-800/60' : ''
                 } ${

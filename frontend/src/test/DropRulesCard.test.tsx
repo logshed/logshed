@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DropRulesCard } from '../components/alerts/tabs/DropRulesTab.tsx';
 import * as dropRulesApi from '../api/dropRules.ts';
@@ -581,6 +581,42 @@ describe('DropRulesCard Component', () => {
     // Card elements are rendered with matching rule test IDs
     expect(screen.getByTestId('drop-rule-row-1')).toBeInTheDocument();
     expect(screen.getByTestId('drop-rule-row-2')).toBeInTheDocument();
+  });
+
+  it('sends drop rule reorder requests one at a time and ends on the last move (B-50)', async () => {
+    const rules: DropRule[] = [1, 2, 3].map((id) => ({ ...mockRules[0], id, name: `Rule ${id}` }));
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(rules);
+    const resolvers: Array<(r: DropRule[]) => void> = [];
+    const reorderSpy = vi.spyOn(dropRulesApi, 'reorderDropRules').mockImplementation(
+      () => new Promise<DropRule[]>((resolve) => resolvers.push(resolve))
+    );
+    const order = () =>
+      screen.getAllByLabelText(/Move rule \d+ up/).map((el) => Number(el.getAttribute('aria-label')!.match(/\d+/)![0]));
+
+    render(<DropRulesCard />);
+    await waitFor(() => expect(screen.getByText('Rule 1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('Move rule 1 down'));
+    fireEvent.click(screen.getByLabelText('Move rule 1 down'));
+    expect(order()).toEqual([2, 3, 1]);
+    expect(reorderSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolvers[0]([rules[1], rules[0], rules[2]]);
+    });
+    await waitFor(() => expect(reorderSpy).toHaveBeenCalledTimes(2));
+    expect(reorderSpy).toHaveBeenLastCalledWith([2, 3, 1]);
+    expect(order()).toEqual([2, 3, 1]);
+  });
+
+  it('clears the dragged row when a drag ends outside a row (B-51)', async () => {
+    render(<DropRulesCard />);
+    await waitFor(() => expect(screen.getByTestId('drop-rule-row-1')).toBeInTheDocument());
+    const row = screen.getByTestId('drop-rule-row-1');
+    fireEvent.dragStart(row, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    expect(row.className).toContain('opacity-40');
+    fireEvent.dragEnd(row);
+    expect(row.className).not.toContain('opacity-40');
   });
 });
 

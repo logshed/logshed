@@ -52,6 +52,7 @@ import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { isMaintenanceItem } from '../../utils/maintenanceHistory.ts';
+import { useSerialReorder } from '../../utils/useSerialReorder.ts';
 import { AlertRulesTab } from './tabs/AlertRulesTab.tsx';
 import { DropRulesTab } from './tabs/DropRulesTab.tsx';
 import { AlertHistoryTab } from './tabs/AlertHistoryTab.tsx';
@@ -544,17 +545,12 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     }
   };
 
-  const handleReorderRules = async (newRules: AlertRule[]) => {
-    const previousRules = [...rules];
-    setRules(newRules);
-    try {
-      const updated = await reorderAlertRules(newRules.map((r) => r.id));
-      setRules(updated);
-    } catch (err: any) {
-      setRules(previousRules);
-      setFeedbackMsg({ text: err.message || 'Failed to update rule order.', isError: true });
-    }
-  };
+  const handleReorderRules = useSerialReorder<AlertRule>(
+    rules,
+    setRules,
+    reorderAlertRules,
+    (message) => setFeedbackMsg({ text: message, isError: true })
+  );
 
   // Toggle rule status
   const handleToggleRule = async (rule: AlertRule) => {
@@ -669,6 +665,20 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         setSelectedHistoryItem(null);
       }
       setHistoryItemToDelete(null);
+      // Refetch the current page, and step back one page when it is now empty
+      try {
+        let offset = historyOffset;
+        let data = await fetchAlertHistory(historyLimit, offset);
+        if (data.items.length === 0 && offset > 0) {
+          offset = Math.max(0, offset - historyLimit);
+          data = await fetchAlertHistory(historyLimit, offset);
+        }
+        setHistoryItems(data.items);
+        setHistoryTotal(data.total);
+        setHistoryOffset(offset);
+      } catch {
+        // Keep the locally updated list when the refetch fails
+      }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to delete history record.', isError: true });
     }
