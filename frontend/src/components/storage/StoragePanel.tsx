@@ -26,7 +26,7 @@ export const StoragePanel: React.FC = () => {
       setErrorMsg(null);
 
       const [settRes, storRes] = await Promise.all([
-        fetchSettings(),
+        fetchSettings(true),
         fetchStorageMetrics(),
       ]);
 

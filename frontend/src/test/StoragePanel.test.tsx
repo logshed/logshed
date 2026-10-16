@@ -48,6 +48,16 @@ describe('StoragePanel Component', () => {
     expect(screen.getByRole('heading', { level: 3, name: /Targeted Log Deletion/i })).toBeInTheDocument();
   });
 
+  it('B-53: forces a fresh settings fetch when the panel mounts', async () => {
+    const fetchSpy = vi.spyOn(settingsApi, 'fetchSettings');
+    render(<StoragePanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: /Storage & Retention/i })).toBeInTheDocument();
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(true);
+  });
+
   it('updates retention policy through RetentionSlider', async () => {
     const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
 
