@@ -438,3 +438,29 @@ class TestAlertRulesExportImport:
         data = res.json()
         assert data["imported"] == 1
         assert len(data["errors"]) == 3
+
+
+class TestAlertRulesExportImportPaths:
+    """The /api/alerts/rules/... paths are canonical in OpenAPI and the old paths still work (B-43)."""
+
+    @pytest.mark.asyncio
+    async def test_openapi_lists_rules_paths_and_hides_old_aliases(self, client: AsyncClient, auth_headers: dict):
+        res = await client.get("/openapi.json", headers=auth_headers)
+        if res.status_code != 200:
+            pytest.skip("OpenAPI document is not served in this configuration")
+        paths = res.json()["paths"]
+        assert "/api/alerts/rules/export" in paths
+        assert "/api/alerts/rules/{rule_id}/export" in paths
+        assert "/api/alerts/rules/import" in paths
+        assert "/api/alerts/export" not in paths
+        assert "/api/alerts/import" not in paths
+
+    @pytest.mark.asyncio
+    async def test_both_path_forms_work(self, client: AsyncClient, auth_headers: dict):
+        for path in ("/api/alerts/export", "/api/alerts/rules/export"):
+            res = await client.get(path, headers=auth_headers)
+            assert res.status_code == 200, path
+            assert res.json()["alert_rules"] == []
+        for path in ("/api/alerts/import", "/api/alerts/rules/import"):
+            res = await client.post(path, json={"version": "1", "alert_rules": []}, headers=auth_headers)
+            assert res.status_code == 200, path

@@ -210,8 +210,8 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
     return await run_db_query(_query)
 
 
-@router.get("/export", response_model=AlertRuleExportBundle)
-@router.get("/rules/export", response_model=AlertRuleExportBundle, include_in_schema=False)
+@router.get("/export", response_model=AlertRuleExportBundle, include_in_schema=False)
+@router.get("/rules/export", response_model=AlertRuleExportBundle)
 async def export_alert_rules(user: dict = Depends(get_current_user)) -> Response:
     """Export all configured alert rules as a JSON bundle."""
     def _query(conn):
@@ -256,8 +256,8 @@ async def export_alert_rules(user: dict = Depends(get_current_user)) -> Response
     )
 
 
-@router.get("/{rule_id}/export", response_model=AlertRuleExportSingle)
-@router.get("/rules/{rule_id}/export", response_model=AlertRuleExportSingle, include_in_schema=False)
+@router.get("/{rule_id}/export", response_model=AlertRuleExportSingle, include_in_schema=False)
+@router.get("/rules/{rule_id}/export", response_model=AlertRuleExportSingle)
 async def export_single_alert_rule(
     rule_id: int,
     user: dict = Depends(get_current_user),
@@ -311,8 +311,8 @@ async def export_single_alert_rule(
     )
 
 
-@router.post("/import", response_model=AlertRuleImportResponse)
-@router.post("/rules/import", response_model=AlertRuleImportResponse, include_in_schema=False)
+@router.post("/import", response_model=AlertRuleImportResponse, include_in_schema=False)
+@router.post("/rules/import", response_model=AlertRuleImportResponse)
 async def import_alert_rules(
     payload: Any = Body(...),
     user: dict = Depends(get_current_user),
