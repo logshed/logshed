@@ -6,6 +6,7 @@ scope enforcement, settings toggle, and CLI subcommand.
 
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Optional
 import asyncio
 import json
 import pytest
@@ -31,6 +32,7 @@ from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.fts_indexer import index_pending_logs
 import app.api.external_v1 as ext_v1_mod
+import app.api.mcp as mcp_api_mod
 import app.cli as cli_mod
 
 
@@ -48,6 +50,9 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     reset_operation_state()
     ext_v1_mod._cached_error_stats = None
     ext_v1_mod._cached_error_stats_time = 0.0
+    # Token ids restart at 1 in every test database, so per-token MCP state must not leak between tests
+    mcp_api_mod._sse_sessions.clear()
+    mcp_api_mod._sse_token_cache.clear()
 
     db_file = tmp_path / "logs.db"
     key_file = tmp_path / ".secret_key"
@@ -69,6 +74,8 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     api_token_rate_limiter.reset()
     _last_used_timestamps.clear()
     invalidate_settings_cache()
+    mcp_api_mod._sse_sessions.clear()
+    mcp_api_mod._sse_token_cache.clear()
 
 
 @pytest_asyncio.fixture
@@ -142,6 +149,269 @@ def seed_sample_data(db_path: Path) -> dict:
     index_pending_logs(db_path)
 
     return {"now": now_iso, "past": past_iso}
+
+
+FULL_MCP_SCOPES = ["logs:read", "alerts:read", "system:read", "maintenance:write"]
+
+INIT_PAYLOAD = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "pytest-client", "version": "1.0.0"},
+    },
+}
+INITIALIZED_NOTIFICATION = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+
+def tool_call_payload(request_id: int, name: str, arguments: Optional[dict] = None) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments or {}},
+    }
+
+
+async def create_token(client: AsyncClient, auth_headers: dict, scopes: list[str], name: str = "MCP Test") -> dict:
+    res = await client.post("/api/tokens", json={"name": name, "scopes": scopes}, headers=auth_headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    return {"id": body["token"]["id"], "raw": body["raw_token"], "name": name}
+
+
+async def enable_mcp(client: AsyncClient, auth_headers: dict) -> None:
+    res = await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
+    assert res.status_code == 200
+
+
+def bearer(raw_token: str) -> dict:
+    return {"Authorization": f"Bearer {raw_token}"}
+
+
+class LegacySseClient:
+    """
+    Drives GET /api/v1/mcp/sse directly over ASGI so the event stream stays open while the
+    test posts JSON-RPC messages to /api/v1/mcp/messages through the regular httpx client.
+    """
+
+    def __init__(self, raw_token: Optional[str] = None, query: str = ""):
+        self.headers = [(b"host", b"testserver")]
+        if raw_token:
+            self.headers.append((b"authorization", f"Bearer {raw_token}".encode()))
+        self.query = query
+        self.status: Optional[int] = None
+        self.endpoint: Optional[str] = None
+        self.ended = asyncio.Event()
+        self._events: asyncio.Queue = asyncio.Queue()
+        self._disconnect = asyncio.Event()
+        self._started = asyncio.Event()
+        self._buffer = b""
+        self._task: Optional[asyncio.Task] = None
+
+    async def _receive(self):
+        await self._disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def _send(self, message):
+        if message["type"] == "http.response.start":
+            self.status = message["status"]
+            self._started.set()
+        elif message["type"] == "http.response.body":
+            self._buffer += message.get("body", b"")
+            while b"\r\n\r\n" in self._buffer:
+                raw, self._buffer = self._buffer.split(b"\r\n\r\n", 1)
+                event: dict[str, str] = {}
+                for line in raw.decode().splitlines():
+                    if line.startswith("event:"):
+                        event["event"] = line[6:].strip()
+                    elif line.startswith("data:"):
+                        event["data"] = line[5:].strip()
+                if event:
+                    self._events.put_nowait(event)
+            if not message.get("more_body", False):
+                self.ended.set()
+
+    async def connect(self) -> "LegacySseClient":
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/mcp/sse",
+            "raw_path": b"/api/v1/mcp/sse",
+            "query_string": self.query.encode(),
+            "headers": self.headers,
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+        self._task = asyncio.create_task(create_app()(scope, self._receive, self._send))
+        await asyncio.wait_for(self._started.wait(), timeout=5.0)
+        if self.status == 200:
+            first = await self.next_event()
+            assert first["event"] == "endpoint"
+            self.endpoint = first["data"]
+        return self
+
+    async def next_event(self, timeout: float = 5.0) -> dict:
+        return await asyncio.wait_for(self._events.get(), timeout=timeout)
+
+    async def next_message(self) -> dict:
+        while True:
+            event = await self.next_event()
+            if event.get("event") == "message":
+                return json.loads(event["data"])
+
+    async def close(self) -> None:
+        self._disconnect.set()
+        if self._task is not None:
+            try:
+                await asyncio.wait_for(self._task, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._task.cancel()
+
+
+async def sse_initialize(client: AsyncClient, sse: LegacySseClient, headers: Optional[dict] = None) -> None:
+    res = await client.post(sse.endpoint, json=INIT_PAYLOAD, headers=headers or {})
+    assert res.status_code == 202, res.text
+    reply = await sse.next_message()
+    assert reply["id"] == 1 and "serverInfo" in reply["result"]
+    res = await client.post(sse.endpoint, json=INITIALIZED_NOTIFICATION, headers=headers or {})
+    assert res.status_code == 202, res.text
+
+
+async def sse_call_tool(
+    client: AsyncClient, sse: LegacySseClient, request_id: int, name: str, arguments: Optional[dict] = None
+) -> dict:
+    res = await client.post(sse.endpoint, json=tool_call_payload(request_id, name, arguments))
+    assert res.status_code == 202, res.text
+    reply = await sse.next_message()
+    assert reply["id"] == request_id
+    return reply["result"]
+
+
+class TestLegacySseSessionAuth:
+    """S-05: legacy SSE sessions are bound to the token that opened them and re-verified on every post."""
+
+    @pytest.mark.asyncio
+    async def test_session_only_post_rejected_after_revocation_and_stream_closes(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            result = await sse_call_tool(client, sse, 2, "list_services")
+            assert result["isError"] is False
+
+            assert (await client.delete(f"/api/tokens/{token['id']}", headers=auth_headers)).status_code == 200
+
+            res = await client.post(sse.endpoint, json=tool_call_payload(3, "list_services"))
+            assert res.status_code in (401, 403)
+            await asyncio.wait_for(sse.ended.wait(), timeout=5.0)
+
+            # Presenting the revoked token itself is rejected too
+            res = await client.post(sse.endpoint, json=tool_call_payload(4, "list_services"), headers=bearer(token["raw"]))
+            assert res.status_code == 401
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_session_only_post_rejected_after_token_expiry(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+            with get_connection(tmp_path / "logs.db") as conn:
+                conn.execute("UPDATE api_tokens SET expires_at = ? WHERE id = ?", (past, token["id"]))
+                conn.commit()
+            mcp_api_mod._sse_token_cache.clear()
+
+            res = await client.post(sse.endpoint, json=tool_call_payload(2, "list_services"))
+            assert res.status_code == 401
+            assert "expired" in res.json()["detail"]
+            await asyncio.wait_for(sse.ended.wait(), timeout=5.0)
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_expiry_is_checked_even_while_the_token_record_is_cached(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            # Simulate a cached record whose expiry time has since passed
+            cached_at, info = mcp_api_mod._sse_token_cache[token["id"]]
+            past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            mcp_api_mod._sse_token_cache[token["id"]] = (cached_at, {**info, "expires_at": past})
+
+            res = await client.post(sse.endpoint, json=tool_call_payload(2, "list_services"))
+            assert res.status_code == 401
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_session_only_posts_count_toward_rate_limit(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        monkeypatch.setattr(api_token_rate_limiter, "max_requests", 3)
+        sse = await LegacySseClient(token["raw"]).connect()  # request 1
+        try:
+            await sse_initialize(client, sse)  # requests 2 and 3
+            res = await client.post(sse.endpoint, json=tool_call_payload(2, "list_services"))
+            assert res.status_code == 429
+            assert int(res.headers["Retry-After"]) >= 1
+            assert res.headers["X-RateLimit-Remaining"] == "0"
+            # A rate limited session stays open
+            assert not sse.ended.is_set()
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_post_with_a_different_token_is_rejected(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        owner = await create_token(client, auth_headers, FULL_MCP_SCOPES, name="Owner")
+        other = await create_token(client, auth_headers, FULL_MCP_SCOPES, name="Other")
+        sse = await LegacySseClient(owner["raw"]).connect()
+        try:
+            res = await client.post(sse.endpoint, json=INIT_PAYLOAD, headers=bearer(other["raw"]))
+            assert res.status_code == 403
+            # The owner's own token is accepted
+            await sse_initialize(client, sse, headers=bearer(owner["raw"]))
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_unknown_session_rejected(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        unknown = "/api/v1/mcp/messages?session_id=deadbeefdeadbeefdeadbeefdeadbeef"
+        assert (await client.post(unknown, json=INIT_PAYLOAD)).status_code == 401
+        assert (await client.post(unknown, json=INIT_PAYLOAD, headers=bearer(token["raw"]))).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_session_binding_removed_on_disconnect(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sse = await LegacySseClient(token["raw"]).connect()
+        assert len(mcp_api_mod._sse_sessions) == 1
+        await sse.close()
+        assert mcp_api_mod._sse_sessions == {}
+        res = await client.post(sse.endpoint, json=INIT_PAYLOAD)
+        assert res.status_code == 401
 
 
 class TestMCPServer:

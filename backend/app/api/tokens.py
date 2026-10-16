@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.api.ingest import forget_ingest_token
+from app.api.mcp import on_token_revoked as close_mcp_sessions_for_token
 from app.core.api_tokens import (
     api_token_rate_limiter,
     forget_last_used,
@@ -145,4 +146,6 @@ async def revoke_token(
     api_token_rate_limiter.forget(f"token_{token_id}")
     forget_last_used(token_id)
     forget_ingest_token(token_id)
+    # Legacy MCP SSE sessions opened with this token are closed instead of living on by session id.
+    close_mcp_sessions_for_token(token_id)
     return MessageResponse(status="ok")
