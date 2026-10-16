@@ -237,17 +237,26 @@ async def refresh_available_models(
     active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
     clean_provider = (provider or active_db_provider).lower()
 
+    stored_base_url = stored_settings.get(f"ai_base_url_{clean_provider}") or (
+        stored_settings.get("ai_base_url") if clean_provider == active_db_provider else None
+    )
+    payload_base_url = payload.base_url.strip() if payload and payload.base_url and payload.base_url.strip() else None
+    # The stored key belongs to the stored endpoint: never send it to a different host.
+    foreign_base_url = payload_base_url is not None and payload_base_url.rstrip("/") != (stored_base_url or "").strip().rstrip("/")
+
     key_from_payload = False
     if payload and payload.api_key and payload.api_key != "********" and payload.api_key.strip():
         api_key = payload.api_key.strip()
         key_from_payload = True
+    elif foreign_base_url:
+        api_key = ""
     else:
         api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
         if not api_key and clean_provider == active_db_provider:
             api_key = stored_settings.get("ai_api_key", "").strip()
 
-    if payload and payload.base_url and payload.base_url.strip():
-        base_url = payload.base_url.strip()
+    if payload_base_url:
+        base_url = payload_base_url
     else:
         base_url = stored_settings.get(f"ai_base_url_{clean_provider}") or stored_settings.get("ai_base_url")
 

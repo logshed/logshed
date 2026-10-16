@@ -164,6 +164,21 @@ class AiProviderConfig(BaseModel):
     ai_fallback_models: Optional[str] = ""
     ai_base_url: Optional[str] = None
 
+    @field_validator("ai_base_url")
+    @classmethod
+    def validate_ai_base_url(cls, v: Optional[str]) -> Optional[str]:
+        """Same rule as the top-level ai_base_url: empty clears it, otherwise http(s) only."""
+        if v is not None:
+            v_clean = v.strip()
+            if not v_clean:
+                return ""
+            from urllib.parse import urlparse
+            parsed = urlparse(v_clean)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("ai_base_url must be a valid HTTP or HTTPS URL")
+            return v_clean
+        return v
+
 
 class SettingsResponse(BaseModel):
     """Application runtime configuration response with masked secrets."""

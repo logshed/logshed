@@ -31,6 +31,17 @@ from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
 router = APIRouter(prefix="/settings", tags=["Settings"])
 logger = logging.getLogger(__name__)
 
+
+class SettingsUpdateResponse(MessageResponse):
+    """Result of a settings save, flagging stored AI keys dropped because their endpoint changed."""
+    ai_api_key_cleared: bool = False
+    ai_api_key_cleared_providers: list[str] = []
+
+
+def _normalize_base_url(value: Optional[str]) -> str:
+    """Comparable form of an AI base URL (surrounding space and trailing slashes ignored)."""
+    return (value or "").strip().rstrip("/")
+
 SENSITIVE_KEYS = {
     "ai_api_key",
     "ai_api_key_gemini",
@@ -63,6 +74,11 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         pmodel = stored.get(f"ai_model_{p}") or (stored.get("ai_model") if p == active_provider else "") or DEFAULT_AI_MODELS.get(p, DEFAULT_AI_MODEL)
         pfallbacks = stored.get(f"ai_fallback_models_{p}") or (stored.get("ai_fallback_models", "") if p == active_provider else "")
         pbase = stored.get(f"ai_base_url_{p}") or (stored.get("ai_base_url") if p == active_provider else None)
+        try:
+            pbase = AiProviderConfig.validate_ai_base_url(pbase)
+        except ValueError:
+            # A value stored before per-provider validation existed must not break the read.
+            pbase = None
         has_pkey = bool(pkey.strip()) if p != "openai_compatible" else True
         providers_config[p] = AiProviderConfig(
             has_api_key=has_pkey,
@@ -84,41 +100,12 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
 
     max_days = get_max_retention_days()
     retention_overridden = is_max_retention_days_overridden()
+    # A read never writes: the effective value is clamped in the response only. The prune
+    # worker applies the same clamp itself (get_effective_retention_days).
     if retention_overridden:
         retention_days = max_days
-        if stored.get("retention_days") != str(max_days):
-            def _persist_override(conn):
-                now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO system_settings (key, value, is_encrypted, updated_at)
-                    VALUES ('retention_days', ?, 0, ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                    """,
-                    (str(max_days), now),
-                )
-                conn.commit()
-
-            await run_db_query(_persist_override)
     else:
-        clamped_days = max(1, min(retention_days, max_days))
-        if retention_days > max_days:
-            def _persist_clamped(conn):
-                now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO system_settings (key, value, is_encrypted, updated_at)
-                    VALUES ('retention_days', ?, 0, ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                    """,
-                    (str(clamped_days), now),
-                )
-                conn.commit()
-
-            await run_db_query(_persist_clamped)
-        retention_days = clamped_days
+        retention_days = max(1, min(retention_days, max_days))
 
     env_level = get_internal_log_level()
     env_level_name = get_internal_log_level_name(env_level)
@@ -209,12 +196,12 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     )
 
 
-@router.post("", response_model=MessageResponse)
+@router.post("", response_model=SettingsUpdateResponse)
 async def update_settings(
     req: SettingsUpdateRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
-) -> MessageResponse:
+) -> SettingsUpdateResponse:
     """
     Update application configuration.
     Sensitive keys are encrypted at rest with Fernet.
@@ -229,6 +216,7 @@ async def update_settings(
             )
 
     old_docker_alias_box: list[Optional[str]] = [None]
+    cleared_providers: list[str] = []
 
     def _save_settings(conn):
 
@@ -383,6 +371,41 @@ async def update_settings(
                 updates.append(("ai_api_key", encrypted, 1))
                 updates.append((f"ai_api_key_{target_provider}", encrypted, 1))
 
+        # A stored key must never follow a changed endpoint: if a provider's base URL changes and
+        # the request carries no key for that provider, drop the stored key.
+        new_base_by_provider: dict[str, str] = {}
+        for key, val, _is_enc in updates:
+            if key.startswith("ai_base_url_"):
+                new_base_by_provider[key[len("ai_base_url_"):]] = val
+        written_key_providers = {
+            key[len("ai_api_key_"):] for key, _val, _is_enc in updates if key.startswith("ai_api_key_")
+        }
+        for p_name, new_base in new_base_by_provider.items():
+            if p_name in written_key_providers:
+                continue
+            cursor.execute("SELECT value FROM system_settings WHERE key = ?", (f"ai_base_url_{p_name}",))
+            row = cursor.fetchone()
+            old_base = (row[0] if row else "") or ""
+            if not old_base and p_name == current_db_provider:
+                cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_base_url'")
+                row = cursor.fetchone()
+                old_base = (row[0] if row else "") or ""
+            if _normalize_base_url(old_base) == _normalize_base_url(new_base):
+                continue
+            cursor.execute("SELECT value FROM system_settings WHERE key = ?", (f"ai_api_key_{p_name}",))
+            row = cursor.fetchone()
+            had_key = bool(row and row[0])
+            if not had_key and p_name == current_db_provider:
+                cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_api_key'")
+                row = cursor.fetchone()
+                had_key = bool(row and row[0])
+            if not had_key:
+                continue
+            updates.append((f"ai_api_key_{p_name}", "", 1))
+            if p_name in (target_provider, current_db_provider):
+                updates.append(("ai_api_key", "", 1))
+            cleared_providers.append(p_name)
+
         for key, val, is_enc in updates:
             cursor.execute(
                 """
@@ -453,7 +476,7 @@ async def update_settings(
                 inact_to = float(get_cached_setting("syslog_tcp_inactivity_timeout", 0.0)) if req.syslog_tcp_inactivity_timeout is not None else None
                 syslog_server.update_limits(max_connections=max_tcp, inactivity_timeout=inact_to)
         except Exception:
-            pass
+            logger.exception("Failed to apply syslog limits after saving settings")
 
     if (
         req.enable_docker is not None
@@ -464,20 +487,25 @@ async def update_settings(
             from app.main import get_docker_pool
             docker_pool = get_docker_pool()
             if docker_pool is not None:
+                pool_toggled = False
                 if req.enable_docker is not None:
+                    pool_toggled = docker_pool.pool_enabled != req.enable_docker
                     await docker_pool.set_pool_enabled(req.enable_docker)
 
-                def _get_ep1(conn):
-                    cur = conn.cursor()
-                    cur.execute("SELECT * FROM docker_endpoints WHERE id = 1")
-                    row = cur.fetchone()
-                    return dict(row) if row else None
+                # Toggling the pool already started (or stopped) endpoint 1 from the saved
+                # database row, so restarting it again would only bounce the collector twice.
+                if not pool_toggled:
+                    def _get_ep1(conn):
+                        cur = conn.cursor()
+                        cur.execute("SELECT * FROM docker_endpoints WHERE id = 1")
+                        row = cur.fetchone()
+                        return dict(row) if row else None
 
-                ep1_data = await run_db_query(_get_ep1)
-                if ep1_data:
-                    await docker_pool.reload_endpoint(1, ep1_data)
+                    ep1_data = await run_db_query(_get_ep1)
+                    if ep1_data:
+                        await docker_pool.reload_endpoint(1, ep1_data)
         except Exception:
-            pass
+            logger.exception("Failed to apply Docker settings to the collector pool after saving settings")
 
     if req.docker_source_alias is not None:
         prev_alias = old_docker_alias_box[0]
@@ -506,4 +534,8 @@ async def update_settings(
 
             background_tasks.add_task(run_db_query, _run_docker_batch)
 
-    return MessageResponse(status="ok")
+    return SettingsUpdateResponse(
+        status="ok",
+        ai_api_key_cleared=bool(cleared_providers),
+        ai_api_key_cleared_providers=cleared_providers,
+    )

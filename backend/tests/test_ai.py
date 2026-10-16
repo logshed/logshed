@@ -3201,3 +3201,59 @@ class TestAiModelRefreshRedaction:
         assert error.startswith("Failed to load models from openai_compatible")
         assert "hunter2secret" not in error
         assert "hunter2secret" not in caplog.text
+
+
+class TestAiModelRefreshStoredKeyScope:
+    """S-14: the stored API key is only used for the stored endpoint."""
+
+    async def _store_compat(self, auth_client):
+        res = await auth_client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "openai_compatible",
+                "ai_api_key": "stored-secret-key-123",
+                "ai_base_url": "http://ollama.lan:11434/v1",
+            },
+        )
+        assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_refresh_with_foreign_base_url_does_not_send_stored_key(self, auth_client):
+        await self._store_compat(auth_client)
+        mock_fetch = AsyncMock(return_value=[{"id": "m1", "name": "m1", "supports_thinking": False}])
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai_compatible",
+                json={"base_url": "http://evil.example.net/v1"},
+            )
+        assert res.status_code == 200
+        kwargs = mock_fetch.await_args.kwargs
+        assert kwargs["base_url"] == "http://evil.example.net/v1"
+        assert kwargs["api_key"] is None
+
+    @pytest.mark.asyncio
+    async def test_refresh_with_stored_or_absent_base_url_uses_stored_key(self, auth_client):
+        await self._store_compat(auth_client)
+        mock_fetch = AsyncMock(return_value=[{"id": "m1", "name": "m1", "supports_thinking": False}])
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai_compatible",
+                json={"base_url": "http://ollama.lan:11434/v1/"},
+            )
+            assert res.status_code == 200
+            assert mock_fetch.await_args.kwargs["api_key"] == "stored-secret-key-123"
+            res = await auth_client.post("/api/ai/models/refresh?provider=openai_compatible")
+            assert res.status_code == 200
+            assert mock_fetch.await_args.kwargs["api_key"] == "stored-secret-key-123"
+
+    @pytest.mark.asyncio
+    async def test_refresh_with_foreign_base_url_and_fresh_key_uses_fresh_key(self, auth_client):
+        await self._store_compat(auth_client)
+        mock_fetch = AsyncMock(return_value=[{"id": "m1", "name": "m1", "supports_thinking": False}])
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai_compatible",
+                json={"base_url": "http://other.example.net/v1", "api_key": "typed-key"},
+            )
+        assert res.status_code == 200
+        assert mock_fetch.await_args.kwargs["api_key"] == "typed-key"

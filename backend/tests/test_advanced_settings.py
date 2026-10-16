@@ -9,6 +9,8 @@ Tests for Advanced System Settings:
 """
 
 import asyncio
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 import pytest
 import pytest_asyncio
@@ -650,3 +652,285 @@ class TestSubsystemIntegrations:
         assert tailer.enable_docker is True
         assert tailer.exclude_containers == ""
         assert tailer.source_alias == "docker"
+
+
+# ===================================================================
+# 5. AI provider base URL / key handling, reload errors, read-only GET (B08)
+# ===================================================================
+
+def _stored_settings(tmp_path: Path) -> dict[str, str]:
+    with get_connection(tmp_path / "logs.db") as conn:
+        return dict(conn.execute("SELECT key, value FROM system_settings").fetchall())
+
+
+class TestSettingsAiBaseUrlAndKey:
+
+    @pytest.mark.asyncio
+    async def test_per_provider_base_url_must_be_http_or_https(
+        self, client: AsyncClient, auth_cookie: dict
+    ):
+        """B-07: the per-provider base URL gets the same http/https validation as the top-level field."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        res = await client.post(
+            "/api/settings",
+            json={"ai_providers_config": {"openai_compatible": {"ai_base_url": "ftp://x"}}},
+        )
+        assert res.status_code == 422
+        res = await client.post(
+            "/api/settings",
+            json={"ai_providers_config": {"openai_compatible": {"ai_base_url": "not-a-url"}}},
+        )
+        assert res.status_code == 422
+        res = await client.post(
+            "/api/settings",
+            json={"ai_providers_config": {"openai_compatible": {"ai_base_url": "http://ok:11434/v1"}}},
+        )
+        assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_empty_base_url_clears_stored_value(
+        self, client: AsyncClient, auth_cookie: dict
+    ):
+        """B-07: an empty string clears the base URL at both the top level and per provider."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        res = await client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "openai_compatible",
+                "ai_base_url": "http://ollama:11434/v1",
+                "ai_providers_config": {"openai_compatible": {"ai_base_url": "http://ollama:11434/v1"}},
+            },
+        )
+        assert res.status_code == 200
+        data = (await client.get("/api/settings")).json()
+        assert data["ai_base_url"] == "http://ollama:11434/v1"
+
+        res = await client.post(
+            "/api/settings",
+            json={
+                "ai_base_url": "",
+                "ai_providers_config": {"openai_compatible": {"ai_base_url": ""}},
+            },
+        )
+        assert res.status_code == 200
+        data = (await client.get("/api/settings")).json()
+        assert not data["ai_base_url"]
+        assert not data["ai_providers_config"]["openai_compatible"]["ai_base_url"]
+
+    @pytest.mark.asyncio
+    async def test_empty_per_provider_base_url_alone_clears_active_provider(
+        self, client: AsyncClient, auth_cookie: dict
+    ):
+        """B-07: clearing only through ai_providers_config also clears the legacy top-level value."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        await client.post(
+            "/api/settings",
+            json={"ai_provider": "openai_compatible", "ai_base_url": "http://ollama:11434/v1"},
+        )
+        res = await client.post(
+            "/api/settings",
+            json={"ai_providers_config": {"openai_compatible": {"ai_base_url": ""}}},
+        )
+        assert res.status_code == 200
+        data = (await client.get("/api/settings")).json()
+        assert not data["ai_base_url"]
+        assert not data["ai_providers_config"]["openai_compatible"]["ai_base_url"]
+
+    @pytest.mark.asyncio
+    async def test_changing_base_url_with_masked_key_clears_stored_key(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """S-14: a new base URL without a new key must not keep sending the stored key to the new host."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        res = await client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "openai",
+                "ai_api_key": "sk-original-key-12345",
+                "ai_base_url": "https://proxy.example.com/v1",
+            },
+        )
+        assert res.status_code == 200
+        assert res.json().get("ai_api_key_cleared") in (None, False)
+        assert _stored_settings(tmp_path)["ai_api_key_openai"] != ""
+
+        res = await client.post(
+            "/api/settings",
+            json={"ai_api_key": "********", "ai_base_url": "https://evil.example.net/v1"},
+        )
+        assert res.status_code == 200
+        assert res.json()["ai_api_key_cleared"] is True
+        stored = _stored_settings(tmp_path)
+        assert stored["ai_api_key_openai"] == ""
+        assert stored["ai_api_key"] == ""
+        data = (await client.get("/api/settings")).json()
+        assert data["has_ai_api_key"] is False
+        assert data["ai_base_url"] == "https://evil.example.net/v1"
+
+    @pytest.mark.asyncio
+    async def test_changing_provider_config_base_url_with_masked_key_clears_that_provider_key(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """S-14: same rule through ai_providers_config, and other providers keep their keys."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        await client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "gemini",
+                "ai_providers_config": {
+                    "gemini": {"ai_api_key": "gem-key-12345"},
+                    "openai": {"ai_api_key": "sk-openai-key", "ai_base_url": "https://a.example.com/v1"},
+                },
+            },
+        )
+        res = await client.post(
+            "/api/settings",
+            json={
+                "ai_providers_config": {
+                    "gemini": {"ai_api_key": "********"},
+                    "openai": {"ai_api_key": "********", "ai_base_url": "https://b.example.com/v1"},
+                },
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["ai_api_key_cleared"] is True
+        stored = _stored_settings(tmp_path)
+        assert stored["ai_api_key_openai"] == ""
+        assert stored["ai_api_key_gemini"] != ""
+
+    @pytest.mark.asyncio
+    async def test_unchanged_base_url_or_new_key_keeps_stored_key(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """S-14: an unchanged base URL keeps the key; a changed one with a fresh key stores the fresh key."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        await client.post(
+            "/api/settings",
+            json={
+                "ai_provider": "openai",
+                "ai_api_key": "sk-original-key-12345",
+                "ai_base_url": "https://proxy.example.com/v1",
+            },
+        )
+        before = _stored_settings(tmp_path)["ai_api_key_openai"]
+
+        res = await client.post(
+            "/api/settings",
+            json={"ai_api_key": "********", "ai_base_url": "https://proxy.example.com/v1/"},
+        )
+        assert res.status_code == 200
+        assert res.json().get("ai_api_key_cleared") in (None, False)
+        assert _stored_settings(tmp_path)["ai_api_key_openai"] == before
+
+        res = await client.post(
+            "/api/settings",
+            json={"ai_api_key": "sk-brand-new-key-999", "ai_base_url": "https://other.example.com/v1"},
+        )
+        assert res.status_code == 200
+        assert res.json().get("ai_api_key_cleared") in (None, False)
+        stored = _stored_settings(tmp_path)
+        assert stored["ai_api_key_openai"] not in ("", before)
+
+    @pytest.mark.asyncio
+    async def test_docker_source_alias_is_stored_without_surrounding_whitespace(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        """B06 follow-up: the stored alias equals the stripped value the Docker backfill uses."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        res = await client.post("/api/settings", json={"docker_source_alias": "  myalias  "})
+        assert res.status_code == 200
+        assert _stored_settings(tmp_path)["docker_source_alias"] == "myalias"
+        with get_connection(tmp_path / "logs.db") as conn:
+            row = conn.execute("SELECT source_alias FROM docker_endpoints WHERE id = 1").fetchone()
+        assert row[0] == "myalias"
+        assert (await client.get("/api/settings")).json()["docker_source_alias"] == "myalias"
+
+
+class TestSettingsReloadErrorsAndReads:
+
+    @pytest.mark.asyncio
+    async def test_syslog_reload_error_is_logged(
+        self, client: AsyncClient, auth_cookie: dict, caplog
+    ):
+        """B-62: a failing syslog limit update is logged with its traceback, not swallowed."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        server = MagicMock()
+        server.update_limits.side_effect = RuntimeError("syslog limit boom")
+        with patch("app.main.get_syslog_server", return_value=server), \
+             caplog.at_level(logging.ERROR, logger="app.api.settings"):
+            res = await client.post("/api/settings", json={"syslog_max_tcp_connections": 50})
+        assert res.status_code == 200
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR and "syslog limit boom" in r.getMessage() + str(r.exc_text or r.exc_info)]
+        assert errors, caplog.text
+
+    @pytest.mark.asyncio
+    async def test_docker_pool_reload_error_is_logged(
+        self, client: AsyncClient, auth_cookie: dict, caplog
+    ):
+        """B-62: a failing Docker pool reload is logged with its traceback, not swallowed."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        pool = MagicMock()
+        pool.pool_enabled = True
+        pool.set_pool_enabled = AsyncMock()
+        pool.reload_endpoint = AsyncMock(side_effect=RuntimeError("pool reload boom"))
+        with patch("app.main.get_docker_pool", return_value=pool), \
+             caplog.at_level(logging.ERROR, logger="app.api.settings"):
+            res = await client.post("/api/settings", json={"docker_exclude_containers": "a,b"})
+        assert res.status_code == 200
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR and "pool reload boom" in r.getMessage() + str(r.exc_text or r.exc_info)]
+        assert errors, caplog.text
+
+    @pytest.mark.asyncio
+    async def test_enabling_docker_starts_endpoint_one_only_once(
+        self, client: AsyncClient, auth_cookie: dict
+    ):
+        """B-62: when set_pool_enabled has just started the pool, endpoint 1 is not restarted again."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        pool = MagicMock()
+        pool.pool_enabled = False
+        pool.set_pool_enabled = AsyncMock()
+        pool.reload_endpoint = AsyncMock()
+        with patch("app.main.get_docker_pool", return_value=pool):
+            res = await client.post("/api/settings", json={"enable_docker": True})
+        assert res.status_code == 200
+        pool.set_pool_enabled.assert_awaited_once_with(True)
+        pool.reload_endpoint.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_exclude_change_with_pool_already_enabled_still_reloads_endpoint_one(
+        self, client: AsyncClient, auth_cookie: dict
+    ):
+        """B-62: a settings change that does not toggle the pool still reloads endpoint 1."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        pool = MagicMock()
+        pool.pool_enabled = True
+        pool.set_pool_enabled = AsyncMock()
+        pool.reload_endpoint = AsyncMock()
+        with patch("app.main.get_docker_pool", return_value=pool):
+            res = await client.post(
+                "/api/settings", json={"enable_docker": True, "docker_exclude_containers": "x"}
+            )
+        assert res.status_code == 200
+        pool.reload_endpoint.assert_awaited_once()
+        assert pool.reload_endpoint.await_args.args[0] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_settings_does_not_write_clamped_retention(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """B-78: GET clamps retention in the response only and never writes system_settings."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        with get_connection(tmp_path / "logs.db") as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('retention_days', '25', CURRENT_TIMESTAMP)"
+            )
+            conn.commit()
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "7")
+        data = (await client.get("/api/settings")).json()
+        assert data["retention_days"] == 7
+        assert _stored_settings(tmp_path)["retention_days"] == "25"
+
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "60")
+        data = (await client.get("/api/settings")).json()
+        assert data["retention_days"] == 60
+        assert _stored_settings(tmp_path)["retention_days"] == "25"

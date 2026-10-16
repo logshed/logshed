@@ -924,7 +924,7 @@ class TestSettingsEncryptionAndKeyManagement:
     ):
         """
         Verify retention_overridden flag is True when MAX_RETENTION_DAYS is set,
-        and cleanly clamps back down to 30 when the variable is removed upon reboot.
+        and the saved value (7) is used again, untouched by the override, when the variable is removed.
         """
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
 
@@ -949,8 +949,8 @@ class TestSettingsEncryptionAndKeyManagement:
         data_reboot = res_reboot.json()
         assert data_reboot["retention_overridden"] is False
         assert data_reboot["max_retention_days"] == 30
-        # Automatically clamped from 60 down to 30, NOT reverting to the old 7 days
-        assert data_reboot["retention_days"] == 30
+        # A read never overwrites the saved value, so the user's 7 days come back (B-78)
+        assert data_reboot["retention_days"] == 7
 
     @pytest.mark.asyncio
     async def test_ai_enabled_setting_toggle_and_persistence(
