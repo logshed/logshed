@@ -125,6 +125,12 @@ async def set_maintenance_window(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid ISO 8601 datetime format for maintenance_until: {payload.until}",
             )
+        # A past (or nearly past) end would start a window the sweep closes at once, leaving an empty audit row
+        if dt <= now_dt + datetime.timedelta(seconds=30):
+            raise HTTPException(
+                status_code=422,
+                detail="End time must be in the future",
+            )
 
         def _save(conn):
             from app.services.maintenance_service import create_maintenance_session

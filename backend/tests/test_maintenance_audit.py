@@ -641,3 +641,29 @@ class TestAtomicCap:
             ).fetchone()[0]
         assert active == ms.MAX_ACTIVE_MAINTENANCE_SESSIONS
         assert history == ms.MAX_ACTIVE_MAINTENANCE_SESSIONS
+
+
+class TestUiEndTime:
+    """B-57: the web UI must not start a window that has already ended."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("offset_seconds", [-3600, 0, 10])
+    async def test_past_or_imminent_until_is_rejected(
+        self, client: AsyncClient, auth_headers: dict, db_path: Path, offset_seconds: int
+    ):
+        until = (
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=offset_seconds)
+        ).isoformat()
+        res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)
+        assert res.status_code == 422
+        assert res.json()["detail"] == "End time must be in the future"
+        with get_connection(db_path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM alert_history").fetchone()[0] == 0
+
+    @pytest.mark.asyncio
+    async def test_future_until_is_accepted(self, client: AsyncClient, auth_headers: dict):
+        until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=2)).isoformat()
+        res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["active"] is True
