@@ -27,7 +27,7 @@ from app.core.security import (
 from app.core.sse import sse_manager
 from app.services.operation_guard import reset_operation_state
 from app.main import create_app
-from app.mcp.server import create_mcp_server
+from app.mcp.server import McpAccess, create_mcp_server, mcp_access_context
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.fts_indexer import index_pending_logs
@@ -293,6 +293,55 @@ async def sse_call_tool(
     return reply["result"]
 
 
+def _streamable_headers(raw_token: str, session_id: Optional[str] = None) -> dict:
+    headers = {
+        **bearer(raw_token),
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if session_id:
+        headers["mcp-session-id"] = session_id
+    return headers
+
+
+def _sse_body_json(text: str) -> dict:
+    for line in text.splitlines():
+        if line.startswith("data:"):
+            return json.loads(line[5:].strip())
+    raise AssertionError(f"No SSE data line in response: {text!r}")
+
+
+async def http_initialize(client: AsyncClient, raw_token: str, path: str = "/mcp") -> str:
+    res = await client.post(path, headers=_streamable_headers(raw_token), json=INIT_PAYLOAD)
+    assert res.status_code == 200, res.text
+    session_id = res.headers["mcp-session-id"]
+    res = await client.post(path, headers=_streamable_headers(raw_token, session_id), json=INITIALIZED_NOTIFICATION)
+    assert res.status_code == 202, res.text
+    return session_id
+
+
+async def http_request(
+    client: AsyncClient, raw_token: str, session_id: str, payload: dict, path: str = "/mcp"
+) -> dict:
+    res = await client.post(path, headers=_streamable_headers(raw_token, session_id), json=payload)
+    assert res.status_code == 200, res.text
+    reply = _sse_body_json(res.text)
+    assert reply["id"] == payload["id"]
+    return reply
+
+
+async def http_call_tool(
+    client: AsyncClient, raw_token: str, session_id: str, request_id: int, name: str, arguments: Optional[dict] = None
+) -> dict:
+    reply = await http_request(client, raw_token, session_id, tool_call_payload(request_id, name, arguments))
+    return reply["result"]
+
+
+def tool_error_text(result: dict) -> str:
+    assert result["isError"] is True, result
+    return " ".join(block.get("text", "") for block in result["content"])
+
+
 class TestLegacySseSessionAuth:
     """S-05: legacy SSE sessions are bound to the token that opened them and re-verified on every post."""
 
@@ -414,6 +463,144 @@ class TestLegacySseSessionAuth:
         assert res.status_code == 401
 
 
+class TestPerToolScopes:
+    """S-07: connecting needs only logs:read; every tool and resource checks its own scope."""
+
+    @pytest.mark.asyncio
+    async def test_logs_read_token_over_streamable_http(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sid = await http_initialize(client, token["raw"])
+
+        for request_id, name in enumerate(("query_logs", "count_logs", "list_services"), start=2):
+            assert (await http_call_tool(client, token["raw"], sid, request_id, name))["isError"] is False
+        ctx = await http_call_tool(client, token["raw"], sid, 9, "get_log_context", {"log_id": 1})
+        assert "maintenance:write" not in str(ctx) and "scope" not in str(ctx)  # not found, not a scope error
+
+        for request_id, (name, scope) in enumerate(
+            (
+                ("enable_maintenance", "maintenance:write"),
+                ("disable_maintenance", "maintenance:write"),
+                ("get_recent_alerts", "alerts:read"),
+                ("get_system_metrics", "system:read"),
+            ),
+            start=10,
+        ):
+            text = tool_error_text(await http_call_tool(client, token["raw"], sid, request_id, name))
+            assert scope in text
+
+        # Nothing was started by the refused enable_maintenance call
+        with get_connection(tmp_path / "logs.db") as conn:
+            assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0
+
+    @pytest.mark.asyncio
+    async def test_logs_read_token_over_legacy_sse(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sse = await LegacySseClient(token["raw"]).connect()
+        assert sse.status == 200
+        try:
+            await sse_initialize(client, sse)
+            assert (await sse_call_tool(client, sse, 2, "query_logs"))["isError"] is False
+            assert "maintenance:write" in tool_error_text(
+                await sse_call_tool(client, sse, 3, "enable_maintenance", {"duration_minutes": 5})
+            )
+            assert "alerts:read" in tool_error_text(await sse_call_tool(client, sse, 4, "get_recent_alerts"))
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_resources_follow_the_tool_scopes(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sid = await http_initialize(client, token["raw"])
+
+        def read(request_id: int, uri: str) -> dict:
+            return {"jsonrpc": "2.0", "id": request_id, "method": "resources/read", "params": {"uri": uri}}
+
+        services = await http_request(client, token["raw"], sid, read(2, "logshed://services"))
+        assert "result" in services
+        metrics = await http_request(client, token["raw"], sid, read(3, "logshed://system/metrics"))
+        assert "error" in metrics and "system:read" in metrics["error"]["message"]
+        alerts = await http_request(client, token["raw"], sid, read(4, "logshed://alerts/active"))
+        assert "error" in alerts and "alerts:read" in alerts["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_token_without_logs_read_cannot_connect(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["alerts:read", "system:read", "maintenance:write"])
+        res = await client.post("/mcp", headers=_streamable_headers(token["raw"]), json=INIT_PAYLOAD)
+        assert res.status_code == 403
+        assert "logs:read" in res.json()["detail"]
+        assert (await client.get("/api/v1/mcp/sse", headers=bearer(token["raw"]))).status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_full_bundle_and_untargeted_drop_errors(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sid = await http_initialize(client, token["raw"])
+
+        for request_id, name in enumerate(("get_system_metrics", "get_recent_alerts", "query_logs"), start=2):
+            assert (await http_call_tool(client, token["raw"], sid, request_id, name))["isError"] is False
+
+        untargeted = await http_call_tool(
+            client, token["raw"], sid, 10, "enable_maintenance", {"duration_minutes": 5, "log_handling": "drop_errors"}
+        )
+        text = tool_error_text(untargeted)
+        assert "target_app" in text and "REST API" in text
+
+        targeted = await http_call_tool(
+            client,
+            token["raw"],
+            sid,
+            11,
+            "enable_maintenance",
+            {"duration_minutes": 5, "log_handling": "drop_errors", "target_app": "nginx"},
+        )
+        assert targeted["isError"] is False
+        assert targeted["structuredContent"]["target_app"] == "nginx"
+
+        silence = await http_call_tool(client, token["raw"], sid, 12, "enable_maintenance", {"duration_minutes": 5})
+        assert silence["isError"] is False
+
+        ended = await http_call_tool(client, token["raw"], sid, 13, "disable_maintenance")
+        assert ended["isError"] is False
+
+    @pytest.mark.asyncio
+    async def test_untargeted_drop_errors_refused_in_process_and_over_stdio(self, tmp_path: Path):
+        for server in (create_mcp_server(stdio=True), create_mcp_server()):
+            tool = server._tool_manager._tools["enable_maintenance"]
+            with mcp_access_context(McpAccess(scopes=("*",), token_id=None, token_name="test")):
+                with pytest.raises(ValueError, match="target_app or target_host"):
+                    await tool.fn(duration_minutes=5, log_handling="drop_errors")
+                with pytest.raises(ValueError, match="target_app or target_host"):
+                    await tool.fn(duration_minutes=5, log_handling="drop_errors", target_app="   ")
+                res = await tool.fn(duration_minutes=5, log_handling="drop_errors", target_host="pve-node1")
+                assert res["target_host"] == "pve-node1"
+        with get_connection(tmp_path / "logs.db") as conn:
+            assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 2
+
+    @pytest.mark.asyncio
+    async def test_direct_calls_without_an_authenticated_caller_are_refused(self):
+        server = create_mcp_server()
+        with pytest.raises(PermissionError):
+            await server._tool_manager._tools["query_logs"].fn()
+        with pytest.raises(PermissionError):
+            await server._resource_manager._resources["logshed://services"].fn()
+
+    def test_instructions_and_descriptions_mark_log_content_as_untrusted(self):
+        server = create_mcp_server()
+        assert "untrusted" in server.instructions
+        assert "instructions" in server.instructions
+        tools = server._tool_manager._tools
+        for name in ("query_logs", "get_log_context", "get_recent_alerts", "enable_maintenance"):
+            assert "untrusted" in tools[name].description, name
+        prompt = server._prompt_manager._prompts["investigate_incident"].fn()
+        assert "untrusted" in prompt
+
+
 class TestMCPServer:
     """Tests for in-process FastMCP server tools, resources, and prompts."""
 
@@ -422,7 +609,7 @@ class TestMCPServer:
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
 
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         # 1. get_system_metrics
         metrics_tool = server._tool_manager._tools.get("get_system_metrics")
@@ -468,7 +655,7 @@ class TestMCPServer:
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
 
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         enable_tool = server._tool_manager._tools.get("enable_maintenance")
         disable_tool = server._tool_manager._tools.get("disable_maintenance")
@@ -508,7 +695,7 @@ class TestMCPServer:
     async def test_mcp_token_efficiency_and_projections(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         query_tool = server._tool_manager._tools.get("query_logs")
         context_tool = server._tool_manager._tools.get("get_log_context")
@@ -551,7 +738,7 @@ class TestMCPServer:
     async def test_mcp_count_logs_tool(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         count_tool = server._tool_manager._tools.get("count_logs")
         assert count_tool is not None
@@ -590,7 +777,7 @@ class TestMCPServer:
     async def test_mcp_count_logs_group_limit_and_truncated(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
         count_tool = server._tool_manager._tools.get("count_logs")
 
         # Seeded data has 2 apps: limit 1 truncates, total still counts all logs
@@ -612,7 +799,7 @@ class TestMCPServer:
     async def test_mcp_raw_is_fetched_only_when_requested(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
         query_tool = server._tool_manager._tools.get("query_logs")
         context_tool = server._tool_manager._tools.get("get_log_context")
 
@@ -639,7 +826,7 @@ class TestMCPServer:
     async def test_mcp_ergonomics_named_severity_and_relative_time(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         query_tool = server._tool_manager._tools.get("query_logs")
 
@@ -665,7 +852,7 @@ class TestMCPServer:
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
 
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         # logshed://system/metrics
         res_metrics = server._resource_manager._resources.get("logshed://system/metrics")
@@ -690,7 +877,7 @@ class TestMCPServer:
         assert len(alerts_data["recent_incidents"]) >= 1
 
     def test_mcp_prompts(self):
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
 
         investigate = server._prompt_manager._prompts.get("investigate_incident")
         assert investigate is not None
@@ -747,10 +934,10 @@ class TestMCPApiAndTransport:
         self, client: AsyncClient, auth_headers: dict
     ):
         await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
-        # Create token with only logs:read
+        # Connecting needs logs:read; a token holding every other MCP scope is still refused
         token_res = await client.post(
             "/api/tokens",
-            json={"name": "Log Viewer", "scopes": ["logs:read"]},
+            json={"name": "No Log Access", "scopes": ["alerts:read", "system:read", "maintenance:write"]},
             headers=auth_headers,
         )
         raw_token = token_res.json()["raw_token"]
@@ -1107,7 +1294,7 @@ class TestMCPCsrfExemption:
         await client.post("/api/settings", json={"enable_mcp": True}, headers=auth_headers)
         token_res = await client.post(
             "/api/tokens",
-            json={"name": "Log Viewer", "scopes": ["logs:read"]},
+            json={"name": "Ingest Only", "scopes": ["logs:write"]},
             headers=auth_headers,
         )
         raw_token = token_res.json()["raw_token"]
@@ -1164,7 +1351,7 @@ class TestMCPRedaction:
             conn.execute("UPDATE alert_history SET sample_log = ?, incident_summary = ?", (secret, secret))
             conn.commit()
 
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
         tools = server._tool_manager._tools
 
         queried = await tools["query_logs"].fn(limit=10, include_raw=True)
@@ -1179,7 +1366,7 @@ class TestMCPRedaction:
         assert "[REDACTED]" in alerts[0]["sample_log"]
 
     def test_count_logs_description_lists_group_by_aliases(self):
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
         desc = server._tool_manager._tools["count_logs"].description
         for token in ("app_name", "level", "source_alias", "host"):
             assert token in desc
@@ -1190,7 +1377,7 @@ class TestMCPQueryLogsCursor:
     async def test_query_logs_pages_with_cursor(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
         query_tool = server._tool_manager._tools.get("query_logs")
 
         seen: list[int] = []
@@ -1210,7 +1397,7 @@ class TestMCPQueryLogsCursor:
     async def test_query_logs_rejects_malformed_cursor(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
-        server = create_mcp_server()
+        server = create_mcp_server(stdio=True)  # direct calls run as the local (stdio) caller
         query_tool = server._tool_manager._tools.get("query_logs")
         with pytest.raises(Exception, match="cursor"):
             await query_tool.fn(limit=5, cursor="garbage!!")

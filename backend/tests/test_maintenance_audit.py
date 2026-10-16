@@ -279,7 +279,7 @@ class TestLimits:
 
     @pytest.mark.asyncio
     async def test_mcp_target_length_limit(self):
-        tool = create_mcp_server()._tool_manager._tools["enable_maintenance"]
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
         with pytest.raises(Exception, match="255"):
             await tool.fn(duration_minutes=5, target_app="a" * 256)
 
@@ -294,7 +294,7 @@ class TestLimits:
         ],
     )
     async def test_mcp_rejects_values_rest_rejects(self, kwargs: dict, match: str, db_path: Path):
-        tool = create_mcp_server()._tool_manager._tools["enable_maintenance"]
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
         with pytest.raises(ValueError, match=match):
             await tool.fn(**kwargs)
         with get_connection(db_path) as conn:
@@ -302,8 +302,11 @@ class TestLimits:
 
     @pytest.mark.asyncio
     async def test_mcp_accepts_rest_upper_bounds(self, db_path: Path):
-        tool = create_mcp_server()._tool_manager._tools["enable_maintenance"]
-        res = await tool.fn(duration_minutes=1440, reason="r" * 255, log_handling="drop_errors")
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
+        # drop_errors over MCP must be targeted (Q5); 255 characters is also the target length limit
+        res = await tool.fn(
+            duration_minutes=1440, reason="r" * 255, log_handling="drop_errors", target_app="a" * 255
+        )
         assert res["duration_minutes"] == 1440
         assert res["log_handling"] == "drop_errors"
 
@@ -415,7 +418,7 @@ class TestExposure:
         res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)
         assert res.status_code == 200
 
-        mcp_tool = create_mcp_server()._tool_manager._tools["enable_maintenance"]
+        mcp_tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
         mcp_res = await mcp_tool.fn(duration_minutes=5)
 
         res = await client.get("/api/alerts/history", headers=auth_headers)
@@ -433,7 +436,7 @@ class TestExposure:
             "/api/v1/maintenance/enable", json={"duration_minutes": 5}, headers=api_token_headers
         )
         session_id = res.json()["session_id"]
-        tool = create_mcp_server()._tool_manager._tools["get_recent_alerts"]
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["get_recent_alerts"]
         out = await tool.fn()
         text = str(out)
         assert session_id in text

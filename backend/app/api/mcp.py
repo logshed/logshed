@@ -2,12 +2,13 @@
 Model Context Protocol (MCP) FastAPI routes and SSE transport endpoints.
 
 Supports remote connections from AI assistants and IDE plugins via:
-- GET  /api/v1/mcp/sse      (Server-Sent Events transport)
-- POST /api/v1/mcp/messages (JSON-RPC message transport)
+- /mcp and /api/v1/mcp      (Streamable HTTP transport; the token is checked on every request)
+- GET  /api/v1/mcp/sse      (legacy Server-Sent Events transport)
+- POST /api/v1/mcp/messages (legacy SSE JSON-RPC message transport)
 
-Enforces enable_mcp runtime toggle and API token authentication with
-the 'AI Assistant / MCP' scope bundle:
-['logs:read', 'alerts:read', 'system:read', 'maintenance:write']
+Enforces the enable_mcp runtime toggle and API token authentication. Connecting needs only
+the logs:read scope; each tool and resource checks its own scope (see app.mcp.server), using
+the verified caller that these routes attach to every request (MCP_ACCESS_SCOPE_KEY).
 """
 
 import asyncio
@@ -33,13 +34,14 @@ from app.api.deps import rate_limit_headers, run_db_query, verify_api_token
 from app.core.api_tokens import api_token_rate_limiter, has_scope_permission, should_update_last_used
 from app.core.config import get_cached_setting
 from app.core.utils import parse_iso_to_utc_datetime
-from app.mcp.server import create_mcp_server
+from app.mcp.server import MCP_ACCESS_SCOPE_KEY, McpAccess, create_mcp_server
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 
-REQUIRED_MCP_SCOPES = ["logs:read", "alerts:read", "system:read", "maintenance:write"]
+# Scope needed to connect at all; tools and resources check their own scopes on top of this.
+REQUIRED_MCP_SCOPES = ["logs:read"]
 
 _mcp_server: Optional[FastMCP] = None
 _sse_transport: Optional[SseServerTransport] = None
@@ -383,10 +385,12 @@ async def _dispatch_streamable_http(request: Request, token: Optional[str] = Non
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    await validate_mcp_token(raw_token)
+    token_info = await validate_mcp_token(raw_token)
 
     # 3. Ensure Accept header includes application/json and text/event-stream for streaming compatibility
     scope = dict(request.scope)
+    # Tools read the caller of each message from the request that carries it (see app.mcp.server)
+    scope[MCP_ACCESS_SCOPE_KEY] = McpAccess.from_token(token_info)
     headers = list(scope.get("headers", []))
     accept_val = None
     accept_idx = -1
@@ -476,6 +480,7 @@ async def handle_mcp_sse(
 
     # 3. If mcp-session-id header is present, dispatch to Streamable HTTP standalone GET stream
     if "mcp-session-id" in request.headers:
+        request.scope[MCP_ACCESS_SCOPE_KEY] = McpAccess.from_token(token_info)
         sm = await ensure_session_manager_started()
         await sm.handle_request(request.scope, request.receive, request._send)
         return AlreadySentResponse()
@@ -550,6 +555,8 @@ async def handle_mcp_messages(
             raise _unauthorized("Authorization Bearer token required.")
         token_info = await _reverify_sse_session_token(session)
 
-    # 3. Deliver message to SSE session writer
+    # 3. Deliver message to SSE session writer. The server loop runs in the GET request's task, but the
+    # library passes this POST request along with the message, so tools see the freshly verified token.
+    request.scope[MCP_ACCESS_SCOPE_KEY] = McpAccess.from_token(token_info)
     await sse.handle_post_message(request.scope, request.receive, request._send)
     return AlreadySentResponse()
