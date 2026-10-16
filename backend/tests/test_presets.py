@@ -525,3 +525,44 @@ class TestShippedPresetsWithUserRegexEngine:
         res = await client.post("/api/alerts/presets/custom_bad/install", headers=auth_headers)
         assert res.status_code == 400
         assert "catastrophic backtracking" in res.json()["detail"].lower()
+
+
+class TestSystemdSessionDropPreset:
+    """The systemd session preset drops exactly the PAM systemd-user session lines (P-01)."""
+
+    @staticmethod
+    def _filter(tmp_path: Path):
+        from app.core.migrations import get_connection
+        from app.services.drop_filter import DropFilter
+
+        preset = get_drop_preset_by_id("systemd_session")
+        db_file = tmp_path / "systemd_preset.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            "INSERT INTO drop_rules (name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
+            "VALUES (?, NULL, NULL, ?, 1, 1, 0, datetime('now'))",
+            (preset["name"], preset["message_pattern"]),
+        )
+        conn.commit()
+        conn.close()
+        return DropFilter(db_file)
+
+    def test_drops_session_opened_and_closed_lines(self, tmp_path: Path):
+        flt = self._filter(tmp_path)
+        opened = "pam_unix(systemd-user:session): session opened for user ben(uid=1000) by (uid=0)"
+        closed = "pam_unix(systemd-user:session): session closed for user ben"
+        assert flt.should_drop(None, None, None, opened) is not None
+        assert flt.should_drop(None, None, None, closed) is not None
+
+    def test_does_not_drop_unrelated_session_closed_lines(self, tmp_path: Path):
+        flt = self._filter(tmp_path)
+        assert flt.should_drop(None, None, None, "sshd: session closed for user ben") is None
+        assert flt.should_drop(None, None, None, "pam_unix(sshd:session): session opened for user ben") is None
+
+    def test_pattern_passes_the_user_pattern_validator(self):
+        from app.core.regex_validator import compile_user_pattern
+        import re
+
+        preset = get_drop_preset_by_id("systemd_session")
+        compile_user_pattern(preset["message_pattern"], re.IGNORECASE)
