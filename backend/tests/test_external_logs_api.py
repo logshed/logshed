@@ -979,3 +979,27 @@ class TestKeysetPlans:
         after_details = " | ".join(str(r[-1]) for r in after)
         assert "idx_logs_src_time (source_alias=? AND timestamp<?)" in before_details
         assert "idx_logs_src_time (source_alias=? AND timestamp>?)" in after_details
+
+
+class TestMultiValueCaps:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["/api/v1/logs", "/api/v1/logs/count"])
+    @pytest.mark.parametrize("param", ["source", "app_name"])
+    async def test_more_than_50_values_returns_422(
+        self, client: AsyncClient, logs_token_headers: dict, path: str, param: str
+    ):
+        values = ",".join(f"v{i}" for i in range(51))
+        res = await client.get(path, params={param: values}, headers=logs_token_headers)
+        assert res.status_code == 422
+        assert "50" in res.json()["detail"]
+
+        repeated = [(param, f"v{i}") for i in range(51)]
+        res = await client.get(path, params=repeated, headers=logs_token_headers)
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_50_values_are_accepted(self, client: AsyncClient, logs_token_headers: dict):
+        values = ",".join(f"v{i}" for i in range(50))
+        res = await client.get("/api/v1/logs", params={"source": values, "app_name": values}, headers=logs_token_headers)
+        assert res.status_code == 200

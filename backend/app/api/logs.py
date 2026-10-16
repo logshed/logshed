@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, run_db_query
 from app.core.config import get_db_path
-from app.core.sse import sse_manager
+from app.core.sse import SSESubscriberLimitError, sse_manager
 from app.models import (
     LogContextResponse,
     LogDeletePreviewResponse,
@@ -193,7 +193,10 @@ async def stream_logs(
 
     docker_aliases = await run_db_query(_get_docker_aliases)
 
-    queue = await sse_manager.subscribe()
+    try:
+        queue = await sse_manager.subscribe()
+    except SSESubscriberLimitError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
     async def event_generator() -> AsyncGenerator[str, None]:
         sent = 0

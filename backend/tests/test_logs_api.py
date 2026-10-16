@@ -1356,3 +1356,32 @@ class TestAliasLessContext:
         res = await client.get("/api/logs/3/context", params={"lines": 1})
         assert res.status_code == 200
         assert [log["id"] for log in res.json()["logs"]] == [1, 3, 5]
+
+
+class TestSseLimitsAndPayload:
+
+    @pytest.mark.asyncio
+    async def test_21st_stream_gets_503(self, client: AsyncClient, auth_cookie: dict):
+        from app.core.sse import MAX_SSE_SUBSCRIBERS
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        assert MAX_SSE_SUBSCRIBERS == 20
+        queues = [await sse_manager.subscribe() for _ in range(MAX_SSE_SUBSCRIBERS)]
+        try:
+            res = await client.get("/api/logs/stream", params={"max_events": 1})
+            assert res.status_code == 503
+            assert sse_manager.subscriber_count() == MAX_SSE_SUBSCRIBERS
+        finally:
+            for q in queues:
+                await sse_manager.unsubscribe(q)
+
+    @pytest.mark.asyncio
+    async def test_subscriber_cap_is_enforced_by_the_broadcaster(self):
+        from app.core.sse import MAX_SSE_SUBSCRIBERS, SSESubscriberLimitError
+
+        queues = [await sse_manager.subscribe() for _ in range(MAX_SSE_SUBSCRIBERS)]
+        with pytest.raises(SSESubscriberLimitError):
+            await sse_manager.subscribe()
+        await sse_manager.unsubscribe(queues.pop())
+        queues.append(await sse_manager.subscribe())
+        assert sse_manager.subscriber_count() == MAX_SSE_SUBSCRIBERS

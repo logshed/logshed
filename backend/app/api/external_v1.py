@@ -603,6 +603,21 @@ def _parse_log_filters(
     return effective_severity_max, from_, to
 
 
+# Each filter value becomes SQL parameters (twice for sources, plus alias expansion), and
+# SQLite rejects statements with more than 32,766 of them, so long lists are refused early.
+MAX_FILTER_VALUES = 50
+
+
+def _check_filter_value_counts(**filters: Optional[list[str]]) -> None:
+    """Raise HTTP 422 when a multi-value filter lists more than MAX_FILTER_VALUES values."""
+    for name, values in filters.items():
+        if len(parse_multi_values(values)) > MAX_FILTER_VALUES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Too many '{name}' values: at most {MAX_FILTER_VALUES} are allowed.",
+            )
+
+
 def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
     """Map a logs table row to a LogEntry (single mapping point for external log endpoints).
 
@@ -653,8 +668,8 @@ def _decode_log_cursor(cursor: str) -> tuple[str, int]:
 @router.get("/logs", response_model=ExternalLogListResponse, response_model_exclude_none=True)
 async def search_logs_v1(
     query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
-    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
-    app_name: Optional[list[str]] = Query(None, description="Filter by application name"),
+    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip (up to 50 values)"),
+    app_name: Optional[list[str]] = Query(None, description="Filter by application name (up to 50 values)"),
     severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
     severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
     from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
@@ -669,6 +684,7 @@ async def search_logs_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> ExternalLogListResponse:
     """Search and filter logs (newest first) with keyset pagination via next_cursor."""
+    _check_filter_value_counts(source=source, app_name=app_name)
     effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
     cursor_pos = _decode_log_cursor(cursor) if cursor else None
 
@@ -736,8 +752,8 @@ async def search_logs_v1(
 @router.get("/logs/count", response_model=LogCountResponse)
 async def count_logs_v1(
     query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
-    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip"),
-    app_name: Optional[list[str]] = Query(None, description="Filter by application name"),
+    source: Optional[list[str]] = Query(None, description="Filter by source_alias or source_ip (up to 50 values)"),
+    app_name: Optional[list[str]] = Query(None, description="Filter by application name (up to 50 values)"),
     severity_max: Optional[int] = Query(None, ge=0, le=7, description="Max severity (0 - 7)"),
     severity: Optional[str] = Query(None, description="Named severity (e.g. 'error', 'warning', 'info') or numeric code"),
     from_: Optional[str] = Query(None, alias="from", description="ISO datetime start filter or relative duration (e.g. '1h', '24h')"),
@@ -747,6 +763,7 @@ async def count_logs_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogCountResponse:
     """Count logs matching filters with optional grouping by severity, app, or source."""
+    _check_filter_value_counts(source=source, app_name=app_name)
     effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
 
     def _count_db(conn):

@@ -9,19 +9,32 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+# Each stream holds a queue of up to 500 entries and its own HTTP connection.
+MAX_SSE_SUBSCRIBERS = 20
+
+
+class SSESubscriberLimitError(Exception):
+    """Raised when a new stream would exceed MAX_SSE_SUBSCRIBERS."""
+
+
 class SSEBroadcaster:
     """
     Manages active SSE client subscriber queues and broadcasts incoming log entries.
     """
 
-    def __init__(self):
+    def __init__(self, max_subscribers: int = MAX_SSE_SUBSCRIBERS):
         self._subscribers: set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
+        self._max_subscribers = max_subscribers
 
     async def subscribe(self, maxsize: int = 500) -> asyncio.Queue:
-        """Register a new client subscriber queue."""
+        """Register a new client subscriber queue, refusing it when the stream limit is reached."""
         q = asyncio.Queue(maxsize=maxsize)
         async with self._lock:
+            if len(self._subscribers) >= self._max_subscribers:
+                raise SSESubscriberLimitError(
+                    f"At most {self._max_subscribers} live log streams can be open at once."
+                )
             self._subscribers.add(q)
         return q
 
