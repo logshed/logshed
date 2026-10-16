@@ -4,7 +4,7 @@ POST /api/v1/ingest
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import pytest
@@ -231,3 +231,378 @@ class TestHttpIngestApi:
             assert "Ingestion rate limit exceeded" in resp_limited.json()["detail"]
         finally:
             ingest_rate_limiter.max_requests = orig_max
+
+
+def _queued_entries() -> list[dict]:
+    """Drain and return every entry currently on the shared ingestion queue."""
+    q = pipeline_mod.get_queue()
+    out = []
+    while not q.empty():
+        out.append(q.get_nowait())
+    return out
+
+
+class _FakeDropFilter:
+    """Drops entries whose message contains the given text."""
+
+    def __init__(self, needle: str):
+        self.needle = needle
+
+    def should_drop(self, source_alias, source_ip, app_name, message, severity=None):
+        return 11 if self.needle in (message or "") else None
+
+
+@pytest.fixture
+def isolated_filters(monkeypatch):
+    """Run with no drop rules and no maintenance sessions unless a test installs them."""
+    from app.services import drop_filter as drop_filter_mod
+    from app.services import maintenance_service
+
+    monkeypatch.setattr(drop_filter_mod, "_drop_filter", _FakeDropFilter("\x00never\x00"))
+    monkeypatch.setattr(maintenance_service, "_active_maintenance_sessions", [])
+    monkeypatch.setattr(maintenance_service, "_dropped_counters", {})
+    return drop_filter_mod, maintenance_service
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestPipelinePath:
+    """HTTP records are complete entries: no multiline merging, and the shared filters apply (B-21)."""
+
+    @pytest.mark.asyncio
+    async def test_indented_record_is_not_merged_into_previous(self, client, write_token, monkeypatch):
+        import app.main as main_mod
+        from app.core.pipeline import KeyedMultilineAssembler
+
+        assembler = KeyedMultilineAssembler()
+        monkeypatch.setattr(main_mod, "get_assembler", lambda: assembler)
+
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"app_name": "svc", "severity": 6, "message": "first record"},
+                {"app_name": "svc", "severity": 3, "message": "    indented second record"},
+                {"app_name": "svc", "severity": 6, "message": "at com.example.Main"},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        await assembler.flush_all()
+        entries = _queued_entries()
+        assert [e["message"] for e in entries] == [
+            "first record",
+            "    indented second record",
+            "at com.example.Main",
+        ]
+        assert [e["severity"] for e in entries] == [6, 3, 6]
+
+    @pytest.mark.asyncio
+    async def test_drop_rule_drops_http_records(self, client, write_token, isolated_filters, monkeypatch):
+        drop_filter_mod, _ = isolated_filters
+        monkeypatch.setattr(drop_filter_mod, "_drop_filter", _FakeDropFilter("healthcheck"))
+
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "GET /healthcheck 200"}, {"message": "real event"}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["accepted"] == 1
+        assert data["dropped"] == 1
+        assert data["ingested"] == 1
+        assert [e["message"] for e in _queued_entries()] == ["real event"]
+        assert pipeline_mod.get_dropped_by_filter_count() == 1
+
+    @pytest.mark.asyncio
+    async def test_drop_errors_session_drops_http_errors(self, client, write_token, isolated_filters, monkeypatch):
+        _, maintenance_service = isolated_filters
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        monkeypatch.setattr(
+            maintenance_service,
+            "_active_maintenance_sessions",
+            [{"session_id": "maint-1", "log_handling": "drop_errors", "expires_at": future, "target_app": "db"}],
+        )
+
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"app_name": "db", "severity": "error", "message": "connection refused"},
+                {"app_name": "db", "severity": "info", "message": "restarted"},
+                {"app_name": "web", "severity": "error", "message": "upstream down"},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["dropped"] == 1
+        assert [e["message"] for e in _queued_entries()] == ["restarted", "upstream down"]
+        assert maintenance_service.get_pending_dropped_counts() == {"maint-1": 1}
+
+    @pytest.mark.asyncio
+    async def test_full_queue_counts_as_dropped_without_blocking(self, client, write_token):
+        q = pipeline_mod.get_queue()
+        while not q.full():
+            q.put_nowait({"message": "filler"})
+
+        resp = await asyncio.wait_for(
+            client.post(
+                "/api/v1/ingest",
+                json=[{"message": "no room"}],
+                headers={"Authorization": f"Bearer {write_token}"},
+            ),
+            timeout=5,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == 0
+        assert resp.json()["dropped"] == 1
+        assert pipeline_mod.get_dropped_count() == 1
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestLimitsAndFields:
+    """Body, entry and field limits on POST /api/v1/ingest (S-06)."""
+
+    @pytest.mark.asyncio
+    async def test_oversize_content_length_is_rejected(self, client, write_token, monkeypatch):
+        monkeypatch.setenv("INGEST_MAX_BODY_BYTES", "1000")
+        body = json.dumps([{"message": "x" * 2000}])
+        resp = await client.post(
+            "/api/v1/ingest",
+            content=body,
+            headers={"Authorization": f"Bearer {write_token}", "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 413
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    async def test_oversize_chunked_body_is_rejected(self, client, write_token, monkeypatch):
+        monkeypatch.setenv("INGEST_MAX_BODY_BYTES", "1000")
+        chunks_sent = []
+
+        async def body_chunks():
+            yield b"["
+            for i in range(50):
+                chunks_sent.append(i)
+                yield json.dumps({"message": "y" * 100}).encode() + b","
+            yield b"{}]"
+
+        resp = await client.post(
+            "/api/v1/ingest",
+            content=body_chunks(),
+            headers={"Authorization": f"Bearer {write_token}", "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 413
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    async def test_default_body_limit_is_five_mib(self, client, write_token, monkeypatch):
+        monkeypatch.delenv("INGEST_MAX_BODY_BYTES", raising=False)
+        from app.api import ingest as ingest_mod
+
+        assert ingest_mod.get_ingest_max_body_bytes() == 5 * 1024 * 1024
+        monkeypatch.setenv("INGEST_MAX_BODY_BYTES", "not-a-number")
+        assert ingest_mod.get_ingest_max_body_bytes() == 5 * 1024 * 1024
+
+    @pytest.mark.asyncio
+    async def test_too_many_entries_is_rejected(self, client, write_token):
+        body = "[" + ",".join(["{}"] * 10_001) + "]"
+        resp = await client.post(
+            "/api/v1/ingest",
+            content=body,
+            headers={"Authorization": f"Bearer {write_token}", "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 413
+        assert "10000" in resp.json()["detail"].replace(",", "")
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    async def test_exactly_max_entries_is_accepted(self, client, write_token):
+        body = "\n".join(['{"message": "m"}'] * 10_000)
+        resp = await client.post(
+            "/api/v1/ingest",
+            content=body,
+            headers={"Authorization": f"Bearer {write_token}", "Content-Type": "application/x-ndjson"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == 10_000
+        assert len(_queued_entries()) == 10_000
+
+    @pytest.mark.asyncio
+    async def test_empty_severity_is_stored_as_info(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "a", "severity": ""}, {"message": "b", "level": "  "}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert [e["severity"] for e in _queued_entries()] == [6, 6]
+
+    @pytest.mark.asyncio
+    async def test_message_and_raw_are_capped_and_raw_is_cleaned(self, client, write_token):
+        from app.core.pipeline import MAX_MESSAGE_BYTES
+
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"message": "M" * (MAX_MESSAGE_BYTES + 10), "raw": "R" * (MAX_MESSAGE_BYTES * 2)},
+                {"message": "colored", "raw": "\x1b[31mred\x1b[0m text\x07"},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        big, colored = _queued_entries()
+        assert big["message"] == "M" * MAX_MESSAGE_BYTES
+        assert big["raw"] == "R" * MAX_MESSAGE_BYTES
+        assert colored["raw"] == "red text"
+
+    @pytest.mark.asyncio
+    async def test_response_reports_accepted_and_dropped(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "one"}, {"message": "two"}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "ingested": 2, "accepted": 2, "dropped": 0}
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestReservedIdentitiesAndTimestamps:
+    """Ingest cannot forge LogShed's own or Docker identities, and timestamps are kept in range (S-19)."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "item",
+        [
+            {"source_ip": "127.0.0.1", "source_alias": "logshed"},
+            {"source_ip": "127.0.0.1", "source_alias": "LogShed"},
+            {"source_ip": "docker"},
+            {"source_ip": "Docker", "source_alias": "my-host"},
+            {"source_ip": "docker:2"},
+        ],
+    )
+    async def test_reserved_identity_is_rejected(self, client, write_token, item):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "fine"}, {"message": "forged", **item}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 422
+        assert "entry 2" in resp.json()["detail"]
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    async def test_forwarded_hosts_keep_their_source_fields(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"message": "a", "source_ip": "10.0.0.7", "source_alias": "nas"},
+                {"message": "b", "source_ip": "127.0.0.1", "source_alias": "local-vector"},
+                {"message": "c", "source_ip": "docker-host-2"},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        entries = _queued_entries()
+        assert [(e["source_ip"], e["source_alias"]) for e in entries] == [
+            ("10.0.0.7", "nas"),
+            ("127.0.0.1", "local-vector"),
+            ("docker-host-2", "docker-host-2"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_timestamps_use_received_time(self, client, write_token):
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=1)).replace(microsecond=0)
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"message": "future", "timestamp": (now + timedelta(days=2)).isoformat()},
+                {"message": "ancient", "timestamp": "1990-01-01T00:00:00Z"},
+                {"message": "recent", "timestamp": recent.isoformat()},
+                {"message": "slight skew", "timestamp": (now + timedelta(minutes=2)).isoformat()},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        future, ancient, recent_e, skew = _queued_entries()
+        assert future["timestamp"] == future["received_at"]
+        assert ancient["timestamp"] == ancient["received_at"]
+        assert datetime.fromisoformat(recent_e["timestamp"]) == recent
+        assert skew["timestamp"] != skew["received_at"]
+
+    @pytest.mark.asyncio
+    async def test_timestamp_lower_bound_follows_max_retention(self, client, write_token, monkeypatch):
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "3")
+        now = datetime.now(timezone.utc)
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"message": "too old", "timestamp": (now - timedelta(days=4)).isoformat()},
+                {"message": "in range", "timestamp": (now - timedelta(days=2)).isoformat()},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        too_old, in_range = _queued_entries()
+        assert too_old["timestamp"] == too_old["received_at"]
+        assert in_range["timestamp"] != in_range["received_at"]
+
+
+class TestIngestTokenRevocationRace:
+    """A token revoked while an ingest request is between its lookup and its cache write stays revoked (S-32)."""
+
+    @pytest.mark.asyncio
+    async def test_revocation_between_lookup_and_cache_write(
+        self, client, write_token, auth_headers, monkeypatch, isolated_filters
+    ):
+        import sqlite3
+
+        from app.api import deps as deps_mod
+        from app.api.ingest import forget_ingest_token
+        from app.core.config import get_db_path
+
+        list_resp = await client.get("/api/tokens", headers=auth_headers)
+        token_id = next(t["id"] for t in list_resp.json() if t["name"] == "Edge Shipper")
+
+        original_run_db_query = deps_mod.run_db_query
+        raced = {"done": False}
+
+        async def racing_run_db_query(fn, *args, **kwargs):
+            result = await original_run_db_query(fn, *args, **kwargs)
+            if not raced["done"] and getattr(fn, "__name__", "") == "_lookup":
+                raced["done"] = True
+                # DELETE /api/tokens/{id} commits and calls forget_ingest_token after the
+                # lookup has read the row, but before the request writes the token cache.
+                conn = sqlite3.connect(str(get_db_path()))
+                try:
+                    conn.execute("DELETE FROM api_tokens WHERE id = ?", (token_id,))
+                    conn.commit()
+                finally:
+                    conn.close()
+                forget_ingest_token(token_id)
+            return result
+
+        monkeypatch.setattr(deps_mod, "run_db_query", racing_run_db_query)
+        headers = {"Authorization": f"Bearer {write_token}"}
+
+        first = await client.post("/api/v1/ingest", json=[{"message": "in flight"}], headers=headers)
+        assert raced["done"] is True
+        assert first.status_code in (200, 401)
+
+        second = await client.post("/api/v1/ingest", json=[{"message": "after revoke"}], headers=headers)
+        assert second.status_code == 401
+
+    def test_revoked_ids_expire_after_twice_the_cache_ttl(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from app.api import ingest as ingest_mod
+
+        clock = {"now": 1000.0}
+        # Replace only the ingest module's clock, not the process-wide time.monotonic.
+        monkeypatch.setattr(ingest_mod, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        ingest_mod.forget_ingest_token(4242)
+        assert ingest_mod.is_ingest_token_revoked(4242)
+        clock["now"] += 2 * ingest_mod._TOKEN_CACHE_TTL - 1
+        assert ingest_mod.is_ingest_token_revoked(4242)
+        clock["now"] += 2
+        assert not ingest_mod.is_ingest_token_revoked(4242)
