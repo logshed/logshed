@@ -20,6 +20,24 @@ from app.core.security import decrypt_value
 
 logger = logging.getLogger(__name__)
 
+TLS_HOSTNAME_HINT = (
+    "The certificate does not list this host name or IP address. If the daemon is reached by an IP "
+    "address its certificate does not list, turn off 'Verify TLS host name' for this host."
+)
+
+
+def is_tls_hostname_mismatch(text: Optional[str]) -> bool:
+    """True when an error message reports a certificate host name or IP address mismatch."""
+    lowered = (text or "").lower()
+    return "hostname mismatch" in lowered or "ip address mismatch" in lowered
+
+
+def with_tls_hostname_hint(error: Optional[str]) -> Optional[str]:
+    """Append the verify host name hint to a TLS host name mismatch error."""
+    if error and is_tls_hostname_mismatch(error) and TLS_HOSTNAME_HINT not in error:
+        return f"{error} {TLS_HOSTNAME_HINT}"
+    return error
+
 
 async def _supervise_tailer(tailer: DockerTailer) -> None:
     """
@@ -105,6 +123,7 @@ class DockerCollectorPool:
                 ca_cert=row.get("ca_cert"),
                 client_cert=row.get("client_cert"),
                 client_key=client_key,
+                verify_hostname=bool(row.get("verify_hostname", 1)),
             )
 
         return DockerTailer(
@@ -132,7 +151,7 @@ class DockerCollectorPool:
                 cur.execute(
                     """
                     SELECT id, name, url, source_alias, enabled, tls_enabled,
-                           ca_cert, client_cert, client_key, exclude_containers
+                           ca_cert, client_cert, client_key, exclude_containers, verify_hostname
                     FROM docker_endpoints
                     WHERE enabled = 1
                     ORDER BY id ASC
@@ -152,6 +171,7 @@ class DockerCollectorPool:
                         "client_cert": r["client_cert"],
                         "client_key": r["client_key"],
                         "exclude_containers": r["exclude_containers"],
+                        "verify_hostname": r["verify_hostname"],
                     })
                 return results
 
@@ -273,7 +293,7 @@ class DockerCollectorPool:
                         cur.execute(
                             """
                             SELECT id, name, url, source_alias, enabled, tls_enabled,
-                                   ca_cert, client_cert, client_key, exclude_containers
+                                   ca_cert, client_cert, client_key, exclude_containers, verify_hostname
                             FROM docker_endpoints
                             WHERE enabled = 1
                             ORDER BY id ASC
@@ -303,7 +323,7 @@ class DockerCollectorPool:
             cur.execute(
                 """
                 SELECT id, name, url, source_alias, enabled, tls_enabled,
-                       ca_cert, client_cert, client_key, exclude_containers,
+                       ca_cert, client_cert, client_key, exclude_containers, verify_hostname,
                        created_at, updated_at
                 FROM docker_endpoints
                 ORDER BY id ASC
@@ -323,6 +343,7 @@ class DockerCollectorPool:
                     "client_cert": r["client_cert"],
                     "has_client_key": bool(r["client_key"] and str(r["client_key"]).strip()),
                     "exclude_containers": r["exclude_containers"] or "",
+                    "verify_hostname": bool(r["verify_hostname"]),
                     "created_at": r["created_at"],
                     "updated_at": r["updated_at"],
                 })
@@ -338,7 +359,7 @@ class DockerCollectorPool:
                 status = tailer.get_status()
                 ep["is_connected"] = status["is_connected"]
                 ep["active_containers"] = status["active_containers"]
-                ep["last_error"] = status["last_error"]
+                ep["last_error"] = with_tls_hostname_hint(status["last_error"])
                 ep["last_activity"] = status["last_activity"]
                 ep["latency_ms"] = status["latency_ms"]
             else:

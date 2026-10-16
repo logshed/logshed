@@ -27,6 +27,7 @@ from app.collectors.docker_collector import (
     create_docker_ssl_context,
     effective_source_ip,
 )
+from app.collectors.docker_pool import TLS_HOSTNAME_HINT, is_tls_hostname_mismatch
 from app.core.config import invalidate_settings_cache
 from app.core.security import decrypt_value, encrypt_value
 
@@ -138,6 +139,28 @@ async def _ensure_url_target_allowed(url: Optional[str]) -> None:
         raise HTTPException(status_code=422, detail=_BLOCKED_TARGET_MESSAGE)
 
 
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    ip = _parse_ip(host)
+    return ip is not None and ip.is_loopback
+
+
+def _require_ca_for_remote_tls(url: str, tls_enabled: bool, ca_cert: Optional[str]) -> None:
+    """TLS to a non-loopback network host must pin a CA certificate (422 otherwise)."""
+    if not tls_enabled or not url.startswith(("tcp://", "http://", "https://")):
+        return
+    if ca_cert and ca_cert.strip():
+        return
+    host = urlparse(url).hostname or ""
+    if _is_loopback_host(host):
+        return
+    raise HTTPException(
+        status_code=422,
+        detail="A CA certificate is required when TLS is on for a Docker host that is not on this machine.",
+    )
+
+
 def _iter_exception_chain(exc: BaseException):
     seen: set[int] = set()
     current: Optional[BaseException] = exc
@@ -152,6 +175,8 @@ def _describe_connection_error(exc: BaseException) -> str:
     chain = list(_iter_exception_chain(exc))
     text = " ".join(str(e) for e in chain)
     if any(isinstance(e, ssl.SSLError) for e in chain) or "SSL" in text or "CERTIFICATE_VERIFY_FAILED" in text:
+        if is_tls_hostname_mismatch(text):
+            return f"Connection test failed: TLS error. {TLS_HOSTNAME_HINT}"
         return "Connection test failed: TLS error."
     if any(isinstance(e, (httpx.TimeoutException, TimeoutError)) for e in chain):
         return "Connection test failed: timeout."
@@ -170,6 +195,7 @@ class DockerEndpointResponse(BaseModel):
     ca_cert: Optional[str] = None
     client_cert: Optional[str] = None
     has_client_key: bool = False
+    verify_hostname: bool = True
     exclude_containers: str = ""
     created_at: str
     updated_at: str
@@ -186,6 +212,7 @@ class DockerEndpointCreateRequest(BaseModel):
     source_alias: str = Field(default="docker", max_length=64)
     enabled: bool = True
     tls_enabled: bool = False
+    verify_hostname: bool = True
     ca_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     client_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     client_key: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
@@ -205,6 +232,7 @@ class DockerEndpointUpdateRequest(BaseModel):
     source_alias: Optional[str] = Field(None, max_length=64)
     enabled: Optional[bool] = None
     tls_enabled: Optional[bool] = None
+    verify_hostname: Optional[bool] = None
     ca_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     client_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     client_key: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
@@ -220,6 +248,7 @@ class DockerEndpointTestRequest(BaseModel):
     endpoint_id: Optional[int] = None
     url: str = Field(..., max_length=URL_MAX_LENGTH)
     tls_enabled: bool = False
+    verify_hostname: bool = True
     ca_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     client_cert: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
     client_key: Optional[str] = Field(None, max_length=PEM_MAX_LENGTH)
@@ -258,7 +287,7 @@ async def list_docker_endpoints(
         cur.execute(
             """
             SELECT id, name, url, source_alias, enabled, tls_enabled,
-                   ca_cert, client_cert, client_key, exclude_containers,
+                   ca_cert, client_cert, client_key, exclude_containers, verify_hostname,
                    created_at, updated_at
             FROM docker_endpoints
             ORDER BY id ASC
@@ -277,6 +306,7 @@ async def list_docker_endpoints(
                 "ca_cert": r["ca_cert"],
                 "client_cert": r["client_cert"],
                 "has_client_key": bool(r["client_key"] and str(r["client_key"]).strip()),
+                "verify_hostname": bool(r["verify_hostname"]),
                 "exclude_containers": r["exclude_containers"] or "",
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
@@ -299,6 +329,7 @@ async def create_docker_endpoint(
 ) -> DockerEndpointResponse:
     """Create a new Docker endpoint and spawn its worker task if enabled."""
     await _ensure_url_target_allowed(payload.url)
+    _require_ca_for_remote_tls(payload.url, payload.tls_enabled, payload.ca_cert)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     enc_key = None
     if payload.client_key and payload.client_key.strip():
@@ -316,10 +347,10 @@ async def create_docker_endpoint(
         cur.execute(
             """
             INSERT INTO docker_endpoints (
-                name, url, source_alias, enabled, tls_enabled,
+                name, url, source_alias, enabled, tls_enabled, verify_hostname,
                 ca_cert, client_cert, client_key, exclude_containers,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.name.strip(),
@@ -327,6 +358,7 @@ async def create_docker_endpoint(
                 payload.source_alias.strip() or "docker",
                 1 if payload.enabled else 0,
                 1 if payload.tls_enabled else 0,
+                1 if payload.verify_hostname else 0,
                 payload.ca_cert.strip() if payload.ca_cert else None,
                 payload.client_cert.strip() if payload.client_cert else None,
                 enc_key,
@@ -348,6 +380,7 @@ async def create_docker_endpoint(
         "source_alias": payload.source_alias.strip() or "docker",
         "enabled": payload.enabled,
         "tls_enabled": payload.tls_enabled,
+        "verify_hostname": payload.verify_hostname,
         "ca_cert": payload.ca_cert.strip() if payload.ca_cert else None,
         "client_cert": payload.client_cert.strip() if payload.client_cert else None,
         "client_key": enc_key,
@@ -371,6 +404,7 @@ async def create_docker_endpoint(
         ca_cert=payload.ca_cert,
         client_cert=payload.client_cert,
         has_client_key=bool(enc_key),
+        verify_hostname=payload.verify_hostname,
         exclude_containers=payload.exclude_containers or "",
         created_at=now_iso,
         updated_at=now_iso,
@@ -455,6 +489,10 @@ async def update_docker_endpoint(
         ca_val = (payload.ca_cert.strip() or None) if payload.ca_cert is not None else row["ca_cert"]
         cert_val = (payload.client_cert.strip() or None) if payload.client_cert is not None else row["client_cert"]
         excl_val = payload.exclude_containers.strip() if payload.exclude_containers is not None else row["exclude_containers"]
+        verify_val = (1 if payload.verify_hostname else 0) if payload.verify_hostname is not None else row["verify_hostname"]
+        # Checked when the request touches TLS, the URL or the CA, so a plain enable toggle still works
+        if payload.tls_enabled is not None or payload.url is not None or payload.ca_cert is not None:
+            _require_ca_for_remote_tls(url_val, bool(tls_val), ca_val)
 
         key_val = row["client_key"]
         if payload.client_key is not None:
@@ -475,6 +513,7 @@ async def update_docker_endpoint(
                 source_alias = ?,
                 enabled = ?,
                 tls_enabled = ?,
+                verify_hostname = ?,
                 ca_cert = ?,
                 client_cert = ?,
                 client_key = ?,
@@ -488,6 +527,7 @@ async def update_docker_endpoint(
                 alias_val,
                 enabled_val,
                 tls_val,
+                verify_val,
                 ca_val,
                 cert_val,
                 key_val,
@@ -533,6 +573,7 @@ async def update_docker_endpoint(
             "source_alias": alias_val,
             "enabled": bool(enabled_val),
             "tls_enabled": bool(tls_val),
+            "verify_hostname": bool(verify_val),
             "ca_cert": ca_val,
             "client_cert": cert_val,
             "client_key": key_val,
@@ -650,6 +691,8 @@ async def test_docker_connection(
                 payload.endpoint_id,
             )
 
+    _require_ca_for_remote_tls(payload.url, payload.tls_enabled, ca_cert)
+
     ssl_ctx = None
     if payload.tls_enabled:
         try:
@@ -657,6 +700,7 @@ async def test_docker_connection(
                 ca_cert=ca_cert,
                 client_cert=client_cert,
                 client_key=client_key,
+                verify_hostname=payload.verify_hostname,
             )
         except Exception as exc:
             logger.info("Docker connection test TLS setup failed: %r", exc)

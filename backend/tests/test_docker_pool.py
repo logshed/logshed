@@ -172,3 +172,83 @@ class TestDockerCollectorPool:
         assert status["endpoint_id"] == 1
         assert status["name"] == "Primary Docker"
         assert status["is_connected"] is False
+
+
+class TestDockerTlsHostnameVerification:
+    """S-16: per-endpoint TLS host name verification, on by default."""
+
+    def test_ssl_context_checks_hostname_by_default(self):
+        from app.collectors.docker_collector import create_docker_ssl_context
+
+        ctx = create_docker_ssl_context()
+        assert ctx.check_hostname is True
+
+    def test_ssl_context_toggle_turns_hostname_check_off(self):
+        import ssl
+        from app.collectors.docker_collector import create_docker_ssl_context
+
+        ctx = create_docker_ssl_context(verify_hostname=False)
+        assert ctx.check_hostname is False
+        # The certificate chain is still verified
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+
+    @pytest.mark.parametrize("stored, expected", [(1, True), (0, False)])
+    def test_pool_builds_tailer_with_endpoint_setting(
+        self, test_db: Path, assembler: KeyedMultilineAssembler, stored: int, expected: bool
+    ):
+        pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
+        row = {
+            "id": 7,
+            "name": "TLS Node",
+            "url": "tcp://10.0.0.7:2376",
+            "source_alias": "tls-node",
+            "enabled": 1,
+            "tls_enabled": 1,
+            "verify_hostname": stored,
+        }
+        with patch("app.collectors.docker_pool.create_docker_ssl_context") as mock_ctx:
+            pool._build_tailer(row)
+        assert mock_ctx.call_args.kwargs["verify_hostname"] is expected
+
+    @pytest.mark.asyncio
+    async def test_status_points_at_toggle_on_hostname_mismatch(
+        self, test_db: Path, assembler: KeyedMultilineAssembler
+    ):
+        pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
+        with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
+            mock_run.side_effect = _run_until_cancelled
+            await pool.start()
+            try:
+                pool.get_tailer(1)._last_error = (
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+                    "IP address mismatch, certificate is not valid for '10.0.0.7'. (_ssl.c:1000)"
+                )
+                statuses = await pool.get_statuses()
+            finally:
+                await pool.stop()
+        primary = next(s for s in statuses if s["id"] == 1)
+        assert "Verify TLS host name" in primary["last_error"]
+        assert primary["verify_hostname"] is True
+
+    def test_migration_repair_adds_verify_hostname_once(self, tmp_path: Path):
+        db = tmp_path / "beta.db"
+        run_migrations(db)
+        # Simulate a 1.3.0 beta database created before the column existed
+        with get_connection(db) as conn:
+            conn.execute("ALTER TABLE docker_endpoints DROP COLUMN verify_hostname")
+            conn.execute(
+                """
+                INSERT INTO docker_endpoints (name, url, source_alias, enabled, tls_enabled, created_at, updated_at)
+                VALUES ('Beta TLS', 'tcp://10.0.0.8:2376', 'beta', 1, 1, datetime('now'), datetime('now'))
+                """
+            )
+            conn.commit()
+
+        run_migrations(db)
+        run_migrations(db)
+
+        with get_connection(db) as conn:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(docker_endpoints)")]
+            assert cols.count("verify_hostname") == 1
+            values = {r[0] for r in conn.execute("SELECT verify_hostname FROM docker_endpoints")}
+            assert values == {1}

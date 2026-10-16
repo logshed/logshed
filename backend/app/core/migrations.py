@@ -528,6 +528,13 @@ def run_migrations(db_path: Union[str, Path]) -> None:
                 logger.info("Upgrading pre-release v3 database schema with missing v1.3.0 tables...")
                 migrate_v3(conn)
                 conn.commit()
+
+            # Per-endpoint Docker TLS host name verification (on by default, including existing endpoints)
+            endpoint_cols = {row[1] for row in conn.execute("PRAGMA table_info(docker_endpoints);").fetchall()}
+            if endpoint_cols and "verify_hostname" not in endpoint_cols:
+                logger.info("Adding verify_hostname column to docker_endpoints...")
+                conn.execute("ALTER TABLE docker_endpoints ADD COLUMN verify_hostname INTEGER NOT NULL DEFAULT 1;")
+                conn.commit()
     finally:
         conn.close()
 

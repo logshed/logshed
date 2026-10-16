@@ -660,6 +660,7 @@ export interface DockerEndpoint {
   ca_cert?: string | null;
   client_cert?: string | null;
   has_client_key?: boolean;
+  verify_hostname?: boolean;
   exclude_containers: string;
   created_at: string;
   updated_at: string;
@@ -676,6 +677,7 @@ export interface DockerEndpointCreate {
   source_alias?: string;
   enabled?: boolean;
   tls_enabled?: boolean;
+  verify_hostname?: boolean;
   ca_cert?: string | null;
   client_cert?: string | null;
   client_key?: string | null;
@@ -688,6 +690,7 @@ export interface DockerEndpointUpdate {
   source_alias?: string;
   enabled?: boolean;
   tls_enabled?: boolean;
+  verify_hostname?: boolean;
   ca_cert?: string | null;
   client_cert?: string | null;
   client_key?: string | null;
@@ -698,6 +701,7 @@ export interface DockerEndpointTestRequest {
   endpoint_id?: number;
   url: string;
   tls_enabled?: boolean;
+  verify_hostname?: boolean;
   ca_cert?: string | null;
   client_cert?: string | null;
   client_key?: string | null;

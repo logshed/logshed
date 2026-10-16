@@ -94,14 +94,19 @@ def create_docker_ssl_context(
     ca_cert: Optional[str] = None,
     client_cert: Optional[str] = None,
     client_key: Optional[str] = None,
+    verify_hostname: bool = True,
 ) -> ssl.SSLContext:
     """
     Create an ephemeral SSLContext configured for Docker mTLS.
     Decrypted client credentials are safely materialized to temporary files
     with restricted 0600 permissions solely during SSLContext generation.
+
+    verify_hostname checks that the daemon certificate names the host in the URL.
+    Turning it off still verifies the certificate chain; it exists for daemons
+    reached by an IP address their certificate does not list.
     """
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
+    ctx.check_hostname = bool(verify_hostname)
 
     if ca_cert and ca_cert.strip():
         ctx.load_verify_locations(cadata=ca_cert.strip())

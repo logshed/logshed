@@ -745,3 +745,100 @@ class TestDockerHostsFixes:
         body = resp.json()
         assert body["success"] is False
         assert "not a Docker API" in body["error"]
+
+    @pytest.mark.asyncio
+    async def test_tls_without_ca_rejected_for_remote_hosts(self, client: AsyncClient, auth_headers: dict):
+        """S-16: TLS to a non-loopback host requires a CA certificate."""
+        res = await client.post(
+            "/api/docker/hosts",
+            json={"name": "No CA", "url": "tcp://10.0.0.9:2376", "tls_enabled": True},
+            headers=auth_headers,
+        )
+        assert res.status_code == 422
+        assert "CA certificate" in res.json()["detail"]
+
+        test_res = await client.post(
+            "/api/docker/hosts/test",
+            json={"url": "tcp://10.0.0.9:2376", "tls_enabled": True},
+            headers=auth_headers,
+        )
+        assert test_res.status_code == 422
+        assert "CA certificate" in test_res.json()["detail"]
+
+        # Loopback TLS without a CA is still allowed
+        ok = await client.post(
+            "/api/docker/hosts",
+            json={"name": "Loopback TLS", "url": "tcp://127.0.0.1:2376", "tls_enabled": True},
+            headers=auth_headers,
+        )
+        assert ok.status_code == 200
+
+        # Turning TLS on for an existing remote host without a CA is refused too
+        plain = await client.post(
+            "/api/docker/hosts",
+            json={"name": "Plain", "url": "tcp://10.0.0.10:2375"},
+            headers=auth_headers,
+        )
+        upd = await client.put(
+            f"/api/docker/hosts/{plain.json()['id']}", json={"tls_enabled": True}, headers=auth_headers
+        )
+        assert upd.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_verify_hostname_defaults_on_and_round_trips(self, client: AsyncClient, auth_headers: dict):
+        """S-16: verify_hostname defaults to on and can be turned off per endpoint."""
+        res = await client.post(
+            "/api/docker/hosts",
+            json={"name": "Verify", "url": "tcp://10.0.0.11:2376", "tls_enabled": True, "ca_cert": _PEM_CERT},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["verify_hostname"] is True
+        ep_id = res.json()["id"]
+
+        upd = await client.put(f"/api/docker/hosts/{ep_id}", json={"verify_hostname": False}, headers=auth_headers)
+        assert upd.status_code == 200
+        assert upd.json()["verify_hostname"] is False
+
+        hosts = (await client.get("/api/docker/hosts", headers=auth_headers)).json()
+        assert next(h for h in hosts if h["id"] == ep_id)["verify_hostname"] is False
+
+    @pytest.mark.asyncio
+    async def test_connection_test_passes_verify_hostname(self, client: AsyncClient, auth_headers: dict):
+        """S-16: the connection test builds its TLS context with the requested hostname check."""
+        with patch("app.api.docker_hosts.create_docker_ssl_context", side_effect=ValueError("bad pem")) as mock_ctx:
+            await client.post(
+                "/api/docker/hosts/test",
+                json={"url": "tcp://127.0.0.1:2376", "tls_enabled": True, "verify_hostname": False},
+                headers=auth_headers,
+            )
+        assert mock_ctx.call_args.kwargs["verify_hostname"] is False
+
+    @pytest.mark.asyncio
+    async def test_connection_test_hostname_mismatch_mentions_toggle(self, client: AsyncClient, auth_headers: dict):
+        """S-16: a certificate host name mismatch points at the verify host name toggle."""
+        import httpx
+
+        class _FailingClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, *args, **kwargs):
+                raise httpx.ConnectError(
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+                    "IP address mismatch, certificate is not valid for '10.0.0.13'. (_ssl.c:1000)"
+                )
+
+        with patch("app.api.docker_hosts._build_client", return_value=_FailingClient()), \
+                patch("app.api.docker_hosts.create_docker_ssl_context"):
+            resp = await client.post(
+                "/api/docker/hosts/test",
+                json={"url": "tcp://10.0.0.13:2376", "tls_enabled": True, "ca_cert": _PEM_CERT},
+                headers=auth_headers,
+            )
+        body = resp.json()
+        assert body["success"] is False
+        assert "Verify TLS host name" in body["error"]

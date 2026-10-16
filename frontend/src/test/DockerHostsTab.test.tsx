@@ -311,3 +311,69 @@ describe('DockerHostsTab TLS credential handling', () => {
     });
   });
 });
+
+describe('DockerHostsTab TLS host name verification', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('defaults to verifying the host name and sends the toggle on create and test', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    const testSpy = vi.spyOn(dockerHostsApi, 'testDockerEndpoint').mockResolvedValue({
+      success: true,
+      version: '27.3.1',
+      latency_ms: 2,
+    });
+    const createSpy = vi.spyOn(dockerHostsApi, 'createDockerEndpoint').mockResolvedValue({
+      ...tlsEndpoint,
+      id: 9,
+      verify_hostname: false,
+    });
+
+    render(<DockerHostsTab />);
+    await waitFor(() => {
+      expect(screen.getByText('No Docker hosts configured')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Add Docker Host/i }));
+    fireEvent.change(screen.getByLabelText(/Host Name/i), { target: { value: 'By IP' } });
+    fireEvent.change(screen.getByLabelText(/Docker Endpoint URL/i), {
+      target: { value: 'tcp://192.168.1.80:2376' },
+    });
+    fireEvent.click(screen.getByLabelText(/Use Mutual TLS/i));
+
+    const toggle = screen.getByLabelText('Verify TLS host name') as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(
+      screen.getByText(/Turn off only for daemons reached by IP whose certificate does not list that IP/)
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Test Connection/i }).at(-1) as HTMLElement);
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({ verify_hostname: true }));
+    });
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Add Host' }));
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ verify_hostname: false }));
+    });
+  });
+
+  it('loads the stored setting when editing', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([
+      { ...tlsEndpoint, verify_hostname: false },
+    ]);
+    const updateSpy = vi
+      .spyOn(dockerHostsApi, 'updateDockerEndpoint')
+      .mockResolvedValue({ ...tlsEndpoint, verify_hostname: false });
+
+    render(<DockerHostsTab />);
+    await openEditFor('TLS Worker');
+
+    expect((screen.getByLabelText('Verify TLS host name') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Update Host' }));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(3, expect.objectContaining({ verify_hostname: false }));
+    });
+  });
+});

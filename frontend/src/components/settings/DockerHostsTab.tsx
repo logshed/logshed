@@ -67,6 +67,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   const [excludeContainers, setExcludeContainers] = useState<string>('');
   const [enabled, setEnabled] = useState<boolean>(true);
   const [tlsEnabled, setTlsEnabled] = useState<boolean>(false);
+  const [verifyHostname, setVerifyHostname] = useState<boolean>(true);
   const [caCert, setCaCert] = useState<string>('');
   const [clientCert, setClientCert] = useState<string>('');
   const [clientKey, setClientKey] = useState<string>('');
@@ -126,6 +127,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
     setExcludeContainers('');
     setEnabled(true);
     setTlsEnabled(false);
+    setVerifyHostname(true);
     setCaCert('');
     setClientCert('');
     setClientKey('');
@@ -144,6 +146,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
     setExcludeContainers(host.exclude_containers || '');
     setEnabled(host.enabled);
     setTlsEnabled(host.tls_enabled);
+    setVerifyHostname(host.verify_hostname ?? true);
     setCaCert(host.ca_cert || '');
     setClientCert(host.client_cert || '');
     setClientKey('');
@@ -209,6 +212,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
         endpoint_id: editingHost?.id,
         url: url.trim(),
         tls_enabled: tlsEnabled,
+        verify_hostname: verifyHostname,
         ca_cert: caCert.trim() || null,
         client_cert: clientCert.trim() || null,
         client_key: clearClientKey ? null : (clientKey.trim() || null),
@@ -243,6 +247,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           exclude_containers: excludeContainers.trim(),
           enabled,
           tls_enabled: tlsEnabled,
+          verify_hostname: verifyHostname,
           // An empty string clears a stored certificate (null would keep it)
           ca_cert: caCert.trim(),
           client_cert: clientCert.trim(),
@@ -261,6 +266,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           exclude_containers: excludeContainers.trim(),
           enabled,
           tls_enabled: tlsEnabled,
+          verify_hostname: verifyHostname,
           ca_cert: caCert.trim() || null,
           client_cert: clientCert.trim() || null,
           client_key: clientKey.trim() || null,
@@ -294,6 +300,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
         endpoint_id: host.id,
         url: host.url,
         tls_enabled: host.tls_enabled,
+        verify_hostname: host.verify_hostname ?? true,
         ca_cert: host.ca_cert || null,
         client_cert: host.client_cert || null,
       });
@@ -785,6 +792,21 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
               <div className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
                 <Lock className="w-3.5 h-3.5 text-accent-400" />
                 <span>TLS Credentials (PEM format)</span>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={verifyHostname}
+                    onChange={(e) => setVerifyHostname(e.target.checked)}
+                    className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Verify TLS host name</span>
+                </label>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Turn off only for daemons reached by IP whose certificate does not list that IP.
+                </p>
               </div>
 
               <div>
