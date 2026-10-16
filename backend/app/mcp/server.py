@@ -78,6 +78,13 @@ class McpAccess:
 
 LOCAL_MCP_ACCESS = McpAccess(scopes=("*",), local=True)
 
+
+def _trigger_label(access: McpAccess) -> str:
+    """Maintenance session label: 'MCP - <token name>' like REST's 'API - <name>', or 'MCP (local)' for stdio."""
+    if access.local:
+        return "MCP (local)"
+    return f"MCP - {access.token_name or 'token'}"
+
 # The stdio server is a separate OS process (docker exec), so it cannot see the web process's memory.
 STDIO_UNAVAILABLE_COUNTERS = ("ingest_rate", "queue_depth", "dropped_logs", "dropped_by_filter")
 STDIO_MAINTENANCE_NOTE = (
@@ -403,7 +410,7 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         target_host: Optional[str] = None,
     ) -> dict[str, Any]:
         """Activate a scoped maintenance session."""
-        _require("maintenance:write", "enable_maintenance")
+        access = _require("maintenance:write", "enable_maintenance")
         # Validate with the REST request model so MCP and /api/v1/maintenance/enable share one set of limits
         try:
             req = ExternalMaintenanceEnableRequest(
@@ -436,7 +443,8 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
                 target_app=req.target_app,
                 target_host=req.target_host,
                 initiated_by="mcp",
-                trigger_label="MCP",
+                token_id=access.token_id,
+                trigger_label=_trigger_label(access),
             )
 
         result = await run_db_query(_create)

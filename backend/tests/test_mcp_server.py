@@ -1363,6 +1363,51 @@ def _make_db_with_app(db_path: Path, app_name: str, enable_mcp_setting: bool) ->
         conn.commit()
 
 
+def _maintenance_row(db_path: Path, session_id: str) -> dict:
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT token_id, trigger_label, initiated_by FROM maintenance_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    return {"token_id": row[0], "trigger_label": row[1], "initiated_by": row[2]}
+
+
+class TestMCPMaintenanceAttribution:
+    """B-65: MCP-started maintenance sessions record the token that started them."""
+
+    @pytest.mark.asyncio
+    async def test_streamable_http_session_records_token(self, client: AsyncClient, auth_headers: dict, tmp_path: Path):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES, name="Deploy Bot")
+        sid = await http_initialize(client, token["raw"])
+        result = await http_call_tool(client, token["raw"], sid, 2, "enable_maintenance", {"duration_minutes": 5})
+        assert result["isError"] is False
+        row = _maintenance_row(tmp_path / "logs.db", result["structuredContent"]["session_id"])
+        assert row == {"token_id": token["id"], "trigger_label": "MCP - Deploy Bot", "initiated_by": "mcp"}
+
+    @pytest.mark.asyncio
+    async def test_legacy_sse_session_records_token(self, client: AsyncClient, auth_headers: dict, tmp_path: Path):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES, name="SSE Agent")
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            result = await sse_call_tool(client, sse, 2, "enable_maintenance", {"duration_minutes": 5})
+            assert result["isError"] is False
+        finally:
+            await sse.close()
+        row = _maintenance_row(tmp_path / "logs.db", result["structuredContent"]["session_id"])
+        assert row["token_id"] == token["id"]
+        assert row["trigger_label"] == "MCP - SSE Agent"
+
+    @pytest.mark.asyncio
+    async def test_stdio_session_gets_the_local_trigger_label(self, tmp_path: Path):
+        tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
+        result = await tool.fn(duration_minutes=5)
+        row = _maintenance_row(tmp_path / "logs.db", result["session_id"])
+        assert row == {"token_id": None, "trigger_label": "MCP (local)", "initiated_by": "mcp"}
+
+
 class TestMCPStdio:
     """B-22: the stdio transport uses --db-path and reports what a separate process cannot see."""
 

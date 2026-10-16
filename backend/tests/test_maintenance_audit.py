@@ -425,8 +425,9 @@ class TestExposure:
         triggers = {
             i["maintenance_trigger"] for i in res.json()["items"] if i["maintenance_session_id"]
         }
-        assert triggers == {"UI", "MCP"}
-        assert _session_row(db_path, mcp_res["session_id"])["trigger_label"] == "MCP"
+        # The stdio server labels its sessions 'MCP (local)'; token callers get 'MCP - <token name>'
+        assert triggers == {"UI", "MCP (local)"}
+        assert _session_row(db_path, mcp_res["session_id"])["trigger_label"] == "MCP (local)"
 
     @pytest.mark.asyncio
     async def test_mcp_get_recent_alerts_includes_maintenance_fields(
