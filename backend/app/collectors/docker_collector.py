@@ -30,6 +30,7 @@ from app.collectors.syslog import AliasCache
 from app.core.config import get_db_path
 from app.core.migrations import get_connection
 from app.core.pipeline import (
+    MAX_MESSAGE_BYTES,
     KeyedMultilineAssembler,
     detect_severity,
     clean_log_text,
@@ -430,8 +431,8 @@ def _make_log_entry(
             else:
                 resolved_alias = alias_cache.resolve("docker")
 
-    clean_message = _clean_text(message)
-    clean_raw = _clean_text(raw if raw is not None else message)
+    clean_message = _clean_text(message)[:MAX_MESSAGE_BYTES]
+    clean_raw = _clean_text(raw if raw is not None else message)[:MAX_MESSAGE_BYTES]
 
     return {
         "timestamp": timestamp or now,
@@ -770,6 +771,19 @@ async def _tail_container_logs(
                                     entry = _process_line(line)
                                     if entry:
                                         await assembler.feed(stream_key, entry)
+
+                                # Same cap as TTY mode: a container writing without "\n" must not
+                                # grow the pending line (and the per-frame copy of it) without limit.
+                                while len(line_buffer) > MAX_TTY_BUFFER:
+                                    logger.warning(
+                                        f"Docker log line buffer exceeded {MAX_TTY_BUFFER} bytes without newline for container {container_name}. Truncating chunk."
+                                    )
+                                    line = line_buffer[:MAX_TTY_BUFFER].rstrip("\r")
+                                    line_buffer = line_buffer[MAX_TTY_BUFFER:]
+                                    if line:
+                                        entry = _process_line(line)
+                                        if entry:
+                                            await assembler.feed(stream_key, entry)
 
                     # Flush any trailing TTY or multiplexed bytes on clean stream completion
                     if is_tty and buffer:

@@ -1855,6 +1855,81 @@ class TestDockerDemuxFrameResync:
         assert len(entries[1]["message"]) == 70000 - 65536
         assert any("exceeded 65536 bytes without newline" in record.message for record in caplog.records)
 
+    @pytest.mark.asyncio
+    async def test_multiplexed_line_buffer_capped_without_newline(self, caplog):
+        """About 1 MB of multiplexed frames with no newline comes out in chunks of at most 64 KB, and the pending line never exceeds the cap."""
+        assembler = KeyedMultilineAssembler()
+        entries = []
+
+        async def capture_feed(key, entry):
+            entries.append(entry)
+
+        assembler.feed = capture_feed
+        cancel_event = asyncio.Event()
+
+        frame_payload = b"Y" * 8192
+        frame = bytes([1, 0, 0, 0]) + len(frame_payload).to_bytes(4, "big") + frame_payload
+        frame_count = 128  # 1 MiB of payload in total
+        pending_after_frame: list[int] = []
+
+        class MockMuxResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                sent = 0
+                for _ in range(frame_count):
+                    yield frame
+                    # The consumer has fully handled the previous frame when it asks for the next one.
+                    sent += len(frame_payload)
+                    emitted = sum(len(e["message"]) for e in entries)
+                    pending_after_frame.append(sent - emitted)
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                return MockMuxResp()
+
+        with caplog.at_level(logging.WARNING):
+            task = asyncio.create_task(
+                _tail_container_logs(
+                    MockClient(),
+                    "cid_mux_large",
+                    "app_mux_large",
+                    assembler,
+                    cancel_event,
+                    heartbeat_interval=0,
+                )
+            )
+            await asyncio.sleep(0.2)
+            cancel_event.set()
+            await task
+
+        assert len(pending_after_frame) == frame_count
+        assert max(pending_after_frame) <= MAX_TTY_BUFFER
+        assert entries
+        assert all(len(e["message"]) <= MAX_TTY_BUFFER for e in entries)
+        assert sum(len(e["message"]) for e in entries) == frame_count * len(frame_payload)
+        assert any("exceeded 65536 bytes without newline" in record.message for record in caplog.records)
+
+    def test_make_log_entry_caps_message_and_raw(self):
+        """_make_log_entry caps message and raw at MAX_MESSAGE_BYTES characters."""
+        from app.core import pipeline as pipeline_mod
+
+        cap = pipeline_mod.MAX_MESSAGE_BYTES
+        assert cap == 65536
+        entry = _make_log_entry("big-app", "c1", "M" * (cap + 5000), raw="R" * (cap * 2))
+        assert entry["message"] == "M" * cap
+        assert entry["raw"] == "R" * cap
+
     def test_build_client_connection_pool_limits(self):
         """_build_client configures higher pool limits to avoid starvation across containers."""
         client_uds = _build_client("http://localhost/v1.43", "/var/run/docker.sock")

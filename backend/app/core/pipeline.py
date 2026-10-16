@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 # Key set on internal log entries that alert rules must not evaluate. The entries are still stored.
 SKIP_ALERT_RULES_KEY = "_skip_alert_rules"
 
+# Longest message or raw text (in characters) stored for a single log entry from any source.
+MAX_MESSAGE_BYTES = 65536
+
 
 class InternalLogHandler(logging.Handler):
     """
