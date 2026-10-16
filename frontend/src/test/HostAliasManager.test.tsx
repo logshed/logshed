@@ -188,4 +188,23 @@ describe('HostAliasManager Component', () => {
     expect(screen.getAllByTitle('Edit Alias').length).toBe(2);
     expect(screen.getAllByTitle('Delete Alias').length).toBe(2);
   });
+
+  it('B-46: cancelling the Add Alias modal opened from a hand-off calls onCancel', async () => {
+    const onCancel = vi.fn();
+    const onAliasSaved = vi.fn();
+    renderWithContext(
+      <HostAliasManager initialAddIp="10.9.9.9" onAliasSaved={onAliasSaved} onCancel={onCancel} />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+    expect(screen.getByDisplayValue('10.9.9.9')).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onAliasSaved).not.toHaveBeenCalled();
+  });
 });

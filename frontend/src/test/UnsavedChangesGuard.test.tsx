@@ -227,4 +227,106 @@ describe('UnsavedChangesGuard Integration', () => {
     });
     expect(screen.queryByTestId('live-log-stream')).toBeNull();
   });
+
+  describe('other sub-tabs and the Advanced tab', () => {
+    beforeEach(() => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ai_provider: 'gemini',
+        ai_model: 'gemini-3.7-flash',
+        ai_api_key: '********',
+        ai_base_url: null,
+        internal_log_level: 'WARNING',
+        retention_days: 14,
+        max_retention_days: 30,
+        has_ai_api_key: true,
+        ai_timeout: 45,
+        ai_thinking_budget: 1024,
+        app_url: '',
+        trusted_proxies: '',
+        syslog_max_tcp_connections: 250,
+        syslog_tcp_inactivity_timeout: 0,
+      });
+    });
+
+    const openSettings = async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Settings$/i }));
+      await waitFor(() => {
+        expect(screen.getByText('System Configuration')).toBeInTheDocument();
+      });
+    };
+
+    it('B-28: still asks before leaving Settings when an Application tab edit is open on another sub-tab', async () => {
+      render(<App />);
+      await openSettings();
+
+      fireEvent.change(screen.getByLabelText('Internal Log Severity Threshold'), { target: { value: 'ERROR' } });
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Advanced System Settings')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Storage/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('storage-panel')).toBeNull();
+    });
+
+    it('B-29: asks before leaving Settings with unsaved Advanced edits, and Save & Continue saves them', async () => {
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      render(<App />);
+      await openSettings();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('45')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByDisplayValue('45'), { target: { value: '90' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /Storage/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('storage-panel')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: /Save & Continue/i }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ ai_timeout: 90 }));
+        expect(screen.getByTestId('storage-panel')).toBeInTheDocument();
+      });
+    });
+
+    it('B-29: switching away from an Advanced tab with unsaved edits asks first, and Discard & Leave switches', async () => {
+      render(<App />);
+      await openSettings();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('45')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByDisplayValue('45'), { target: { value: '90' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /^Application$/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Advanced System Settings')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Keep Editing/i }));
+      await waitFor(() => {
+        expect(screen.queryByText('Unsaved Changes')).toBeNull();
+      });
+      expect(screen.getByDisplayValue('90')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Application$/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Discard & Leave/i }));
+      await waitFor(() => {
+        expect(screen.queryByText('Advanced System Settings')).toBeNull();
+        expect(screen.getByLabelText('Internal Log Severity Threshold')).toBeInTheDocument();
+      });
+    });
+  });
 });

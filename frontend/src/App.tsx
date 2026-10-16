@@ -60,6 +60,14 @@ export const App: React.FC = () => {
     () => ({ aliasVersion, bumpAliasVersion }),
     [aliasVersion, bumpAliasVersion]
   );
+  // Hand-offs from the log view (add alias, edit/manage a Docker host) only apply to the next
+  // visit that started them; leaving Settings drops them so they cannot reopen a modal later.
+  const clearSettingsHandOffs = useCallback(() => {
+    setAddAliasIp(null);
+    setEditDockerHostId(null);
+    setDeletedDockerHostInfo(null);
+    setPendingSettingsSubTab(null);
+  }, []);
   const isMobile = useMediaQuery('(max-width: 767px)');
 
   const {
@@ -91,12 +99,13 @@ export const App: React.FC = () => {
         setPendingTab(nextTab);
         return;
       }
+      if (nextTab !== 'settings') clearSettingsHandOffs();
       setActiveTab(nextTab);
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [activeTab, isSettingsDirty]);
+  }, [activeTab, isSettingsDirty, clearSettingsHandOffs]);
 
   // Dynamic browser title for beta / prerelease builds (e.g. LogShed [1.2.0-beta.1])
   const titleSetRef = useRef<boolean>(false);
@@ -175,7 +184,7 @@ export const App: React.FC = () => {
       return;
     }
     if (nextTab !== 'settings') {
-      setPendingSettingsSubTab(null);
+      clearSettingsHandOffs();
     }
     setActiveTab(nextTab);
     const targetPath = tabToPath(nextTab);
@@ -321,6 +330,7 @@ export const App: React.FC = () => {
                 setPendingTab(null);
                 setIsSettingsDirty(false);
                 if (target) {
+                  if (target !== 'settings') clearSettingsHandOffs();
                   setActiveTab(target);
                   const targetPath = tabToPath(target);
                   if (window.location.pathname !== targetPath) {
@@ -346,6 +356,7 @@ export const App: React.FC = () => {
                     setPendingTab(null);
                     setIsSettingsDirty(false);
                     if (target) {
+                      if (target !== 'settings') clearSettingsHandOffs();
                       setActiveTab(target);
                       const targetPath = tabToPath(target);
                       if (window.location.pathname !== targetPath) {

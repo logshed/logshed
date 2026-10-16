@@ -17,12 +17,14 @@ export interface AdvancedSettingsCardProps {
   settings: SystemSettings | null;
   onSettingsSaved: () => Promise<void> | void;
   onDirtyChange?: (dirty: boolean) => void;
+  saveTriggerRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
 }
 
 export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   settings,
   onSettingsSaved,
   onDirtyChange,
+  saveTriggerRef,
 }) => {
   // Form state
   const [aiTimeout, setAiTimeout] = useState<number>(45.0);
@@ -98,28 +100,29 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     setSaveInlineSuccess(false);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!settings) return;
+  // Resolves true when the edits were saved (or there was nothing to save), false on a validation
+  // or save failure, so a navigation guard knows whether it may continue.
+  const performSave = async (): Promise<boolean> => {
+    if (!settings) return true;
     setSaveInlineError(null);
     setSaveInlineSuccess(false);
 
     // Validation
     if (aiTimeout <= 0) {
       setSaveInlineError('Request Timeout must be greater than 0 seconds.');
-      return;
+      return false;
     }
     if (aiThinkingBudget < 0) {
       setSaveInlineError('Thinking Token Budget cannot be negative.');
-      return;
+      return false;
     }
     if (syslogMaxTcpConnections < 1) {
       setSaveInlineError('Max Concurrent TCP Connections must be at least 1.');
-      return;
+      return false;
     }
     if (syslogTcpInactivityTimeout < 0) {
       setSaveInlineError('Client Inactivity Timeout cannot be negative.');
-      return;
+      return false;
     }
 
     const updates: Partial<SystemSettings> = {};
@@ -154,7 +157,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     }
 
     if (Object.keys(updates).length === 0) {
-      return;
+      return true;
     }
 
     try {
@@ -168,12 +171,31 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       }, 3000);
 
       await onSettingsSaved();
+      return true;
     } catch (err: any) {
       setSaveInlineError(err.message || 'Failed to save advanced system settings.');
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await performSave();
+  };
+
+  // Expose the save so a navigation guard (Save & Continue) can trigger it.
+  useEffect(() => {
+    if (saveTriggerRef) {
+      saveTriggerRef.current = performSave;
+    }
+    return () => {
+      if (saveTriggerRef) {
+        saveTriggerRef.current = null;
+      }
+    };
+  });
 
   return (
     <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-6">

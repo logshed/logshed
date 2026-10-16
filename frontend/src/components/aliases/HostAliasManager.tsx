@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Server, Plus, Trash2, Edit2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
@@ -9,11 +9,14 @@ import { useAlias } from '../../context/AliasContext.tsx';
 interface HostAliasManagerProps {
   initialAddIp?: string | null;
   onAliasSaved?: () => void;
+  /** Called when the Add / Edit modal is dismissed without saving, so a hand-off can be cleared. */
+  onCancel?: () => void;
 }
 
 export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   initialAddIp,
   onAliasSaved,
+  onCancel,
 }) => {
   const { bumpAliasVersion } = useAlias();
   const [aliases, setAliases] = useState<HostAlias[]>([]);
@@ -33,6 +36,9 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   const [isDeletingIp, setIsDeletingIp] = useState<string | null>(null);
   const [deleteTargetIp, setDeleteTargetIp] = useState<string | null>(null);
 
+  // A hand-off IP the user already dismissed must not reopen the modal when the alias list reloads.
+  const dismissedAddIpRef = useRef<string | null>(null);
+
   const loadAliases = async () => {
     try {
       setIsLoading(true);
@@ -51,7 +57,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   }, []);
 
   useEffect(() => {
-    if (initialAddIp) {
+    if (initialAddIp && initialAddIp !== dismissedAddIpRef.current) {
       const existing = aliases.find((a) => a.ip === initialAddIp);
       if (existing) {
         setEditingIp(existing.ip);
@@ -66,6 +72,8 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       }
       setModalError(null);
       setIsModalOpen(true);
+    } else if (!initialAddIp) {
+      dismissedAddIpRef.current = null;
     }
   }, [initialAddIp, aliases]);
 
@@ -94,6 +102,12 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     setAlias('');
     setNotes('');
     setModalError(null);
+  };
+
+  const handleCancelModal = () => {
+    dismissedAddIpRef.current = initialAddIp || null;
+    handleCloseModal();
+    if (onCancel) onCancel();
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -268,7 +282,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       {isModalOpen && (
         <Modal
           isOpen={isModalOpen}
-          onClose={handleCloseModal}
+          onClose={handleCancelModal}
           title={editingIp ? `Edit Host Alias - ${editingIp}` : 'Add Host Alias'}
           maxWidth="max-w-md"
         >
@@ -330,7 +344,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-dark-800">
               <button
                 type="button"
-                onClick={handleCloseModal}
+                onClick={handleCancelModal}
                 className="px-3.5 py-1.5 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded text-xs transition cursor-pointer"
               >
                 Cancel

@@ -41,9 +41,16 @@ export async function fetchSettings(forceRefresh = false): Promise<SettingsRespo
   return settingsPromise;
 }
 
-export async function updateSettings(settings: Partial<SystemSettings>): Promise<{ status: string }> {
+export interface UpdateSettingsResponse {
+  status: string;
+  /** True when a stored AI API key was dropped because its provider's base URL changed. */
+  ai_api_key_cleared?: boolean;
+  ai_api_key_cleared_providers?: string[];
+}
+
+export async function updateSettings(settings: Partial<SystemSettings>): Promise<UpdateSettingsResponse> {
   cachedSettings = null;
-  return apiFetch<{ status: string }>('/api/settings', {
+  return apiFetch<UpdateSettingsResponse>('/api/settings', {
     method: 'POST',
     body: JSON.stringify(settings),
   });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Settings,
   Brain,
@@ -33,6 +33,7 @@ import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
 import { ApiTokensTab } from './ApiTokensTab.tsx';
 import { DockerHostsTab } from './DockerHostsTab.tsx';
+import { Modal } from '../common/Modal.tsx';
 
 export type { SettingsSubTab };
 
@@ -78,6 +79,66 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
   }
 };
 
+type ProviderId = 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
+
+const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  gemini: DEFAULT_AI_MODEL,
+  openai: 'gpt-4o',
+  anthropic: 'claude-sonnet-4-6',
+  openai_compatible: 'llama3.2',
+};
+
+interface ProviderLocalState {
+  apiKey: string;
+  hasKey: boolean;
+  model: string;
+  fallbackModels: string;
+  baseUrl: string;
+}
+
+/**
+ * Builds the per-provider form state from a settings response. The same function produces the
+ * baseline the dirty check compares against, so loading and comparing can never disagree.
+ * The '********' placeholder only appears when the server says a key is stored: a keyless
+ * OpenAI-compatible provider has an empty key field and an empty baseline.
+ */
+const buildProviderStates = (
+  settRes: SettingsResponseData,
+): { configs: Record<string, ProviderLocalState>; activeProvider: ProviderId } => {
+  const configs: Record<string, ProviderLocalState> = {
+    gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
+    openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
+    anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
+    openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
+  };
+
+  if (settRes.ai_providers_config) {
+    for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
+      if (configs[p]) {
+        configs[p] = {
+          apiKey: pCfg.has_api_key ? (pCfg.ai_api_key || '') : '',
+          hasKey: pCfg.has_api_key,
+          model: pCfg.ai_model || DEFAULT_PROVIDER_MODELS[p] || DEFAULT_AI_MODEL,
+          fallbackModels: pCfg.ai_fallback_models || '',
+          baseUrl: pCfg.ai_base_url || '',
+        };
+      }
+    }
+  }
+
+  const activeProvider = (settRes.ai_provider || 'gemini') as ProviderId;
+  if (configs[activeProvider]) {
+    configs[activeProvider] = {
+      apiKey: settRes.has_ai_api_key ? (settRes.ai_api_key || '') : '',
+      hasKey: settRes.has_ai_api_key,
+      model: settRes.ai_model || configs[activeProvider].model || DEFAULT_PROVIDER_MODELS[activeProvider] || DEFAULT_AI_MODEL,
+      fallbackModels: settRes.ai_fallback_models !== undefined ? settRes.ai_fallback_models : configs[activeProvider].fallbackModels,
+      baseUrl: settRes.ai_base_url || configs[activeProvider].baseUrl,
+    };
+  }
+  return { configs, activeProvider };
+};
+
 export interface SettingsPanelProps {
   initialSubTab?: SettingsSubTab;
   initialAddIp?: string | null;
@@ -119,30 +180,42 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return pathToSettingsSubTab(window.location.pathname);
   });
 
-  const handleSubTabChange = (nextSubTab: SettingsSubTab) => {
+  // The Advanced tab unmounts when another sub-tab is shown, so its unsaved edits are guarded
+  // here. App tab edits live in this component and survive sub-tab switches.
+  const [advancedDirty, setAdvancedDirty] = useState<boolean>(false);
+  const advancedDirtyRef = useRef<boolean>(false);
+  const advancedSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const [pendingSubTab, setPendingSubTab] = useState<SettingsSubTab | null>(null);
+  const [isSavingSubTabModal, setIsSavingSubTabModal] = useState<boolean>(false);
+  const activeSubTabRef = useRef<SettingsSubTab>(activeSubTab);
+  activeSubTabRef.current = activeSubTab;
+
+  const commitSubTabChange = (nextSubTab: SettingsSubTab) => {
     setActiveSubTab(nextSubTab);
+    if (nextSubTab !== 'advanced') {
+      advancedDirtyRef.current = false;
+      setAdvancedDirty(false);
+    }
     const targetPath = settingsSubTabToPath(nextSubTab);
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, '', targetPath);
     }
   };
 
-  // Form states
-  const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-    gemini: DEFAULT_AI_MODEL,
-    openai: 'gpt-4o',
-    anthropic: 'claude-sonnet-4-6',
-    openai_compatible: 'llama3.2',
+  const handleSubTabChange = (nextSubTab: SettingsSubTab) => {
+    if (activeSubTab === 'advanced' && nextSubTab !== 'advanced' && advancedDirtyRef.current) {
+      setPendingSubTab(nextSubTab);
+      return;
+    }
+    commitSubTabChange(nextSubTab);
   };
 
-  interface ProviderLocalState {
-    apiKey: string;
-    hasKey: boolean;
-    model: string;
-    fallbackModels: string;
-    baseUrl: string;
-  }
+  const handleAdvancedDirtyChange = useCallback((dirty: boolean) => {
+    advancedDirtyRef.current = dirty;
+    setAdvancedDirty(dirty);
+  }, []);
 
+  // Form states
   const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
     gemini: { apiKey: '', hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '', baseUrl: '' },
     openai: { apiKey: '', hasKey: false, model: 'gpt-4o', fallbackModels: '', baseUrl: '' },
@@ -178,6 +251,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
   const [saveInlineSuccess, setSaveInlineSuccess] = useState<boolean>(false);
   const [saveInlineError, setSaveInlineError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const saveSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -196,14 +270,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const baselineDigestChannelId = settings ? (settings.daily_digest_channel_id ?? null) : null;
   const baselineDigestScheduleTime = settings ? (settings.daily_digest_schedule_time || '09:00') : '09:00';
 
+  // Every provider is compared with its own baseline, not just the active one, so an edit made to
+  // a provider that is no longer selected still counts as unsaved. The active provider's live
+  // fields are held in the individual states; the others in providerConfigs.
+  const baselineProviders = useMemo(() => (settings ? buildProviderStates(settings) : null), [settings]);
+  const providersDirty = (() => {
+    if (!baselineProviders) return false;
+    const live: Record<string, ProviderLocalState> = {
+      ...providerConfigs,
+      [aiProvider]: {
+        apiKey: aiApiKey,
+        hasKey: hasApiKeyForProvider,
+        model: aiModel,
+        fallbackModels: aiFallbackModels,
+        baseUrl: aiBaseUrl,
+      },
+    };
+    return Object.entries(live).some(([p, cfg]) => {
+      const base = baselineProviders.configs[p];
+      if (!base) return false;
+      return (
+        cfg.apiKey !== base.apiKey ||
+        cfg.model !== base.model ||
+        cfg.fallbackModels !== base.fallbackModels ||
+        cfg.baseUrl !== base.baseUrl
+      );
+    });
+  })();
+
   const isDirty = Boolean(
     settings &&
     (aiEnabled !== baselineAiEnabled ||
       aiProvider !== settings.ai_provider ||
-      aiModel !== (settings.ai_model || DEFAULT_AI_MODEL) ||
-      aiFallbackModels !== (settings.ai_fallback_models || '') ||
-      (aiApiKey !== (settings.ai_api_key || '') && !(aiApiKey === '' && !hasApiKeyForProvider && !settings.has_ai_api_key)) ||
-      aiBaseUrl !== (settings.ai_base_url || '') ||
+      providersDirty ||
       normalizePrompt(aiSystemPrompt) !== normalizePrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT) ||
       internalLogLevel !== (settings.internal_log_level || 'WARNING') ||
       checkForUpdates !== (settings.check_for_updates ?? true) ||
@@ -211,6 +310,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       digestChannelId !== baselineDigestChannelId ||
       digestScheduleTime !== baselineDigestScheduleTime)
   );
+  const isDirtyRef = useRef<boolean>(false);
+  isDirtyRef.current = isDirty;
 
   // Track if AI system instructions differ from system default
   const isAiSystemPromptModified = normalizePrompt(aiSystemPrompt) !== normalizePrompt(DEFAULT_SYSTEM_PROMPT);
@@ -228,38 +329,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const applySettingsResponse = (settRes: SettingsResponseData) => {
     setSettings(settRes);
 
-    const initialConfigs: Record<string, ProviderLocalState> = {
-      gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
-      openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
-      anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
-      openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
-    };
-
-    if (settRes.ai_providers_config) {
-      for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
-        if (initialConfigs[p]) {
-          initialConfigs[p] = {
-            apiKey: pCfg.has_api_key ? (pCfg.ai_api_key || '********') : '',
-            hasKey: pCfg.has_api_key,
-            model: pCfg.ai_model || DEFAULT_PROVIDER_MODELS[p] || DEFAULT_AI_MODEL,
-            fallbackModels: pCfg.ai_fallback_models || '',
-            baseUrl: pCfg.ai_base_url || '',
-          };
-        }
-      }
-    }
-
-    const activeP = (settRes.ai_provider || 'gemini') as 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
-    if (initialConfigs[activeP]) {
-      initialConfigs[activeP] = {
-        apiKey: settRes.has_ai_api_key ? (settRes.ai_api_key || '********') : '',
-        hasKey: settRes.has_ai_api_key,
-        model: settRes.ai_model || initialConfigs[activeP].model || DEFAULT_PROVIDER_MODELS[activeP] || DEFAULT_AI_MODEL,
-        fallbackModels: settRes.ai_fallback_models !== undefined ? settRes.ai_fallback_models : initialConfigs[activeP].fallbackModels,
-        baseUrl: settRes.ai_base_url || initialConfigs[activeP].baseUrl,
-      };
-    }
-
+    const { configs: initialConfigs, activeProvider: activeP } = buildProviderStates(settRes);
     setProviderConfigs(initialConfigs);
 
     const curActive = initialConfigs[activeP];
@@ -277,6 +347,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setDigestEnabled(Boolean(settRes.daily_digest_enabled));
     setDigestChannelId(settRes.daily_digest_channel_id ?? null);
     setDigestScheduleTime(settRes.daily_digest_schedule_time || '09:00');
+  };
+
+  // Child tabs (API & MCP, Advanced, notifications) save their own settings. They only refresh
+  // the baseline: the App tab form is replaced from the server only when it has no edits of its own.
+  const refreshBaseline = async () => {
+    try {
+      const settRes = await fetchSettings(true);
+      if (isDirtyRef.current) {
+        setSettings(settRes);
+      } else {
+        applySettingsResponse(settRes);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to refresh system settings.');
+    }
   };
 
   const loadModels = async (
@@ -425,71 +510,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleRemoveApiKey = async () => {
-    try {
-      setIsSavingSettings(true);
-      setErrorMsg(null);
-      setSaveInlineError(null);
-
-      const updatedProvidersConfig: Record<string, any> = {};
-      for (const [p, cfg] of Object.entries(providerConfigs)) {
-        const isCurrent = p === aiProvider;
-        updatedProvidersConfig[p] = {
-          has_api_key: isCurrent ? false : cfg.hasKey,
-          ai_api_key: isCurrent ? '' : cfg.apiKey,
-          ai_model: isCurrent ? aiModel : cfg.model,
-          ai_fallback_models: isCurrent ? aiFallbackModels : cfg.fallbackModels,
-          ai_base_url: isCurrent ? (aiBaseUrl || null) : (cfg.baseUrl || null),
-        };
-      }
-
-      await updateSettings({
-        ai_provider: aiProvider,
-        ai_api_key: '',
-        ai_providers_config: updatedProvidersConfig,
-      });
-
-      setAiApiKey('');
-      setHasApiKeyForProvider(false);
-      setAvailableModels([]);
-      setProviderConfigs((prev) => ({
-        ...prev,
-        [aiProvider]: {
-          ...prev[aiProvider],
-          apiKey: '',
-          hasKey: false,
-        },
-      }));
-
-      const settRes = await fetchSettings();
-      applySettingsResponse(settRes);
-
-      setSaveInlineSuccess(true);
-      if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
-      saveSuccessTimeoutRef.current = setTimeout(() => {
-        setSaveInlineSuccess(false);
-      }, 3000);
-    } catch (err: any) {
-      const msg = err.message || 'Failed to remove API key from storage.';
-      setErrorMsg(msg);
-      setSaveInlineError(msg);
-    } finally {
-      setIsSavingSettings(false);
-    }
-  };
-
-  const handleApiKeyBlur = async () => {
-    if (hasApiKeyForProvider && aiApiKey.trim() === '') {
-      await handleRemoveApiKey();
-    }
-  };
-
+  // Emptying the key field is a pending change like any other edit: it is sent as an empty
+  // key by the normal Save, so leaving the field never saves (or discards) anything by itself.
   const handleApiKeyEnter = async () => {
-    if (hasApiKeyForProvider && aiApiKey.trim() === '') {
-      await handleRemoveApiKey();
-    } else {
-      await executeSave();
-    }
+    await executeSave();
   };
 
   const handleRefreshModels = async () => {
@@ -498,12 +522,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     await loadModels(aiProvider, true, keyToSend, urlToSend);
   };
 
+  // Always read the server state on mount: the module-level cache would hide changes made elsewhere
+  // (digest last run, Docker host 1 sync) while this panel was unmounted.
   const loadAllData = async () => {
     try {
       setIsLoading(true);
       setErrorMsg(null);
 
-      const settRes = await fetchSettings();
+      const settRes = await fetchSettings(true);
       applySettingsResponse(settRes);
 
       // Load models for provider if enabled
@@ -544,7 +570,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   useEffect(() => {
     const handlePopState = () => {
-      setActiveSubTab(pathToSettingsSubTab(window.location.pathname));
+      const nextSubTab = pathToSettingsSubTab(window.location.pathname);
+      if (
+        activeSubTabRef.current === 'advanced' &&
+        nextSubTab !== 'advanced' &&
+        advancedDirtyRef.current
+      ) {
+        // Stay on the Advanced tab and ask first, like a click on another sub-tab would.
+        window.history.pushState(null, '', settingsSubTabToPath('advanced'));
+        setPendingSubTab(nextSubTab);
+        return;
+      }
+      setActiveSubTab(nextSubTab);
+      if (nextSubTab !== 'advanced') {
+        advancedDirtyRef.current = false;
+        setAdvancedDirty(false);
+      }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -557,19 +598,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, []);
 
-  // Notify parent component of dirty state changes - only applies when App sub-tab is active
+  // Notify the parent of unsaved edits on any sub-tab: the Application tab form stays alive while
+  // other sub-tabs are shown, and the Advanced tab reports its own edits.
+  const hasUnsavedChanges = isDirty || (activeSubTab === 'advanced' && advancedDirty);
   useEffect(() => {
-    if (activeSubTab === 'app') {
-      onDirtyChange?.(isDirty);
-    } else {
-      onDirtyChange?.(false);
-    }
-  }, [activeSubTab, isDirty, onDirtyChange]);
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
 
   // Warn on page unload/refresh when unsaved changes exist
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (activeSubTab === 'app' && isDirty) {
+      if (hasUnsavedChanges) {
         e.preventDefault();
         e.returnValue = '';
         return '';
@@ -577,7 +616,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [activeSubTab, isDirty]);
+  }, [hasUnsavedChanges]);
 
   const handleResetChanges = () => {
     if (!settings) return;
@@ -617,17 +656,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           ai_api_key: isCurrent ? aiApiKey : cfg.apiKey,
           ai_model: isCurrent ? aiModel : cfg.model,
           ai_fallback_models: isCurrent ? aiFallbackModels : cfg.fallbackModels,
-          ai_base_url: isCurrent ? (aiBaseUrl || null) : (cfg.baseUrl || null),
+          // An emptied base URL is sent as '' so the server clears it (null would keep the old one).
+          ai_base_url: isCurrent ? aiBaseUrl.trim() : cfg.baseUrl.trim(),
         };
       }
 
-      await updateSettings({
+      const saveRes = await updateSettings({
         ai_enabled: aiEnabled,
         ai_provider: aiProvider,
         ai_model: aiModel,
         ai_fallback_models: aiFallbackModels,
         ai_api_key: aiApiKey,
-        ai_base_url: aiBaseUrl || null,
+        ai_base_url: aiBaseUrl.trim(),
         ai_system_prompt: aiSystemPrompt,
         ai_providers_config: updatedProvidersConfig,
         internal_log_level: internalLogLevel,
@@ -650,11 +690,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       // Refresh version info to reflect updated check_for_updates setting
       loadVersionData(true);
 
+      const keyCleared = Boolean(saveRes && saveRes.ai_api_key_cleared);
+      setSaveNotice(keyCleared ? 'API key cleared because the endpoint changed. Enter the key again if the new endpoint needs one.' : null);
       setSaveInlineSuccess(true);
       if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
       saveSuccessTimeoutRef.current = setTimeout(() => {
         setSaveInlineSuccess(false);
-      }, 3000);
+        setSaveNotice(null);
+      }, keyCleared ? 10000 : 3000);
       return true;
     } catch (err: any) {
       const msg = err.message || 'Failed to update settings.';
@@ -673,14 +716,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     await executeSave();
   };
 
-  // Expose programmatic save function for navigation guards - only applies when App sub-tab is active
+  // Saves every set of unsaved edits (Application tab form and the Advanced tab card).
+  // Resolves false as soon as one save fails so the caller does not leave the page.
+  const saveAllChanges = async (): Promise<boolean> => {
+    if (isDirtyRef.current) {
+      const appSaved = await executeSave();
+      if (!appSaved) return false;
+    }
+    if (advancedDirtyRef.current && advancedSaveRef.current) {
+      return advancedSaveRef.current();
+    }
+    return true;
+  };
+
+  // Expose programmatic save function for navigation guards (Save & Continue).
   useEffect(() => {
     if (saveTriggerRef) {
-      if (activeSubTab === 'app') {
-        saveTriggerRef.current = executeSave;
-      } else {
-        saveTriggerRef.current = null;
-      }
+      saveTriggerRef.current = saveAllChanges;
     }
     return () => {
       if (saveTriggerRef) {
@@ -931,7 +983,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 type="password"
                 value={aiApiKey}
                 onChange={(e) => setAiApiKey(e.target.value)}
-                onBlur={handleApiKeyBlur}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -1267,7 +1318,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Notification Channels & Webhooks Section */}
         <NotificationsCard
           settings={settings}
-          onSettingsSaved={loadAllData}
+          onSettingsSaved={refreshBaseline}
           digestEnabled={digestEnabled}
           onDigestEnabledChange={setDigestEnabled}
           digestChannelId={digestChannelId}
@@ -1324,6 +1375,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <div className="flex items-center gap-2 text-emerald-400 font-mono">
                   <Check className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>Settings saved successfully!</span>
+                  {saveNotice && (
+                    <span className="text-amber-300 font-sans">{saveNotice}</span>
+                  )}
                 </div>
               ) : saveInlineError ? (
                 <div className="flex items-center gap-2 text-red-400 font-mono">
@@ -1466,6 +1520,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="space-y-6">
           <HostAliasManager
             initialAddIp={activeAddIp}
+            onCancel={() => {
+              setActiveAddIp(null);
+              if (onClearSourcesState) onClearSourcesState();
+            }}
             onAliasSaved={() => {
               setActiveAddIp(null);
               if (onAliasSaved) onAliasSaved();
@@ -1485,7 +1543,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {activeSubTab === 'tokens' && (
         <ApiTokensTab
           settings={settings}
-          onSettingsSaved={loadAllData}
+          onSettingsSaved={refreshBaseline}
         />
       )}
 
@@ -1495,7 +1553,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {/* Advanced System Settings */}
           <AdvancedSettingsCard
             settings={settings}
-            onSettingsSaved={loadAllData}
+            onSettingsSaved={refreshBaseline}
+            onDirtyChange={handleAdvancedDirtyChange}
+            saveTriggerRef={advancedSaveRef}
           />
 
           {/* Admin Password Reset Section */}
@@ -1580,6 +1640,71 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </section>
         </div>
       )}
+
+      {/* Unsaved Advanced edits: asked before another sub-tab replaces the Advanced tab */}
+      <Modal
+        isOpen={pendingSubTab !== null}
+        onClose={() => setPendingSubTab(null)}
+        title="Unsaved Changes"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              You have unsaved changes in Advanced System Settings. Switching tabs now will discard those edits.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-3 border-t border-dark-700">
+            <button
+              type="button"
+              onClick={() => setPendingSubTab(null)}
+              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 transition cursor-pointer"
+            >
+              Keep Editing
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const target = pendingSubTab;
+                setPendingSubTab(null);
+                if (target) commitSubTabChange(target);
+              }}
+              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/40 border border-red-800/60 transition cursor-pointer"
+            >
+              Discard &amp; Leave
+            </button>
+            <button
+              type="button"
+              disabled={isSavingSubTabModal}
+              onClick={async () => {
+                setIsSavingSubTabModal(true);
+                try {
+                  const saved = advancedSaveRef.current ? await advancedSaveRef.current() : true;
+                  if (saved) {
+                    const target = pendingSubTab;
+                    setPendingSubTab(null);
+                    if (target) commitSubTabChange(target);
+                  }
+                } finally {
+                  setIsSavingSubTabModal(false);
+                }
+              }}
+              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+            >
+              {isSavingSubTabModal ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              <span>Save &amp; Continue</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

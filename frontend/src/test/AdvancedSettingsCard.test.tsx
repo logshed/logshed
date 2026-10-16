@@ -149,4 +149,37 @@ describe('AdvancedSettingsCard Component', () => {
       expect(onSaved).toHaveBeenCalled();
     });
   });
+
+  it('B-29: exposes its save through saveTriggerRef, resolving true on success and false on failure', async () => {
+    const saveTriggerRef = { current: null } as { current: (() => Promise<boolean>) | null };
+    const onSaved = vi.fn();
+    vi.mocked(settingsApi.updateSettings).mockResolvedValueOnce({ status: 'ok' });
+
+    render(
+      <AdvancedSettingsCard
+        settings={mockBaseSettings}
+        onSettingsSaved={onSaved}
+        saveTriggerRef={saveTriggerRef}
+      />
+    );
+
+    expect(saveTriggerRef.current).not.toBeNull();
+    fireEvent.change(screen.getByDisplayValue('45'), { target: { value: '75' } });
+
+    let ok: boolean | undefined;
+    await waitFor(async () => {
+      ok = await saveTriggerRef.current!();
+    });
+    expect(ok).toBe(true);
+    expect(settingsApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ ai_timeout: 75 }));
+    expect(onSaved).toHaveBeenCalled();
+
+    vi.mocked(settingsApi.updateSettings).mockRejectedValueOnce(new Error('boom'));
+    fireEvent.change(screen.getByDisplayValue('75'), { target: { value: '80' } });
+    let failed: boolean | undefined;
+    await waitFor(async () => {
+      failed = await saveTriggerRef.current!();
+    });
+    expect(failed).toBe(false);
+  });
 });

@@ -1,3 +1,4 @@
+import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SettingsPanel, pathToSettingsSubTab, settingsSubTabToPath } from '../components/settings/SettingsPanel.tsx';
@@ -756,7 +757,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.queryByText('Internal Application Logging')).toBeNull();
     });
 
-    it('reports dirty state only when App sub-tab is active', async () => {
+    it('keeps reporting App tab edits as dirty while another sub-tab is shown (B-28)', async () => {
       const onDirtyChange = vi.fn();
       render(<SettingsPanel onDirtyChange={onDirtyChange} />);
 
@@ -776,9 +777,11 @@ describe('SettingsPanel Component', () => {
       const sourcesTab = screen.getByRole('button', { name: /^Sources$/i });
       fireEvent.click(sourcesTab);
 
+      // The App tab form is still alive, so its unsaved edit is still reported
       await waitFor(() => {
-        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        expect(window.location.pathname).toBe('/settings/sources');
       });
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 
       // Switch back to Application tab
       const appTab = screen.getByRole('button', { name: /^Application$/i });
@@ -1011,7 +1014,7 @@ describe('SettingsPanel Component', () => {
       expect(restoredKeyInput.value).toBe('********');
     });
 
-    it('clears API key from storage when user deletes masked dots and blurs input', async () => {
+    it('clearing the API key and leaving the field only marks the form dirty; Save then clears the stored key', async () => {
       const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
         ai_provider: 'gemini',
@@ -1032,10 +1035,12 @@ describe('SettingsPanel Component', () => {
       const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
       expect(keyInput.value).toBe('********');
 
-      // Clear input and blur
+      // Clear input and blur: nothing is saved yet
       fireEvent.change(keyInput, { target: { value: '' } });
       fireEvent.blur(keyInput);
+      expect(updateSpy).not.toHaveBeenCalled();
 
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
       await waitFor(() => {
         expect(updateSpy).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -1083,6 +1088,334 @@ describe('SettingsPanel Component', () => {
       });
     });
   });
+
+  describe('B08: dirty tracking and save handling', () => {
+    const keylessCompatSettings = {
+      ai_enabled: true,
+      ai_provider: 'openai_compatible' as const,
+      ai_model: 'llama3.2',
+      ai_api_key: '',
+      ai_base_url: 'http://ollama.lan:11434/v1',
+      internal_log_level: 'WARNING',
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: true,
+      ai_providers_config: {
+        openai_compatible: {
+          has_api_key: true,
+          ai_api_key: '',
+          ai_model: 'llama3.2',
+          ai_fallback_models: '',
+          ai_base_url: 'http://ollama.lan:11434/v1',
+        },
+      },
+    };
+
+    const twoProviderSettings = {
+      ai_enabled: true,
+      ai_provider: 'gemini' as const,
+      ai_model: 'gemini-3.7-flash',
+      ai_api_key: '********',
+      ai_base_url: null,
+      internal_log_level: 'WARNING',
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: true,
+      ai_providers_config: {
+        gemini: {
+          has_api_key: true,
+          ai_api_key: '********',
+          ai_model: 'gemini-3.7-flash',
+          ai_fallback_models: '',
+          ai_base_url: null,
+        },
+        openai: {
+          has_api_key: true,
+          ai_api_key: '********',
+          ai_model: 'gpt-4o',
+          ai_fallback_models: '',
+          ai_base_url: null,
+        },
+      },
+    };
+
+    beforeEach(() => {
+      vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+        provider: 'openai_compatible',
+        models: [],
+        has_api_key: true,
+        cached_at: null,
+        is_live: true,
+      });
+    });
+
+    it('B-05: a keyless OpenAI-compatible provider loads clean (no save bar, no unload prompt)', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
+      const onDirtyChange = vi.fn();
+      render(<SettingsPanel onDirtyChange={onDirtyChange} />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI-Compatible (Ollama / vLLM / LocalAI)')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
+      expect(screen.queryByText(/You have unsaved changes/i)).toBeNull();
+      expect(onDirtyChange).not.toHaveBeenCalledWith(true);
+      const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it('B-05: an OpenAI-compatible provider with a stored key loads clean, and typing a new key makes it dirty', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ...keylessCompatSettings,
+        ai_api_key: '********',
+        ai_providers_config: {
+          openai_compatible: {
+            ...keylessCompatSettings.ai_providers_config.openai_compatible,
+            ai_api_key: '********',
+          },
+        },
+      });
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI-Compatible (Ollama / vLLM / LocalAI)')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
+
+      const keyInput = screen.getByDisplayValue('********');
+      fireEvent.change(keyInput, { target: { value: 'new-secret' } });
+      expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+    });
+
+    it('B-05: typing a key into a keyless OpenAI-compatible provider makes the form dirty', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI-Compatible (Ollama / vLLM / LocalAI)')).toBeInTheDocument();
+      });
+      const keyInput = screen.getByPlaceholderText(/API key/i);
+      fireEvent.change(keyInput, { target: { value: 'typed-key' } });
+      expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+    });
+
+    it('B-07: emptying the base URL saves an empty string instead of null', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('http://ollama.lan:11434/v1')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByDisplayValue('http://ollama.lan:11434/v1'), { target: { value: '' } });
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalled();
+      });
+      const payload = updateSpy.mock.calls[0][0] as any;
+      expect(payload.ai_base_url).toBe('');
+      expect(payload.ai_providers_config.openai_compatible.ai_base_url).toBe('');
+    });
+
+    it('S-14: tells the user when the API key was cleared because the endpoint changed', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
+      vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({
+        status: 'ok',
+        ai_api_key_cleared: true,
+        ai_api_key_cleared_providers: ['openai_compatible'],
+      } as any);
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('http://ollama.lan:11434/v1')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByDisplayValue('http://ollama.lan:11434/v1'), {
+        target: { value: 'http://other.lan:11434/v1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/API key cleared because the endpoint changed/i)).toBeInTheDocument();
+      });
+    });
+
+    it('B-27: clearing the API key and leaving the field is a pending change that keeps other edits', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      const levelSelect = screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement;
+      fireEvent.change(levelSelect, { target: { value: 'ERROR' } });
+
+      const keyInput = screen.getByDisplayValue('********') as HTMLInputElement;
+      fireEvent.change(keyInput, { target: { value: '' } });
+      fireEvent.blur(keyInput);
+
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect((screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement).value).toBe('ERROR');
+      expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ internal_log_level: 'ERROR', ai_api_key: '' })
+        );
+      });
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('B-54: editing a non-active provider counts as an unsaved change', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
+      vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+        provider: 'gemini',
+        models: [],
+        has_api_key: true,
+        cached_at: null,
+        is_live: true,
+      });
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByDisplayValue('Google Gemini'), { target: { value: 'openai' } });
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+      });
+      // Switching provider alone is a change; edit the model, then return to the saved provider.
+      fireEvent.change(screen.getByPlaceholderText('gpt-4o'), { target: { value: 'gpt-4.1' } });
+      fireEvent.change(screen.getByDisplayValue('OpenAI'), { target: { value: 'gemini' } });
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+    });
+
+    it('B-54: switching providers and back without edits leaves the form clean', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
+      render(<SettingsPanel />);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByDisplayValue('Google Gemini'), { target: { value: 'openai' } });
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByDisplayValue('OpenAI'), { target: { value: 'gemini' } });
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
+    });
+
+    it('B-53: forces a fresh settings fetch when the panel mounts', async () => {
+      const fetchSpy = vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
+      render(<SettingsPanel />);
+      await waitFor(() => {
+        expect(screen.getByText('System Configuration')).toBeInTheDocument();
+      });
+      expect(fetchSpy).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe('B08: App tab edits survive other sub-tabs', () => {
+    const mcpSettings = {
+      ai_enabled: true,
+      ai_provider: 'gemini' as const,
+      ai_model: 'gemini-3.7-flash',
+      ai_api_key: '********',
+      ai_base_url: null,
+      internal_log_level: 'WARNING',
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: true,
+      enable_mcp: false,
+    };
+
+    it('B-28: keeps reporting dirty on other sub-tabs and keeps the edit after a save made there', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(mcpSettings);
+      vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      const onDirtyChange = vi.fn();
+      render(<SettingsPanel onDirtyChange={onDirtyChange} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('System Configuration')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByLabelText('Internal Log Severity Threshold'), { target: { value: 'ERROR' } });
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /API & MCP Access/i }));
+      await waitFor(() => {
+        expect(screen.getByLabelText('Enable Model Context Protocol')).toBeInTheDocument();
+      });
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+      // beforeunload still protects the hidden App tab edit
+      const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+
+      // A save made on this tab must not wipe the App tab edit
+      fireEvent.click(screen.getByLabelText('Enable Model Context Protocol'));
+      await waitFor(() => {
+        expect(settingsApi.updateSettings).toHaveBeenCalledWith({ enable_mcp: true });
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /^Application$/i }));
+      await waitFor(() => {
+        expect((screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement).value).toBe('ERROR');
+      });
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    });
+
+    it('B-29: Advanced edits are reported as dirty and saved through saveTriggerRef', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+        ...mcpSettings,
+        ai_timeout: 45,
+        ai_thinking_budget: 1024,
+        app_url: '',
+        trusted_proxies: '',
+        syslog_max_tcp_connections: 250,
+        syslog_tcp_inactivity_timeout: 0,
+      });
+      const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+      const onDirtyChange = vi.fn();
+      const saveTriggerRef = { current: null } as React.MutableRefObject<(() => Promise<boolean>) | null>;
+      render(<SettingsPanel onDirtyChange={onDirtyChange} saveTriggerRef={saveTriggerRef} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('System Configuration')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('45')).toBeInTheDocument();
+      });
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+      fireEvent.change(screen.getByDisplayValue('45'), { target: { value: '60' } });
+      await waitFor(() => {
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      });
+
+      expect(saveTriggerRef.current).not.toBeNull();
+      let saved = false;
+      await waitFor(async () => {
+        saved = await saveTriggerRef.current!();
+      });
+      expect(saved).toBe(true);
+      expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ ai_timeout: 60 }));
+    });
+  });
 });
-
-
