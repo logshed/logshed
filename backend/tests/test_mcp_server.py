@@ -1408,6 +1408,54 @@ class TestMCPMaintenanceAttribution:
         assert row == {"token_id": None, "trigger_label": "MCP (local)", "initiated_by": "mcp"}
 
 
+class TestMCPDisableMaintenance:
+    """B-66: disable_maintenance uses the REST response keys and refuses unknown session ids."""
+
+    @pytest.mark.asyncio
+    async def test_response_uses_rest_keys_and_keeps_old_ones(self, client: AsyncClient, auth_headers: dict):
+        tools = create_mcp_server(stdio=True)._tool_manager._tools
+        first = await tools["enable_maintenance"].fn(duration_minutes=5)
+        await tools["enable_maintenance"].fn(duration_minutes=5)
+
+        res = await tools["disable_maintenance"].fn(session_id=first["session_id"])
+        assert res["terminated_sessions"] == 1
+        assert res["remaining_active_sessions"] == 1
+        assert res["active"] is True
+        assert res["server_time"]
+        # Old key names stay for one release
+        assert res["terminated_count"] == 1
+        assert res["remaining_active_count"] == 1
+
+        res_all = await tools["disable_maintenance"].fn()
+        assert res_all["terminated_sessions"] == 1
+        assert res_all["remaining_active_sessions"] == 0
+        assert res_all["active"] is False
+
+        # Same keys as POST /api/v1/maintenance/disable
+        rest = await client.post("/api/v1/maintenance/disable", json={}, headers=auth_headers)
+        assert rest.status_code == 200
+        assert set(rest.json()) <= set(res_all)
+
+    @pytest.mark.asyncio
+    async def test_unknown_or_ended_session_id_is_a_tool_error(self):
+        tools = create_mcp_server(stdio=True)._tool_manager._tools
+        with pytest.raises(ValueError, match="No active maintenance session with id 'does-not-exist'"):
+            await tools["disable_maintenance"].fn(session_id="does-not-exist")
+
+        started = await tools["enable_maintenance"].fn(duration_minutes=5)
+        await tools["disable_maintenance"].fn(session_id=started["session_id"])
+        with pytest.raises(ValueError, match="No active maintenance session"):
+            await tools["disable_maintenance"].fn(session_id=started["session_id"])
+
+    @pytest.mark.asyncio
+    async def test_unknown_session_id_over_streamable_http(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sid = await http_initialize(client, token["raw"])
+        result = await http_call_tool(client, token["raw"], sid, 2, "disable_maintenance", {"session_id": "nope"})
+        assert "No active maintenance session with id 'nope'" in tool_error_text(result)
+
+
 class TestMCPStdio:
     """B-22: the stdio transport uses --db-path and reports what a separate process cannot see."""
 

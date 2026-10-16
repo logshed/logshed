@@ -15,6 +15,7 @@ another task (the session manager's task group, or the SSE GET request). The std
 runs as a local process and has full access.
 """
 
+import datetime
 import json
 import logging
 from contextlib import contextmanager
@@ -456,7 +457,9 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         name="disable_maintenance",
         description=(
             "Deactivate an active maintenance window using its session_id, "
-            "or deactivate all active windows if omitted. Requires the maintenance:write scope."
+            "or deactivate all active windows if omitted. Returns terminated_sessions, "
+            "remaining_active_sessions and active, like POST /api/v1/maintenance/disable; "
+            "an unknown or already ended session_id is an error. Requires the maintenance:write scope."
         ),
     )
     async def disable_maintenance(
@@ -469,8 +472,16 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
             return disable_maintenance_sessions(conn, session_id=session_id)
 
         terminated, remaining = await run_db_query(_disable)
+        if session_id and session_id.strip() and terminated == 0:
+            raise ValueError(f"No active maintenance session with id {session_id.strip()!r}.")
         result: dict[str, Any] = {
             "status": "ok",
+            # Same keys as the REST ExternalMaintenanceDisableResponse
+            "active": remaining > 0,
+            "terminated_sessions": terminated,
+            "remaining_active_sessions": remaining,
+            "server_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            # Deprecated names kept for one release (1.3.x); remove in 1.4.0
             "terminated_count": terminated,
             "remaining_active_count": remaining,
         }
