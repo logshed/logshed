@@ -75,6 +75,7 @@ from app.services.retention import (
 from app.services.log_query import (
     INVALID_DATETIME_DETAIL,
     add_fts_filter,
+    context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
     to_utc_bound,
@@ -614,7 +615,7 @@ def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
         timestamp=str(r["timestamp"]),
         received_at=str(r["received_at"]),
         source_ip=r["source_ip"],
-        source_alias=r["source_alias"] if r["source_alias"] is not None else r["source_ip"],
+        source_alias=r["source_alias"] or r["source_ip"],
         app_name=r["app_name"] if r["app_name"] is not None else "unknown",
         facility=r["facility"],
         severity=r["severity"],
@@ -811,7 +812,7 @@ async def count_logs_v1(
             run, label = (lambda p: _limited_group(p, "COALESCE(logs.app_name, 'unknown')", "app")), "app"
         elif valid_group in ("source", "source_alias", "host"):
             run, label = (
-                lambda p: _limited_group(p, "COALESCE(logs.source_alias, logs.source_ip, 'unknown')", "source")
+                lambda p: _limited_group(p, "COALESCE(NULLIF(logs.source_alias, ''), logs.source_ip, 'unknown')", "source")
             ), "source"
         else:
             run, label = (lambda p: (_total_count(p), None, {}, False)), None
@@ -854,14 +855,8 @@ async def get_log_context_v1(
         t_time = target_row["timestamp"]
         t_id = target_row["id"]
 
-        # NULL-safe source matching: "col = NULL" never matches, so NULL aliases
-        # are matched via IS NULL and constrained to the same source_ip.
-        if source_alias is None:
-            source_clause = "source_alias IS NULL AND source_ip = ? "
-            source_params: tuple = (target_row["source_ip"],)
-        else:
-            source_clause = "source_alias = ? "
-            source_params = (source_alias,)
+        # Same host: alias-less rows (source_alias '') are also matched on source_ip.
+        source_clause, source_params = context_source_clause(source_alias, target_row["source_ip"])
 
         if not same_app:
             app_clause = ""

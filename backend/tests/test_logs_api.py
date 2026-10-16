@@ -1318,3 +1318,41 @@ class TestTimeBoundsAndErrors:
 
         res_preview = await client.post("/api/logs/delete/preview", json={"apps": ["web"]})
         assert res_preview.status_code == 503
+
+
+class TestAliasLessContext:
+
+    def _seed_two_aliasless_hosts(self, db_file: Path) -> None:
+        rows = []
+        for i in range(1, 8):
+            ip = "10.0.0.1" if i % 2 else "10.0.0.2"
+            row = _utc_row(f"2026-10-15T12:00:0{i}+00:00", message=f"line {i} from {ip}")
+            row["source_ip"] = ip
+            row["source_alias"] = ""
+            rows.append(row)
+        _seed_logs(db_file, rows)
+
+    @pytest.mark.asyncio
+    async def test_context_for_aliasless_log_stays_on_target_host(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        self._seed_two_aliasless_hosts(tmp_path / "logs.db")
+
+        # id 3 is from 10.0.0.1; its neighbours on that host are ids 1 and 5
+        res = await client.get("/api/logs/3/context", params={"lines": 4})
+        assert res.status_code == 200
+        logs = res.json()["logs"]
+        assert {log["source_ip"] for log in logs} == {"10.0.0.1"}
+        assert [log["id"] for log in logs] == [1, 3, 5, 7]
+
+    @pytest.mark.asyncio
+    async def test_context_lines_one_returns_one_line_each_side(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        self._seed_two_aliasless_hosts(tmp_path / "logs.db")
+
+        res = await client.get("/api/logs/3/context", params={"lines": 1})
+        assert res.status_code == 200
+        assert [log["id"] for log in res.json()["logs"]] == [1, 3, 5]

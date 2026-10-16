@@ -874,3 +874,45 @@ class TestFtsFallbackAndConsistency:
         res_v1 = await client.get("/api/v1/logs/count", params=bounds, headers=logs_token_headers)
         res_ui = await client.get("/api/logs", params=bounds, headers=auth_headers)
         assert res_v1.json()["total"] == res_ui.json()["total"] == 3
+
+
+class TestAliasLessHosts:
+    """Logs without an alias are stored with source_alias '' and must be told apart by IP."""
+
+    def _seed(self, db_path: Path) -> None:
+        with get_connection(db_path) as conn:
+            for i in range(1, 8):
+                _insert_log(conn, i, "10.0.0.1" if i % 2 else "10.0.0.2", "", "web")
+            _insert_log(conn, 8, "10.0.0.3", "host-c", "web")
+            conn.commit()
+
+    @pytest.mark.asyncio
+    async def test_context_matches_target_ip_only(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+        res = await client.get("/api/v1/logs/3/context", params={"lines": 5}, headers=logs_token_headers)
+        assert res.status_code == 200
+        body = res.json()
+        assert [e["id"] for e in body["before_logs"]] == [1]
+        assert [e["id"] for e in body["after_logs"]] == [5, 7]
+
+    @pytest.mark.asyncio
+    async def test_count_by_source_groups_aliasless_logs_by_ip(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+        res = await client.get(
+            "/api/v1/logs/count", params={"group_by": "source"}, headers=logs_token_headers
+        )
+        assert res.status_code == 200
+        assert res.json()["breakdown"] == {"10.0.0.1": 4, "10.0.0.2": 3, "host-c": 1}
+
+    @pytest.mark.asyncio
+    async def test_entries_without_alias_report_the_ip(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        self._seed(tmp_path / "logs.db")
+        res = await client.get("/api/v1/logs", params={"source": "10.0.0.2"}, headers=logs_token_headers)
+        assert res.status_code == 200
+        assert {e["source_alias"] for e in res.json()["logs"]} == {"10.0.0.2"}

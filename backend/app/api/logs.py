@@ -31,6 +31,7 @@ from app.services.log_deletion import count_matching_logs_async, execute_delete_
 from app.services.log_query import (
     INVALID_DATETIME_DETAIL,
     add_fts_filter,
+    context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
     to_utc_bound,
@@ -443,13 +444,16 @@ async def get_log_facets(
 @router.get("/{id}/context", response_model=LogContextResponse)
 async def get_log_context(
     id: int,
-    lines: int = Query(10, ge=1, le=100, description="Surrounding lines before and after"),
+    lines: int = Query(10, ge=1, le=100, description="Total surrounding lines, split evenly before and after (at least 1 on each side)"),
     same_app: bool = Query(False, description="Restrict surrounding logs to the same application name"),
     user: dict = Depends(get_current_user),
 ) -> LogContextResponse:
     """
     Fetch surrounding context lines symmetrically before and after target log.
-    Defaults to all host activity (same source_alias). If same_app=True, restricts to the same app_name.
+    `lines` is the total window: lines // 2 (at least 1) are returned on each side, so the
+    UI asking for 10 shows 5 before and 5 after.
+    Defaults to all host activity (same source_alias, or same source_ip for logs without an
+    alias). If same_app=True, restricts to the same app_name.
     """
     def _fetch_context(conn):
         cursor = conn.cursor()
@@ -462,35 +466,36 @@ async def get_log_context(
         app_name = target_row["app_name"]
         t_time = target_row["timestamp"]
         t_id = target_row["id"]
-        half = lines // 2
+        half = max(1, lines // 2)
+        source_clause, source_params = context_source_clause(source_alias, target_row["source_ip"])
 
         app_clause = "AND app_name = ? " if same_app else ""
         app_params = (app_name,) if same_app else ()
 
         # Fetch lines before (chronologically earlier)
         before_sql = f"""
-            SELECT * FROM logs 
-            WHERE source_alias = ? {app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
+            SELECT * FROM logs
+            WHERE {source_clause}{app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
             ORDER BY timestamp DESC, id DESC
             LIMIT ?
         """
         cursor.execute(
             before_sql,
-            (source_alias, *app_params, t_time, t_time, t_id, half),
+            (*source_params, *app_params, t_time, t_time, t_id, half),
         )
         before_rows = cursor.fetchall()
         before_rows.reverse()  # Chronological order
 
         # Fetch lines after (chronologically later)
         after_sql = f"""
-            SELECT * FROM logs 
-            WHERE source_alias = ? {app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
+            SELECT * FROM logs
+            WHERE {source_clause}{app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
             ORDER BY timestamp ASC, id ASC
             LIMIT ?
         """
         cursor.execute(
             after_sql,
-            (source_alias, *app_params, t_time, t_time, t_id, half),
+            (*source_params, *app_params, t_time, t_time, t_id, half),
         )
         after_rows = cursor.fetchall()
 

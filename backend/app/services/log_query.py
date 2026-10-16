@@ -136,3 +136,18 @@ def db_busy_exception(exc: BaseException, action: str) -> HTTPException:
     """Log a database OperationalError and return a generic 503 for the client."""
     logger.warning(f"Database error while {action}: {exc}")
     return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=DB_BUSY_DETAIL)
+
+
+def context_source_clause(source_alias: Optional[str], source_ip: Optional[str]) -> tuple[str, tuple]:
+    """
+    WHERE fragment (and parameters) selecting the same host as a context target row.
+
+    ``source_alias`` is NOT NULL and an empty string means "no alias", so alias-less rows
+    are matched by ``source_ip`` as well; otherwise every alias-less host would mix into
+    the context. The IS NULL branch covers older databases with a nullable column.
+    """
+    if source_alias is None:
+        return "source_alias IS NULL AND source_ip = ? ", (source_ip,)
+    if source_alias == "":
+        return "source_alias = '' AND source_ip = ? ", (source_ip,)
+    return "source_alias = ? ", (source_alias,)
