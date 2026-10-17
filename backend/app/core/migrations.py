@@ -9,6 +9,11 @@ It uses the standard library `sqlite3` module exclusively and is designed to
 be executed synchronously (e.g., via `asyncio.to_thread` from an async context).
 All database connections opened through this module will automatically have WAL
 mode and other performance pragmas enabled.
+
+Each migration, together with its `user_version` bump, runs in one explicit
+`BEGIN IMMEDIATE` transaction, so a crash part way through leaves the previous
+version intact. Statements run one at a time through `execute()`: `executescript()`
+would commit the open transaction first and run the script in autocommit mode.
 """
 
 import logging
@@ -16,7 +21,7 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import Union
+from typing import Callable, Union
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,24 @@ def set_user_version(conn: sqlite3.Connection, version: int) -> None:
     """
     conn.execute(f"PRAGMA user_version = {version};")
 
+
+def _run_script(conn: sqlite3.Connection, script: str) -> None:
+    """
+    Run a multi-statement SQL script one statement at a time with `execute()`, so the
+    statements join the caller's open transaction. Statements are split where
+    `sqlite3.complete_statement` says one ends, which keeps trigger bodies whole.
+    Each statement must end on its own line.
+    """
+    buffer = ""
+    for line in script.splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            conn.execute(buffer)
+            buffer = ""
+    if buffer.strip():
+        raise ValueError(f"Incomplete SQL statement in migration script: {buffer.strip()[:80]}")
+
+
 def migrate_v1(conn: sqlite3.Connection) -> None:
     """
     Execute the full v1 DDL schema. This is Migration 1.
@@ -71,8 +94,8 @@ def migrate_v1(conn: sqlite3.Connection) -> None:
         conn: The active sqlite3 connection.
     """
     logger.info("Running migration v1...")
-    conn.executescript('''
-CREATE TABLE logs (
+    _run_script(conn, '''
+CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp DATETIME NOT NULL,
     received_at DATETIME NOT NULL,
@@ -85,13 +108,13 @@ CREATE TABLE logs (
     raw TEXT NOT NULL
 );
 
-CREATE INDEX idx_logs_time_sev ON logs(timestamp DESC, severity);
-CREATE INDEX idx_logs_app_time ON logs(app_name, timestamp DESC);
-CREATE INDEX idx_logs_src_time ON logs(source_alias, timestamp DESC);
-CREATE INDEX idx_logs_source_ip ON logs(source_ip);
-CREATE INDEX idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);
+CREATE INDEX IF NOT EXISTS idx_logs_time_sev ON logs(timestamp DESC, severity);
+CREATE INDEX IF NOT EXISTS idx_logs_app_time ON logs(app_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_src_time ON logs(source_alias, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_source_ip ON logs(source_ip);
+CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name, source_ip);
 
-CREATE VIRTUAL TABLE logs_fts USING fts5(
+CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
     app_name,
     source_alias,
     message,
@@ -99,31 +122,31 @@ CREATE VIRTUAL TABLE logs_fts USING fts5(
     content_rowid='id'
 );
 
-CREATE TRIGGER logs_ai AFTER INSERT ON logs BEGIN
+CREATE TRIGGER IF NOT EXISTS logs_ai AFTER INSERT ON logs BEGIN
     INSERT INTO logs_fts(rowid, app_name, source_alias, message)
     VALUES (new.id, new.app_name, new.source_alias, new.message);
 END;
 
-CREATE TRIGGER logs_ad AFTER DELETE ON logs BEGIN
+CREATE TRIGGER IF NOT EXISTS logs_ad AFTER DELETE ON logs BEGIN
     INSERT INTO logs_fts(logs_fts, rowid, app_name, source_alias, message)
     VALUES('delete', old.id, old.app_name, old.source_alias, old.message);
 END;
 
-CREATE TRIGGER logs_au AFTER UPDATE ON logs BEGIN
+CREATE TRIGGER IF NOT EXISTS logs_au AFTER UPDATE ON logs BEGIN
     INSERT INTO logs_fts(logs_fts, rowid, app_name, source_alias, message)
     VALUES('delete', old.id, old.app_name, old.source_alias, old.message);
     INSERT INTO logs_fts(rowid, app_name, source_alias, message)
     VALUES (new.id, new.app_name, new.source_alias, new.message);
 END;
 
-CREATE TABLE host_aliases (
+CREATE TABLE IF NOT EXISTS host_aliases (
     ip TEXT PRIMARY KEY,
     alias TEXT NOT NULL,
     notes TEXT,
     created_at DATETIME NOT NULL
 );
 
-CREATE TABLE storage_metrics (
+CREATE TABLE IF NOT EXISTS storage_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recorded_at DATETIME NOT NULL,
     db_size_bytes INTEGER NOT NULL,
@@ -132,9 +155,9 @@ CREATE TABLE storage_metrics (
     total_logs_count INTEGER NOT NULL
 );
 
-CREATE INDEX idx_storage_metrics_time ON storage_metrics(recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_storage_metrics_time ON storage_metrics(recorded_at DESC);
 
-CREATE TABLE ai_audit_log (
+CREATE TABLE IF NOT EXISTS ai_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp DATETIME NOT NULL,
     source_alias TEXT NOT NULL,
@@ -151,14 +174,14 @@ CREATE TABLE ai_audit_log (
     system_prompt TEXT
 );
 
-CREATE TABLE admin_auth (
+CREATE TABLE IF NOT EXISTS admin_auth (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     password_hash TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE system_settings (
+CREATE TABLE IF NOT EXISTS system_settings (
     key TEXT PRIMARY KEY,
     value TEXT,
     updated_at DATETIME NOT NULL,
@@ -184,7 +207,7 @@ def migrate_v2(conn: sqlite3.Connection) -> None:
     - Backfill historical on-demand ai_audit_log entries into alert_history.
     """
     logger.info("Running migration v2...")
-    conn.executescript('''
+    _run_script(conn, '''
 DROP TRIGGER IF EXISTS logs_ai;
 
 CREATE TABLE IF NOT EXISTS fts_index_state (
@@ -227,8 +250,6 @@ CREATE TABLE IF NOT EXISTS drop_rules (
     created_at DATETIME NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_drop_rules_enabled ON drop_rules(is_enabled);
-
 CREATE TABLE IF NOT EXISTS saved_views (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -269,8 +290,6 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     created_at DATETIME NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(is_enabled);
-
 CREATE TABLE IF NOT EXISTS alert_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_id INTEGER REFERENCES alert_rules(id) ON DELETE SET NULL,
@@ -286,7 +305,6 @@ CREATE TABLE IF NOT EXISTS alert_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC);
-CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON alert_history(rule_id);
 CREATE INDEX IF NOT EXISTS idx_alert_history_rule_time ON alert_history(rule_id, triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_audit_id);
@@ -376,7 +394,7 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE alert_history ADD COLUMN maintenance_session_id TEXT;")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_history_maint_session ON alert_history(maintenance_session_id);")
 
-    conn.executescript('''
+    _run_script(conn, '''
 CREATE TABLE IF NOT EXISTS api_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -389,7 +407,6 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     created_by TEXT DEFAULT 'admin'
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_expires ON api_tokens(expires_at);
 
 CREATE TABLE IF NOT EXISTS maintenance_sessions (
@@ -424,7 +441,8 @@ CREATE TABLE IF NOT EXISTS docker_endpoints (
     client_key TEXT,
     exclude_containers TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL
+    updated_at DATETIME NOT NULL,
+    verify_hostname INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_docker_endpoints_name ON docker_endpoints(name);
@@ -483,12 +501,76 @@ MIGRATIONS = [
     (3, migrate_v3),
 ]
 
+# Indexes made redundant by another index: the UNIQUE autoindex on api_tokens.token_hash, or the
+# leading columns of idx_alert_history_rule_time and the idx_*_rules_order indexes.
+REDUNDANT_INDEXES = (
+    "idx_api_tokens_hash",
+    "idx_alert_history_rule_id",
+    "idx_drop_rules_enabled",
+    "idx_alert_rules_enabled",
+)
+
+
+def repair_v3(conn: sqlite3.Connection) -> None:
+    """
+    Idempotent repair of a v3 database, run on every start. It fixes databases left
+    incomplete by earlier 1.3.0 builds, whose migrations were not atomic:
+    - re-run migrate_v3 when its tables are missing (pre-release databases);
+    - add docker_endpoints.verify_hostname (on by default, including existing endpoints);
+    - number rules by id when a table holds more than one rule and none was ever ordered;
+    - create the rule order indexes and drop the redundant ones.
+    """
+    cur = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name IN ('docker_endpoints', 'ai_conversation_messages');"
+    )
+    if cur.fetchone()[0] < 2:
+        logger.info("Upgrading pre-release v3 database schema with missing v1.3.0 tables...")
+        migrate_v3(conn)
+
+    endpoint_cols = {row[1] for row in conn.execute("PRAGMA table_info(docker_endpoints);").fetchall()}
+    if endpoint_cols and "verify_hostname" not in endpoint_cols:
+        logger.info("Adding verify_hostname column to docker_endpoints...")
+        conn.execute("ALTER TABLE docker_endpoints ADD COLUMN verify_hostname INTEGER NOT NULL DEFAULT 1;")
+
+    for table in ("drop_rules", "alert_rules"):
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table});").fetchall()}
+        if "display_order" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0;")
+        total, ordered = conn.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(display_order <> 0), 0) FROM {table};"
+        ).fetchone()
+        if total > 1 and ordered == 0:
+            logger.info(f"Restoring display_order for {total} rows in {table}...")
+            conn.execute(f"UPDATE {table} SET display_order = id;")
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{table}_order ON {table}(is_enabled, display_order ASC, id ASC);"
+        )
+
+    for index_name in REDUNDANT_INDEXES:
+        conn.execute(f"DROP INDEX IF EXISTS {index_name};")
+
+
+def _run_in_transaction(conn: sqlite3.Connection, step: Callable[[sqlite3.Connection], None]) -> None:
+    """Run one migration step inside BEGIN IMMEDIATE ... COMMIT, rolling back on any error."""
+    conn.execute("BEGIN IMMEDIATE;")
+    try:
+        step(conn)
+        conn.execute("COMMIT;")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK;")
+        raise
+
+
 def run_migrations(db_path: Union[str, Path]) -> None:
     """
     Main entry point for database migrations.
 
     Opens the database, enables WAL mode pragmas, and runs all pending migrations
-    in order based on the current PRAGMA user_version.
+    in order based on the current PRAGMA user_version. Each migration and its
+    user_version bump commit together in one transaction, then repair_v3 runs in
+    its own transaction.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -498,43 +580,36 @@ def run_migrations(db_path: Union[str, Path]) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = get_connection(db_path)
+    # Manual transaction control: no implicit BEGIN or COMMIT around the statements below
+    conn.isolation_level = None
     try:
         current_version = get_user_version(conn)
         logger.info(f"Current database version: {current_version}")
 
         for target_version, migration_func in MIGRATIONS:
-            if current_version < target_version:
-                logger.info(f"Migrating from {current_version} to {target_version}")
-                try:
-                    migration_func(conn)
-                    set_user_version(conn, target_version)
-                    conn.commit()
-                    current_version = target_version
-                    logger.info(f"Successfully migrated to version {target_version}")
-                except Exception as e:
-                    conn.rollback()
-                    logger.error(f"Migration to version {target_version} failed: {e}")
-                    raise
-            else:
+            if current_version >= target_version:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
+                continue
+            logger.info(f"Migrating from {current_version} to {target_version}")
 
-        # Ensure schema integrity for v3 databases (e.g. pre-release v1.3.0 dev deployments)
+            def _apply(c: sqlite3.Connection, version: int = target_version, func=migration_func) -> None:
+                # Re-read the version under the write lock in case another process migrated first
+                if get_user_version(c) >= version:
+                    return
+                func(c)
+                set_user_version(c, version)
+
+            try:
+                _run_in_transaction(conn, _apply)
+            except Exception as e:
+                logger.error(f"Migration to version {target_version} failed: {e}")
+                raise
+            current_version = target_version
+            logger.info(f"Successfully migrated to version {target_version}")
+
+        # Ensure schema integrity for v3 databases (pre-release and interrupted v1.3.0 upgrades)
         if current_version == 3:
-            cur = conn.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-                "AND name IN ('docker_endpoints', 'ai_conversation_messages');"
-            )
-            if cur.fetchone()[0] < 2:
-                logger.info("Upgrading pre-release v3 database schema with missing v1.3.0 tables...")
-                migrate_v3(conn)
-                conn.commit()
-
-            # Per-endpoint Docker TLS host name verification (on by default, including existing endpoints)
-            endpoint_cols = {row[1] for row in conn.execute("PRAGMA table_info(docker_endpoints);").fetchall()}
-            if endpoint_cols and "verify_hostname" not in endpoint_cols:
-                logger.info("Adding verify_hostname column to docker_endpoints...")
-                conn.execute("ALTER TABLE docker_endpoints ADD COLUMN verify_hostname INTEGER NOT NULL DEFAULT 1;")
-                conn.commit()
+            _run_in_transaction(conn, repair_v3)
     finally:
         conn.close()
 

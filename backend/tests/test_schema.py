@@ -7,12 +7,22 @@ from pathlib import Path
 import sqlite3
 import pytest
 
+import app.core.migrations as migrations_mod
 from app.core.migrations import (
     MIGRATIONS,
     get_connection,
     get_user_version,
+    migrate_v1,
     set_user_version,
     run_migrations,
+)
+
+# Indexes that duplicate another index (a UNIQUE autoindex or the leading columns of a composite index)
+REDUNDANT_INDEXES = (
+    "idx_api_tokens_hash",
+    "idx_alert_history_rule_id",
+    "idx_drop_rules_enabled",
+    "idx_alert_rules_enabled",
 )
 
 
@@ -188,17 +198,43 @@ class TestSchemaIntegrity:
             "idx_logs_source_ip",
             "idx_logs_source_app_ip",
             "idx_storage_metrics_time",
-            "idx_drop_rules_enabled",
             "idx_drop_rules_order",
             "idx_saved_views_pinned",
             "idx_notification_channels_enabled",
-            "idx_alert_rules_enabled",
             "idx_alert_rules_order",
             "idx_alert_history_triggered_at",
-            "idx_alert_history_rule_id",
             "idx_alert_history_rule_time",
         }
         assert expected.issubset(indexes)
+
+    def test_redundant_indexes_absent(self, db_path: Path):
+        """E-46: indexes that duplicate a UNIQUE autoindex or a composite index prefix are not created."""
+        conn = get_connection(db_path)
+        indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+        conn.close()
+        assert indexes.isdisjoint(REDUNDANT_INDEXES)
+
+    @pytest.mark.parametrize(
+        "query, expected_index",
+        [
+            (
+                "SELECT id FROM drop_rules WHERE is_enabled = 1 ORDER BY display_order ASC, id ASC",
+                "idx_drop_rules_order",
+            ),
+            (
+                "SELECT id FROM alert_rules WHERE is_enabled = 1 ORDER BY display_order ASC, id ASC",
+                "idx_alert_rules_order",
+            ),
+            ("SELECT COUNT(*) FROM alert_history WHERE rule_id = 1", "idx_alert_history_rule_time"),
+            ("SELECT id FROM api_tokens WHERE token_hash = 'x'", "sqlite_autoindex_api_tokens_1"),
+        ],
+    )
+    def test_queries_use_remaining_indexes(self, db_path: Path, query: str, expected_index: str):
+        """The queries the dropped indexes used to serve still search through an index."""
+        conn = get_connection(db_path)
+        plan = " ".join(str(r) for r in conn.execute(f"EXPLAIN QUERY PLAN {query}").fetchall())
+        conn.close()
+        assert expected_index in plan
 
     def test_notification_channels_schema(self, db_path: Path):
         """notification_channels table should contain expected columns and constraints."""
@@ -482,7 +518,7 @@ class TestMigrationRunner:
         assert "docker_endpoints" in tables
         assert "ai_conversation_messages" in tables
 
-        assert "idx_api_tokens_hash" in indexes
+        assert "idx_api_tokens_hash" not in indexes
         assert "idx_ai_conversation_audit_id" in indexes
         assert "idx_api_tokens_expires" in indexes
         assert "idx_maint_sessions_active" in indexes
@@ -615,6 +651,242 @@ class TestMigrationRunner:
         conn.close()
         assert "ai_conversation_messages" in tables
         assert "idx_ai_conversation_audit_id" in indexes
+
+
+# ===================================================================
+# 2a. Migration Atomicity and v3 Repair (B-15, E-46)
+# ===================================================================
+
+def _schema_snapshot(path: Path) -> tuple:
+    """user_version plus every schema object and its SQL, for exact before/after comparisons."""
+    conn = get_connection(path)
+    try:
+        objects = conn.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+        return get_user_version(conn), objects
+    finally:
+        conn.close()
+
+
+def _object_names(path: Path) -> set:
+    return {(t, n) for t, n, _tbl, _sql in _schema_snapshot(path)[1]}
+
+
+def _migrate_to(path: Path, version: int, monkeypatch) -> None:
+    """Bring a database to an older schema version using the real migrations up to that version."""
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS[:version])
+    run_migrations(path)
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS)
+
+
+def _seed_v2_rules(path: Path) -> None:
+    conn = get_connection(path)
+    conn.execute(
+        "INSERT INTO drop_rules (name, message_pattern, created_at) "
+        "VALUES ('d1', 'p1', datetime('now')), ('d2', 'p2', datetime('now')), ('d3', 'p3', datetime('now'))"
+    )
+    conn.execute(
+        "INSERT INTO alert_rules (name, rule_type, created_at) "
+        "VALUES ('a1', 'threshold', datetime('now')), ('a2', 'threshold', datetime('now'))"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _assert_rules_ordered_and_indexed(path: Path) -> None:
+    conn = get_connection(path)
+    try:
+        for table in ("drop_rules", "alert_rules"):
+            rows = conn.execute(f"SELECT id, display_order FROM {table} ORDER BY id").fetchall()
+            assert rows, table
+            assert all(rule_id == order for rule_id, order in rows), (table, rows)
+        indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        assert {"idx_drop_rules_order", "idx_alert_rules_order"}.issubset(indexes)
+    finally:
+        conn.close()
+
+
+def _make_beta_v3_db(path: Path, drop_order: tuple, alert_order: tuple) -> None:
+    """A v3 database as an interrupted or earlier 1.3.0 build could leave it."""
+    run_migrations(path)
+    conn = get_connection(path)
+    conn.execute("DROP INDEX idx_drop_rules_order")
+    conn.execute("DROP INDEX idx_alert_rules_order")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_drop_rules_enabled ON drop_rules(is_enabled)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(is_enabled)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON alert_history(rule_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)")
+    for i, order in enumerate(drop_order):
+        conn.execute(
+            "INSERT INTO drop_rules (name, message_pattern, display_order, created_at) VALUES (?, 'p', ?, datetime('now'))",
+            (f"d{i}", order),
+        )
+    for i, order in enumerate(alert_order):
+        conn.execute(
+            "INSERT INTO alert_rules (name, rule_type, display_order, created_at) VALUES (?, 'threshold', ?, datetime('now'))",
+            (f"a{i}", order),
+        )
+    conn.commit()
+    conn.close()
+
+
+class TestMigrationAtomicity:
+
+    @pytest.mark.parametrize("failing_version", [1, 2, 3])
+    def test_failed_migration_leaves_previous_schema(self, tmp_path: Path, monkeypatch, failing_version: int):
+        """A migration that fails after all its statements ran leaves no trace, and the next start completes it."""
+        p = tmp_path / f"atomic_v{failing_version}.db"
+        _migrate_to(p, failing_version - 1, monkeypatch)
+        if failing_version == 3:
+            _seed_v2_rules(p)
+        before = _schema_snapshot(p)
+
+        original = dict(MIGRATIONS)[failing_version]
+
+        def _crash_after(conn: sqlite3.Connection) -> None:
+            original(conn)
+            raise RuntimeError("simulated crash")
+
+        patched = [(v, _crash_after if v == failing_version else fn) for v, fn in MIGRATIONS]
+        monkeypatch.setattr(migrations_mod, "MIGRATIONS", patched)
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            run_migrations(p)
+        assert _schema_snapshot(p) == before
+
+        monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS)
+        run_migrations(p)
+        assert _schema_snapshot(p)[0] == 3
+        if failing_version == 3:
+            _assert_rules_ordered_and_indexed(p)
+
+    def test_failed_display_order_backfill_keeps_v2_state(self, tmp_path: Path, monkeypatch):
+        """If the display_order backfill fails, the added column is rolled back and the next start backfills it."""
+        p = tmp_path / "backfill_crash.db"
+        _migrate_to(p, 2, monkeypatch)
+        _seed_v2_rules(p)
+
+        real_get_connection = migrations_mod.get_connection
+
+        def _deny_backfill(action, arg1, arg2, _db, _source):
+            if action == sqlite3.SQLITE_UPDATE and arg1 == "drop_rules" and arg2 == "display_order":
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        def _connection_failing_backfill(path, *args, **kwargs):
+            conn = real_get_connection(path, *args, **kwargs)
+            conn.set_authorizer(_deny_backfill)
+            return conn
+
+        monkeypatch.setattr(migrations_mod, "get_connection", _connection_failing_backfill)
+        with pytest.raises(sqlite3.DatabaseError):
+            run_migrations(p)
+        monkeypatch.setattr(migrations_mod, "get_connection", real_get_connection)
+
+        conn = get_connection(p)
+        assert get_user_version(conn) == 2
+        assert "display_order" not in {r[1] for r in conn.execute("PRAGMA table_info(drop_rules)")}
+        conn.close()
+
+        run_migrations(p)
+        _assert_rules_ordered_and_indexed(p)
+
+    def test_v1_statements_tolerate_existing_objects(self, tmp_path: Path):
+        """v1 uses IF NOT EXISTS, so it can run over objects left by an earlier partial run."""
+        conn = get_connection(tmp_path / "v1_twice.db")
+        migrate_v1(conn)
+        conn.commit()
+        migrate_v1(conn)
+        conn.commit()
+        conn.close()
+
+    def test_run_migrations_twice_gives_identical_schema(self, tmp_path: Path):
+        p = tmp_path / "twice.db"
+        run_migrations(p)
+        first = _schema_snapshot(p)
+        run_migrations(p)
+        assert _schema_snapshot(p) == first
+
+
+class TestRepairV3:
+
+    def test_unbackfilled_v3_database_is_backfilled_and_indexed(self, tmp_path: Path):
+        """A v3 database whose rules were never backfilled gains display_order = id and the order indexes."""
+        p = tmp_path / "beta_zeros.db"
+        _make_beta_v3_db(p, drop_order=(0, 0, 0), alert_order=(0, 0))
+
+        run_migrations(p)
+
+        _assert_rules_ordered_and_indexed(p)
+        fresh = tmp_path / "fresh.db"
+        run_migrations(fresh)
+        assert _object_names(p) == _object_names(fresh)
+
+        repaired = _schema_snapshot(p)
+        run_migrations(p)
+        assert _schema_snapshot(p) == repaired
+
+    def test_repair_drops_redundant_indexes(self, tmp_path: Path):
+        p = tmp_path / "beta_indexes.db"
+        _make_beta_v3_db(p, drop_order=(), alert_order=())
+        run_migrations(p)
+        conn = get_connection(p)
+        indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        conn.close()
+        assert indexes.isdisjoint(REDUNDANT_INDEXES)
+
+    def test_repair_keeps_existing_rule_order(self, tmp_path: Path):
+        """Rules that already carry an order, or a lone rule at 0, are left as they are."""
+        p = tmp_path / "beta_ordered.db"
+        _make_beta_v3_db(p, drop_order=(2, 3, 1), alert_order=(0,))
+
+        run_migrations(p)
+
+        conn = get_connection(p)
+        drop_orders = [r[0] for r in conn.execute("SELECT display_order FROM drop_rules ORDER BY id")]
+        alert_orders = [r[0] for r in conn.execute("SELECT display_order FROM alert_rules ORDER BY id")]
+        conn.close()
+        assert drop_orders == [2, 3, 1]
+        assert alert_orders == [0]
+
+    def test_repair_keeps_partly_ordered_rules(self, tmp_path: Path):
+        """A table with some rules at 0 and others ordered is not renumbered."""
+        p = tmp_path / "beta_mixed.db"
+        _make_beta_v3_db(p, drop_order=(0, 0, 1), alert_order=(0, 0))
+        run_migrations(p)
+        conn = get_connection(p)
+        drop_orders = [r[0] for r in conn.execute("SELECT display_order FROM drop_rules ORDER BY id")]
+        alert_rows = conn.execute("SELECT id, display_order FROM alert_rules ORDER BY id").fetchall()
+        conn.close()
+        assert drop_orders == [0, 0, 1]
+        assert all(rule_id == order for rule_id, order in alert_rows)
+
+    @pytest.mark.parametrize("origin", ["fresh", "from_v2", "beta_v3_without_column"])
+    def test_verify_hostname_defaults_on(self, tmp_path: Path, monkeypatch, origin: str):
+        """Fresh, upgraded and repaired databases all end up with verify_hostname NOT NULL DEFAULT 1."""
+        p = tmp_path / f"{origin}.db"
+        if origin == "from_v2":
+            _migrate_to(p, 2, monkeypatch)
+        elif origin == "beta_v3_without_column":
+            run_migrations(p)
+            conn = get_connection(p)
+            conn.execute("ALTER TABLE docker_endpoints DROP COLUMN verify_hostname")
+            conn.commit()
+            conn.close()
+
+        run_migrations(p)
+
+        conn = get_connection(p)
+        info = {r[1]: r for r in conn.execute("PRAGMA table_info(docker_endpoints)")}
+        conn.execute(
+            "INSERT INTO docker_endpoints (name, url, created_at, updated_at) "
+            "VALUES ('Second', 'tcp://10.0.0.9:2376', datetime('now'), datetime('now'))"
+        )
+        values = [r[0] for r in conn.execute("SELECT verify_hostname FROM docker_endpoints ORDER BY id")]
+        conn.close()
+        assert info["verify_hostname"][3] == 1  # NOT NULL
+        assert info["verify_hostname"][4] == "1"  # DEFAULT 1
+        assert values == [1, 1]
 
 
 
