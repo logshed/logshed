@@ -11,15 +11,29 @@ import * as authApi from '../api/auth.ts';
 import { LogEntry } from '../types.ts';
 import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 
+// Test control for the virtualizer mock: when edgeRows is set, only the first and last
+// edgeRows rows are "visible" (like a real viewport), so large buffers stay cheap to render.
+const virtualizerControl: { edgeRows: number | null; lastOptions: any } = { edgeRows: null, lastOptions: null };
+
 vi.mock('@tanstack/react-virtual', () => ({
-  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize?: () => number }) => {
+  useVirtualizer: (options: { count: number; estimateSize?: () => number; getItemKey?: (i: number) => unknown }) => {
+    const { count, estimateSize, getItemKey } = options;
+    virtualizerControl.lastOptions = options;
     const size = estimateSize ? estimateSize() : 28;
+    const edge = virtualizerControl.edgeRows;
+    const indexes =
+      edge === null || count <= edge * 2
+        ? Array.from({ length: count }, (_, i) => i)
+        : [
+            ...Array.from({ length: edge }, (_, i) => i),
+            ...Array.from({ length: edge }, (_, i) => count - edge + i),
+          ];
     return {
       measure: () => {},
       getTotalSize: () => count * size,
       getVirtualItems: () =>
-        Array.from({ length: count }, (_, index) => ({
-          key: index,
+        indexes.map((index) => ({
+          key: getItemKey ? getItemKey(index) : index,
           index,
           start: index * size,
           size,
@@ -146,6 +160,7 @@ describe('LiveLogStream Component', () => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
     MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
     window.matchMedia = ((query: string) => ({
       matches: false,
       media: query,
@@ -726,6 +741,8 @@ describe('LiveLogStream Component', () => {
   });
 
   it('automatically fetches older logs with offset pagination on infinite scroll (Item #33)', async () => {
+    // Render only a viewport's worth of rows at each end, as the real virtualizer does
+    virtualizerControl.edgeRows = 20;
     // Generate 500 initial logs
     const batch1: LogEntry[] = Array.from({ length: 500 }, (_, i) => ({
       id: 1000 - i,
@@ -769,7 +786,7 @@ describe('LiveLogStream Component', () => {
 
     // Virtualizer and scroll observer trigger loadMoreLogs for batch 2
     await waitFor(() => {
-      expect(screen.getByText('Batch 2 Log item #500')).toBeInTheDocument();
+      expect(screen.getByText('Batch 2 Log item #251')).toBeInTheDocument();
     });
 
     // Total of 750 logs loaded, and end-of-history banner appears
@@ -1716,6 +1733,7 @@ describe('LiveLogStream B11 fixes', () => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
     MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
     window.matchMedia = ((query: string) => ({
       matches: false,
       media: query,
@@ -1841,6 +1859,7 @@ describe('LiveLogStream B12 fixes', () => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
     MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
     window.matchMedia = ((query: string) => ({
       matches: false,
       media: query,
