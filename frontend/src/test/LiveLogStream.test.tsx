@@ -2062,4 +2062,40 @@ describe('LiveLogStream B12 fixes', () => {
       expect(bufferCount()).toBe(3000);
     });
   });
+
+  it('anchors the scroll position with the mobile row height after crossing the breakpoint (B-74)', async () => {
+    const listeners: ((e: { matches: boolean }) => void)[] = [];
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => listeners.push(cb),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as any;
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+
+    // Switch to the mobile layout
+    act(() => listeners.forEach((cb) => cb({ matches: true })));
+    await waitFor(() => expect(screen.queryByText('TIMESTAMP')).toBeNull());
+
+    const scroller = document.querySelector('.overflow-y-auto') as HTMLElement;
+    let top = 200;
+    Object.defineProperty(scroller, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+    fireEvent.scroll(scroller);
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => {
+      for (let i = 0; i < 3; i++) {
+        es.emit('log', { ...sampleLogs[0], id: 900 + i, message: `Mobile anchored ${i}` });
+      }
+    });
+    await waitFor(() => expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument());
+    // 3 prepended cards of 74px each, not the 28px desktop row height
+    expect(top).toBe(200 + 3 * 74);
+  });
 });

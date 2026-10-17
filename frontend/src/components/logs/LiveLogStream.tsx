@@ -660,6 +660,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   }, [logs]);
 
   const isMobile = useMediaQuery('(max-width: 767px)');
+  // Read by flushIncomingLogs, which is cached by useCallback and would otherwise keep the first layout's row height
+  const isMobileRef = useRef<boolean>(isMobile);
+  isMobileRef.current = isMobile;
   const parentRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const isAutoScrollRef = useRef<boolean>(true);
@@ -837,7 +840,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     if (!isAutoScrollRef.current) {
       setMissedLogsCount((prev) => prev + toFlush.length);
       // Anchor scroll position by compensating for prepended items' height (74px on mobile, 28px on desktop)
-      pendingScrollAdjustmentRef.current += toFlush.length * (isMobile ? 74 : 28);
+      pendingScrollAdjustmentRef.current += toFlush.length * (isMobileRef.current ? 74 : 28);
     } else if (parentRef.current && !isTouchingRef.current) {
       requestAnimationFrame(() => {
         if (parentRef.current && isAutoScrollRef.current && !isTouchingRef.current) {
