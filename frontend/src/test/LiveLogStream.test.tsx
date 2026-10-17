@@ -1,7 +1,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LiveLogStream, formatLocalTimestamp, matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import { LiveLogStream, matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import { formatStreamTimestamp } from '../utils/formatters.ts';
+import * as settingsApi from '../api/settings.ts';
 import * as logsApi from '../api/logs.ts';
 import * as aliasesApi from '../api/aliases.ts';
 import * as dockerHostsApi from '../api/dockerHosts.ts';
@@ -114,63 +116,6 @@ const sampleLogs: LogEntry[] = [
   },
 ];
 
-describe('formatLocalTimestamp Helper (Item #5)', () => {
-  it("formats today's timestamps as HH:mm:ss.SSS", () => {
-    const now = new Date();
-    const utcString = now.toISOString();
-    const formatted = formatLocalTimestamp(utcString);
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    const millis = String(now.getMilliseconds()).padStart(3, '0');
-    const expected = `${hours}:${minutes}:${seconds}.${millis}`;
-    expect(formatted).toBe(expected);
-  });
-
-  it('formats historical timestamps (e.g. from yesterday or a past month) with date as DD MMM HH:mm:ss', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
-    try {
-      const past = new Date(2026, 8, 3, 14, 22, 1, 0); // 03 Sep 14:22:01 in local time
-      const formatted = formatLocalTimestamp(past.toISOString());
-      expect(formatted).toBe('03 Sep 14:22:01');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('handles empty and invalid timestamp strings gracefully', () => {
-    expect(formatLocalTimestamp('')).toBe('');
-    expect(formatLocalTimestamp('invalid-date')).toBe('invalid-date');
-  });
-
-  it('falls back to received_at when timestamp is in the future (>60s ahead of received_at)', () => {
-    const now = new Date();
-    const receivedAt = new Date(now.getTime() - 65000).toISOString();
-    const futureTs = new Date(now.getTime() + 100000).toISOString();
-    const formatted = formatLocalTimestamp(futureTs, receivedAt);
-    const d = new Date(receivedAt);
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    const seconds = String(d.getSeconds()).padStart(2, '0');
-    const millis = String(d.getMilliseconds()).padStart(3, '0');
-    expect(formatted).toBe(`${hours}:${minutes}:${seconds}.${millis}`);
-  });
-
-  it('falls back to received_at with historical format if received_at is from a prior day', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
-    try {
-      const pastReceived = new Date(2026, 8, 3, 14, 22, 1, 0);
-      const pastFuture = new Date(2026, 8, 3, 15, 22, 1, 0); // 1 hour ahead
-      const formatted = formatLocalTimestamp(pastFuture.toISOString(), pastReceived.toISOString());
-      expect(formatted).toBe('03 Sep 14:22:01');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
 describe('LiveLogStream Component', () => {
   const renderWithContext = (
     ui: React.ReactElement,
@@ -266,7 +211,7 @@ describe('LiveLogStream Component', () => {
     });
 
     // Check tooltip on the timestamp cell
-    const expectedTime = formatLocalTimestamp(sampleLogs[0].timestamp);
+    const expectedTime = formatStreamTimestamp(sampleLogs[0].timestamp, sampleLogs[0].received_at);
     const timestampEl = screen.getByText(expectedTime);
     expect(timestampEl).toBeInTheDocument();
     expect(timestampEl.getAttribute('title')).toContain(sampleLogs[0].timestamp);
@@ -1881,5 +1826,64 @@ describe('LiveLogStream B11 fixes', () => {
     // Shift-click row 0 (id 102): with a stale anchor this would select a whole range of 3
     fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement, { shiftKey: true });
     expect(screen.getByText('2 logs selected')).toBeInTheDocument();
+  });
+});
+
+describe('LiveLogStream B12 fixes', () => {
+  const renderStream = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as any;
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({
+      logs: [...sampleLogs],
+      total: sampleLogs.length,
+      limit: 500,
+      offset: 0,
+    });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({
+      sources: [],
+      apps: [],
+      host_to_apps: {},
+      app_to_hosts: {},
+    } as any);
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+  });
+
+  it('re-formats loaded rows when the server time zone arrives after the first page (B-73)', async () => {
+    let resolveSettings: (s: any) => void = () => {};
+    vi.spyOn(settingsApi, 'fetchSettings').mockImplementation(
+      () => new Promise((resolve) => { resolveSettings = resolve; })
+    );
+    renderStream();
+    const log = sampleLogs[0];
+    const browserText = formatStreamTimestamp(log.timestamp, log.received_at);
+    await waitFor(() => expect(screen.getByText(browserText)).toBeInTheDocument());
+
+    // UTC+14: differs from any browser zone the suite runs in
+    const tz = 'Pacific/Kiritimati';
+    await act(async () => {
+      resolveSettings({ server_timezone: tz, server_tz_name: 'LINT' });
+    });
+    const serverText = formatStreamTimestamp(log.timestamp, log.received_at, tz);
+    expect(serverText).not.toBe(browserText);
+    await waitFor(() => expect(screen.getByText(serverText)).toBeInTheDocument());
   });
 });

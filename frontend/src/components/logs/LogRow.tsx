@@ -2,8 +2,8 @@ import React from 'react';
 import { Sparkles, CheckSquare, Square } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
-import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
-import { formatLocalTimestamp } from './LiveLogStream.tsx';
+import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp } from '../../utils/formatters.ts';
+import { getCachedServerTimezone } from '../../api/settings.ts';
 
 export interface ProcessedLogEntry extends LogEntry {
   formattedTimestamp?: string;
@@ -70,7 +70,8 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   onClick,
   onDiagnoseAi,
 }) => {
-  const displayTimestamp = log.formattedTimestamp ?? formatLocalTimestamp(log.timestamp, log.received_at);
+  const displayTimestamp = log.formattedTimestamp ??
+    formatStreamTimestamp(log.timestamp, log.received_at, getCachedServerTimezone());
   const displayMessage = log.cleanedMessage ?? cleanLogMessageForDisplay(log.message);
   const displayTitle = log.strippedMessage ?? stripAnsi(log.message);
 

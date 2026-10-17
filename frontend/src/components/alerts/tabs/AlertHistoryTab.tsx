@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   History,
   Trash2,
@@ -14,6 +14,7 @@ import {
 import { AlertHistoryItem } from '../../../types.ts';
 import { extractCleanSummary } from '../../../utils/summary.ts';
 import { formatLocalTimestamp } from '../../../utils/formatters.ts';
+import { fetchSettings, getCachedServerTimezone } from '../../../api/settings.ts';
 import {
   isMaintenanceItem,
   maintenanceSummary,
@@ -44,6 +45,19 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
   offset = 0,
   onPageChange,
 }) => {
+  const [serverTimezone, setServerTimezone] = useState<string | undefined>(() => getCachedServerTimezone());
+  useEffect(() => {
+    let active = true;
+    fetchSettings()
+      .then((s) => {
+        if (active && s.server_timezone) setServerTimezone(s.server_timezone);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = Math.max(1, Math.ceil(historyTotal / limit));
   const startItem = historyTotal === 0 ? 0 : offset + 1;
@@ -140,7 +154,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                    {formatLocalTimestamp(item.triggered_at)}
+                    {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
                   </span>
                 </div>
 
@@ -223,7 +237,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                 className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
               >
                 <div className="text-slate-400 group-hover:text-slate-300 font-mono">
-                  {formatLocalTimestamp(item.triggered_at)}
+                  {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
                 </div>
                 <div>
                   {isMaintenance ? (

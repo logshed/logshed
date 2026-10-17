@@ -9,6 +9,8 @@ import {
   formatMaintenanceTime,
   formatLocalTimestamp,
   formatFullTimestamp,
+  formatStreamTimestamp,
+  getTodayKey,
 } from '../utils/formatters.ts';
 
 describe('stripAnsi', () => {
@@ -303,3 +305,73 @@ describe('formatFullTimestamp', () => {
 });
 
 
+
+describe('formatStreamTimestamp (live stream rows)', () => {
+  it("formats today's timestamps as HH:mm:ss.SSS", () => {
+    const now = new Date();
+    const formatted = formatStreamTimestamp(now.toISOString());
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const millis = String(now.getMilliseconds()).padStart(3, '0');
+    expect(formatted).toBe(`${hours}:${minutes}:${seconds}.${millis}`);
+  });
+
+  it('formats timestamps from another day as DD MMM HH:mm:ss', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+    try {
+      const past = new Date(2026, 8, 3, 14, 22, 1, 0);
+      expect(formatStreamTimestamp(past.toISOString())).toBe('03 Sep 14:22:01');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('handles empty and invalid timestamp strings gracefully', () => {
+    expect(formatStreamTimestamp('')).toBe('');
+    expect(formatStreamTimestamp('invalid-date')).toBe('invalid-date');
+  });
+
+  it('falls back to received_at when timestamp is more than 60s ahead of received_at', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+    try {
+      const pastReceived = new Date(2026, 8, 3, 14, 22, 1, 0);
+      const pastFuture = new Date(2026, 8, 3, 15, 22, 1, 0);
+      expect(formatStreamTimestamp(pastFuture.toISOString(), pastReceived.toISOString())).toBe('03 Sep 14:22:01');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('formats in the given time zone and uses the supplied today key', () => {
+    const iso = '2026-10-06T14:38:53.421Z';
+    expect(formatStreamTimestamp(iso, undefined, 'Asia/Tokyo', '2026-10-01')).toBe('06 Oct 23:38:53');
+    expect(formatStreamTimestamp(iso, undefined, 'Asia/Tokyo', '2026-10-06')).toBe('23:38:53.421');
+    expect(formatStreamTimestamp(iso, undefined, 'UTC', '2026-10-06')).toBe('14:38:53.421');
+  });
+
+  it('computes the today key in the given time zone', () => {
+    const now = new Date('2026-10-06T20:00:00Z');
+    expect(getTodayKey('Asia/Tokyo', now)).toBe('2026-10-07');
+    expect(getTodayKey('UTC', now)).toBe('2026-10-06');
+  });
+
+  it('reuses one Intl.DateTimeFormat per time zone instead of building one per row', () => {
+    const spy = vi.spyOn(Intl, 'DateTimeFormat');
+    try {
+      for (let i = 0; i < 50; i++) {
+        formatStreamTimestamp(`2026-10-06T14:38:${String(i % 60).padStart(2, '0')}.000Z`, undefined, 'Pacific/Auckland');
+      }
+      expect(spy.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('falls back to browser time when the time zone is invalid', () => {
+    const d = new Date(2026, 8, 3, 14, 22, 1, 0);
+    expect(formatStreamTimestamp(d.toISOString(), undefined, 'Not/AZone', '1999-01-01')).toBe('03 Sep 14:22:01');
+  });
+});

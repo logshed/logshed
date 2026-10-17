@@ -140,12 +140,132 @@ export function fromLocalDatetimeInputString(localString?: string | null): strin
   return d.toISOString();
 }
 
-function cleanIsoString(ts: string): string {
+/**
+ * Prepares a backend timestamp for Date parsing: a value without a zone suffix is treated as UTC.
+ */
+export function cleanIsoString(ts: string): string {
   let parseable = ts.trim();
   if (!parseable.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(parseable)) {
     parseable = parseable.replace(' ', 'T') + 'Z';
   }
   return parseable;
+}
+
+const MONTH_NAMES = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+// One formatter per time zone. Building an Intl.DateTimeFormat is far more costly than using one,
+// and the live stream formats every incoming row. null marks a time zone the runtime rejected.
+const dateTimeFormatterCache = new Map<string, Intl.DateTimeFormat | null>();
+
+function getDateTimeFormatter(timeZone: string): Intl.DateTimeFormat | null {
+  const cached = dateTimeFormatterCache.get(timeZone);
+  if (cached !== undefined) return cached;
+  let formatter: Intl.DateTimeFormat | null = null;
+  try {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+  } catch {
+    formatter = null;
+  }
+  dateTimeFormatterCache.set(timeZone, formatter);
+  return formatter;
+}
+
+interface DateParts {
+  year: number;
+  /** 1-based month */
+  month: number;
+  day: number;
+  hours: string;
+  minutes: string;
+  seconds: string;
+}
+
+/** Calendar and clock fields of a date in the given time zone, or in browser time when none (or an invalid one) is given. */
+function getDateParts(date: Date, timeZone?: string): DateParts {
+  const formatter = timeZone ? getDateTimeFormatter(timeZone) : null;
+  if (formatter) {
+    const parts: DateParts = { year: 0, month: 0, day: 0, hours: '00', minutes: '00', seconds: '00' };
+    for (const p of formatter.formatToParts(date)) {
+      if (p.type === 'year') parts.year = parseInt(p.value, 10);
+      else if (p.type === 'month') parts.month = parseInt(p.value, 10);
+      else if (p.type === 'day') parts.day = parseInt(p.value, 10);
+      else if (p.type === 'hour') parts.hours = (p.value === '24' ? '00' : p.value).padStart(2, '0');
+      else if (p.type === 'minute') parts.minutes = p.value.padStart(2, '0');
+      else if (p.type === 'second') parts.seconds = p.value.padStart(2, '0');
+    }
+    return parts;
+  }
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    hours: String(date.getHours()).padStart(2, '0'),
+    minutes: String(date.getMinutes()).padStart(2, '0'),
+    seconds: String(date.getSeconds()).padStart(2, '0'),
+  };
+}
+
+function dayKey(parts: DateParts): string {
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+/**
+ * The current calendar day ('YYYY-MM-DD') in the given time zone (browser time when none is given).
+ * The live stream computes it once per batch and passes it to formatStreamTimestamp.
+ */
+export function getTodayKey(timeZone?: string, now: Date = new Date()): string {
+  return dayKey(getDateParts(now, timeZone));
+}
+
+/**
+ * Formats a log timestamp for a live stream row: 'HH:mm:ss.SSS' for today, 'DD MMM HH:mm:ss' otherwise.
+ * A timestamp more than 60s ahead of received_at (legacy RFC 3164 rows) falls back to received_at.
+ * Pass todayKey (from getTodayKey) when formatting many rows so "today" is computed once.
+ */
+export function formatStreamTimestamp(
+  ts: string,
+  fallbackTs?: string,
+  timeZone?: string,
+  todayKey?: string,
+): string {
+  if (!ts && !fallbackTs) return '';
+  try {
+    let target = ts || fallbackTs || '';
+    let d = new Date(cleanIsoString(target));
+    if (ts && fallbackTs) {
+      const dFb = new Date(cleanIsoString(fallbackTs));
+      if (!isNaN(d.getTime()) && !isNaN(dFb.getTime()) && d.getTime() - dFb.getTime() > 60000) {
+        target = fallbackTs;
+        d = dFb;
+      }
+    }
+    if (isNaN(d.getTime())) {
+      return target;
+    }
+
+    const parts = getDateParts(d, timeZone);
+    const today = todayKey ?? getTodayKey(timeZone);
+    if (dayKey(parts) === today) {
+      const millis = String(d.getMilliseconds()).padStart(3, '0');
+      return `${parts.hours}:${parts.minutes}:${parts.seconds}.${millis}`;
+    }
+    const day = String(parts.day).padStart(2, '0');
+    return `${day} ${MONTH_NAMES[parts.month - 1]} ${parts.hours}:${parts.minutes}:${parts.seconds}`;
+  } catch {
+    return ts || fallbackTs || '';
+  }
 }
 
 /**
@@ -161,45 +281,9 @@ export function formatLocalTimestamp(
   const date = new Date(clean);
   if (isNaN(date.getTime())) return isoString;
 
-  if (timeZone) {
-    try {
-      const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      });
-      const parts = formatter.formatToParts(date);
-      const getPart = (pType: string) => parts.find((p) => p.type === pType)?.value || '';
-      const year = getPart('year');
-      const month = getPart('month').padStart(2, '0');
-      const day = getPart('day').padStart(2, '0');
-      const hours = getPart('hour').padStart(2, '0');
-      const minutes = getPart('minute').padStart(2, '0');
-      const seconds = getPart('second').padStart(2, '0');
-      if (includeSeconds) {
-        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-      }
-      return `${year}-${month}-${day} ${hours}:${minutes}`;
-    } catch {
-      // Fall through to local browser time if invalid timeZone
-    }
-  }
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  if (includeSeconds) {
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  }
-  return `${year}-${month}-${day} ${hours}:${minutes}`;
+  const parts = getDateParts(date, timeZone);
+  const base = `${dayKey(parts)} ${parts.hours}:${parts.minutes}`;
+  return includeSeconds ? `${base}:${parts.seconds}` : base;
 }
 
 /**

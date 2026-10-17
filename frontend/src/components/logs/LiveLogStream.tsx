@@ -22,7 +22,7 @@ import { fetchAliases } from '../../api/aliases.ts';
 import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
-import { stripAnsi, cleanLogMessageForDisplay } from '../../utils/formatters.ts';
+import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { LogRow, ProcessedLogEntry, areLogRowPropsEqual } from './LogRow.tsx';
 import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
@@ -130,107 +130,12 @@ export function syncFiltersToUrl(filters: LogFilterParams) {
   }
 }
 
-function cleanIsoString(ts: string): string {
-  let parseable = ts.trim();
-  if (!parseable.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(parseable)) {
-    parseable = parseable.replace(' ', 'T') + 'Z';
-  }
-  return parseable;
-}
-
-const MONTH_NAMES = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-export function formatLocalTimestamp(ts: string, fallbackTs?: string, timeZone?: string): string {
-  if (!ts && !fallbackTs) return '';
-  try {
-    let target = ts || fallbackTs || '';
-    // If timestamp is clearly in the future compared to received_at (> 60s),
-    // clamp to fallbackTs (received_at) to avoid 1-hour future offsets on legacy RFC 3164 rows
-    if (ts && fallbackTs) {
-      const dTs = new Date(cleanIsoString(ts));
-      const dFb = new Date(cleanIsoString(fallbackTs));
-      if (!isNaN(dTs.getTime()) && !isNaN(dFb.getTime()) && dTs.getTime() - dFb.getTime() > 60000) {
-        target = fallbackTs;
-      }
-    }
-    const parseable = cleanIsoString(target);
-    const d = new Date(parseable);
-    if (isNaN(d.getTime())) {
-      return target;
-    }
-
-    const effectiveTz = timeZone || getCachedServerTimezone();
-    let year = d.getFullYear();
-    let month = d.getMonth();
-    let date = d.getDate();
-    let hours = String(d.getHours()).padStart(2, '0');
-    let minutes = String(d.getMinutes()).padStart(2, '0');
-    let seconds = String(d.getSeconds()).padStart(2, '0');
-
-    let isToday = false;
-    const now = new Date();
-
-    if (effectiveTz) {
-      try {
-        const formatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: effectiveTz,
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-        });
-        const parts = formatter.formatToParts(d);
-        const getPart = (pType: string) => parts.find((p) => p.type === pType)?.value || '';
-        year = parseInt(getPart('year'), 10);
-        month = parseInt(getPart('month'), 10) - 1;
-        date = parseInt(getPart('day'), 10);
-        hours = getPart('hour').padStart(2, '0');
-        minutes = getPart('minute').padStart(2, '0');
-        seconds = getPart('second').padStart(2, '0');
-
-        const nowParts = formatter.formatToParts(now);
-        const getNowPart = (pType: string) => nowParts.find((p) => p.type === pType)?.value || '';
-        const nowYear = parseInt(getNowPart('year'), 10);
-        const nowMonth = parseInt(getNowPart('month'), 10) - 1;
-        const nowDate = parseInt(getNowPart('day'), 10);
-        isToday = year === nowYear && month === nowMonth && date === nowDate;
-      } catch {
-        isToday =
-          d.getFullYear() === now.getFullYear() &&
-          d.getMonth() === now.getMonth() &&
-          d.getDate() === now.getDate();
-      }
-    } else {
-      isToday =
-        d.getFullYear() === now.getFullYear() &&
-        d.getMonth() === now.getMonth() &&
-        d.getDate() === now.getDate();
-    }
-
-    if (isToday) {
-      const millis = String(d.getMilliseconds()).padStart(3, '0');
-      return `${hours}:${minutes}:${seconds}.${millis}`;
-    }
-
-    const day = String(date).padStart(2, '0');
-    const monthName = MONTH_NAMES[month];
-    return `${day} ${monthName} ${hours}:${minutes}:${seconds}`;
-  } catch {
-    return ts || fallbackTs || '';
-  }
-}
-
 export function prepareLogEntry(
   entry: LogEntry | ProcessedLogEntry,
   aliases?: Record<string, string>,
   timeZone?: string,
   dockerAliases?: Set<string>,
+  todayKey?: string,
 ): ProcessedLogEntry {
   const existing = entry as ProcessedLogEntry;
   const isDocker =
@@ -250,10 +155,23 @@ export function prepareLogEntry(
     ...entry,
     source_alias,
     formattedTimestamp:
-      existing.formattedTimestamp ?? formatLocalTimestamp(entry.timestamp, entry.received_at, timeZone),
+      existing.formattedTimestamp ??
+      formatStreamTimestamp(entry.timestamp, entry.received_at, timeZone, todayKey),
     cleanedMessage: existing.cleanedMessage ?? cleanLogMessageForDisplay(entry.message),
     strippedMessage: existing.strippedMessage ?? stripAnsi(entry.message),
   };
+}
+
+/** Recomputes every row's display timestamp, for a new time zone or after midnight. */
+function reformatTimestamps(
+  logs: ProcessedLogEntry[],
+  timeZone: string | undefined,
+  todayKey: string,
+): ProcessedLogEntry[] {
+  return logs.map((l) => ({
+    ...l,
+    formattedTimestamp: formatStreamTimestamp(l.timestamp, l.received_at, timeZone, todayKey),
+  }));
 }
 
 export { LogRow, areLogRowPropsEqual };
@@ -407,6 +325,23 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       .catch(() => {});
   }, []);
 
+  // Time zone and calendar day the buffer's display timestamps were last formatted with
+  const formatTzRef = useRef<string>(serverTimezone);
+  const formatDayRef = useRef<string>(getTodayKey(serverTimezone || undefined));
+  const getFormatContext = useCallback(() => {
+    const timeZone = formatTzRef.current || undefined;
+    return { timeZone, todayKey: getTodayKey(timeZone) };
+  }, []);
+
+  // Rows loaded before the server time zone arrived were formatted in browser time: re-format them
+  useEffect(() => {
+    if (serverTimezone === formatTzRef.current) return;
+    formatTzRef.current = serverTimezone;
+    const fmt = getFormatContext();
+    formatDayRef.current = fmt.todayKey;
+    setLogs((prev) => reformatTimestamps(prev, fmt.timeZone, fmt.todayKey));
+  }, [serverTimezone, getFormatContext]);
+
   useEffect(() => {
     syncFiltersToUrl(filters);
   }, [filters]);
@@ -418,7 +353,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [appToHostsMap, setAppToHostsMap] = useState<Record<string, string[]>>({});
 
   // Incoming SSE batch buffer & flush timer
-  const incomingBufferRef = useRef<ProcessedLogEntry[]>([]);
+  const incomingBufferRef = useRef<LogEntry[]>([]);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filtersRef = useRef<LogFilterParams>(filters);
 
@@ -841,10 +776,20 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     // Incrementally update facets with new incoming logs
     updateFacetsWithNewLogs(toFlush);
 
+    // "Today" is computed once per batch; after midnight the rows already shown get their date back
+    const fmt = getFormatContext();
+    const dayChanged = fmt.todayKey !== formatDayRef.current;
+    formatDayRef.current = fmt.todayKey;
+    // toFlush is in arrival order (oldest first, newest last): reverse it so the newest log is at the top
+    const prepared = toFlush
+      .map((entry) =>
+        prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
+      )
+      .reverse();
+
     setLogs((prev) => {
-      // toFlush is in arrival order (oldest first, newest last)
-      // Reverse toFlush so newest log is at the top (index 0)
-      const next = [...toFlush.slice().reverse(), ...prev];
+      const base = dayChanged ? reformatTimestamps(prev, fmt.timeZone, fmt.todayKey) : prev;
+      const next = [...prepared, ...base];
       if (next.length > MAX_BUFFER_SIZE) {
         return next.slice(0, MAX_BUFFER_SIZE);
       }
@@ -864,7 +809,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }
       });
     }
-  }, [updateFacetsWithNewLogs]);
+  }, [updateFacetsWithNewLogs, getFormatContext]);
 
   // In-flight query cancellation / stale response guard
   const fetchRequestIdRef = useRef<number>(0);
@@ -903,8 +848,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
 
       // Keep newest logs at the top (res.logs is ordered DESC)
+      const fmt = getFormatContext();
       const preparedLogs = res.logs.map((entry) =>
-        prepareLogEntry(entry, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+        prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
       );
       setLogs(preparedLogs);
       updateFacetsWithNewLogs(res.logs);
@@ -962,8 +908,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       if (res.logs.length > 0) {
         updateFacetsWithNewLogs(res.logs);
+        const fmt = getFormatContext();
         const preparedLogs = res.logs.map((entry) =>
-          prepareLogEntry(entry, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+          prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
         );
         setLogs((prev) => {
           const existingIds = new Set(prev.map((l) => l.id));
@@ -1062,9 +1009,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }
 
         // Buffer incoming SSE logs (Issue #1)
-        incomingBufferRef.current.push(
-          prepareLogEntry(entry, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
-        );
+        incomingBufferRef.current.push(entry);
 
         if (incomingBufferRef.current.length >= 500) {
           if (flushTimerRef.current !== null) {
@@ -1863,10 +1808,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
           setLogs((prevLogs) => {
             const existingIds = new Set(prevLogs.map((l) => l.id));
+            const fmt = getFormatContext();
             const missingLogs = logsToInspect
               .filter((l) => !existingIds.has(l.id))
               .map((l) =>
-                prepareLogEntry(l, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+                prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
               );
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
@@ -1881,10 +1827,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           setActiveLogDetail(null);
           setLogs((prevLogs) => {
             const existingIds = new Set(prevLogs.map((l) => l.id));
+            const fmt = getFormatContext();
             const missingLogs = targetAndCtxLogs
               .filter((l) => !existingIds.has(l.id))
               .map((l) =>
-                prepareLogEntry(l, mergedAliasesRef.current, undefined, dockerAliasesRef.current)
+                prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
               );
             if (missingLogs.length === 0) return prevLogs;
             return [...missingLogs, ...prevLogs].sort((a, b) => {
