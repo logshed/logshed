@@ -253,7 +253,9 @@ interface LiveLogStreamProps {
   pullTouchHandlers?: PullTouchHandlers;
 }
 
-const MAX_BUFFER_SIZE = 3000;
+// Rows kept while auto-scroll is on, and while the user is scrolled back reading history
+const LIVE_BUFFER_SIZE = 3000;
+const SCROLLBACK_BUFFER_SIZE = 20000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -354,6 +356,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // Incoming SSE batch buffer & flush timer
   const incomingBufferRef = useRef<LogEntry[]>([]);
+  // Live rows held back while scrolled back with a full scrollback buffer (newest first)
+  const heldLiveRowsRef = useRef<ProcessedLogEntry[]>([]);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filtersRef = useRef<LogFilterParams>(filters);
 
@@ -667,6 +671,30 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     isAutoScrollRef.current = autoScroll;
   }, [autoScroll]);
 
+  // Buffer cap, one rule for live rows and history pages: keep the newest LIVE_BUFFER_SIZE rows
+  // while auto-scroll is on, and up to SCROLLBACK_BUFFER_SIZE while scrolled back. Trimming drops the
+  // oldest rows, so the next history page must start that many rows earlier.
+  useLayoutEffect(() => {
+    const cap = autoScroll ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE;
+    if (logs.length <= cap) return;
+    const removed = logs.length - cap;
+    historicalOffsetRef.current = Math.max(0, historicalOffsetRef.current - removed);
+    setHasMoreLogs(true);
+    setLogs(logs.slice(0, cap));
+  }, [logs, autoScroll]);
+
+  // Rows held back while the scrollback buffer was full join the top once auto-scroll resumes
+  useEffect(() => {
+    if (!autoScroll || heldLiveRowsRef.current.length === 0) return;
+    const held = heldLiveRowsRef.current;
+    heldLiveRowsRef.current = [];
+    setLogs((prev) => {
+      const existingIds = new Set(prev.map((l) => l.id));
+      return [...held.filter((l) => !existingIds.has(l.id)), ...prev];
+    });
+    setLastSelectedLogIndex(null);
+  }, [autoScroll]);
+
   // Maintain scroll anchoring when new logs arrive while auto-scroll is paused
   useLayoutEffect(() => {
     if (pendingScrollAdjustmentRef.current > 0) {
@@ -787,13 +815,21 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       )
       .reverse();
 
+    // Scrolled back with a full scrollback buffer: hold new rows (counted in the "N new" banner)
+    // until auto-scroll resumes, instead of trimming the history the user is reading.
+    if (
+      !isAutoScrollRef.current &&
+      (heldLiveRowsRef.current.length > 0 ||
+        logsRef.current.length + prepared.length > SCROLLBACK_BUFFER_SIZE)
+    ) {
+      heldLiveRowsRef.current = [...prepared, ...heldLiveRowsRef.current].slice(0, LIVE_BUFFER_SIZE);
+      setMissedLogsCount((prev) => prev + toFlush.length);
+      return;
+    }
+
     setLogs((prev) => {
       const base = dayChanged ? reformatTimestamps(prev, fmt.timeZone, fmt.todayKey) : prev;
-      const next = [...prepared, ...base];
-      if (next.length > MAX_BUFFER_SIZE) {
-        return next.slice(0, MAX_BUFFER_SIZE);
-      }
-      return next;
+      return [...prepared, ...base];
     });
 
     setLastSelectedLogIndex((prev) => (prev !== null ? prev + toFlush.length : null));
@@ -833,6 +869,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         flushTimerRef.current = null;
       }
       incomingBufferRef.current = [];
+      heldLiveRowsRef.current = [];
       pendingScrollAdjustmentRef.current = 0;
 
       const activeFilters = overrideFilters !== undefined ? overrideFilters : filters;
@@ -882,6 +919,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   const loadMoreLogs = useCallback(async () => {
     if (isLoadingMoreRef.current || !hasMoreLogs || isLoadingHistory) return;
+    if (logsRef.current.length >= (isAutoScrollRef.current ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE)) return;
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     const reqId = fetchRequestIdRef.current;
@@ -1068,6 +1106,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         flushTimerRef.current = null;
       }
       incomingBufferRef.current = [];
+      heldLiveRowsRef.current = [];
     };
   }, [filters.severity_max, filters.to, sourcesKey, appsKey, flushIncomingLogs, streamReconnectNonce]);
 
@@ -1084,6 +1123,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
     } else {
       if (autoScroll) {
+        isAutoScrollRef.current = false;
         setAutoScroll(false);
       }
     }
@@ -1416,6 +1456,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       flushTimerRef.current = null;
     }
     incomingBufferRef.current = [];
+    heldLiveRowsRef.current = [];
     pendingScrollAdjustmentRef.current = 0;
     setLogs([]);
     setSelectedLogIds(new Set());
@@ -1692,6 +1733,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
             <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
              - Reached the end of loaded history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
+            </div>
+          )}
+
+          {logs.length >= SCROLLBACK_BUFFER_SIZE && hasMoreLogs && !isLoadingMore && (
+            <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none text-center px-3">
+              Screen buffer limit reached ({SCROLLBACK_BUFFER_SIZE.toLocaleString()} lines). Narrow the filters or time range to see older logs.
             </div>
           )}
         </div>

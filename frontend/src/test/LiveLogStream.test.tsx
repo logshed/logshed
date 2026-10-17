@@ -13,7 +13,12 @@ import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 
 // Test control for the virtualizer mock: when edgeRows is set, only the first and last
 // edgeRows rows are "visible" (like a real viewport), so large buffers stay cheap to render.
-const virtualizerControl: { edgeRows: number | null; lastOptions: any } = { edgeRows: null, lastOptions: null };
+// headOnly hides the tail too, so older pages load only through scroll events.
+const virtualizerControl: { edgeRows: number | null; headOnly: boolean; lastOptions: any } = {
+  edgeRows: null,
+  headOnly: false,
+  lastOptions: null,
+};
 
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: (options: { count: number; estimateSize?: () => number; getItemKey?: (i: number) => unknown }) => {
@@ -26,7 +31,7 @@ vi.mock('@tanstack/react-virtual', () => ({
         ? Array.from({ length: count }, (_, i) => i)
         : [
             ...Array.from({ length: edge }, (_, i) => i),
-            ...Array.from({ length: edge }, (_, i) => count - edge + i),
+            ...(virtualizerControl.headOnly ? [] : Array.from({ length: edge }, (_, i) => count - edge + i)),
           ];
     return {
       measure: () => {},
@@ -161,6 +166,7 @@ describe('LiveLogStream Component', () => {
     vi.restoreAllMocks();
     MockEventSource.instances = [];
     virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
     window.matchMedia = ((query: string) => ({
       matches: false,
       media: query,
@@ -1734,6 +1740,7 @@ describe('LiveLogStream B11 fixes', () => {
     vi.restoreAllMocks();
     MockEventSource.instances = [];
     virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
     window.matchMedia = ((query: string) => ({
       matches: false,
       media: query,
@@ -1860,6 +1867,7 @@ describe('LiveLogStream B12 fixes', () => {
     vi.restoreAllMocks();
     MockEventSource.instances = [];
     virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
     window.matchMedia = ((query: string) => ({
       matches: false,
       media: query,
@@ -1921,5 +1929,137 @@ describe('LiveLogStream B12 fixes', () => {
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
     expect(desktopTimeSelect().value).toBe('custom');
+  });
+
+  describe('buffer cap (B-34)', () => {
+    const makeLog = (id: number, label: string): LogEntry => ({
+      id,
+      timestamp: new Date(Date.UTC(2026, 8, 3, 12, 0, 0) + id).toISOString(),
+      received_at: new Date(Date.UTC(2026, 8, 3, 12, 0, 0) + id).toISOString(),
+      source_ip: '192.168.1.50',
+      source_alias: 'homelab-host',
+      app_name: 'nginx',
+      facility: 1,
+      severity: 6,
+      message: `${label} ${id}`,
+      raw: 'raw',
+    });
+
+    // History pages: offset N returns the rows ranked N..N+499 in a 100,000-row result set (newest first)
+    const mockHistory = () =>
+      vi.spyOn(logsApi, 'fetchLogs').mockImplementation(async (params: any) => {
+        const offset = params.offset ?? 0;
+        return {
+          logs: Array.from({ length: 500 }, (_, i) => makeLog(100000 - offset - i, 'History')),
+          total: 100000,
+          limit: 500,
+          offset,
+        };
+      });
+
+    const setupScroller = () => {
+      const scroller = document.querySelector('.overflow-y-auto') as HTMLElement;
+      let top = 0;
+      Object.defineProperty(scroller, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+      Object.defineProperty(scroller, 'scrollHeight', { get: () => 10000, configurable: true });
+      Object.defineProperty(scroller, 'clientHeight', { get: () => 500, configurable: true });
+      return {
+        // Near the bottom: pauses auto-scroll and loads the next page
+        toBottom: () => { top = 9400; fireEvent.scroll(scroller); },
+        toTop: () => { top = 0; fireEvent.scroll(scroller); },
+      };
+    };
+
+    const bufferCount = () =>
+      Number(screen.getByText(/Screen Buffer:/).textContent!.replace(/[^0-9]/g, ''));
+
+    const loadPages = async (fetchSpy: ReturnType<typeof mockHistory>, scroller: ReturnType<typeof setupScroller>, pages: number) => {
+      for (let p = 1; p < pages; p++) {
+        scroller.toBottom();
+        await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: p * 500 })));
+        await waitFor(() => expect(bufferCount()).toBe((p + 1) * 500));
+      }
+    };
+
+    const emitLive = (count: number) => {
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+      act(() => {
+        for (let i = 0; i < count; i++) es.emit('log', makeLog(200000 + i, 'Live'));
+      });
+    };
+
+    it('keeps the newest 3,000 rows while auto-scroll is on and pages on without a gap', async () => {
+      virtualizerControl.edgeRows = 20;
+      virtualizerControl.headOnly = true;
+      const fetchSpy = mockHistory();
+      renderStream();
+      await waitFor(() => expect(bufferCount()).toBe(500));
+      const scroller = setupScroller();
+      await loadPages(fetchSpy, scroller, 5);
+
+      scroller.toTop();
+      expect(screen.getByText('Auto-Scroll ON')).toBeInTheDocument();
+      emitLive(600);
+      // The last 100 rows flush on the 100 ms batch timer; the newest row shows at the top
+      await waitFor(() => expect(screen.getByText('Live 200599')).toBeInTheDocument());
+      await waitFor(() => expect(bufferCount()).toBe(3000));
+
+      // 100 of the 2,500 history rows were trimmed, so the next page starts at offset 2,400
+      fetchSpy.mockClear();
+      scroller.toBottom();
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 2400 }));
+    });
+
+    it('does not trim scrolled-back history when live rows arrive while paused', async () => {
+      virtualizerControl.edgeRows = 20;
+      virtualizerControl.headOnly = true;
+      const fetchSpy = mockHistory();
+      renderStream();
+      await waitFor(() => expect(bufferCount()).toBe(500));
+      const scroller = setupScroller();
+      await loadPages(fetchSpy, scroller, 5);
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+
+      emitLive(600);
+      await waitFor(() => expect(bufferCount()).toBe(3100));
+      await waitFor(() => expect(screen.getByText(/600 new logs at top/)).toBeInTheDocument());
+    });
+
+    it('holds live rows back while scrolled back with a full buffer and adds them on resume', async () => {
+      virtualizerControl.edgeRows = 20;
+      virtualizerControl.headOnly = true;
+      // Large pages so the 20,000-row scrollback buffer fills in a few loads
+      const fetchSpy = vi.spyOn(logsApi, 'fetchLogs').mockImplementation(async (params: any) => {
+        const offset = params.offset ?? 0;
+        return {
+          logs: Array.from({ length: 5000 }, (_, i) => makeLog(100000 - offset - i, 'History')),
+          total: 100000,
+          limit: 500,
+          offset,
+        };
+      });
+      renderStream();
+      // Auto-scroll is on at first, so the first page is cut to the newest 3,000 rows
+      await waitFor(() => expect(bufferCount()).toBe(3000));
+      const scroller = setupScroller();
+      for (const expected of [8000, 13000, 18000, 20000]) {
+        scroller.toBottom();
+        await waitFor(() => expect(bufferCount()).toBe(expected));
+      }
+      expect(screen.getByText(/Screen buffer limit reached/)).toBeInTheDocument();
+      fetchSpy.mockClear();
+      scroller.toBottom();
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      emitLive(10);
+      await waitFor(() => expect(screen.getByText(/10 new logs at top/)).toBeInTheDocument());
+      expect(bufferCount()).toBe(20000);
+      expect(screen.queryByText('Live 200009')).toBeNull();
+
+      scroller.toTop();
+      await waitFor(() => expect(screen.getByText('Live 200009')).toBeInTheDocument());
+      expect(bufferCount()).toBe(3000);
+    });
   });
 });
