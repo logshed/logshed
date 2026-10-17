@@ -1484,3 +1484,122 @@ class TestSyslogTCPConnectionLimitsAndTimeout:
 
 
 
+# ===================================================================
+# 7. Listener robustness: supervision, per-IP cap, truncation, drain
+# ===================================================================
+
+async def _wait_until(predicate, timeout: float = 2.0) -> None:
+    """Poll predicate() until it is true, failing the test after timeout seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            raise AssertionError("condition not met in time")
+        await asyncio.sleep(0.01)
+
+
+def _listening(server: SyslogServer) -> bool:
+    return server.udp_transport is not None and server.tcp_server is not None
+
+
+class TestSyslogMessageCaps:
+    """S-12: oversize messages are truncated, and one IP cannot hold every TCP slot."""
+
+    def test_oversize_message_is_truncated(self):
+        from app.core.pipeline import MAX_MESSAGE_BYTES
+
+        data = b"<13>Oct 11 22:14:15 myhost myapp: " + b"A" * (MAX_MESSAGE_BYTES * 3)
+        result = parse_syslog_message(data, "10.0.0.1")
+        assert len(result["raw"]) <= MAX_MESSAGE_BYTES
+        assert len(result["message"]) <= MAX_MESSAGE_BYTES
+        assert result["raw"].endswith("[truncated]")
+        assert result["message"].endswith("[truncated]")
+        assert result["app_name"] == "myapp"
+        assert result["message"].startswith("AAAA")
+
+    def test_message_at_limit_is_not_truncated(self):
+        from app.core.pipeline import MAX_MESSAGE_BYTES
+
+        data = b"A" * MAX_MESSAGE_BYTES
+        result = parse_syslog_message(data, "10.0.0.1")
+        assert result["raw"] == "A" * MAX_MESSAGE_BYTES
+        assert "[truncated]" not in result["message"]
+
+    def test_config_per_ip_limit(self, monkeypatch):
+        from app.core.config import get_syslog_max_tcp_connections_per_ip
+
+        monkeypatch.delenv("SYSLOG_MAX_TCP_CONNECTIONS_PER_IP", raising=False)
+        assert get_syslog_max_tcp_connections_per_ip() == 20
+        monkeypatch.setenv("SYSLOG_MAX_TCP_CONNECTIONS_PER_IP", "5")
+        assert get_syslog_max_tcp_connections_per_ip() == 5
+        for bad in ("0", "-3", "abc", ""):
+            monkeypatch.setenv("SYSLOG_MAX_TCP_CONNECTIONS_PER_IP", bad)
+            assert get_syslog_max_tcp_connections_per_ip() == 20
+
+    @pytest.mark.asyncio
+    async def test_per_ip_tcp_connection_cap(self, db_path: Path):
+        """The 21st connection from one IP is refused while another IP still connects."""
+        import socket as socket_mod
+
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        writers = []
+        try:
+            await _wait_until(lambda: _listening(server))
+            tcp_port = server.tcp_server.sockets[0].getsockname()[1]
+
+            for _ in range(20):
+                _, w = await asyncio.open_connection("127.0.0.1", tcp_port)
+                writers.append(w)
+            await _wait_until(lambda: server.active_tcp_connections == 20)
+
+            reader21, w21 = await asyncio.open_connection("127.0.0.1", tcp_port)
+            writers.append(w21)
+            # Refused at accept time: the server closes it straight away
+            assert await asyncio.wait_for(reader21.read(), timeout=2.0) == b""
+            assert server.active_tcp_connections == 20
+
+            # A different source IP (127.0.0.2 is loopback on Linux) is still accepted
+            other = socket_mod.socket(socket_mod.AF_INET, socket_mod.SOCK_STREAM)
+            other.bind(("127.0.0.2", 0))
+            other.setblocking(False)
+            await asyncio.get_running_loop().sock_connect(other, ("127.0.0.1", tcp_port))
+            reader_o, w_o = await asyncio.open_connection(sock=other)
+            writers.append(w_o)
+            await _wait_until(lambda: server.active_tcp_connections == 21)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(reader_o.read(), timeout=0.1)
+        finally:
+            for w in writers:
+                w.close()
+            await server.stop()
+            await asyncio.wait_for(task, timeout=2.0)
+
+    @pytest.mark.asyncio
+    async def test_per_ip_cap_slot_frees_on_disconnect(self, db_path: Path):
+        server = SyslogServer(
+            KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0,
+            max_tcp_connections_per_ip=1,
+        )
+        task = asyncio.create_task(server.start())
+        writers = []
+        try:
+            await _wait_until(lambda: _listening(server))
+            tcp_port = server.tcp_server.sockets[0].getsockname()[1]
+            _, w1 = await asyncio.open_connection("127.0.0.1", tcp_port)
+            writers.append(w1)
+            await _wait_until(lambda: server.active_tcp_connections == 1)
+
+            w1.close()
+            await _wait_until(lambda: server.active_tcp_connections == 0)
+
+            reader2, w2 = await asyncio.open_connection("127.0.0.1", tcp_port)
+            writers.append(w2)
+            await _wait_until(lambda: server.active_tcp_connections == 1)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(reader2.read(), timeout=0.1)
+        finally:
+            for w in writers:
+                w.close()
+            await server.stop()
+            await asyncio.wait_for(task, timeout=2.0)

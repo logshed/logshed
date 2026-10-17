@@ -64,6 +64,21 @@ def get_syslog_max_tcp_connections() -> int:
     """
     return int(get_cached_setting("syslog_max_tcp_connections", 250))
 
+def get_syslog_max_tcp_connections_per_ip() -> int:
+    """
+    Returns the maximum concurrent Syslog TCP connections allowed from one source IP.
+    Reads SYSLOG_MAX_TCP_CONNECTIONS_PER_IP (default: 20); values that are not
+    integers >= 1 fall back to 20.
+    """
+    raw = os.environ.get("SYSLOG_MAX_TCP_CONNECTIONS_PER_IP", "20")
+    try:
+        val = int(raw.strip())
+        if val >= 1:
+            return val
+    except (ValueError, TypeError):
+        pass
+    return 20
+
 def get_syslog_tcp_inactivity_timeout() -> float:
     """
     Returns the Syslog TCP inactivity timeout in seconds.

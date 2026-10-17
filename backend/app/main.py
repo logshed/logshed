@@ -30,6 +30,7 @@ from app.core.config import (
     get_db_path,
     get_syslog_port,
     get_syslog_max_tcp_connections,
+    get_syslog_max_tcp_connections_per_ip,
     get_syslog_tcp_inactivity_timeout,
     get_internal_log_level,
 )
@@ -364,6 +365,7 @@ async def lifespan(app: FastAPI):
             port=syslog_port,
             max_tcp_connections=get_syslog_max_tcp_connections(),
             tcp_inactivity_timeout=get_syslog_tcp_inactivity_timeout(),
+            max_tcp_connections_per_ip=get_syslog_max_tcp_connections_per_ip(),
         )
         _background_tasks.append(asyncio.create_task(_supervise_worker(_syslog_server.start, "SyslogServer")))
         logger.info(f"SyslogServer listener started on port {syslog_port}.")

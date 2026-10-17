@@ -12,10 +12,11 @@ import sqlite3
 import threading
 import weakref
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from app.core.migrations import get_connection
 from app.core.pipeline import (
+    MAX_MESSAGE_BYTES,
     KeyedMultilineAssembler,
     detect_severity,
     SEVERITY_LEVEL_MAP,
@@ -24,6 +25,9 @@ from app.core.pipeline import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Appended to a syslog message cut down to MAX_MESSAGE_BYTES characters.
+TRUNCATION_MARKER = " [truncated]"
 
 _MONTH_MAP = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -138,6 +142,10 @@ def parse_syslog_message(
     Parse a raw syslog message (bytes) into a structured dict.
     """
     raw_str = data.decode("utf-8", errors="replace").strip("\r\n")
+    # Cap the stored text before parsing. The parsed message is always a slice of
+    # raw_str, so it inherits the cap (and the marker when the tail was cut off).
+    if len(raw_str) > MAX_MESSAGE_BYTES:
+        raw_str = raw_str[: MAX_MESSAGE_BYTES - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
     if now is None:
         now = datetime.datetime.now(datetime.timezone.utc)
     elif now.tzinfo is None:
@@ -655,6 +663,7 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
 
 MAX_TCP_BUFFER = 65536  # 64 KB limit to prevent unbounded memory growth / OOM DoS
 MAX_TCP_CONNECTIONS = 250
+MAX_TCP_CONNECTIONS_PER_IP = 20
 TCP_INACTIVITY_TIMEOUT = 0.0
 
 
@@ -668,6 +677,7 @@ class SyslogTCPProtocol(asyncio.Protocol):
         on_close=None,
         inactivity_timeout: float = TCP_INACTIVITY_TIMEOUT,
         reject_on_connect: bool = False,
+        admit: Optional[Callable[["SyslogTCPProtocol"], bool]] = None,
     ):
         self.assembler = assembler
         self.alias_cache = alias_cache
@@ -680,7 +690,13 @@ class SyslogTCPProtocol(asyncio.Protocol):
         self.on_close = on_close
         self.inactivity_timeout = inactivity_timeout
         self.reject_on_connect = reject_on_connect
+        # Called once the peer address is known; returning False refuses the connection.
+        self.admit = admit
         self._inactivity_handle: Optional[asyncio.TimerHandle] = None
+
+    @property
+    def peer_ip(self) -> Optional[str]:
+        return self.peername[0] if self.peername else None
 
     def _ensure_workers(self) -> None:
         if not self._workers:
@@ -744,6 +760,9 @@ class SyslogTCPProtocol(asyncio.Protocol):
             logger.warning(
                 f"Syslog TCP connection limit reached. Rejecting connection from {self.peername}."
             )
+            transport.close()
+            return
+        if self.admit is not None and not self.admit(self):
             transport.close()
             return
         self._ensure_workers()
@@ -857,6 +876,7 @@ class SyslogServer:
         port: int = 1514,
         max_tcp_connections: int = MAX_TCP_CONNECTIONS,
         tcp_inactivity_timeout: float = TCP_INACTIVITY_TIMEOUT,
+        max_tcp_connections_per_ip: int = MAX_TCP_CONNECTIONS_PER_IP,
     ):
         self.assembler = assembler
         self.db_path = db_path
@@ -864,6 +884,7 @@ class SyslogServer:
         self.port = port
         self.max_tcp_connections = max_tcp_connections
         self.tcp_inactivity_timeout = tcp_inactivity_timeout
+        self.max_tcp_connections_per_ip = max(1, max_tcp_connections_per_ip)
         self.udp_transport = None
         self.udp_protocol: SyslogUDPProtocol | None = None
         self.tcp_server = None
@@ -906,6 +927,21 @@ class SyslogServer:
                 f"tcp_inactivity_timeout={self.tcp_inactivity_timeout}s"
             )
 
+    def _admit_tcp_connection(self, proto: SyslogTCPProtocol) -> bool:
+        """Accept-time check once the peer address is known: refuse a connection over the per-IP cap."""
+        ip = proto.peer_ip
+        if ip is None:
+            return True
+        same_ip = sum(1 for p in self.tcp_protocols if p is not proto and p.peer_ip == ip)
+        if same_ip >= self.max_tcp_connections_per_ip:
+            self.tcp_protocols.discard(proto)
+            logger.warning(
+                f"Syslog TCP per-IP connection limit reached ({self.max_tcp_connections_per_ip}) "
+                f"for {ip}. Rejecting new connection."
+            )
+            return False
+        return True
+
     async def start(self) -> None:
         """Create and start alias cache refresh, then both UDP and TCP transports."""
         loop = asyncio.get_running_loop()
@@ -945,6 +981,7 @@ class SyslogServer:
                 self.alias_cache,
                 on_close=_remove_tcp_protocol,
                 inactivity_timeout=self.tcp_inactivity_timeout,
+                admit=self._admit_tcp_connection,
             )
             self.tcp_protocols.add(proto)
             return proto
