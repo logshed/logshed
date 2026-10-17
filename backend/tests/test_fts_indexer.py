@@ -7,6 +7,7 @@ import asyncio
 import datetime
 from pathlib import Path
 import sqlite3
+import threading
 import time
 import pytest
 import pytest_asyncio
@@ -358,6 +359,152 @@ class TestRetentionPruningCoordination:
 
         assert count_after == 0
         assert fts_after == 0
+
+
+class _CursorProxy:
+    """Cursor wrapper that passes each executed statement through a hook."""
+
+    def __init__(self, cursor: sqlite3.Cursor, on_execute):
+        self._cursor = cursor
+        self._on_execute = on_execute
+        self._current = cursor
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def execute(self, sql, params=()):
+        self._current = self._on_execute(sql, self._cursor.execute(sql, params))
+        return self
+
+    def fetchone(self):
+        return self._current.fetchone()
+
+    def fetchall(self):
+        return self._current.fetchall()
+
+
+class _ConnectionProxy:
+    """
+    sqlite3 connection wrapper for index_pending_batch: on_execute(sql, cursor) sees every
+    statement right after it runs and returns the cursor the caller gets back.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, on_execute):
+        self._conn = conn
+        self._on_execute = on_execute
+
+    def __enter__(self):
+        self._conn.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._conn.__exit__(*exc)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, params=()):
+        return self._on_execute(sql, self._conn.execute(sql, params))
+
+    def cursor(self):
+        return _CursorProxy(self._conn.cursor(), self._on_execute)
+
+
+class _ReversedRows:
+    def __init__(self, cursor: sqlite3.Cursor):
+        self._cursor = cursor
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return list(reversed(self._cursor.fetchall()))
+
+
+def _insert_plain_logs(db_path: Path, count: int, word: str) -> None:
+    conn = get_connection(db_path)
+    with conn:
+        conn.executemany(
+            """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, message, raw)
+               VALUES ('2026-09-01T12:00:00+00:00', '2026-09-01T12:00:00+00:00', '10.0.0.1', 'h1', 'app', ?, 'raw')""",
+            [(f"{word} line {i}",) for i in range(count)],
+        )
+    conn.close()
+
+
+def _assert_fts_consistent(db_path: Path, word: str, expected: int) -> None:
+    conn = get_connection(db_path)
+    try:
+        # Raises "database disk image is malformed" when the index holds rows twice
+        conn.execute("INSERT INTO logs_fts(logs_fts) VALUES('integrity-check')")
+        assert conn.execute("SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?", (word,)).fetchone()[0] == expected
+        assert conn.execute("SELECT COUNT(*) FROM logs_fts_docsize").fetchone()[0] == expected
+        assert conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0] == expected
+    finally:
+        conn.close()
+
+
+class TestConcurrentIndexers:
+
+    def test_concurrent_indexers_do_not_index_rows_twice(self, db_path: Path):
+        """B-14: a second indexer that runs while the first is between its read and its insert adds nothing."""
+        _insert_plain_logs(db_path, 30, "racing")
+        first_read = threading.Event()
+        second_done = threading.Event()
+        results: dict[str, int] = {}
+        errors: list[BaseException] = []
+
+        def _pause_after_state_read(sql, cursor):
+            if "FROM fts_index_state" in sql and sql.lstrip().upper().startswith("SELECT") and not first_read.is_set():
+                first_read.set()
+                # Give the second indexer its chance to run; it either finishes or waits for our write lock
+                second_done.wait(timeout=0.3)
+            return cursor
+
+        def _first():
+            conn = get_connection(db_path)
+            try:
+                results["first"] = index_pending_batch(_ConnectionProxy(conn, _pause_after_state_read))
+            except BaseException as e:
+                errors.append(e)
+            finally:
+                conn.close()
+
+        def _second():
+            first_read.wait(timeout=2)
+            conn = get_connection(db_path)
+            try:
+                results["second"] = index_pending_batch(conn)
+            except BaseException as e:
+                errors.append(e)
+            finally:
+                second_done.set()
+                conn.close()
+
+        threads = [threading.Thread(target=_first), threading.Thread(target=_second)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert errors == []
+        assert results["first"] + results["second"] == 30
+        _assert_fts_consistent(db_path, "racing", 30)
+
+    def test_last_indexed_id_uses_highest_returned_rowid(self, db_path: Path):
+        """RETURNING order is not guaranteed, so the indexer records the highest rowid it indexed."""
+        _insert_plain_logs(db_path, 10, "unordered")
+
+        def _reverse_returning(sql, cursor):
+            return _ReversedRows(cursor) if "RETURNING" in sql else cursor
+
+        conn = get_connection(db_path)
+        try:
+            assert index_pending_batch(_ConnectionProxy(conn, _reverse_returning)) == 10
+        finally:
+            conn.close()
+        assert index_pending_logs(db_path) == 0
+        _assert_fts_consistent(db_path, "unordered", 10)
 
 
 class TestFTSIndexWorkerPersistentConnection:

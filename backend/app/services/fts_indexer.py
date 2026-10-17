@@ -23,9 +23,16 @@ def index_pending_batch(conn: sqlite3.Connection, batch_size: int = 1000) -> int
     Reads last_indexed_id from fts_index_state, inserts up to batch_size rows,
     and updates fts_index_state.last_indexed_id in the same transaction.
 
+    The transaction starts with BEGIN IMMEDIATE, so the write lock is held before
+    last_indexed_id is read. Indexers on other connections (the worker, the drain
+    before a prune or delete, the drain on shutdown) then wait instead of reading
+    the same value and indexing the same rows twice. The caller's connection must
+    not have a transaction open.
+
     Returns:
         Number of newly indexed rows.
     """
+    conn.execute("BEGIN IMMEDIATE")
     with conn:
         cursor = conn.cursor()
         cursor.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1")
@@ -48,7 +55,8 @@ def index_pending_batch(conn: sqlite3.Connection, batch_size: int = 1000) -> int
         )
         returned_rows = cursor.fetchall()
         if returned_rows:
-            new_last_id = returned_rows[-1][0]
+            # SQLite does not guarantee the order of RETURNING rows
+            new_last_id = max(r[0] for r in returned_rows)
             cursor.execute(
                 "UPDATE fts_index_state SET last_indexed_id = ?, updated_at = datetime('now') WHERE id = 1",
                 (new_last_id,),
