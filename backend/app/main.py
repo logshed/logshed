@@ -367,8 +367,9 @@ async def lifespan(app: FastAPI):
             tcp_inactivity_timeout=get_syslog_tcp_inactivity_timeout(),
             max_tcp_connections_per_ip=get_syslog_max_tcp_connections_per_ip(),
         )
+        # start() runs until stop() and raises on a bind failure, so the supervisor retries it.
         _background_tasks.append(asyncio.create_task(_supervise_worker(_syslog_server.start, "SyslogServer")))
-        logger.info(f"SyslogServer listener started on port {syslog_port}.")
+        logger.info(f"SyslogServer listener starting on port {syslog_port}.")
     except Exception as e:
         logger.warning(f"SyslogServer could not be started: {e}")
 

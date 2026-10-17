@@ -511,10 +511,12 @@ class AliasCache:
             self._aliases = new_aliases
 
     async def start(self) -> None:
-        """Start the periodic refresh background task."""
+        """Start the periodic refresh background task. Safe to call again while running."""
+        _active_caches.add(self)
         # Initial synchronous load
         await asyncio.to_thread(self.load_aliases)
-        self._refresh_task = asyncio.create_task(self._refresh_loop())
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = asyncio.create_task(self._refresh_loop())
 
     async def stop(self) -> None:
         """Stop the periodic refresh task."""
@@ -541,6 +543,37 @@ class AliasCache:
 
 
 NUM_PARSER_WORKERS = 4
+# How long stop() waits for parser workers to finish the queued messages before cancelling them.
+WORKER_DRAIN_TIMEOUT = 2.0
+
+
+async def _drain_workers(queue: asyncio.Queue, workers: list[asyncio.Task], label: str) -> None:
+    """
+    Let parser workers finish every message already queued, then end them: one None
+    sentinel per worker goes in behind the queued messages. Workers still running after
+    WORKER_DRAIN_TIMEOUT seconds are cancelled. Clears `workers`.
+    """
+    tasks = list(workers)
+    if not tasks:
+        return
+
+    async def _finish() -> None:
+        for _ in tasks:
+            await queue.put(None)
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        await asyncio.wait_for(_finish(), timeout=WORKER_DRAIN_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"Syslog {label} parser workers did not finish within {WORKER_DRAIN_TIMEOUT}s; "
+            f"discarding {queue.qsize()} queued items."
+        )
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        workers.clear()
 
 
 async def dispatch_syslog_message(
@@ -599,6 +632,7 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         alias_cache: AliasCache,
         max_queue_size: int = 5000,
         num_workers: int = NUM_PARSER_WORKERS,
+        on_lost: Optional[Callable[["SyslogUDPProtocol", Optional[Exception]], None]] = None,
     ):
         self.assembler = assembler
         self.alias_cache = alias_cache
@@ -606,9 +640,11 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
         self.num_workers = num_workers
         self._workers: list[asyncio.Task] = []
+        self.on_lost = on_lost
+        self._stopping = False
 
     def _ensure_workers(self) -> None:
-        if not self._workers:
+        if not self._workers and not self._stopping:
             for _ in range(self.num_workers):
                 self._workers.append(asyncio.create_task(self._worker_loop()))
 
@@ -640,7 +676,13 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         self._ensure_workers()
         logger.info("Syslog UDP Server started")
 
+    def connection_lost(self, exc):
+        if self.on_lost:
+            self.on_lost(self, exc)
+
     def datagram_received(self, data: bytes, addr: tuple[str, int]):
+        if self._stopping:
+            return
         source_ip = addr[0]
         self._ensure_workers()
         try:
@@ -654,11 +696,11 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         await dispatch_syslog_message(data, source_ip, self.alias_cache, self.assembler)
 
     async def stop(self) -> None:
-        for task in self._workers:
-            task.cancel()
-        if self._workers:
-            await asyncio.gather(*self._workers, return_exceptions=True)
-            self._workers.clear()
+        """Stop receiving, then let the workers finish the datagrams already queued."""
+        self._stopping = True
+        if self.transport is not None:
+            self.transport.close()
+        await _drain_workers(self.queue, self._workers, "UDP")
 
 
 MAX_TCP_BUFFER = 65536  # 64 KB limit to prevent unbounded memory growth / OOM DoS
@@ -693,13 +735,14 @@ class SyslogTCPProtocol(asyncio.Protocol):
         # Called once the peer address is known; returning False refuses the connection.
         self.admit = admit
         self._inactivity_handle: Optional[asyncio.TimerHandle] = None
+        self._stopping = False
 
     @property
     def peer_ip(self) -> Optional[str]:
         return self.peername[0] if self.peername else None
 
     def _ensure_workers(self) -> None:
-        if not self._workers:
+        if not self._workers and not self._stopping:
             for _ in range(self.num_workers):
                 self._workers.append(asyncio.create_task(self._worker_loop()))
 
@@ -770,6 +813,8 @@ class SyslogTCPProtocol(asyncio.Protocol):
         logger.debug(f"Syslog TCP connection from {self.peername}")
 
     def data_received(self, data: bytes):
+        if self._stopping:
+            return
         self._reset_inactivity_timer()
         self.buffer += data
         while self.buffer:
@@ -844,21 +889,23 @@ class SyslogTCPProtocol(asyncio.Protocol):
             self._inactivity_handle.cancel()
             self._inactivity_handle = None
         logger.debug(f"Syslog TCP connection lost from {self.peername}")
-        for task in self._workers:
-            task.cancel()
-        self._workers.clear()
+        if not self._stopping:
+            # During stop() the workers are drained there instead of cancelled here.
+            for task in self._workers:
+                task.cancel()
+            self._workers.clear()
         if self.on_close:
             self.on_close(self)
 
     async def stop(self) -> None:
+        """Close the connection, then let the workers finish the frames already queued."""
+        self._stopping = True
         if self._inactivity_handle:
             self._inactivity_handle.cancel()
             self._inactivity_handle = None
-        for task in self._workers:
-            task.cancel()
-        if self._workers:
-            await asyncio.gather(*self._workers, return_exceptions=True)
-            self._workers.clear()
+        if self.transport is not None:
+            self.transport.close()
+        await _drain_workers(self.queue, self._workers, "TCP")
 
 
 # Alias for backward compatibility / explicit naming
@@ -890,6 +937,10 @@ class SyslogServer:
         self.tcp_server = None
         self.tcp_protocols: set[SyslogTCPProtocol] = set()
         self.alias_cache = AliasCache(db_path, preload=False)
+        # Set once by stop(); a stopped server never binds again.
+        self._stopped = False
+        # Resolved by stop() (normal end) or failed by an unexpected listener loss.
+        self._run_future: Optional[asyncio.Future] = None
 
     @property
     def active_tcp_connections(self) -> int:
@@ -927,8 +978,36 @@ class SyslogServer:
                 f"tcp_inactivity_timeout={self.tcp_inactivity_timeout}s"
             )
 
+    def _remove_tcp_protocol(self, proto: SyslogTCPProtocol) -> None:
+        self.tcp_protocols.discard(proto)
+
+    def _create_tcp_protocol(self) -> SyslogTCPProtocol:
+        if len(self.tcp_protocols) >= self.max_tcp_connections:
+            logger.warning(
+                f"Syslog TCP connection limit reached ({self.max_tcp_connections}). Rejecting new connection."
+            )
+            return SyslogTCPProtocol(
+                self.assembler,
+                self.alias_cache,
+                on_close=self._remove_tcp_protocol,
+                reject_on_connect=True,
+            )
+
+        proto = SyslogTCPProtocol(
+            self.assembler,
+            self.alias_cache,
+            on_close=self._remove_tcp_protocol,
+            inactivity_timeout=self.tcp_inactivity_timeout,
+            admit=self._admit_tcp_connection,
+        )
+        self.tcp_protocols.add(proto)
+        return proto
+
     def _admit_tcp_connection(self, proto: SyslogTCPProtocol) -> bool:
-        """Accept-time check once the peer address is known: refuse a connection over the per-IP cap."""
+        """Accept-time check once the peer address is known: refuse while stopping or over the per-IP cap."""
+        if self._stopped:
+            self.tcp_protocols.discard(proto)
+            return False
         ip = proto.peer_ip
         if ip is None:
             return True
@@ -942,76 +1021,99 @@ class SyslogServer:
             return False
         return True
 
-    async def start(self) -> None:
-        """Create and start alias cache refresh, then both UDP and TCP transports."""
-        loop = asyncio.get_running_loop()
+    def _on_udp_lost(self, proto: SyslogUDPProtocol, exc: Optional[Exception]) -> None:
+        """A UDP listener closed by anything other than stop() fails the running start()."""
+        if self._stopped or proto is not self.udp_protocol:
+            return
+        fut = self._run_future
+        if fut is not None and not fut.done():
+            fut.set_exception(OSError(f"Syslog UDP listener closed unexpectedly: {exc}"))
 
-        # Pre-load aliases before starting listeners
-        await self.alias_cache.start()
-        
-        # Start UDP
-        try:
-            self.udp_protocol = SyslogUDPProtocol(self.assembler, self.alias_cache)
-            self.udp_transport, _ = await loop.create_datagram_endpoint(
-                lambda: self.udp_protocol,
-                local_addr=(self.host, self.port)
-            )
-            logger.info(f"Started Syslog UDP server on {self.host}:{self.port}")
-        except Exception as e:
-            logger.error(f"Failed to start Syslog UDP server: {e}")
-
-        # Start TCP
-        def _remove_tcp_protocol(proto: SyslogTCPProtocol):
-            self.tcp_protocols.discard(proto)
-
-        def _create_tcp_protocol():
-            if len(self.tcp_protocols) >= self.max_tcp_connections:
-                logger.warning(
-                    f"Syslog TCP connection limit reached ({self.max_tcp_connections}). Rejecting new connection."
-                )
-                return SyslogTCPProtocol(
-                    self.assembler,
-                    self.alias_cache,
-                    on_close=_remove_tcp_protocol,
-                    reject_on_connect=True,
-                )
-
-            proto = SyslogTCPProtocol(
-                self.assembler,
-                self.alias_cache,
-                on_close=_remove_tcp_protocol,
-                inactivity_timeout=self.tcp_inactivity_timeout,
-                admit=self._admit_tcp_connection,
-            )
-            self.tcp_protocols.add(proto)
-            return proto
-
-        try:
-            self.tcp_server = await loop.create_server(
-                _create_tcp_protocol,
-                self.host, self.port
-            )
-            logger.info(f"Started Syslog TCP server on {self.host}:{self.port}")
-        except Exception as e:
-            logger.error(f"Failed to start Syslog TCP server: {e}")
-
-    async def stop(self) -> None:
-        """Close transports and stop alias cache refresh."""
-        await self.alias_cache.stop()
-
-        if self.udp_protocol:
-            await self.udp_protocol.stop()
-
-        if self.udp_transport:
-            self.udp_transport.close()
-
-        for proto in list(self.tcp_protocols):
-            await proto.stop()
+    async def _close_listeners(self) -> None:
+        """Close both listeners and every TCP connection, draining their parse queues. Idempotent."""
+        # Detach everything first, so a concurrent caller finds nothing left to close.
+        tcp_server, self.tcp_server = self.tcp_server, None
+        udp_protocol, self.udp_protocol = self.udp_protocol, None
+        udp_transport, self.udp_transport = self.udp_transport, None
+        protocols = list(self.tcp_protocols)
         self.tcp_protocols.clear()
 
-        if self.tcp_server:
-            self.tcp_server.close()
-            await self.tcp_server.wait_closed()
-            
-        logger.info("Syslog servers stopped")
+        if tcp_server is not None:
+            tcp_server.close()  # stop accepting new connections
+        if udp_transport is not None:
+            udp_transport.close()
 
+        drains = [proto.stop() for proto in protocols]
+        if udp_protocol is not None:
+            drains.append(udp_protocol.stop())
+        if drains:
+            await asyncio.gather(*drains, return_exceptions=True)
+
+        if tcp_server is not None:
+            # Every client transport is closed above, so this returns once they detach.
+            try:
+                await asyncio.wait_for(tcp_server.wait_closed(), timeout=WORKER_DRAIN_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning("Syslog TCP server did not close all client connections in time.")
+
+    async def start(self) -> None:
+        """
+        Start the alias cache refresh, bind the UDP and TCP listeners, then run until stop().
+
+        A bind failure (such as the port being in use) raises after closing whatever was bound,
+        so the worker supervisor retries with backoff. An unexpected loss of the UDP listener
+        also raises. A normal return means stop() was called.
+        """
+        if self._stopped:
+            return
+        loop = asyncio.get_running_loop()
+
+        # Pre-load aliases before starting listeners (no-op restart while already running)
+        await self.alias_cache.start()
+        if self._stopped:  # stop() ran during the alias load
+            await self.alias_cache.stop()
+            return
+
+        self._run_future = loop.create_future()
+        try:
+            try:
+                udp_protocol = SyslogUDPProtocol(
+                    self.assembler, self.alias_cache, on_lost=self._on_udp_lost
+                )
+                self.udp_protocol = udp_protocol
+                self.udp_transport, _ = await loop.create_datagram_endpoint(
+                    lambda: udp_protocol,
+                    local_addr=(self.host, self.port)
+                )
+            except Exception as e:
+                logger.error(f"Failed to start Syslog UDP server on {self.host}:{self.port}: {e}")
+                raise
+            logger.info(f"Started Syslog UDP server on {self.host}:{self.port}")
+
+            try:
+                self.tcp_server = await loop.create_server(
+                    self._create_tcp_protocol,
+                    self.host, self.port
+                )
+            except Exception as e:
+                logger.error(f"Failed to start Syslog TCP server on {self.host}:{self.port}: {e}")
+                raise
+            logger.info(f"Started Syslog TCP server on {self.host}:{self.port}")
+
+            if not self._stopped:  # stop() may have run while a bind was in progress
+                await self._run_future
+        finally:
+            self._run_future = None
+            await self._close_listeners()
+
+    async def stop(self) -> None:
+        """Stop for good: end start(), close listeners and connections after draining, stop alias refresh."""
+        self._stopped = True
+        fut = self._run_future
+        if fut is not None and not fut.done():
+            fut.set_result(None)
+
+        await self._close_listeners()
+        await self.alias_cache.stop()
+
+        logger.info("Syslog servers stopped")

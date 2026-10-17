@@ -662,13 +662,14 @@ class TestSyslogNetworkAndProtocol:
     async def test_syslog_server_start_and_stop(self, db_path: Path):
         """SyslogServer manages UDP and TCP sockets and shuts down cleanly."""
         asm = KeyedMultilineAssembler()
-        server = SyslogServer(asm, db_path, host="127.0.0.1", port=11514)
+        server = SyslogServer(asm, db_path, host="127.0.0.1", port=0)
 
-        await server.start()
-        assert server.udp_transport is not None
-        assert server.tcp_server is not None
+        # start() runs until stop(), so it goes in a task
+        task = asyncio.create_task(server.start())
+        await _wait_until(lambda: _listening(server))
 
         await server.stop()
+        await asyncio.wait_for(task, timeout=2.0)
         assert server.alias_cache._refresh_task is None
 
     @pytest.mark.asyncio
@@ -1502,6 +1503,131 @@ def _listening(server: SyslogServer) -> bool:
     return server.udp_transport is not None and server.tcp_server is not None
 
 
+def _hold_port(kind: int):
+    """Bind a socket on an OS-assigned loopback port so the syslog server cannot take it."""
+    import socket as socket_mod
+
+    sock = socket_mod.socket(socket_mod.AF_INET, kind)
+    sock.bind(("127.0.0.1", 0))
+    if kind == socket_mod.SOCK_STREAM:
+        sock.listen()
+    return sock
+
+
+class TestSyslogListenerSupervision:
+    """B-19: bind failures raise so the supervisor retries, and start() runs until stop()."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("held", ["udp", "tcp"])
+    async def test_start_raises_when_port_is_taken(self, db_path: Path, held: str):
+        import socket as socket_mod
+
+        sock = _hold_port(socket_mod.SOCK_DGRAM if held == "udp" else socket_mod.SOCK_STREAM)
+        port = sock.getsockname()[1]
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=port)
+        try:
+            with pytest.raises(OSError):
+                await asyncio.wait_for(server.start(), timeout=2.0)
+            # A failed start leaves no half-open listener behind
+            assert server.udp_transport is None
+            assert server.tcp_server is None
+        finally:
+            sock.close()
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_supervisor_retries_until_port_is_free(self, db_path: Path, monkeypatch):
+        import socket as socket_mod
+        from app.main import _supervise_worker
+
+        real_sleep = asyncio.sleep
+
+        async def fast_sleep(delay, *args, **kwargs):
+            return await real_sleep(min(delay, 0.01), *args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+
+        sock = _hold_port(socket_mod.SOCK_DGRAM)
+        port = sock.getsockname()[1]
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=port)
+
+        attempts = 0
+        real_start = server.start
+
+        async def counting_start():
+            nonlocal attempts
+            attempts += 1
+            await real_start()
+
+        task = asyncio.create_task(_supervise_worker(counting_start, "SyslogServer"))
+        try:
+            await _wait_until(lambda: attempts >= 2)
+            assert not task.done()
+            sock.close()
+            await _wait_until(lambda: _listening(server))
+            assert not task.done()
+        finally:
+            sock.close()
+            await server.stop()
+        # stop() ends the awaiting start(), so the supervisor finishes normally
+        await asyncio.wait_for(task, timeout=2.0)
+
+    @pytest.mark.asyncio
+    async def test_stop_ends_running_start(self, db_path: Path):
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        await _wait_until(lambda: _listening(server))
+        await asyncio.sleep(0.02)
+        assert not task.done(), "start() must keep running while the listeners are up"
+
+        await server.stop()
+        await asyncio.wait_for(task, timeout=2.0)
+        assert task.exception() is None
+        assert server.udp_transport is None
+        assert server.tcp_server is None
+        assert server.alias_cache._refresh_task is None
+
+    @pytest.mark.asyncio
+    async def test_start_after_stop_does_not_bind(self, db_path: Path):
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        await server.stop()
+        await asyncio.wait_for(server.start(), timeout=2.0)
+        assert server.udp_transport is None
+        assert server.tcp_server is None
+        assert server.alias_cache._refresh_task is None
+
+    @pytest.mark.asyncio
+    async def test_stop_returns_with_connected_tcp_client(self, db_path: Path):
+        """A persistent TCP sender (such as rsyslog) must not hang shutdown."""
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        await _wait_until(lambda: _listening(server))
+        tcp_port = server.tcp_server.sockets[0].getsockname()[1]
+        reader, writer = await asyncio.open_connection("127.0.0.1", tcp_port)
+        try:
+            await _wait_until(lambda: server.active_tcp_connections == 1)
+            await asyncio.wait_for(server.stop(), timeout=3.0)
+            await asyncio.wait_for(task, timeout=2.0)
+            # The server closed the client connection
+            assert await asyncio.wait_for(reader.read(), timeout=2.0) == b""
+        finally:
+            writer.close()
+
+    @pytest.mark.asyncio
+    async def test_unexpected_udp_listener_loss_raises_for_supervisor(self, db_path: Path):
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        try:
+            await _wait_until(lambda: _listening(server))
+            server.udp_transport.close()
+            with pytest.raises(OSError):
+                await asyncio.wait_for(task, timeout=2.0)
+            # The failed run closed its other listener too, ready for a clean retry
+            assert server.tcp_server is None
+        finally:
+            await server.stop()
+
+
 class TestSyslogMessageCaps:
     """S-12: oversize messages are truncated, and one IP cannot hold every TCP slot."""
 
@@ -1603,3 +1729,64 @@ class TestSyslogMessageCaps:
                 w.close()
             await server.stop()
             await asyncio.wait_for(task, timeout=2.0)
+
+
+class TestSyslogShutdownDrain:
+    """B-67: stop() hands every queued message to the assembler before the workers end."""
+
+    @pytest.mark.asyncio
+    async def test_udp_stop_drains_queued_datagrams(self, db_path: Path, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        dispatched = []
+
+        async def fake_dispatch(data, source_ip, alias_cache, assembler):
+            await asyncio.sleep(0)
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", fake_dispatch)
+        proto = SyslogUDPProtocol(KeyedMultilineAssembler(), AliasCache(db_path, preload=False))
+        for i in range(100):
+            proto.datagram_received(f"<14>msg {i}".encode(), ("10.0.0.1", 514))
+
+        await proto.stop()
+        assert len(dispatched) == 100
+        assert not proto._workers
+
+    @pytest.mark.asyncio
+    async def test_tcp_stop_drains_queued_frames(self, db_path: Path, monkeypatch):
+        from unittest.mock import MagicMock
+        import app.collectors.syslog as syslog_mod
+
+        dispatched = []
+
+        async def fake_dispatch(data, source_ip, alias_cache, assembler):
+            await asyncio.sleep(0)
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", fake_dispatch)
+        proto = SyslogTCPProtocol(KeyedMultilineAssembler(), AliasCache(db_path, preload=False))
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("10.0.0.2", 5000)
+        proto.connection_made(transport)
+        proto.data_received(b"".join(f"<14>line {i}\n".encode() for i in range(100)))
+
+        await proto.stop()
+        assert len(dispatched) == 100
+        assert transport.close.called
+
+    @pytest.mark.asyncio
+    async def test_udp_stop_cancels_stuck_workers_after_timeout(self, db_path: Path, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        async def stuck_dispatch(data, source_ip, alias_cache, assembler):
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", stuck_dispatch)
+        monkeypatch.setattr(syslog_mod, "WORKER_DRAIN_TIMEOUT", 0.05)
+        proto = SyslogUDPProtocol(KeyedMultilineAssembler(), AliasCache(db_path, preload=False))
+        proto.datagram_received(b"<14>stuck", ("10.0.0.1", 514))
+        await asyncio.sleep(0)
+
+        await asyncio.wait_for(proto.stop(), timeout=1.0)
+        assert not proto._workers
