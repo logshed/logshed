@@ -224,3 +224,45 @@ describe('LogSearchBar B11 fixes', () => {
     await waitFor(() => expect(screen.getByText('Pin failed on server')).toBeInTheDocument());
   });
 });
+
+describe('LogSearchBar time presets (B-23)', () => {
+  const renderBar = (filters: LogFilterParams, onFilterChange = vi.fn()) => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+    render(<LogSearchBar filters={filters} onFilterChange={onFilterChange} onSearch={vi.fn()} onReset={vi.fn()} />);
+    return onFilterChange;
+  };
+  const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
+
+  it('stores a preset as a relative value instead of a fixed timestamp', () => {
+    const onFilterChange = renderBar({ query: 'x' });
+    fireEvent.change(desktopTimeSelect(), { target: { value: '1h' } });
+    expect(onFilterChange).toHaveBeenCalledWith({ query: 'x', from: '1h', to: undefined });
+  });
+
+  it('shows the preset that matches a relative from value (saved view or link)', () => {
+    renderBar({ from: '24h' });
+    expect(desktopTimeSelect().value).toBe('24h');
+  });
+
+  it('shows Custom with the date pickers for an absolute from value', () => {
+    renderBar({ from: '2026-10-13T10:00:00.000Z' });
+    expect(desktopTimeSelect().value).toBe('custom');
+    expect(screen.getAllByText('From:').length).toBeGreaterThan(0);
+  });
+
+  it('shows All Time when no time bounds are set', () => {
+    renderBar({});
+    expect(desktopTimeSelect().value).toBe('all');
+  });
+
+  it('turns a relative preset into an absolute start when switching to Custom', () => {
+    const onFilterChange = renderBar({ from: '1h' });
+    const before = Date.now();
+    fireEvent.change(desktopTimeSelect(), { target: { value: 'custom' } });
+    const call = onFilterChange.mock.calls[0][0];
+    const from = new Date(call.from).getTime();
+    expect(from).toBeGreaterThanOrEqual(before - 3600_000 - 1000);
+    expect(from).toBeLessThanOrEqual(Date.now() - 3600_000 + 1000);
+    expect(desktopTimeSelect().value).toBe('custom');
+  });
+});

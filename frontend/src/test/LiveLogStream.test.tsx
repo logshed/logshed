@@ -1905,4 +1905,21 @@ describe('LiveLogStream B12 fixes', () => {
     expect(serverText).not.toBe(browserText);
     await waitFor(() => expect(screen.getByText(serverText)).toBeInTheDocument());
   });
+
+  const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
+
+  it('keeps a relative time from a link and shows the matching preset (B-23)', async () => {
+    window.history.replaceState(null, '', '/?time=1h');
+    const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderStream();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: '1h' })));
+    expect(desktopTimeSelect().value).toBe('1h');
+  });
+
+  it('shows Custom for a digest link with an absolute time (B-23)', async () => {
+    window.history.replaceState(null, '', '/?time=2026-10-13T10%3A00%3A00.000Z&severity=3');
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    expect(desktopTimeSelect().value).toBe('custom');
+  });
 });

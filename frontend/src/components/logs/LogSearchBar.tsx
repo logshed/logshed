@@ -7,6 +7,23 @@ import { toLocalDatetimeInputString, fromLocalDatetimeInputString } from '../../
 import { fetchSavedViews, createSavedView, updateSavedView, deleteSavedView } from '../../api/savedViews.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
 
+// Time presets are stored as relative values (the backend resolves them at query time), so a saved
+// view or shared link keeps meaning "the last hour" instead of freezing the moment it was made.
+const TIME_PRESET_MS: Record<string, number> = {
+  '15m': 15 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+};
+
+/** The time preset matching the filters: 'all', a relative preset such as '1h', or 'custom' for absolute bounds. */
+export function deriveTimePreset(from?: string, to?: string): string {
+  if (!from && !to) return 'all';
+  if (from && !to && Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, from)) return from;
+  return 'custom';
+}
+
 interface LogSearchBarProps {
   filters: LogFilterParams;
   onFilterChange: (filters: LogFilterParams) => void;
@@ -30,8 +47,15 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   totalCount,
   totalCapped = false,
 }) => {
-  const [timePreset, setTimePreset] = useState<string>('all');
-  const [showCustomTime, setShowCustomTime] = useState<boolean>(false);
+  // The selected preset follows the filters (saved views, links, Reset); "Custom" chosen before any
+  // bounds are entered is the only local choice.
+  const [customTimeRequested, setCustomTimeRequested] = useState<boolean>(false);
+  const derivedTimePreset = deriveTimePreset(filters.from, filters.to);
+  const timePreset = customTimeRequested ? 'custom' : derivedTimePreset;
+  const showCustomTime = timePreset === 'custom';
+  useEffect(() => {
+    if (derivedTimePreset !== 'all' && derivedTimePreset !== 'custom') setCustomTimeRequested(false);
+  }, [derivedTimePreset]);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [isViewsLoading, setIsViewsLoading] = useState<boolean>(false);
@@ -146,36 +170,33 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   const hasActiveFilters = activeFilterCount > 0;
 
   const handleTimePresetChange = useCallback((preset: string) => {
-    setTimePreset(preset);
     if (preset === 'custom') {
-      setShowCustomTime(true);
+      setCustomTimeRequested(true);
+      // Start the pickers from the preset's current window rather than leaving them empty
+      if (filters.from && Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, filters.from)) {
+        onFilterChange({
+          ...filters,
+          from: new Date(Date.now() - TIME_PRESET_MS[filters.from]).toISOString(),
+        });
+      }
       return;
     }
 
-    setShowCustomTime(false);
+    setCustomTimeRequested(false);
     if (preset === 'all') {
       onFilterChange({ ...filters, from: undefined, to: undefined });
       return;
     }
 
-    const now = new Date();
-    let fromDate = new Date();
-    if (preset === '15m') fromDate = new Date(now.getTime() - 15 * 60 * 1000);
-    else if (preset === '1h') fromDate = new Date(now.getTime() - 60 * 60 * 1000);
-    else if (preset === '6h') fromDate = new Date(now.getTime() - 6 * 60 * 60 * 1000);
-    else if (preset === '24h') fromDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    else if (preset === '7d') fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
     onFilterChange({
       ...filters,
-      from: fromDate.toISOString(),
+      from: preset,
       to: undefined,
     });
   }, [filters, onFilterChange]);
 
   const handleResetFilters = useCallback(() => {
-    setTimePreset('all');
-    setShowCustomTime(false);
+    setCustomTimeRequested(false);
     onReset();
   }, [onReset]);
 
