@@ -16,6 +16,7 @@ from app.core import pipeline as pipeline_mod
 from app.core.migrations import get_connection, run_migrations
 from app.core.pipeline import QueueConsumer, get_queue
 from app.core.sse import sse_manager
+import app.services.fts_indexer as fts_indexer_mod
 from app.services.fts_indexer import FTSIndexWorker, index_pending_batch, index_pending_logs
 from app.services.retention import execute_prune
 
@@ -421,13 +422,15 @@ class _ReversedRows:
         return list(reversed(self._cursor.fetchall()))
 
 
-def _insert_plain_logs(db_path: Path, count: int, word: str) -> None:
+def _insert_plain_logs(
+    db_path: Path, count: int, word: str, timestamp: str = "2026-09-01T12:00:00+00:00"
+) -> None:
     conn = get_connection(db_path)
     with conn:
         conn.executemany(
             """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, message, raw)
-               VALUES ('2026-09-01T12:00:00+00:00', '2026-09-01T12:00:00+00:00', '10.0.0.1', 'h1', 'app', ?, 'raw')""",
-            [(f"{word} line {i}",) for i in range(count)],
+               VALUES (?, ?, '10.0.0.1', 'h1', 'app', ?, 'raw')""",
+            [(timestamp, timestamp, f"{word} line {i}") for i in range(count)],
         )
     conn.close()
 
@@ -505,6 +508,145 @@ class TestConcurrentIndexers:
             conn.close()
         assert index_pending_logs(db_path) == 0
         _assert_fts_consistent(db_path, "unordered", 10)
+
+
+def _index_in_small_segments(db_path: Path, batch_size: int = 10) -> None:
+    """Index pending rows in many small commits with automerge off, so logs_fts holds many b-trees."""
+    conn = get_connection(db_path)
+    try:
+        conn.execute("INSERT INTO logs_fts(logs_fts, rank) VALUES('automerge', 0)")
+        conn.commit()
+        while index_pending_batch(conn, batch_size=batch_size):
+            pass
+    finally:
+        conn.close()
+
+
+def _merge_would_do_work(conn: sqlite3.Connection) -> bool:
+    """A full ('merge', -N) pass changes fewer than two rows only when the index is already compact."""
+    before = conn.total_changes
+    conn.execute("INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', -500)")
+    conn.commit()
+    return conn.total_changes - before >= 2
+
+
+def _assert_index_compact_and_valid(db_path: Path, word: str, expected: int) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute("INSERT INTO logs_fts(logs_fts) VALUES('integrity-check')")
+        assert conn.execute("SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?", (word,)).fetchone()[0] == expected
+        assert not _merge_would_do_work(conn)
+    finally:
+        conn.close()
+
+
+class TestIncrementalFtsMerge:
+    """B-18: index compaction after a prune or a large delete runs in short, separately committed merge steps."""
+
+    def _segmented_index_with_deletes(self, db_path: Path) -> sqlite3.Connection:
+        """400 rows of 30 distinct terms each in 40 b-trees, then half the rows deleted."""
+        conn = get_connection(db_path)
+        with conn:
+            conn.executemany(
+                """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, message, raw)
+                   VALUES ('2026-09-01T12:00:00+00:00', '2026-09-01T12:00:00+00:00', '10.0.0.1', 'h1', 'app', ?, 'raw')""",
+                [("segment " + " ".join(f"term{i}x{k}" for k in range(30)),) for i in range(400)],
+            )
+        conn.close()
+        _index_in_small_segments(db_path)
+        conn = get_connection(db_path)
+        conn.execute("DELETE FROM logs WHERE id % 2 = 0")
+        conn.commit()
+        return conn
+
+    def test_prune_and_delete_no_longer_run_optimize(self):
+        services = Path(fts_indexer_mod.__file__).parent
+        for name in ("retention.py", "log_deletion.py"):
+            source = (services / name).read_text()
+            assert "'optimize'" not in source, name
+            assert "merge_fts_index" in source, name
+
+    def test_merge_loop_compacts_index_in_steps(self, db_path: Path):
+        conn = self._segmented_index_with_deletes(db_path)
+        try:
+            steps = fts_indexer_mod.merge_fts_index(conn, pages=4)
+            assert 1 < steps < 200
+            assert not conn.in_transaction
+        finally:
+            conn.close()
+        _assert_index_compact_and_valid(db_path, "segment", 200)
+
+    def test_merge_loop_stops_at_step_cap(self, db_path: Path):
+        conn = self._segmented_index_with_deletes(db_path)
+        try:
+            assert fts_indexer_mod.merge_fts_index(conn, pages=1, max_steps=3) == 3
+            assert not conn.in_transaction
+        finally:
+            conn.close()
+
+    def test_merge_loop_commits_after_each_step(self, db_path: Path):
+        conn = self._segmented_index_with_deletes(db_path)
+        calls: list[str] = []
+
+        def _record(sql, cursor):
+            if "'merge'" in sql:
+                calls.append("merge")
+            return cursor
+
+        class _RecordingConnection(_ConnectionProxy):
+            def commit(self):
+                calls.append("commit")
+                self._conn.commit()
+
+        try:
+            fts_indexer_mod.merge_fts_index(_RecordingConnection(conn, _record), pages=4)
+        finally:
+            conn.close()
+        assert len(calls) >= 4
+        assert calls == ["merge", "commit"] * (len(calls) // 2)
+
+    def test_prune_compacts_index_with_merge_steps(self, db_path: Path, monkeypatch):
+        old_ts = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)).isoformat()
+        new_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _insert_plain_logs(db_path, 300, "expired", timestamp=old_ts)
+        _insert_plain_logs(db_path, 100, "kept", timestamp=new_ts)
+        _index_in_small_segments(db_path)
+
+        calls = []
+        real_merge = fts_indexer_mod.merge_fts_index
+
+        def _recording_merge(conn, *args, **kwargs):
+            calls.append(1)
+            return real_merge(conn, *args, **kwargs)
+
+        monkeypatch.setattr(fts_indexer_mod, "merge_fts_index", _recording_merge)
+        result = execute_prune(db_path, retention_days=14)
+
+        assert result["deleted_logs"] == 300
+        assert calls == [1]
+        _assert_index_compact_and_valid(db_path, "kept", 100)
+
+    def test_large_delete_compacts_index_with_merge_steps(self, db_path: Path, monkeypatch):
+        from app.models import LogDeleteRequest
+        from app.services.log_deletion import execute_delete_logs
+
+        _insert_plain_logs(db_path, 5000, "bulk")
+        _insert_plain_logs(db_path, 10, "survivor")
+        index_pending_logs(db_path)
+
+        calls = []
+        real_merge = fts_indexer_mod.merge_fts_index
+
+        def _recording_merge(conn, *args, **kwargs):
+            calls.append(1)
+            return real_merge(conn, *args, **kwargs)
+
+        monkeypatch.setattr(fts_indexer_mod, "merge_fts_index", _recording_merge)
+        result = execute_delete_logs(db_path, LogDeleteRequest(query="bulk"))
+
+        assert result["deleted_count"] == 5000
+        assert calls == [1]
+        _assert_index_compact_and_valid(db_path, "survivor", 10)
 
 
 class TestFTSIndexWorkerPersistentConnection:

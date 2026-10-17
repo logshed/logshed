@@ -84,6 +84,50 @@ def index_pending_logs(db_path: Union[str, Path], batch_size: int = 5000) -> int
         conn.close()
 
 
+# Incremental logs_fts compaction: pages written per merge step, and the most steps per run
+FTS_MERGE_PAGES = 500
+FTS_MERGE_MAX_STEPS = 200
+
+
+def merge_fts_index(
+    conn: sqlite3.Connection,
+    pages: int = FTS_MERGE_PAGES,
+    max_steps: int = FTS_MERGE_MAX_STEPS,
+) -> int:
+    """
+    Compact logs_fts with FTS5 'merge' steps, committing after each one, instead of a single
+    'optimize' that holds the write lock until the whole index is rewritten (long enough on a
+    large index to outlast busy_timeout and make ingestion inserts fail).
+
+    The first step uses a negative page count, which starts a full merge of every b-tree, as
+    'optimize' does. Later steps use a positive count so they continue that merge without
+    restarting it when the indexer adds new b-trees meanwhile. The loop stops when a step
+    changes fewer than two rows (nothing left to merge) or after max_steps; an unfinished merge
+    carries on at the next run. The connection must not have a transaction open.
+
+    Returns:
+        Number of merge steps that did work.
+    """
+    steps = 0
+    for step in range(max_steps):
+        before = conn.total_changes
+        try:
+            conn.execute(
+                "INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', ?)",
+                (-pages if step == 0 else pages,),
+            )
+            conn.commit()
+        except BaseException:
+            # Earlier steps stay committed; do not leave the caller's connection mid-transaction
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        if conn.total_changes - before < 2:
+            break
+        steps += 1
+    return steps
+
+
 _active_fts_worker: Optional["FTSIndexWorker"] = None
 
 def get_fts_worker() -> Optional["FTSIndexWorker"]:

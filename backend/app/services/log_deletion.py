@@ -189,11 +189,11 @@ def execute_delete_logs(
 
             total_deleted += execute_with_fts_fallback(_delete_batches, params, criteria.query, empty=0)
 
-        # Compact FTS5 index if a significant volume of rows was deleted
+        # Compact FTS5 index if a significant volume of rows was deleted, in short merge steps
         if total_deleted >= 5000:
+            from app.services.fts_indexer import merge_fts_index
             try:
-                cursor.execute("INSERT INTO logs_fts(logs_fts) VALUES('optimize');")
-                conn.commit()
+                merge_fts_index(conn)
             except sqlite3.Error as e:
                 logger.warning(f"FTS index compaction warning after deletion: {e}")
 

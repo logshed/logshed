@@ -287,10 +287,10 @@ def execute_prune(
         # older than the cutoff, plus the AI audit records they link to.
         deleted_history, deleted_ai_audit = _prune_history(conn, cutoff_iso)
 
-        # 2. Compact FTS5 virtual table segments
+        # 2. Compact FTS5 index segments in short, separately committed merge steps
+        from app.services.fts_indexer import merge_fts_index
         try:
-            cursor.execute("INSERT INTO logs_fts(logs_fts) VALUES('optimize');")
-            conn.commit()
+            merge_fts_index(conn)
         except sqlite3.Error as e:
             logger.warning(f"FTS5 compaction warning: {e}")
 
