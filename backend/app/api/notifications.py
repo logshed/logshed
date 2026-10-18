@@ -198,10 +198,22 @@ async def delete_notification_channel(
         cur = conn.cursor()
         cur.execute("DELETE FROM notification_channels WHERE id = ?", (channel_id,))
         rows_affected = cur.rowcount
+        cleared_digest = False
+        if rows_affected:
+            cur.execute(
+                "UPDATE system_settings SET value = '' "
+                "WHERE key = 'daily_digest_channel_id' AND value = ?",
+                (str(channel_id),),
+            )
+            cleared_digest = cur.rowcount > 0
         conn.commit()
-        return rows_affected
+        return rows_affected, cleared_digest
 
-    deleted_count = await run_db_query(_delete)
+    deleted_count, cleared_digest = await run_db_query(_delete)
+    if cleared_digest:
+        from app.core.config import invalidate_settings_cache
+
+        invalidate_settings_cache()
     if deleted_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

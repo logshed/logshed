@@ -548,3 +548,48 @@ class TestNotificationsApi:
         assert fresh_executor._shutdown is False
         assert fresh_executor._thread_name_prefix == "logshed-notifier"
 
+
+
+class TestDigestChannelDelete:
+
+    @pytest.mark.asyncio
+    async def test_deleting_digest_channel_clears_digest_setting(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/notifications/channels",
+            json={"name": "Digest Target", "url": "discord://123456789/digest_token", "is_enabled": True},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201
+        channel_id = res.json()["id"]
+
+        save = await client.post(
+            "/api/settings",
+            json={"daily_digest_channel_id": channel_id},
+            headers=auth_headers,
+        )
+        assert save.status_code == 200
+        before = await client.get("/api/settings", headers=auth_headers)
+        assert before.json()["daily_digest_channel_id"] == channel_id
+
+        del_res = await client.delete(f"/api/notifications/channels/{channel_id}", headers=auth_headers)
+        assert del_res.status_code == 200
+
+        after = await client.get("/api/settings", headers=auth_headers)
+        assert after.json()["daily_digest_channel_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_deleting_other_channel_keeps_digest_setting(self, client: AsyncClient, auth_headers: dict):
+        ids = []
+        for name in ("Keep Target", "Other Target"):
+            res = await client.post(
+                "/api/notifications/channels",
+                json={"name": name, "url": "discord://123456789/some_token", "is_enabled": True},
+                headers=auth_headers,
+            )
+            ids.append(res.json()["id"])
+        await client.post("/api/settings", json={"daily_digest_channel_id": ids[0]}, headers=auth_headers)
+
+        await client.delete(f"/api/notifications/channels/{ids[1]}", headers=auth_headers)
+
+        after = await client.get("/api/settings", headers=auth_headers)
+        assert after.json()["daily_digest_channel_id"] == ids[0]
