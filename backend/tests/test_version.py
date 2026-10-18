@@ -213,7 +213,9 @@ class TestVersionEndpoint:
     """Test suite for /api/system/version API route."""
 
     def test_get_version_endpoint_returns_200(self):
+        from app.api.deps import get_optional_user
         app = create_app()
+        app.dependency_overrides[get_optional_user] = lambda: {"user_id": 1}
         client = TestClient(app)
 
         with patch("app.api.system.check_for_updates", new_callable=AsyncMock) as mock_check:
@@ -256,3 +258,61 @@ class TestVersionEndpoint:
             }
             response = client.get("/api/system/version?refresh=true")
             assert response.status_code == 200
+
+
+class TestVersionCheckHardening:
+    """S-21: failed GHCR checks are throttled and anonymous callers get no version string."""
+
+    @pytest.mark.asyncio
+    async def test_failed_check_is_not_retried_within_minimum_interval(self):
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = Exception("GHCR unreachable")
+            first = await check_for_updates()
+            second = await check_for_updates()
+            third = await check_for_updates(force_refresh=True)
+
+        assert mock_fetch.call_count == 1
+        for res in (first, second, third):
+            assert res["latest_version"] is None
+            assert res["update_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_failed_check_is_retried_after_minimum_interval(self):
+        import app.services.version_service as vs
+
+        clock = [1_000_000.0]
+        with patch.object(vs.time, "time", lambda: clock[0]):
+            with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+                mock_fetch.side_effect = Exception("GHCR unreachable")
+                await check_for_updates()
+                clock[0] += vs._MIN_QUERY_INTERVAL_SECONDS - 1
+                await check_for_updates()
+                assert mock_fetch.call_count == 1
+
+                clock[0] += 2
+                mock_fetch.side_effect = None
+                mock_fetch.return_value = ["1.0.0", "99.0.0"]
+                res = await check_for_updates()
+                assert mock_fetch.call_count == 2
+                assert res["latest_version"] == "99.0.0"
+
+    def test_anonymous_version_request_gets_no_version_and_makes_no_check(self):
+        client = TestClient(create_app())
+        with patch("app.api.system.check_for_updates", new_callable=AsyncMock) as mock_check:
+            mock_check.return_value = {
+                "current_version": "1.1.0-beta.3",
+                "latest_version": "1.2.0",
+                "update_available": True,
+                "checked_at": 1700000000.0,
+                "repo_deprecated": False,
+            }
+            response = client.get("/api/system/version")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["current_version"] == ""
+        assert data["latest_version"] is None
+        assert data["update_available"] is False
+        assert "1.1.0" not in response.text
+        assert APP_VERSION not in response.text
+        mock_check.assert_not_called()

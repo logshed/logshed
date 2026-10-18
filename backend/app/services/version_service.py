@@ -21,6 +21,10 @@ _MIN_QUERY_INTERVAL_SECONDS = 60.0
 _cached_version_info: Optional[Dict[str, Any]] = None
 _cached_at: float = 0.0
 _last_live_query_at: float = 0.0
+# Result of the last failed GHCR check when no successful result is cached yet. It is served
+# until the minimum query interval has passed, so an unreachable registry is not retried on
+# every request.
+_failed_check_info: Optional[Dict[str, Any]] = None
 
 # Target GHCR repository (lowercase required for GHCR token service)
 DEFAULT_IMAGE_REPO = os.environ.get("LOGSHED_IMAGE_REPO", "logshed/logshed").lower()
@@ -41,10 +45,11 @@ if is_deprecated_image_repo(DEFAULT_IMAGE_REPO):
 
 def clear_version_cache() -> None:
     """Clear in-memory cached version check data (useful in testing or manual invalidation)."""
-    global _cached_version_info, _cached_at, _last_live_query_at
+    global _cached_version_info, _cached_at, _last_live_query_at, _failed_check_info
     _cached_version_info = None
     _cached_at = 0.0
     _last_live_query_at = 0.0
+    _failed_check_info = None
 
 
 
@@ -112,8 +117,10 @@ async def check_for_updates(
     Check if a newer stable version is available on GHCR.
     Respects the check_for_updates system setting.
     Caches results in memory for 1 hour. Fails gracefully on network or registry errors.
+    At most one live GHCR query runs per minimum interval, whether the last one succeeded,
+    failed or is still running.
     """
-    global _cached_version_info, _cached_at, _last_live_query_at
+    global _cached_version_info, _cached_at, _last_live_query_at, _failed_check_info
 
     now = time.time()
     repo_deprecated = is_deprecated_image_repo(image_repo)
@@ -138,9 +145,10 @@ async def check_for_updates(
     if not force_refresh and _cached_version_info and (now - _cached_at < _CACHE_TTL_SECONDS):
         return _cached_version_info
 
-    # Enforce minimum interval between live GHCR queries to prevent socket exhaustion and rate limiting
-    if _cached_version_info and (now - _last_live_query_at < _MIN_QUERY_INTERVAL_SECONDS):
-        return _cached_version_info
+    # Enforce minimum interval between live GHCR queries to prevent socket exhaustion and rate limiting.
+    # This also holds when the last query failed (negative cache) or is still in flight.
+    if now - _last_live_query_at < _MIN_QUERY_INTERVAL_SECONDS:
+        return _cached_version_info or _failed_check_info or _unavailable_result(now, repo_deprecated)
 
     _last_live_query_at = now
 
@@ -165,21 +173,29 @@ async def check_for_updates(
 
         _cached_version_info = result
         _cached_at = now
+        _failed_check_info = None
         return result
 
     except Exception as exc:
         logger.warning(f"Failed to check GHCR for updates: {exc}")
+        # The attempt time is kept in _last_live_query_at, so the next live query waits for the interval
         if _cached_version_info:
             # Return stale cache if available
             return _cached_version_info
 
-        # Graceful fallback when unreachable
-        return {
-            "current_version": APP_VERSION,
-            "latest_version": None,
-            "update_available": False,
-            "check_enabled": True,
-            "checked_at": now,
-            "repo_deprecated": repo_deprecated,
-        }
+        # Graceful fallback when unreachable, cached as a negative result
+        _failed_check_info = _unavailable_result(now, repo_deprecated)
+        return _failed_check_info
+
+
+def _unavailable_result(now: float, repo_deprecated: bool) -> Dict[str, Any]:
+    """Result used when no successful GHCR check is available."""
+    return {
+        "current_version": APP_VERSION,
+        "latest_version": None,
+        "update_available": False,
+        "check_enabled": True,
+        "checked_at": now,
+        "repo_deprecated": repo_deprecated,
+    }
 

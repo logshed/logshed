@@ -247,12 +247,16 @@ async def get_version_info(
 ) -> VersionResponse:
     """
     Returns current application version and checks GHCR for stable updates.
+    Anonymous callers get an empty version and no update check, so the endpoint neither
+    reveals the running version nor lets anyone trigger outbound registry requests.
     """
     if refresh and not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required.",
         )
+    if not user:
+        return VersionResponse(current_version="", checked_at=None)
     info = await check_for_updates(force_refresh=refresh)
     return VersionResponse(**info)
 
