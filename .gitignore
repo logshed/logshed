@@ -118,3 +118,6 @@ docs/internal/
 
 # Claude Code local files (agent worktrees, settings)
 .claude/
+
+# TypeScript build cache
+frontend/tsconfig.tsbuildinfo
