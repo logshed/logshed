@@ -55,6 +55,7 @@ services:
       # - APP_URL=https://logs.example.com
       # - LOGSHED_INTERNAL_LOG_LEVEL=WARNING
       # - LOGSHED_AI_TIMEOUT=45.0
+      # - TRUSTED_PROXIES=172.18.0.5   # your reverse proxy container IP (preferred over TRUST_DOCKER_PROXIES)
       # - TRUST_DOCKER_PROXIES=false
     volumes:
       - ./data:/data
@@ -67,6 +68,7 @@ services:
 
 - [Core Settings](#core-settings)
 - [Syslog Listener](#syslog-listener)
+- [HTTP Ingest and Rule Patterns](#http-ingest-and-rule-patterns)
 - [Docker Log Tailing](#docker-log-tailing)
 - [Storage and Retention](#storage-and-retention)
 - [AI Provider](#ai-provider)
@@ -86,7 +88,7 @@ services:
 | `DATA_DIR` | `/data` | Docker Compose only | Path to persistent storage directory for the SQLite database, encryption key, and custom rule presets. | 1.0.0 |
 | `PUID` | `1000` | Docker Compose only | User ID used for internal execution after privilege dropping via `gosu`. | 1.0.0 |
 | `PGID` | `1000` | Docker Compose only | Group ID used for internal execution after privilege dropping via `gosu`. | 1.0.0 |
-| `ALLOW_ROOT` | `false` | Docker Compose only | The container refuses to start when `PUID` or `PGID` is `0`. Set to `true` to run the app as root anyway (not recommended). | 1.3.0 |
+| `ALLOW_ROOT` | `false` | Docker Compose only | The container refuses to start when `PUID` or `PGID` is `0`. Set to `true` to run the app as root anyway (not recommended); the container then logs a warning at startup. New database files are created with `umask 027`, so they are not world-readable on the host bind mount. | 1.3.0 |
 | `TZ` | `UTC` | Docker Compose only | Container timezone identifier (for example, `UTC`, `America/New_York`, `Europe/London`). | 1.0.0 |
 | `APP_URL` | *(empty)* | Web UI or Compose | Public base URL of the LogShed instance (for example, `https://logs.example.com`), used for direct links in push alerts. | 1.1.0 |
 | `LOGSHED_INTERNAL_LOG_LEVEL` | `WARNING` | Web UI or Compose | Log level for LogShed internal diagnostic logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `DISABLED`). Logs from alerting, notifications and AI analysis are stored but never evaluated by alert rules, so a rule cannot trigger itself. | 1.1.0 |
@@ -99,7 +101,17 @@ services:
 |---|---|---|---|:---:|
 | `SYSLOG_PORT` | `1514` | Docker Compose only | Port for both UDP and TCP syslog ingestion (valid range 1 to 65535). | 1.0.0 |
 | `SYSLOG_MAX_TCP_CONNECTIONS` | `250` | Web UI or Compose | Maximum number of concurrent Syslog TCP client connections. | 1.1.0 |
+| `SYSLOG_MAX_TCP_CONNECTIONS_PER_IP` | `20` | Docker Compose only | Maximum number of concurrent Syslog TCP connections from one source IP, so a single host cannot use every slot. Extra connections are refused with a warning. Values that are not a whole number of at least `1` fall back to `20`. Not shown in the web interface. | 1.3.0 |
 | `SYSLOG_TCP_INACTIVITY_TIMEOUT` | `0.0` | Web UI or Compose | Inactivity timeout in seconds for Syslog TCP connections (`0.0` disables timeout, keeping persistent streams connected). | 1.1.0 |
+
+---
+
+## HTTP Ingest and Rule Patterns
+
+| Variable | Default | Where to Configure | Description | Since |
+|---|---|---|---|:---:|
+| `INGEST_MAX_BODY_BYTES` | `5242880` (5 MiB) | Docker Compose only | Largest request body accepted by `POST /api/v1/ingest`, in bytes. Larger bodies are refused with `413`. A request may also hold at most 10,000 entries (`413`), and `message` and `raw` are cut to 64 KB each. Invalid or non-positive values fall back to the default. | 1.3.0 |
+| `USER_REGEX_TIMEOUT_MS` | `50` | Docker Compose only | Time limit in milliseconds for one match of a user-written alert or drop rule regular expression. A pattern that runs longer counts as no match and logs a warning naming the rule, so one bad pattern cannot freeze ingestion. Invalid or non-positive values fall back to `50`. | 1.3.0 |
 
 ---
 
@@ -116,7 +128,13 @@ services:
 | `DOCKER_SOCKET_POLL_INTERVAL` | `5.0` | Docker Compose only | Initial delay in seconds when polling for socket availability during startup or reconnect. | 1.1.0 |
 | `DOCKER_SOCKET_POLL_MAX` | `60.0` | Docker Compose only | Maximum backoff duration in seconds for Docker socket reconnect attempts. | 1.1.0 |
 | `DOCKER_DISCOVERY_INTERVAL` | `60.0` | Docker Compose only | Interval in seconds between periodic container discovery scans to detect newly started or stopped containers. | 1.3.0 |
+| `DOCKER_ALLOWED_SOCKETS` | *(empty)* | Docker Compose only | Comma-separated list of extra Unix socket paths that Docker hosts may use. By default a `unix://` host URL must end in `docker.sock` or be the `DOCKER_HOST` socket; any other path is refused with `422` when you save the host. Stored hosts are not re-checked, so collection from an already saved host keeps running. Example: `/run/podman/podman.sock`. | 1.3.0 |
 | `DOCKER_ADDITIONAL_HOSTS` | *(empty)* | Docker Compose only | JSON-encoded array of remote Docker endpoints to pre-seed on startup (for example, `[{"name": "remote-node", "url": "tcp://192.168.1.50:2375", "source_alias": "remote-docker"}]`). | 1.3.0 |
+
+> [!WARNING]
+> **Docker socket owned by group 0:** when the mounted Docker socket belongs to the `root` group (some Docker Desktop and rootful setups), the container no longer adds its app user to the root group. It logs a warning at startup and Docker collection from that socket fails. Connect through a Docker socket proxy (such as `tecnativa/docker-socket-proxy`) with `DOCKER_HOST=tcp://proxy:2375` instead.
+
+**TLS to remote Docker hosts:** each Docker host has a "Verify TLS host name" toggle (on by default, including hosts saved before 1.3.0). With it on, the daemon certificate must match the host name in the URL, so a host reached by IP address needs a certificate that lists that IP (an IP SAN). Turn the toggle off for such hosts. TLS to a host that is not on this machine also requires a CA certificate. Docker host URLs that point at link-local or cloud metadata addresses are refused.
 
 ---
 
@@ -124,7 +142,7 @@ services:
 
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
-| `MAX_RETENTION_DAYS` | `30` | Docker Compose only | Hard ceiling in days for the log retention slider in the web interface (minimum `1`). | 1.0.0 |
+| `MAX_RETENTION_DAYS` | `30` | Docker Compose only | Hard ceiling in days for the log retention slider in the web interface (minimum `1`). Reading settings never saves a clamped value, so removing this variable returns retention to the value you saved. | 1.0.0 |
 | `DB_PATH` | *(empty)* | Docker Compose only | Custom SQLite database file path. Supported for backward compatibility; prefer `DATA_DIR`. | 1.0.0 |
 | `SECRET_KEY_PATH` | *(empty)* | Docker Compose only | Custom path to the persisted encryption key file. Supported for backward compatibility; prefer `DATA_DIR`. | 1.0.0 |
 
@@ -144,6 +162,7 @@ services:
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
 | `ENABLE_MCP` | `false` | Web UI or Compose | Master switch to activate the integrated Model Context Protocol (MCP) server endpoints and tools (`true` or `false`). | 1.3.0 |
+| `MCP_ALLOW_QUERY_TOKEN` | `false` | Docker Compose only | Accept the API token in the URL query string (`?token=`) on MCP routes (`true`, `1`, `yes` or `on`). Off by default because URLs are written to reverse proxy access logs. Meant only for old clients that cannot send an `Authorization: Bearer` header; it is deprecated and a warning is logged while it is used. | 1.3.0 |
 
 ---
 
@@ -153,9 +172,11 @@ services:
 |---|---|---|---|:---:|
 | `LOGSHED_SECRET_KEY` | *(auto-generated)* | Docker Compose only | 32-byte URL-safe base64 string for Fernet encryption of runtime settings at rest. Generated automatically at `/data/.secret_key` if unset. | 1.0.0 |
 | `COOKIE_SECURE` | `false` | Web UI or Compose | Enforces the `Secure` flag on HTTP session cookies (`true` or `false`). Enable when running behind an HTTPS reverse proxy. | 1.1.0 |
-| `TRUSTED_PROXIES` | *(empty)* | Web UI or Compose | Comma-separated list of reverse proxy IP addresses or CIDR blocks for client IP resolution via `X-Forwarded-For`. | 1.1.0 |
-| `TRUST_DOCKER_PROXIES` | `false` | Web UI or Compose | Automatically trust Docker bridge subnets (`172.16.0.0/12`) as reverse proxies (`true` or `false`). | 1.1.0 |
-| `ALLOW_PRIVATE_NOTIFICATION_TARGETS` | `true` | Web UI or Compose | Allow webhook and notification dispatches to RFC 1918 private subnets and local domain names (`true` or `false`). Set to `false` to restrict webhooks to public Internet addresses. | 1.1.0 |
+| `TRUSTED_PROXIES` | *(empty)* | Web UI or Compose | Comma-separated list of reverse proxy IP addresses or CIDR blocks for client IP resolution via `X-Forwarded-For`. Recommended when LogShed runs behind a reverse proxy: set it to the proxy container IP (for example `TRUSTED_PROXIES=172.18.0.5`). | 1.1.0 |
+| `TRUST_DOCKER_PROXIES` | `false` | Web UI or Compose | Trusts every address in `172.16.0.0/12` to set `X-Forwarded-For` (`true` or `false`). If clients can reach LogShed through the Docker userland proxy or hairpin NAT, they appear as the bridge gateway and can spoof their address to avoid per-address login limits; the global failed-login limit still applies. Prefer `TRUSTED_PROXIES=<reverse proxy container IP>`. LogShed logs a warning at startup while this option is in effect. | 1.1.0 |
+| `ALLOW_PRIVATE_NOTIFICATION_TARGETS` | `true` | Web UI or Compose | Allow webhook and notification dispatches to RFC 1918 private subnets and local domain names (`true` or `false`). Set to `false` to restrict webhooks to public Internet addresses. LogShed checks the address it actually connects to, which stops DNS rebinding. With `HTTP_PROXY` or `HTTPS_PROXY` set, the check sees the proxy address instead of the destination, so a proxy on a blocked range (including loopback) is refused. | 1.1.0 |
+
+Login attempts are limited to 5 failures per client address per minute and 30 failures per minute across all addresses. The global limit means that an attacker using six or more addresses can keep it tripped and block new admin logins while the attack lasts; sessions that are already signed in are not affected.
 
 ---
 
@@ -163,9 +184,10 @@ services:
 
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
-| `ENVIRONMENT` | `production` | Docker Compose only | Runtime mode (`production` or `development`). Enables debug logging and development CORS origins when set to `development`. | 1.0.0 |
-| `DEBUG` | `false` | Docker Compose only | Enable debug mode and development settings (`true` or `false`). | 1.0.0 |
-| `CORS_ORIGINS` | *(empty)* | Docker Compose only | Comma-separated list of permitted origins for cross-origin resource sharing requests. | 1.0.0 |
+| `ENVIRONMENT` | `production` | Docker Compose only | Runtime mode (`production` or `development`). `development` adds the localhost development CORS origins (ports 5173, 8080 and 3000) and includes tracebacks in AI failure logs. Use this, not `DEBUG`, for a local frontend dev server. | 1.0.0 |
+| `DEBUG` | `false` | Docker Compose only | Includes tracebacks in AI failure logs (`true` or `false`). Since 1.3.0 it no longer trusts localhost development origins; use `ENVIRONMENT=development` for that. | 1.0.0 |
+| `CORS_ORIGINS` | *(empty)* | Docker Compose only | Comma-separated list of permitted origins for cross-origin resource sharing requests. List each trusted origin. A `*` entry is ignored and an error is logged, because with credentials it would let any website send logged-in requests. Cross-origin requests may send only the `Content-Type`, `X-Requested-With` and `Authorization` headers. | 1.0.0 |
+| `ENABLE_API_DOCS` | `true` | Docker Compose only | Serves the interactive API documentation (`/docs`, `/redoc`) and `/openapi.json`. Set to `false` (or `0`, `no`, `off`) to turn them off. | 1.3.0 |
 | `LOGSHED_VERSION` | *(runtime build)* | Docker Compose only | Override the version string displayed in the web dashboard header. | 1.0.0 |
 | `LOGSHED_IMAGE_REPO` | `logshed/logshed` | Docker Compose only | Container image repository checked for version updates. | 1.1.0 |
 
