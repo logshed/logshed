@@ -132,10 +132,22 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
     try {
       setIsSaving(true);
       setErrorMsg(null);
-      await saveRetention();
-      await runPrune();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to update retention period or purge expired data.');
+      try {
+        await saveRetention();
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Failed to update retention period.');
+        return;
+      }
+      try {
+        await runPrune();
+      } catch (err: any) {
+        // The new retention is already saved: only the immediate purge failed
+        setErrorMsg(
+          err?.status === 409
+            ? 'Retention saved. Purge is busy, try again shortly.'
+            : `Retention saved, but the purge failed: ${err?.message || 'unknown error'}`
+        );
+      }
     } finally {
       setIsSaving(false);
       closePreview();

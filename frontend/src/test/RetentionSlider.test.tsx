@@ -4,6 +4,7 @@ import { RetentionSlider } from '../components/storage/RetentionSlider.tsx';
 import { describeNextCleanup } from '../components/storage/PrunePreviewModal.tsx';
 import { formatBytes } from '../components/storage/StorageCard.tsx';
 import * as systemApi from '../api/system.ts';
+import { ApiError } from '../api/client.ts';
 
 describe('RetentionSlider Component', () => {
   beforeEach(() => {
@@ -590,5 +591,24 @@ describe('RetentionSlider Component', () => {
       ).toBeInTheDocument();
     });
   });
-});
 
+  it('says the retention was saved when Save and Delete Now saves but the purge is busy (409)', async () => {
+    vi.spyOn(systemApi, 'fetchPrunePreview').mockResolvedValue(dataPreview);
+    vi.spyOn(systemApi, 'triggerManualPrune').mockRejectedValue(new ApiError(409, 'Prune already running'));
+    const onSaveMock = vi.fn().mockResolvedValue(undefined);
+    render(<RetentionSlider retentionDays={14} onSaveRetention={onSaveMock} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '7 Days' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Retention Policy/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Save and Delete Now/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Save and Delete Now/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Retention saved\. Purge is busy, try again shortly/i)).toBeInTheDocument();
+    });
+    expect(onSaveMock).toHaveBeenCalledWith(7);
+    expect(screen.queryByText(/Failed to update retention period/i)).not.toBeInTheDocument();
+  });
+});
