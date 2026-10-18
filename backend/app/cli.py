@@ -20,6 +20,10 @@ from app.core.migrations import get_connection, run_migrations
 # Default database path inside the container
 _DEFAULT_DB_PATH = "/data/logs.db"
 
+# Same bounds as the web setup and password change forms
+_MIN_PASSWORD_LENGTH = 8
+_MAX_PASSWORD_LENGTH = 128
+
 
 def reset_admin(password: str, db_path: str = _DEFAULT_DB_PATH) -> None:
     """
@@ -241,11 +245,24 @@ def main() -> None:
         run_mcp_stdio(args.db_path)
     elif args.command == "reset-admin":
         password = args.password
-        if not password:
+        if password:
+            print(
+                "Warning: a password given with --password is visible in shell history and "
+                "process listings. Omit --password to be prompted instead.",
+                file=sys.stderr,
+            )
+        else:
             password = getpass.getpass("Enter new admin password: ")
-            if not password:
-                print("Error: Password cannot be empty.", file=sys.stderr)
+            confirm = getpass.getpass("Confirm new admin password: ")
+            if password != confirm:
+                print("Error: Passwords do not match.", file=sys.stderr)
                 sys.exit(1)
+        if not (_MIN_PASSWORD_LENGTH <= len(password) <= _MAX_PASSWORD_LENGTH):
+            print(
+                f"Error: Password must be {_MIN_PASSWORD_LENGTH} to {_MAX_PASSWORD_LENGTH} characters.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         reset_admin(password, args.db_path)
     elif args.command == "seed-logs":
         seed_logs(args.count, args.days, args.db_path)
