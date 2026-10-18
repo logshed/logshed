@@ -7,6 +7,7 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any, Optional, Union
 
@@ -526,13 +527,46 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete.")
 
 
+# Content-Security-Policy for the SPA and every other response. The built SPA loads only
+# same-origin scripts, styles and data; inline style attributes (React style props) and data:
+# images are the only relaxations.
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+    "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+)
+
+# The FastAPI docs pages (Swagger UI and ReDoc) load their bundles from cdn.jsdelivr.net, start
+# with an inline script, and ReDoc uses Google Fonts and blob: workers. They carry no user data.
+_DOCS_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; "
+    "worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+)
+
+
+def _api_docs_enabled() -> bool:
+    """ENABLE_API_DOCS (default true) serves /docs, /redoc and /openapi.json."""
+    raw = os.environ.get("ENABLE_API_DOCS", "true").strip().lower()
+    return raw not in ("false", "0", "no", "off")
+
+
 def create_app() -> FastAPI:
     """Factory creating and configuring the FastAPI application instance."""
+    docs_enabled = _api_docs_enabled()
     app = FastAPI(
         title="LogShed",
         description="Unified syslog and Docker container log aggregator with on-demand AI analysis.",
         version=APP_VERSION,
         lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+    docs_paths = (
+        {path for path in (app.docs_url, app.redoc_url, app.swagger_ui_oauth2_redirect_url) if path}
+        if docs_enabled
+        else set()
     )
 
     @app.exception_handler(RequestValidationError)
@@ -551,15 +585,6 @@ def create_app() -> FastAPI:
 
     # Full-text searches wake the FTS indexer from the shared query path
     # (app.services.log_query.execute_with_fts_fallback), which MCP calls also pass through.
-
-    # Security headers middleware
-    @app.middleware("http")
-    async def add_security_headers(request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        return response
 
     # CSRF protection middleware for mutating endpoints
     @app.middleware("http")
@@ -588,6 +613,23 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["Content-Type", "X-Requested-With", "Authorization"],
     )
+
+    # Security headers middleware. Registered last so it is the outermost middleware and also
+    # covers responses produced by the CSRF and CORS middleware (such as CSRF 403s).
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            _DOCS_CONTENT_SECURITY_POLICY if path in docs_paths else _CONTENT_SECURITY_POLICY
+        )
+        if path == "/api" or path.startswith("/api/"):
+            # API responses can hold secrets (new API tokens, settings) and must not be cached
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     # Mount API routers
     api_router = APIRouter(prefix="/api")

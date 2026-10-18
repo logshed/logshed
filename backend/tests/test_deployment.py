@@ -474,3 +474,117 @@ class TestEntrypointHardening:
         res, calls = self._run_entrypoint(tmp_path, {})
         assert res.returncode == 0, res.stderr
         assert "umask 0027" in calls
+
+
+# ===================================================================
+# HTTP perimeter: CSP, no-store and API docs toggle (S-21, S-22)
+# ===================================================================
+
+STRICT_CSP = (
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+    "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+)
+
+
+class TestHttpPerimeterHeaders:
+
+    @pytest.fixture
+    def perimeter_env(self, tmp_path: Path, monkeypatch):
+        from app.core.security import get_or_create_master_key, reset_crypto_cache
+
+        db_file = tmp_path / "logs.db"
+        key_file = tmp_path / ".secret_key"
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("DB_PATH", str(db_file))
+        monkeypatch.setenv("SECRET_KEY_PATH", str(key_file))
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        monkeypatch.delenv("ENABLE_API_DOCS", raising=False)
+        reset_crypto_cache()
+        run_migrations(db_file)
+        get_or_create_master_key(key_file)
+        yield
+        reset_crypto_cache()
+
+    @staticmethod
+    def _client(app) -> AsyncClient:
+        return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    @staticmethod
+    def _assert_security_headers(res) -> None:
+        assert res.headers.get("X-Frame-Options") == "DENY"
+        assert res.headers.get("X-Content-Type-Options") == "nosniff"
+        assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+        assert res.headers.get("Content-Security-Policy") == STRICT_CSP
+
+    @pytest.mark.asyncio
+    async def test_spa_html_carries_content_security_policy(self, perimeter_env):
+        static_index = Path(__file__).resolve().parent.parent / "app" / "static" / "index.html"
+        if not static_index.is_file():
+            pytest.skip("frontend is not built")
+        async with self._client(create_app()) as ac:
+            res = await ac.get("/stream")
+        assert res.status_code == 200
+        assert "text/html" in res.headers["content-type"]
+        self._assert_security_headers(res)
+
+    @pytest.mark.asyncio
+    async def test_api_responses_are_not_stored(self, perimeter_env):
+        async with self._client(create_app()) as ac:
+            res = await ac.get("/api/health")
+        assert res.status_code == 200
+        assert res.headers.get("Cache-Control") == "no-store"
+        self._assert_security_headers(res)
+
+    @pytest.mark.asyncio
+    async def test_created_api_token_response_is_not_stored(self, perimeter_env):
+        from app.core.security import SESSION_COOKIE_NAME, create_session_token
+
+        async with self._client(create_app()) as ac:
+            ac.cookies.set(SESSION_COOKIE_NAME, create_session_token(user_id=1))
+            res = await ac.post(
+                "/api/tokens",
+                json={"name": "Runner", "scopes": ["logs:read"]},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+        assert res.status_code in (200, 201)
+        assert "raw_token" in res.json()
+        assert res.headers.get("Cache-Control") == "no-store"
+
+    @pytest.mark.asyncio
+    async def test_csrf_rejection_carries_security_headers(self, perimeter_env):
+        async with self._client(create_app()) as ac:
+            res = await ac.post("/api/auth/logout")
+        assert res.status_code == 403
+        assert "X-Requested-With" in res.json()["detail"]
+        self._assert_security_headers(res)
+        assert res.headers.get("Cache-Control") == "no-store"
+
+    @pytest.mark.asyncio
+    async def test_api_docs_are_served_by_default_with_a_docs_policy(self, perimeter_env):
+        async with self._client(create_app.uncached()) as ac:
+            docs = await ac.get("/docs")
+            redoc = await ac.get("/redoc")
+            spec = await ac.get("/openapi.json")
+        assert docs.status_code == 200 and "swagger-ui" in docs.text
+        assert redoc.status_code == 200 and "redoc" in redoc.text.lower()
+        assert spec.status_code == 200 and "openapi" in spec.json()
+        for res in (docs, redoc):
+            csp = res.headers.get("Content-Security-Policy", "")
+            assert "https://cdn.jsdelivr.net" in csp
+            assert "frame-ancestors 'none'" in csp
+            assert "object-src 'none'" in csp
+            assert res.headers.get("X-Frame-Options") == "DENY"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", ["false", "0", "no", "off"])
+    async def test_api_docs_can_be_turned_off(self, perimeter_env, monkeypatch, value):
+        monkeypatch.setenv("ENABLE_API_DOCS", value)
+        async with self._client(create_app.uncached()) as ac:
+            docs = await ac.get("/docs")
+            redoc = await ac.get("/redoc")
+            spec = await ac.get("/openapi.json")
+        assert "swagger-ui" not in docs.text
+        assert "redoc.standalone" not in redoc.text
+        assert spec.status_code == 404 or "application/json" not in spec.headers.get("content-type", "")
+        for res in (docs, redoc, spec):
+            assert "cdn.jsdelivr.net" not in res.headers.get("Content-Security-Policy", "")
