@@ -383,5 +383,41 @@ describe('ApiTokensTab Component', () => {
     fireEvent.click(cursorBtn);
     expect(screen.getByText((content) => content.includes('https://logs.example.com/api/v1/mcp/sse'))).toBeInTheDocument();
   });
-});
 
+  it('shows a token create error inside the generate modal', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue(mockTokens);
+    vi.spyOn(tokensApi, 'createApiToken').mockRejectedValue(new Error('Token name already exists'));
+
+    render(<ApiTokensTab />);
+    await waitFor(() => {
+      expect(screen.getByText('Active Tokens (2)')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Generate Token/i }));
+    fireEvent.change(screen.getByPlaceholderText('e.g. Home Assistant or Claude Desktop'), {
+      target: { value: 'Dup' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create Token/i }));
+
+    const alert = await screen.findByText('Token name already exists');
+    expect(alert.closest('[data-testid="generate-token-modal"]')).not.toBeNull();
+    expect(screen.getByText('Generate API Token')).toBeInTheDocument();
+  });
+
+  it('shows a token revoke error inside the revoke confirmation', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue(mockTokens);
+    vi.spyOn(tokensApi, 'revokeApiToken').mockRejectedValue(new Error('Revoke failed upstream'));
+
+    render(<ApiTokensTab />);
+    await waitFor(() => {
+      expect(screen.getByText('Active Tokens (2)')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByTitle('Revoke Token')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Yes, Revoke/i }));
+
+    const alert = await screen.findByText('Revoke failed upstream');
+    expect(alert.closest('[data-testid="revoke-token-modal"]')).not.toBeNull();
+    expect(screen.getByText(/Are you sure you want to revoke/i)).toBeInTheDocument();
+  });
+});

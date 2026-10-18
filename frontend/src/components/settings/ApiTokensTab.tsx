@@ -106,6 +106,8 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Errors raised by actions inside a modal are shown in the modal, not under its backdrop
+  const [modalError, setModalError] = useState<string | null>(null);
 
   // Modals
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState<boolean>(false);
@@ -230,6 +232,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   }, []);
 
   const handleOpenGenerateModal = () => {
+    setModalError(null);
     setNewTokenName('');
     setSelectedPresetId('ai_mcp');
     setExpiresDays(90);
@@ -243,6 +246,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
     const preset = SCOPE_PRESETS.find((p) => p.id === selectedPresetId) || SCOPE_PRESETS.find((p) => p.id === 'ai_mcp') || SCOPE_PRESETS[0];
     setIsSubmitting(true);
     setErrorMsg(null);
+    setModalError(null);
 
     try {
       const payload: ApiTokenCreateRequest = {
@@ -255,7 +259,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
       setCreatedRawToken(resp.raw_token);
       await loadTokens();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to generate token.');
+      setModalError(err.message || 'Failed to generate token.');
     } finally {
       setIsSubmitting(false);
     }
@@ -274,12 +278,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   const handleConfirmRevoke = async () => {
     if (!tokenToRevoke) return;
     setIsRevoking(true);
+    setModalError(null);
     try {
       await revokeApiToken(tokenToRevoke.id);
       setTokenToRevoke(null);
       await loadTokens();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to revoke token.');
+      setModalError(err.message || 'Failed to revoke token.');
     } finally {
       setIsRevoking(false);
     }
@@ -362,7 +367,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() => setTokenToRevoke(token)}
+                        onClick={() => { setModalError(null); setTokenToRevoke(token); }}
                         className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-dark-700 hover:border-red-900 rounded-lg transition cursor-pointer shrink-0"
                         title="Revoke Token"
                       >
@@ -439,7 +444,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                         <td className="py-3 px-4 text-right">
                           <button
                             type="button"
-                            onClick={() => setTokenToRevoke(token)}
+                            onClick={() => { setModalError(null); setTokenToRevoke(token); }}
                             className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-transparent hover:border-red-900 rounded transition cursor-pointer"
                             title="Revoke Token"
                           >
@@ -773,7 +778,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
 
       {/* Generate Token Modal */}
       {isGenerateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
+        <div data-testid="generate-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
           <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
@@ -788,6 +793,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+            {modalError && (
+              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleGenerateSubmit} className="p-5 space-y-4">
               <div>
@@ -968,7 +979,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
 
       {/* Revoke Confirmation Modal */}
       {tokenToRevoke && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
+        <div data-testid="revoke-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
           <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-5 space-y-3">
               <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
@@ -981,6 +992,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 token will immediately fail authentication with HTTP 401 errors.
               </p>
             </div>
+              {modalError && (
+                <div role="alert" className="mx-5 mb-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{modalError}</span>
+                </div>
+              )}
             <div className="px-5 py-3.5 bg-dark-950/50 border-t border-dark-800 flex justify-end gap-2">
               <button
                 type="button"
