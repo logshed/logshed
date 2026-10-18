@@ -9,11 +9,13 @@ test deliveries, and asynchronous dispatch using asyncio.to_thread.
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import ipaddress
 import logging
 import os
 import re
 import socket
+import threading
 from typing import Optional, Tuple, Union
 import urllib.parse
 
@@ -227,7 +229,17 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
         except ValueError:
             pass
 
+    # Hosts of fixed-endpoint plugins. Many such plugins keep a token or ID in the URL host (for
+    # example Discord webhook IDs), but some switch to a self-hosted mode and post to that host
+    # (for example notica://host/token). These hosts are checked when they look like a network
+    # host, and an unresolvable one is not an error. The connect-time check in
+    # _pinned_destination_guard covers whatever the plugin actually connects to.
+    fixed_plugin_hosts: list[str] = []
+
     for server in ap_obj:
+        shost = getattr(server, "host", None)
+        shost = shost.strip() if isinstance(shost, str) else None
+
         # If the plugin uses a fixed public cloud endpoint, verify that endpoint host
         cloud_url = getattr(server, "notify_url", None)
         if (
@@ -238,44 +250,87 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
             cloud_host = urllib.parse.urlsplit(cloud_url).hostname
             if cloud_host and cloud_host not in hosts_to_verify:
                 hosts_to_verify.append(cloud_host)
+            if shost and _looks_like_network_host(shost) and shost not in fixed_plugin_hosts:
+                fixed_plugin_hosts.append(shost)
             continue
 
-        shost = getattr(server, "host", None)
         if shost and shost not in hosts_to_verify:
             hosts_to_verify.append(shost)
 
     if not hosts_to_verify and hostname:
         hosts_to_verify.append(hostname)
 
+    for host_target in fixed_plugin_hosts:
+        if host_target in hosts_to_verify:
+            continue
+        is_safe, err = _check_host_target(host_target, allow_private, require_resolution=False)
+        if not is_safe:
+            return False, err
+
     for host_target in hosts_to_verify:
-        clean_target = host_target.lower().rstrip(".").strip("[]")
-        if clean_target == "localhost" or clean_target.endswith(".localhost"):
-            return False, f"Container loopback target '{host_target}' is not allowed."
+        is_safe, err = _check_host_target(host_target, allow_private, require_resolution=True)
+        if not is_safe:
+            return False, err
 
+    return True, None
+
+
+def _looks_like_network_host(host: str) -> bool:
+    """True for an IP literal, localhost or a dotted name with letters; False for bare tokens and IDs."""
+    clean = host.lower().rstrip(".").strip("[]")
+    if not clean:
+        return False
+    if clean == "localhost" or clean.endswith(".localhost"):
+        return True
+    try:
+        ipaddress.ip_address(clean)
+        return True
+    except ValueError:
+        pass
+    return "." in clean and any(ch.isalpha() for ch in clean)
+
+
+def _check_host_target(
+    host_target: str,
+    allow_private: bool,
+    require_resolution: bool,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Check one destination host (IP literal or resolved name) against the blocked ranges.
+    With require_resolution False, a name that does not resolve passes (it cannot be reached).
+    """
+    clean_target = host_target.lower().rstrip(".").strip("[]")
+    if clean_target == "localhost" or clean_target.endswith(".localhost"):
+        return False, f"Container loopback target '{host_target}' is not allowed."
+
+    try:
+        ip_obj = ipaddress.ip_address(clean_target)
+    except ValueError:
+        ip_obj = None
+    if ip_obj is not None:
+        return _check_ip_address_safety(ip_obj, allow_private)
+
+    # Hostname is not an IP literal; resolve via socket.getaddrinfo
+    try:
+        addr_info = socket.getaddrinfo(clean_target, None)
+    except (socket.gaierror, socket.herror, OSError, Exception) as dns_err:
+        logger.debug(f"Could not resolve host '{host_target}' during validation: {dns_err}")
+        if not require_resolution:
+            return True, None
+        return False, f"Unable to resolve destination hostname '{host_target}'"
+    if not addr_info:
+        if not require_resolution:
+            return True, None
+        return False, f"Unable to resolve destination hostname '{host_target}'"
+    for addr in addr_info:
+        resolved_ip_str = addr[4][0]
         try:
-            ip_obj = ipaddress.ip_address(clean_target)
-            is_safe, err = _check_ip_address_safety(ip_obj, allow_private)
-            if not is_safe:
-                return False, err
+            resolved_ip = ipaddress.ip_address(resolved_ip_str.strip("[]"))
         except ValueError:
-            # Hostname is not an IP literal; resolve via socket.getaddrinfo
-            try:
-                addr_info = socket.getaddrinfo(clean_target, None)
-                if not addr_info:
-                    return False, f"Unable to resolve destination hostname '{host_target}'"
-                for addr in addr_info:
-                    resolved_ip_str = addr[4][0]
-                    try:
-                        resolved_ip = ipaddress.ip_address(resolved_ip_str.strip("[]"))
-                        is_safe, err = _check_ip_address_safety(resolved_ip, allow_private)
-                        if not is_safe:
-                            return False, err
-                    except ValueError:
-                        continue
-            except (socket.gaierror, socket.herror, OSError, Exception) as dns_err:
-                logger.debug(f"Could not resolve host '{host_target}' during validation: {dns_err}")
-                return False, f"Unable to resolve destination hostname '{host_target}'"
-
+            continue
+        is_safe, err = _check_ip_address_safety(resolved_ip, allow_private)
+        if not is_safe:
+            return False, err
     return True, None
 
 
@@ -423,6 +478,112 @@ def _safe_get_redirect_target(self, resp):
 requests.sessions.SessionRedirectMixin.get_redirect_target = _safe_get_redirect_target
 
 
+# ---------------------------------------------------------------------------
+# Connect-time destination pinning (DNS rebinding protection)
+# ---------------------------------------------------------------------------
+#
+# validate_notification_url resolves names once, but Apprise (through requests/urllib3, smtplib
+# and similar) resolves them again when it connects, so a DNS answer can change in between.
+# socket.getaddrinfo is wrapped once, process-wide. The wrapper only acts in a thread that is
+# inside _pinned_destination_guard (a notification dispatch or channel test): there every
+# address a lookup returns, which is the address the client then connects to, is checked
+# against the same blocklist and the lookup fails if any address is blocked. Other threads,
+# including the event loop's resolver threads, are not affected. Apprise runs inside the guard
+# with async_mode off so that every send happens in the guarded thread.
+
+_dispatch_guard = threading.local()
+
+
+class BlockedNotificationDestinationError(OSError):
+    """A notification connection resolved to a blocked address at connect time."""
+
+
+def _port_number(port) -> Optional[int]:
+    if isinstance(port, int):
+        return port
+    if isinstance(port, (str, bytes)):
+        try:
+            return int(port)
+        except ValueError:
+            return None
+    return None
+
+
+def _guarded_getaddrinfo(host, port, *args, **kwargs):
+    results = _system_getaddrinfo(host, port, *args, **kwargs)
+    allow_private = getattr(_dispatch_guard, "allow_private", None)
+    if allow_private is None:
+        return results
+
+    port_num = _port_number(port)
+    if port_num in _BLOCKED_PORTS:
+        logger.warning(f"Blocked notification connection to port {port_num} at connect time.")
+        raise BlockedNotificationDestinationError(
+            f"Notification destination port {port_num} is blocked to protect container control sockets."
+        )
+    for res in results:
+        ip_str = str(res[4][0]).split("%", 1)[0].strip("[]")
+        try:
+            ip_obj = ipaddress.ip_address(ip_str)
+        except ValueError:
+            is_safe, err = False, f"Notification destination address '{ip_str}' is not an IP address."
+        else:
+            is_safe, err = _check_ip_address_safety(ip_obj, allow_private)
+        if not is_safe:
+            logger.warning(f"Blocked notification connection to '{host}' at connect time: {err}")
+            raise BlockedNotificationDestinationError(f"Notification destination '{host}' is blocked: {err}")
+    return results
+
+
+_guarded_getaddrinfo._logshed_notification_guard = True  # type: ignore[attr-defined]
+
+if getattr(socket.getaddrinfo, "_logshed_notification_guard", False):
+    # Module reloaded: keep the original resolver captured by the first import
+    _system_getaddrinfo = socket.getaddrinfo._logshed_system_getaddrinfo  # type: ignore[attr-defined]
+else:
+    _system_getaddrinfo = socket.getaddrinfo
+_guarded_getaddrinfo._logshed_system_getaddrinfo = _system_getaddrinfo  # type: ignore[attr-defined]
+socket.getaddrinfo = _guarded_getaddrinfo
+
+
+@contextmanager
+def _pinned_destination_guard():
+    """Check every address resolved in this thread against the notification blocklist."""
+    from app.core.config import get_cached_setting
+
+    allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
+    previous = getattr(_dispatch_guard, "allow_private", None)
+    _dispatch_guard.allow_private = allow_private
+    try:
+        yield
+    finally:
+        _dispatch_guard.allow_private = previous
+
+
+def _new_dispatch_apprise() -> apprise.Apprise:
+    """Apprise instance that sends from the calling thread, so _pinned_destination_guard applies."""
+    return apprise.Apprise(asset=apprise.AppriseAsset(async_mode=False))
+
+
+# ---------------------------------------------------------------------------
+# Log scrubbing for Apprise errors
+# ---------------------------------------------------------------------------
+
+_URL_IN_TEXT_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://[^\s'\"<>]+")
+# urllib3 and requests errors name the request path without the scheme ("with url: /path?query")
+_URL_PATH_IN_TEXT_RE = re.compile(r"(\burl: )\S+", re.IGNORECASE)
+
+
+def _scrub_error_text(exc: BaseException) -> str:
+    """Exception text safe to log: URLs masked, request paths hidden, secrets redacted."""
+    from app.core.redactor import redact
+
+    text = f"{type(exc).__name__}: {exc}"
+    text = _URL_IN_TEXT_RE.sub(lambda m: mask_notification_url(m.group(0)), text)
+    text = _URL_PATH_IN_TEXT_RE.sub(r"\1/********", text)
+    return redact(text)
+
+
 def _sync_send_notification(
     urls: list[str],
     title: str,
@@ -454,19 +615,20 @@ def _sync_send_notification(
         return False
 
     try:
-        ap_obj = apprise.Apprise()
+        ap_obj = _new_dispatch_apprise()
         for u in safe_urls:
             ap_obj.add(u)
         _configure_apprise_servers(ap_obj)
 
-        success = ap_obj.notify(
-            title=title,
-            body=body,
-            body_format=body_format,
-        )
+        with _pinned_destination_guard():
+            success = ap_obj.notify(
+                title=title,
+                body=body,
+                body_format=body_format,
+            )
         return bool(success)
     except Exception as exc:
-        logger.error(f"Failed to dispatch notification: {exc}")
+        logger.error(f"Failed to dispatch notification: {_scrub_error_text(exc)}")
         return False
 
 
@@ -485,23 +647,25 @@ def _sync_test_channel(
         return False, err or "Invalid or disallowed notification URL."
 
     try:
-        ap_obj = apprise.Apprise()
+        ap_obj = _new_dispatch_apprise()
         added = ap_obj.add(url.strip())
         if not added:
             return False, "Failed to initialize notification target. Please check URL syntax."
         _configure_apprise_servers(ap_obj)
 
-        success = ap_obj.notify(
-            title=title,
-            body=body,
-            body_format=body_format,
-        )
+        with _pinned_destination_guard():
+            success = ap_obj.notify(
+                title=title,
+                body=body,
+                body_format=body_format,
+            )
         if success:
             return True, "Notification sent successfully."
         else:
             return False, "Notification service rejected delivery. Please verify webhook credentials or token permissions."
     except Exception as exc:
-        logger.error(f"Notification delivery test failed: {exc}", exc_info=True)
+        # No exc_info: the stored internal logs would include the raw traceback text
+        logger.error(f"Notification delivery test failed: {_scrub_error_text(exc)}")
         return False, "Notification test delivery failed due to a connection or server error. Please verify host connectivity and credentials."
 
 
@@ -525,7 +689,8 @@ class NotifierService:
         """
         Deliver an immediate test notification to verify connectivity.
         """
-        valid, err = validate_notification_url(url)
+        # validate_notification_url resolves DNS, so it must not run on the event loop
+        valid, err = await asyncio.to_thread(validate_notification_url, url)
         if not valid:
             return False, err or "Invalid notification URL."
 

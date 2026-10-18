@@ -592,3 +592,165 @@ class TestDigestChannelDelete:
 
         after = await client.get("/api/settings", headers=auth_headers)
         assert after.json()["daily_digest_channel_id"] == ids[0]
+
+
+# ===================================================================
+# SSRF pinning, event loop safety and log scrubbing (S-15, S-28, S-33)
+# ===================================================================
+
+_PUBLIC_IP = "93.184.216.34"
+
+
+def _fake_addrinfo(ip: str, port):
+    import socket as socket_mod
+
+    family = socket_mod.AF_INET6 if ":" in ip else socket_mod.AF_INET
+    sockaddr = (ip, int(port or 0), 0, 0) if family == socket_mod.AF_INET6 else (ip, int(port or 0))
+    return [(family, socket_mod.SOCK_STREAM, 6, "", sockaddr)]
+
+
+class TestNotifierDestinationHardening:
+
+    def test_fixed_endpoint_plugin_self_hosted_host_is_validated(self):
+        """notica:// with a path is self-hosted and posts to the URL host, so that host is checked too."""
+        def resolver(host, port, *args, **kwargs):
+            ip = "169.254.169.254" if host == "169.254.169.254.nip.io" else _PUBLIC_IP
+            return _fake_addrinfo(ip, port)
+
+        with patch("_socket.getaddrinfo", side_effect=resolver):
+            valid, err = validate_notification_url("notica://169.254.169.254.nip.io/x/token")
+        assert valid is False
+        assert "169.254" in err
+
+    def test_fixed_endpoint_plugin_token_host_is_not_resolved_as_a_destination(self):
+        """Token-like hosts of fixed-endpoint plugins (Discord webhook IDs) are not treated as destinations."""
+        seen_hosts = []
+
+        def resolver(host, port, *args, **kwargs):
+            seen_hosts.append(host)
+            return _fake_addrinfo(_PUBLIC_IP, port)
+
+        with patch("_socket.getaddrinfo", side_effect=resolver):
+            valid, err = validate_notification_url("discord://2130706433/abcdefghij")
+        assert valid is True, err
+        assert "2130706433" not in seen_hosts
+
+    def _rebinding_patches(self):
+        """Resolve to a public IP while validating and to 127.0.0.1 afterwards (DNS rebinding)."""
+        import socket as socket_mod
+        import app.services.notifier as notifier_mod
+
+        state = {"validating": 0}
+        real_validate = notifier_mod.validate_notification_url
+
+        def tracking_validate(url):
+            state["validating"] += 1
+            try:
+                return real_validate(url)
+            finally:
+                state["validating"] -= 1
+
+        def resolver(host, port, *args, **kwargs):
+            return _fake_addrinfo(_PUBLIC_IP if state["validating"] else "127.0.0.1", port)
+
+        return (
+            patch.object(notifier_mod, "validate_notification_url", side_effect=tracking_validate),
+            patch("_socket.getaddrinfo", side_effect=resolver),
+            patch.object(socket_mod.socket, "connect", side_effect=ConnectionRefusedError("refused in test")),
+        )
+
+    def test_dispatch_refuses_destination_that_rebinds_to_loopback(self, caplog):
+        import logging
+        from app.services.notifier import _sync_send_notification
+
+        p_validate, p_resolver, p_connect = self._rebinding_patches()
+        with p_validate, p_resolver, p_connect as mock_connect:
+            with caplog.at_level(logging.WARNING, logger="app.services.notifier"):
+                ok = _sync_send_notification(["json://rebind.example.com:8080/hook"], "Alert", "Body")
+
+        assert ok is False
+        connected = [c.args[0] for c in mock_connect.call_args_list]
+        assert not any(addr[0] == "127.0.0.1" for addr in connected), connected
+        assert any("at connect time" in r.getMessage() for r in caplog.records)
+
+    def test_channel_test_refuses_destination_that_rebinds_to_loopback(self, caplog):
+        import logging
+        from app.services.notifier import _sync_test_channel
+
+        p_validate, p_resolver, p_connect = self._rebinding_patches()
+        with p_validate, p_resolver, p_connect as mock_connect:
+            with caplog.at_level(logging.WARNING, logger="app.services.notifier"):
+                ok, _msg = _sync_test_channel("json://rebind.example.com:8080/hook", "Test", "Body")
+
+        assert ok is False
+        connected = [c.args[0] for c in mock_connect.call_args_list]
+        assert not any(addr[0] == "127.0.0.1" for addr in connected), connected
+        assert any("at connect time" in r.getMessage() for r in caplog.records)
+
+    def test_dispatch_still_connects_to_public_destination(self):
+        import socket as socket_mod
+        from app.services.notifier import _sync_send_notification
+
+        with patch("_socket.getaddrinfo", side_effect=lambda host, port, *a, **k: _fake_addrinfo(_PUBLIC_IP, port)):
+            with patch.object(socket_mod.socket, "connect", side_effect=ConnectionRefusedError("refused")) as mock_connect:
+                _sync_send_notification(["json://hooks.example.com:8080/hook"], "Alert", "Body")
+
+        assert (_PUBLIC_IP, 8080) in [c.args[0] for c in mock_connect.call_args_list]
+
+    def test_connect_time_check_only_applies_inside_notification_dispatch(self):
+        import socket as socket_mod
+
+        with patch("_socket.getaddrinfo", side_effect=lambda host, port, *a, **k: _fake_addrinfo("127.0.0.1", port)):
+            from app.services.notifier import _sync_send_notification
+
+            _sync_send_notification([], "t", "b")
+            # Outside a dispatch (and after one), loopback lookups still work for the rest of LogShed
+            assert socket_mod.getaddrinfo("localhost", 80)[0][4][0] == "127.0.0.1"
+
+    @pytest.mark.asyncio
+    async def test_test_channel_validates_off_the_event_loop(self):
+        import threading
+        import app.services.notifier as notifier_mod
+
+        loop_thread = threading.get_ident()
+        threads = []
+
+        def recording_validate(url):
+            threads.append(threading.get_ident())
+            return False, "blocked in test"
+
+        with patch.object(notifier_mod, "validate_notification_url", side_effect=recording_validate):
+            success, msg = await NotifierService().test_channel("json://example.com/hook")
+
+        assert success is False
+        assert msg == "blocked in test"
+        assert threads and loop_thread not in threads
+
+    @pytest.mark.parametrize(
+        "error_text",
+        [
+            "POST https://discord.com/api/webhooks/123456/SuperSecretToken123 failed",
+            "HTTPSConnectionPool(host='discord.com', port=443): Max retries exceeded with url: "
+            "/api/webhooks/123456/SuperSecretToken123 (Caused by NewConnectionError)",
+            "bad request token=SuperSecretToken123",
+        ],
+    )
+    @pytest.mark.parametrize("path", ["dispatch", "test_channel"])
+    def test_apprise_errors_are_logged_without_secrets(self, caplog, error_text, path):
+        import logging
+        from app.services.notifier import _sync_send_notification, _sync_test_channel
+
+        url = "discord://123456/SuperSecretToken123"
+        with patch("_socket.getaddrinfo", side_effect=lambda host, port, *a, **k: _fake_addrinfo(_PUBLIC_IP, port)):
+            with patch("apprise.Apprise.notify", side_effect=RuntimeError(error_text)):
+                with caplog.at_level(logging.DEBUG, logger="app.services.notifier"):
+                    if path == "dispatch":
+                        assert _sync_send_notification([url], "t", "b") is False
+                    else:
+                        assert _sync_test_channel(url, "t", "b")[0] is False
+
+        records = [r for r in caplog.records if r.name == "app.services.notifier"]
+        assert records
+        for record in records:
+            assert "SuperSecretToken123" not in record.getMessage()
+            assert not record.exc_info
