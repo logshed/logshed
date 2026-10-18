@@ -265,4 +265,94 @@ describe('NotificationsCard Component', () => {
       ).toBeInTheDocument();
     });
   });
+
+  const discordChannel = {
+    id: 1,
+    name: 'Homelab Discord',
+    url: 'discord://1...9/a...f',
+    is_enabled: true,
+    created_at: '2026-09-18T12:00:00Z',
+    updated_at: '2026-09-18T12:00:00Z',
+  };
+
+  it('warns that the digest was saved but not delivered when notification_sent is false', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValue([discordChannel]);
+    vi.mocked(settingsApi.fetchSettings).mockResolvedValue({
+      daily_digest_enabled: true,
+      daily_digest_channel_id: 1,
+    } as any);
+    vi.mocked(notifApi.sendDailyDigest).mockResolvedValueOnce({
+      status: 'ok',
+      total_logs: 10,
+      error_count: 0,
+      top_errors: [],
+      top_services: [],
+      storage_delta: '+1 KB',
+      channel_id: 1,
+      notification_sent: false,
+      triggered_at: '2026-09-28T12:00:00Z',
+    });
+
+    render(<NotificationsCard />);
+    await waitFor(() => {
+      expect(screen.getByText('Send Digest Now')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Send Digest Now'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Digest saved to History, but delivery to Homelab Discord failed/i)
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/dispatched successfully/i)).not.toBeInTheDocument();
+  });
+
+  it('resets the digest channel select after the digest channel is deleted', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValue([discordChannel]);
+    vi.mocked(notifApi.deleteNotificationChannel).mockResolvedValue({ status: 'ok' } as any);
+    vi.mocked(settingsApi.fetchSettings).mockResolvedValue({
+      daily_digest_enabled: true,
+      daily_digest_channel_id: 1,
+    } as any);
+    const onSettingsSaved = vi.fn();
+
+    render(<NotificationsCard onSettingsSaved={onSettingsSaved} />);
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Target Channel/i) as HTMLSelectElement).value).toBe('1');
+    });
+
+    fireEvent.click(screen.getByLabelText('Delete Homelab Discord'));
+    fireEvent.click(screen.getByText('Delete Target'));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Target Channel/i) as HTMLSelectElement).value).toBe('');
+    });
+    expect(onSettingsSaved).toHaveBeenCalled();
+  });
+
+  it('sends only one delete request when the delete button is clicked twice', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValue([discordChannel]);
+    vi.mocked(settingsApi.fetchSettings).mockResolvedValue({
+      daily_digest_enabled: false,
+      daily_digest_channel_id: null,
+    } as any);
+    let resolveDelete: (v: any) => void = () => {};
+    vi.mocked(notifApi.deleteNotificationChannel).mockImplementation(
+      () => new Promise((resolve) => { resolveDelete = resolve; })
+    );
+
+    render(<NotificationsCard />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Delete Homelab Discord')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText('Delete Homelab Discord'));
+    const confirm = screen.getByText('Delete Target');
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(notifApi.deleteNotificationChannel).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveDelete({ status: 'ok' });
+    });
+  });
 });

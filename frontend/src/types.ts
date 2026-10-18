@@ -449,7 +449,6 @@ export interface DailyDigestRunResponse {
   top_errors: Array<{ entity: string; error_count: number }>;
   top_services: Array<{ service: string; log_count: number }>;
   storage_delta: string;
-  ai_summary?: string | null;
   channel_id?: number | null;
   notification_sent: boolean;
   triggered_at?: string | null;

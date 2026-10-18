@@ -78,6 +78,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   const [digestLastRun, setDigestLastRun] = useState<string | null>(null);
   const [isSavingDigest, setIsSavingDigest] = useState<boolean>(false);
   const [isSendingDigest, setIsSendingDigest] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   const isDigestControlled = onDigestEnabledChange !== undefined;
   const currentDigestEnabled = isDigestControlled ? Boolean(propsDigestEnabled) : digestEnabled;
@@ -150,13 +151,20 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           : hasActiveChannel
           ? 'All Enabled Channels'
           : null;
-        const successMessage = channelLabel
-          ? `Daily digest dispatched successfully to ${channelLabel} and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`
-          : `Daily digest generated and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`;
-        setFeedbackMsg({
-          text: successMessage,
-          isError: false,
-        });
+        if (channelLabel && !res.notification_sent) {
+          setFeedbackMsg({
+            text: `Digest saved to History, but delivery to ${channelLabel} failed (${res.total_logs.toLocaleString()} logs analyzed). Check the target and try again.`,
+            isError: true,
+          });
+        } else {
+          const successMessage = channelLabel
+            ? `Daily digest dispatched successfully to ${channelLabel} and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`
+            : `Daily digest generated and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`;
+          setFeedbackMsg({
+            text: successMessage,
+            isError: false,
+          });
+        }
         if (res.triggered_at) {
           setDigestLastRun(res.triggered_at);
         }
@@ -304,14 +312,25 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   };
 
   const handleConfirmDelete = async () => {
-    if (!channelToDelete) return;
+    if (!channelToDelete || isDeleting) return;
+    setIsDeleting(true);
     try {
       await deleteNotificationChannel(channelToDelete.id);
       setChannels((prev) => prev.filter((c) => c.id !== channelToDelete.id));
       setFeedbackMsg({ text: `Notification target "${channelToDelete.name}" deleted.`, isError: false });
       setChannelToDelete(null);
+      // The server clears the digest channel when its target is deleted: mirror that here
+      if (currentDigestChannelId === channelToDelete.id) {
+        setDigestChannelId(null);
+        setInternalSettings((prev) => (prev ? { ...prev, daily_digest_channel_id: null } : prev));
+        if (onSettingsSaved) {
+          await onSettingsSaved();
+        }
+      }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to delete notification target.', isError: true });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -768,7 +787,8 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             <button
               type="button"
               onClick={handleConfirmDelete}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-md"
+              disabled={isDeleting}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Delete Target</span>
