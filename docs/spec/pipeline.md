@@ -19,6 +19,9 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Parsing Standards:** Complete parsing for RFC 3164 (BSD syslog) and RFC 5424 (IETF syslog with structured data).
 - **TCP Framing:** Implements RFC 6587 octet-counted framing and newline-delimited framing for stream separation.
 - **Connection Ceilings:** Default TCP connection ceiling is 250 concurrent connections (configurable via `SYSLOG_MAX_TCP_CONNECTIONS`). TCP keepalive is enabled (`SO_KEEPALIVE`).
+- **Per-IP Connection Cap:** One source IP may hold at most 20 concurrent TCP connections (`SYSLOG_MAX_TCP_CONNECTIONS_PER_IP`, environment only, values below 1 or not a number fall back to 20), so one host cannot use every slot. Extra connections are refused with a warning.
+- **Message Size:** Messages longer than 65,536 characters are cut and end with a `[truncated]` marker.
+- **Startup and Shutdown:** If the port is in use at startup, the listener retries with backoff. Shutdown does not wait for connected TCP senders, and messages already received but not yet parsed are processed first.
 - **TCP Inactivity Timeout:** Defaults to disabled (`0.0`, configurable via `SYSLOG_TCP_INACTIVITY_TIMEOUT`) to prevent disconnection of persistent log forwarders during idle periods.
 - **Fallback Severity:** Unparseable messages default to severity 6 (Info) while preserving the complete raw message content.
 
@@ -78,6 +81,17 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Alert Rules Evaluation Order:**
   - Alert rules evaluate in user-configured sequence (`ORDER BY display_order ASC, id ASC`).
   - Each rule evaluates within its own sliding window, and notification dispatch within a batch deterministically follows this configured order.
+
+### 5.1 HTTP Ingest (`POST /api/v1/ingest`)
+
+- **Implementation Reference:** [backend/app/api/ingest.py](../../backend/app/api/ingest.py)
+- **Limits:** The body may be at most `INGEST_MAX_BODY_BYTES` (default 5 MiB) and hold at most 10,000 entries (`413` otherwise). `message` and `raw` are cut to 64 KB each.
+- **Reserved identities:** A request is rejected as a whole (`422`, nothing stored) if any entry uses `source_ip` `docker` or `docker:*`, or `127.0.0.1` with `source_alias` `logshed`.
+- **Timestamps:** A timestamp older than `MAX_RETENTION_DAYS` or more than 5 minutes ahead is replaced with the received time.
+- **No merging:** Each record is stored as its own entry. HTTP records skip the multiline assembler, so indented records or records starting with `at ...` are never merged into the previous one. Drop rules and maintenance `drop_errors` sessions always apply, and a full queue does not block the request.
+- **Field cleanup:** An empty severity is stored as info (6); ANSI and control characters are removed from `raw`.
+- **Response:** `accepted` (entries queued) and `dropped` (entries removed by drop rules or maintenance sessions, or lost to a full queue); `ingested` equals `accepted`.
+- **Docker streams:** Container output that arrives without newlines (non-TTY) is split into 64 KB entries instead of growing an unbounded buffer.
 
 ## 6. Internal Application Logs (`InternalLogHandler`)
 

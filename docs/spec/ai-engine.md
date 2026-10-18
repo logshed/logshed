@@ -108,6 +108,9 @@ The model response is formatted in Markdown with three designated sections, pars
   - Authentication tokens (Bearer tokens, JWT headers and signatures, GitHub and Slack personal access tokens).
   - Private keys, certificates, and hashed credential lines.
   - Common password assignments and key-value secret pairs.
+  - Secrets in JSON and quoted keys (double or single quotes, escaped JSON inside a log message, quoted values with spaces), `Cookie` and `Set-Cookie` headers (the rest of the line after `Cookie:`), the user name in any `scheme://user@host` URL, Discord webhook URLs, Telegram bot tokens, Google API keys, Stripe live keys, GitLab and GitHub fine-grained tokens, bare LogShed API tokens, encrypted and PGP private keys (text after a lone `-----BEGIN ... PRIVATE KEY-----` up to the next punctuation), and signed-URL `sig=` and `signature=` parameters.
+- **Bounded Cost:** Matching runs in linear time on hostile input. Lines longer than 16,384 characters in redacted output (AI prompts, MCP and external API responses, alert samples) are cut and end with a `...[truncated]` marker.
+- **Known Limit:** The redactor sees one message at a time, so a private key split across separate syslog messages (one line each) is not caught. Redaction is best-effort.
 - **Preview Assurance:** On-demand requests present the scrubbed preview text in the modal prior to execution, ensuring the operator can review redacted text before dispatch.
 
 ---

@@ -17,7 +17,7 @@ Single Docker container running Python 3.12 (`asyncio`) + FastAPI backend servin
   8. `DropFilterWorker`: Flushes in-memory drop rule match counts to SQLite every 30 seconds to prevent database write contention.
   9. `DailyDigestWorker`: Compiles and delivers scheduled 24-hour analytical rollup digest notifications across configured channels. This worker performs deterministic SQL metric aggregations (ingestion volume, error counts by entity, noisy services, storage footprint delta) and operates independently without AI models or prompt synthesis.
 - **Failure Isolation:** Worker exceptions must be caught, logged, and restarted with exponential backoff without crashing the event loop.
-- **Security & Privileges:** Container starts as root to allow [`entrypoint.sh`](../../entrypoint.sh) to configure permissions. It reads `PUID` and `PGID` environment variables (defaulting to 1000:1000), maps the `appuser` to match, dynamically detects `/var/run/docker.sock` GID and adds the user to that group, changes ownership of `/data`, and drops privileges via `gosu appuser`.
+- **Security & Privileges:** Container starts as root to allow [`entrypoint.sh`](../../entrypoint.sh) to configure permissions. It reads `PUID` and `PGID` environment variables (defaulting to 1000:1000; `0` is refused unless `ALLOW_ROOT=true`), maps the `appuser` to match, dynamically detects the Docker socket GID and adds the user to that group (unless the socket is owned by group `0`: then the root group is not joined, a warning recommends a Docker socket proxy, and Docker collection from that socket fails), changes ownership of `/data`, and drops privileges via `gosu appuser`.
 - **Docker Endpoints:** Primary daemon connects via `DOCKER_HOST` (`unix:///var/run/docker.sock` or `tcp://proxy:2375` for `tecnativa/docker-socket-proxy`). Additional remote Docker hosts can be pre-seeded via `DOCKER_ADDITIONAL_HOSTS` and managed dynamically through the Web UI and REST API.
 
 ### 1.1 Configuration Architecture: Bootstrap Primitives vs. Runtime Settings
@@ -34,8 +34,15 @@ The following environment variables are supplied at container start and are stri
 - `DOCKER_HOST` - Docker endpoint socket or proxy address (defaults to `unix:///var/run/docker.sock`).
 - `DOCKER_ADDITIONAL_HOSTS` - JSON array of remote Docker host endpoints to pre-seed on container boot.
 - `MAX_RETENTION_DAYS` - Hard ceiling in days for the log retention slider in the UI (defaults to `30`, minimum `1`).
-- `ENVIRONMENT` / `DEBUG` - Development origin and debug mode toggle (`production` / `false`).
-- `CORS_ORIGINS` - Comma-separated list of allowed cross-origin hosts (defaults to empty in production).
+- `ENVIRONMENT` / `DEBUG` - `ENVIRONMENT=development` adds the localhost development CORS origins and debug logging (`production` by default). `DEBUG=true` alone no longer trusts localhost origins.
+- `CORS_ORIGINS` - Comma-separated list of allowed cross-origin hosts (defaults to empty in production). A `*` entry is ignored and logged as an error.
+- `ENABLE_API_DOCS` - Serves `/docs`, `/redoc` and `/openapi.json` (default `true`).
+- `ALLOW_ROOT` - Lets the container run with `PUID` or `PGID` set to `0` (default `false`).
+- `DOCKER_ALLOWED_SOCKETS` - Comma-separated extra Unix socket paths accepted for Docker hosts whose path does not end in `docker.sock`.
+- `INGEST_MAX_BODY_BYTES` - Largest `POST /api/v1/ingest` body in bytes (default 5 MiB).
+- `USER_REGEX_TIMEOUT_MS` - Per-match time limit for user alert and drop rule patterns (default `50`).
+- `MCP_ALLOW_QUERY_TOKEN` - Accepts MCP API tokens in the URL query string (default `false`, deprecated).
+- `SYSLOG_MAX_TCP_CONNECTIONS_PER_IP` - Concurrent Syslog TCP connections allowed from one source IP (default `20`; environment only, not a runtime setting).
 
 *Storage Compatibility Note:* `DB_PATH` and `SECRET_KEY_PATH` remain supported as backward-compatible path overrides.
 
@@ -56,8 +63,8 @@ The runtime operational and advanced settings are:
 - `enable_docker`: Toggle Docker log collector (Env: `ENABLE_DOCKER`, default: `True`).
 - `docker_exclude_containers`: Comma-separated container names/IDs to ignore (Env: `DOCKER_EXCLUDE_CONTAINERS`, default: `""`).
 - `docker_source_alias`: Source attribution alias for Docker logs (Env: `DOCKER_SOURCE_ALIAS`, default: `"docker"`).
-- `trusted_proxies`: Comma-separated proxy IPs or CIDR blocks for client IP resolution (Env: `TRUSTED_PROXIES`, default: `""`).
-- `trust_docker_proxies`: Automatically trust standard Docker bridge networks `172.16.0.0/12` (Env: `TRUST_DOCKER_PROXIES`, legacy aliases: `TRUST_DOCKER_NETWORKS`, `TRUST_DOCKER_GATEWAY`, default: `False`).
+- `trusted_proxies`: Comma-separated proxy IPs or CIDR blocks for client IP resolution (Env: `TRUSTED_PROXIES`, default: `""`). Recommended over `trust_docker_proxies`.
+- `trust_docker_proxies`: Trusts every address in `172.16.0.0/12` to set `X-Forwarded-For` (Env: `TRUST_DOCKER_PROXIES`, legacy aliases: `TRUST_DOCKER_NETWORKS`, `TRUST_DOCKER_GATEWAY`, default: `False`). If clients can reach LogShed through the Docker userland proxy or hairpin NAT, they appear as the bridge gateway and can spoof their address to avoid per-address login limits; the global failed-login limit still applies. Prefer `TRUSTED_PROXIES=<reverse proxy container IP>`. LogShed logs a warning at startup while this option is in effect.
 - `cookie_secure`: Force `Secure` flag on session cookies behind SSL proxies stripping `X-Forwarded-Proto` (Env: `COOKIE_SECURE`, default: `False`).
 - `syslog_max_tcp_connections`: Maximum concurrent Syslog TCP connections (Env: `SYSLOG_MAX_TCP_CONNECTIONS`, default: `250`).
 - `syslog_tcp_inactivity_timeout`: Syslog TCP client inactivity timeout in seconds (Env: `SYSLOG_TCP_INACTIVITY_TIMEOUT`, default: `0.0` - disabled).

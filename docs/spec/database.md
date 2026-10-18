@@ -169,7 +169,6 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
        created_at DATETIME NOT NULL
    );
 
-   CREATE INDEX IF NOT EXISTS idx_drop_rules_enabled ON drop_rules(is_enabled);
    ```
 
 3. **Saved Views (`saved_views`):**
@@ -223,7 +222,6 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
        created_at DATETIME NOT NULL
    );
 
-   CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(is_enabled);
    ```
 
 6. **Alert Incident History (`alert_history`):**
@@ -246,7 +244,6 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
    );
 
    CREATE INDEX IF NOT EXISTS idx_alert_history_triggered_at ON alert_history(triggered_at DESC);
-   CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON alert_history(rule_id);
    CREATE INDEX IF NOT EXISTS idx_alert_history_rule_time ON alert_history(rule_id, triggered_at DESC);
    CREATE INDEX IF NOT EXISTS idx_alert_history_rule_name ON alert_history(rule_name, triggered_at DESC);
    CREATE INDEX IF NOT EXISTS idx_alert_history_ai_audit_id ON alert_history(ai_audit_id);
@@ -295,7 +292,6 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
       last_used_at DATETIME,
       created_by TEXT DEFAULT 'admin'
   );
-  CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
   CREATE INDEX IF NOT EXISTS idx_api_tokens_expires ON api_tokens(expires_at);
   ```
 - **Maintenance Sessions Table (Multi-Session Tracking):**
@@ -337,7 +333,10 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
   CREATE INDEX IF NOT EXISTS idx_ai_conversation_audit_id ON ai_conversation_messages(audit_id, created_at ASC);
   ```
   Each follow-up question and its reply are written in one `BEGIN IMMEDIATE` transaction that re-checks the 10-question limit, so concurrent requests cannot exceed it. Deleting an `ai_audit_log` row (single history delete, clear all history, or retention pruning) removes its thread through `ON DELETE CASCADE` (every connection enables `PRAGMA foreign_keys=ON`).
-- **Pre-release v3 Databases:** On startup, a database already at `user_version = 3` that is missing `docker_endpoints` or `ai_conversation_messages` (from an earlier v1.3.0 pre-release) re-runs the idempotent `migrate_v3` to add them.
+- **Atomic Migrations:** Each migration step and its `user_version` bump run in one `BEGIN IMMEDIATE` transaction, so a crash during an upgrade rolls back instead of leaving rules without an order or a database that cannot start.
+- **Removed Redundant Indexes:** `idx_api_tokens_hash` (the `UNIQUE` constraint on `token_hash` already indexes it), `idx_alert_history_rule_id` (covered by `idx_alert_history_rule_time`), `idx_drop_rules_enabled` and `idx_alert_rules_enabled` (covered by the `idx_*_rules_order` indexes) are no longer created and are dropped from existing databases.
+- **Docker Endpoints Table:** `docker_endpoints` holds `id`, `name` (unique), `url`, `source_alias`, `enabled`, `tls_enabled`, `ca_cert`, `client_cert`, `client_key` (encrypted), `exclude_containers`, `created_at`, `updated_at` and `verify_hostname INTEGER NOT NULL DEFAULT 1`. `verify_hostname` makes the TLS handshake check the daemon certificate against the host name; existing rows get `1`.
+- **Startup Repair (`repair_v3`):** Runs on every start and is idempotent. It re-runs `migrate_v3` when `docker_endpoints` or `ai_conversation_messages` is missing (databases from an earlier v1.3.0 pre-release), adds `docker_endpoints.verify_hostname` when absent, adds missing `display_order` columns, numbers rules by id when a table holds more than one rule and none was ever ordered, creates the `idx_*_rules_order` indexes, and drops the redundant indexes above.
 - **System Identity Setup:**
   - `server_name` defaults to `'LogShed'` in `system_settings` table.
   - `instance_id` set to persistent UUID4 if not already present.
@@ -358,7 +357,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
 - **Crash Resilience & State Tracking:** `fts_index_state.last_indexed_id` is committed atomically with each FTS insert batch. On worker crash or restart, indexing resumes from `last_indexed_id + 1`, eliminating duplicate or missing FTS rows.
 - **Search Consistency Middleware:** When incoming search queries arrive at `/api/logs?query=...`, the middleware signals the supervised `FTSIndexWorker` via non-blocking event notification (`worker.notify_new_logs()`) to accelerate catch-up without stalling query execution threads. This ensures pending logs are indexed promptly while avoiding query latency bottlenecks under ingestion load.
 - **Retention Coordination:** Retention pruning ([`backend/app/services/retention.py`](../../backend/app/services/retention.py)) coordinates with `fts_index_state.last_indexed_id`. During retention pruning (`execute_prune`), pending unindexed logs are indexed first (`index_pending_logs`), and deletions enforce `AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)` to guarantee no unindexed log records are ever purged without being indexed, preventing orphaned FTS records or unindexed log deletion.
-- **Graceful Shutdown Sequencing:** Lifespan shutdown stops log collectors (`SyslogServer`, `DockerTailer`), flushes the multiline assembler, stops `QueueConsumer` (drains queue to DB), then stops `FTSIndexWorker` (flushes pending unindexed logs to `logs_fts`), followed by `PruneWorker`, `StorageMetricsWorker`, `AlertEvaluator`, `DailyDigestWorker`, notification executor, regex executor, and flushes drop filter counts.
+- **Graceful Shutdown Sequencing:** Lifespan shutdown stops log collectors (`SyslogServer`, `DockerTailer`), flushes the multiline assembler, stops `QueueConsumer` (drains queue to DB), then stops `FTSIndexWorker` (flushes pending unindexed logs to `logs_fts`), followed by `PruneWorker`, `StorageMetricsWorker`, `AlertEvaluator`, `DailyDigestWorker`, notification executor, and flushes drop filter counts.
 
 ### 2.5 Thread-Local Connection Model & Concurrency
 - **Thread-Local Read Connection Reuse:** In [`backend/app/api/deps.py`](../../backend/app/api/deps.py), synchronous database queries are dispatched to worker threads via `run_db_query(fn, custom_db_path)` using `asyncio.to_thread()`. `get_thread_read_connection(db_path: Path) -> sqlite3.Connection` maintains a thread-local dictionary `_thread_local.connections` keyed by resolved database path, reusing connections across sequential queries on worker threads.
@@ -390,8 +389,8 @@ Daily task runs iterative batch pruning coordinated with the FTS indexing waterm
    - Maintenance window rows are deleted when their session has ended and `ended_at` is older than the cutoff (a maintenance row whose session no longer exists falls back to `triggered_at`); running sessions are never deleted. Ended sessions older than the cutoff are then deleted too.
    - The `ai_audit_log` row linked by `ai_audit_id` is deleted with its history row unless a kept history row still references it. Unreferenced `ai_audit_log` rows older than the cutoff are deleted as well. Follow-up conversation threads in `ai_conversation_messages` are removed with their `ai_audit_log` row by cascade.
    - The prune result reports `deleted_logs` (logs only), `deleted_history` and `deleted_ai_audit` separately.
-4. Execute FTS5 index compaction:
-   `INSERT INTO logs_fts(logs_fts) VALUES('optimize');`
+4. Compact the FTS5 index in short merge steps:
+   `INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', N);` (`merge_fts_index` in `backend/app/services/fts_indexer.py`). Each step writes 500 pages and commits on its own, with at most 200 steps per run; the first step (a negative page count) starts a full merge and later steps continue it, and an unfinished merge carries on at the next run. A single `optimize` is not used because it held the write lock until the whole index was rewritten, long enough to make ingestion inserts wait or fail.
 5. Checkpoint and truncate the WAL:
    `PRAGMA wal_checkpoint(TRUNCATE);`
 
