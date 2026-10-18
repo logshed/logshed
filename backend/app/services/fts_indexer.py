@@ -235,7 +235,8 @@ class FTSIndexWorker:
                         break
 
                 async with self._index_lock:
-                    if self._paused:
+                    # stop() may have begun while this pass waited for the lock
+                    if self._paused or not self._running:
                         continue
                     indexed_count = await asyncio.to_thread(
                         self._index_pending_chunk, self._batch_size
@@ -282,5 +283,8 @@ class FTSIndexWorker:
         except Exception as e:
             logger.warning(f"Error draining FTS index on shutdown: {e}")
         finally:
-            await asyncio.to_thread(self.close)
+            # Wait for a pass still running in a worker thread on the persistent connection:
+            # closing a sqlite3 connection while another thread uses it crashes the process
+            async with self._index_lock:
+                await asyncio.to_thread(self.close)
         logger.info("FTSIndexWorker drain complete.")

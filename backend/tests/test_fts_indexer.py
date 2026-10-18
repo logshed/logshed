@@ -245,6 +245,56 @@ class TestFTSIndexWorkerDurableRecovery:
         assert last_id == 25
         assert fts_count == 25
 
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_running_pass_before_closing_connection(self, db_path: Path, monkeypatch):
+        """
+        stop() must not close the persistent connection while an indexing pass still uses it in a
+        worker thread (closing a sqlite3 connection that another thread is using crashes the process).
+        """
+        worker = FTSIndexWorker(db_path, batch_size=10, poll_interval=0.05)
+        in_pass = threading.Event()
+        release = threading.Event()
+        drained = threading.Event()
+        events: list[str] = []
+        real_close = worker.close
+        real_drain = fts_indexer_mod.index_pending_logs
+
+        def _slow_pass(batch_size: int) -> int:
+            worker._get_connection()
+            in_pass.set()
+            release.wait(timeout=5)
+            events.append("pass done")
+            return 0
+
+        def _recording_close() -> None:
+            events.append("close")
+            real_close()
+
+        def _recording_drain(*args, **kwargs):
+            try:
+                return real_drain(*args, **kwargs)
+            finally:
+                drained.set()
+
+        monkeypatch.setattr(worker, "_index_pending_chunk", _slow_pass)
+        monkeypatch.setattr(worker, "close", _recording_close)
+        monkeypatch.setattr(fts_indexer_mod, "index_pending_logs", _recording_drain)
+
+        run_task = asyncio.create_task(worker.run())
+        try:
+            assert await asyncio.to_thread(in_pass.wait, 2)
+            stop_task = asyncio.create_task(worker.stop())
+            assert await asyncio.to_thread(drained.wait, 2)
+            # Leave stop() time to reach the close step while the pass is still running
+            await asyncio.sleep(0.05)
+        finally:
+            release.set()
+        await asyncio.wait_for(stop_task, timeout=5)
+        await asyncio.wait_for(run_task, timeout=5)
+
+        assert events == ["pass done", "close"]
+        assert worker._conn is None
+
 
 class TestChunkedBatchInsertsWithReturningID:
 
