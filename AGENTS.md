@@ -16,7 +16,7 @@
   * **Python Execution Scope:** Python execution is strictly reserved for running existing project test suites (`.venv/bin/pytest`) and starting the project application.
 
 ## Backend Test Suite Conventions
-`backend/tests/conftest.py` keeps the backend suite fast (about 45s). Know these before writing or debugging tests:
+`backend/tests/conftest.py` keeps the backend suite fast (about 60s). Know these before writing or debugging tests:
 - **Shared FastAPI app:** In tests, `create_app()` returns a cached instance (one per CORS origin set and built-frontend presence), because building the app costs about 0.12s and over 300 tests use one. Never mutate the returned app (adding routes, middleware, mounts or `app.state`); call `create_app.uncached()` when a test needs its own instance. `app.dependency_overrides` is cleared automatically after each test.
 - **Low-cost Argon2id:** `hash_password()` uses minimal Argon2id cost parameters in tests. Production-cost hashes still verify, but tests must not assert the production cost parameters on hashes produced by `hash_password()`.
 - **`e2e` marker:** Tests needing a live Docker build or external services (including live AI provider calls) must be marked `@pytest.mark.e2e` so the default run stays offline and deterministic.

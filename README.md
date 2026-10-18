@@ -210,8 +210,10 @@ LogShed provides an official Unraid Community Applications template in [`unraid-
 If you forget your administrator password, run the built-in password reset CLI tool inside the running container:
 
 ```bash
-docker exec -it logshed python -m app.cli reset-admin --password "your_new_secure_password"
+docker exec -it <container> python -m app.cli reset-admin
 ```
+
+The tool prompts twice for the new password (8 to 128 characters). The `--password` option still works, but it prints a warning because the password is then visible in your shell history and in process listings.
 
 ---
 
