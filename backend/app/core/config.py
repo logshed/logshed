@@ -140,14 +140,23 @@ def get_cors_origins() -> list[str]:
     """
     Returns the list of allowed CORS origins.
     Strictly defaults to [] in production (same-origin React SPA bundle).
-    Populates development origins only if ENVIRONMENT=development or DEBUG=True,
+    Populates development origins only if ENVIRONMENT=development (DEBUG alone does not),
     or if explicitly overridden via the CORS_ORIGINS environment variable.
+    A wildcard "*" entry is dropped: with credentials allowed, Starlette would echo any
+    Origin back, letting every website send credentialed requests to LogShed.
     """
     env_origins = os.environ.get("CORS_ORIGINS")
     if env_origins is not None:
-        return [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+        origins = [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+        if "*" in origins:
+            logging.getLogger(__name__).error(
+                "CORS_ORIGINS contains '*', which is not allowed because LogShed sends credentialed "
+                "cross-origin requests. The '*' entry is ignored; list each trusted origin instead."
+            )
+            origins = [origin for origin in origins if origin != "*"]
+        return origins
 
-    if is_debug_or_dev():
+    if os.environ.get("ENVIRONMENT", "").strip().lower() == "development":
         return [
             "http://localhost:5173",
             "http://127.0.0.1:5173",

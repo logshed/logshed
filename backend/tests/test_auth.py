@@ -411,13 +411,6 @@ class TestCorsConfiguration:
         assert "http://localhost:5173" in origins
         assert "http://localhost:8080" in origins
 
-    def test_debug_cors_origins(self, monkeypatch):
-        monkeypatch.delenv("CORS_ORIGINS", raising=False)
-        monkeypatch.delenv("ENVIRONMENT", raising=False)
-        monkeypatch.setenv("DEBUG", "true")
-        origins = get_cors_origins()
-        assert "http://localhost:5173" in origins
-
     def test_custom_cors_origins(self, monkeypatch):
         monkeypatch.setenv("CORS_ORIGINS", "http://192.168.1.50:8080, https://logs.example.com")
         origins = get_cors_origins()
@@ -956,3 +949,111 @@ class TestTrustDockerProxiesWarning:
                 warnings = [r for r in caplog.records if r.name == "app.api.auth"]
                 assert len(warnings) == 1
                 assert "trust_docker_proxies" in warnings[0].getMessage()
+
+
+# ===================================================================
+# CORS and Bearer scheme hardening (S-09)
+# ===================================================================
+
+def _plain_client(app) -> AsyncClient:
+    """Client without the X-Requested-With default header, like a cross-site form or fetch."""
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+class TestCorsAndBearerHardening:
+
+    def test_wildcard_cors_origin_is_dropped_with_error_log(self, monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setenv("CORS_ORIGINS", "*")
+        with caplog.at_level(logging.ERROR, logger="app.core.config"):
+            assert get_cors_origins() == []
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR and "CORS_ORIGINS" in r.getMessage()]
+        assert len(errors) == 1
+
+    def test_wildcard_is_dropped_but_explicit_origins_are_kept(self, monkeypatch):
+        monkeypatch.setenv("CORS_ORIGINS", "https://logs.example.com, *")
+        assert get_cors_origins() == ["https://logs.example.com"]
+
+    def test_debug_alone_does_not_trust_development_origins(self, monkeypatch):
+        monkeypatch.delenv("CORS_ORIGINS", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.setenv("DEBUG", "true")
+        assert get_cors_origins() == []
+
+    @pytest.mark.asyncio
+    async def test_wildcard_cors_origin_does_not_echo_arbitrary_origins(self, monkeypatch):
+        monkeypatch.setenv("CORS_ORIGINS", "*")
+        app = create_app.uncached()
+        async with _plain_client(app) as ac:
+            res = await ac.get("/api/auth/status", headers={"Origin": "https://evil.example"})
+            assert "access-control-allow-origin" not in res.headers
+            pre = await ac.options(
+                "/api/v1/maintenance/disable",
+                headers={
+                    "Origin": "https://evil.example",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "x-requested-with",
+                },
+            )
+            assert "access-control-allow-origin" not in pre.headers
+
+    @pytest.mark.asyncio
+    async def test_cors_preflight_only_allows_known_request_headers(self, monkeypatch):
+        monkeypatch.setenv("CORS_ORIGINS", "https://logs.example.com")
+        app = create_app.uncached()
+        async with _plain_client(app) as ac:
+            base = {"Origin": "https://logs.example.com", "Access-Control-Request-Method": "POST"}
+            ok = await ac.options(
+                "/api/v1/maintenance/disable",
+                headers={**base, "Access-Control-Request-Headers": "content-type, x-requested-with, authorization"},
+            )
+            assert ok.status_code == 200
+            assert ok.headers.get("access-control-allow-origin") == "https://logs.example.com"
+            bad = await ac.options(
+                "/api/v1/maintenance/disable",
+                headers={**base, "Access-Control-Request-Headers": "x-custom-header"},
+            )
+            assert bad.status_code == 400
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("auth_value", ["bearer junk", "BEARER junk", "Basic YWRtaW46eA==", "Bearer"])
+    async def test_authorization_header_never_falls_back_to_session_cookie(self, auth_cookie, auth_value):
+        app = create_app()
+        async with _plain_client(app) as ac:
+            ac.cookies.update(auth_cookie)
+            res = await ac.post(
+                "/api/v1/maintenance/disable",
+                headers={"Authorization": auth_value, "X-Requested-With": "XMLHttpRequest"},
+            )
+            assert res.status_code == 401
+            status_res = await ac.get("/api/v1/maintenance/status", headers={"Authorization": auth_value})
+            assert status_res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_lowercase_bearer_junk_without_csrf_header_cannot_ride_the_cookie(self, auth_cookie):
+        app = create_app()
+        async with _plain_client(app) as ac:
+            ac.cookies.update(auth_cookie)
+            res = await ac.post("/api/v1/maintenance/disable", headers={"Authorization": "bearer junk"})
+            assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_bearer_scheme_is_case_insensitive_for_valid_tokens(self, client: AsyncClient, auth_cookie):
+        client.cookies.update(auth_cookie)
+        created = await client.post("/api/tokens", json={"name": "Runner", "scopes": ["*"]})
+        assert created.status_code in (200, 201)
+        raw_token = created.json()["raw_token"]
+        client.cookies.clear()
+
+        async with _plain_client(create_app()) as ac:
+            res = await ac.get("/api/v1/maintenance/status", headers={"Authorization": f"bearer {raw_token}"})
+            assert res.status_code == 200
+            assert "X-RateLimit-Limit" in res.headers
+
+    @pytest.mark.asyncio
+    async def test_session_cookie_still_works_without_authorization_header(self, auth_cookie):
+        async with _plain_client(create_app()) as ac:
+            ac.cookies.update(auth_cookie)
+            res = await ac.get("/api/v1/maintenance/status")
+            assert res.status_code == 200

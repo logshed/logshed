@@ -409,8 +409,12 @@ def require_auth_or_token(required_scopes: list[str]) -> Callable[[Request], Any
     """
     Unified dependency: accepts either a valid admin session cookie (full access)
     or a Bearer API token with the required scopes.
+
+    Whenever an Authorization header is present, only the token is checked and the session
+    cookie is never used: the CSRF middleware skips requests carrying a Bearer header, so a
+    cookie fallback would let a cross-site request with a junk token act as the admin.
+    The scheme name is matched case-insensitively (RFC 7235).
     """
-    token_dep = require_api_token(required_scopes)
 
     async def _dependency(
         request: Request,
@@ -418,8 +422,18 @@ def require_auth_or_token(required_scopes: list[str]) -> Callable[[Request], Any
         _bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
     ) -> dict[str, Any]:
         auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            return await token_dep(request, response)
+        if auth_header is not None:
+            scheme, _, credentials = auth_header.strip().partition(" ")
+            if scheme.lower() != "bearer":
+                raise _bearer_error("Authorization Bearer token required.")
+            raw_token = credentials.strip()
+            if not raw_token:
+                raise _bearer_error("Invalid Bearer token.")
+
+            def _attach_rate_headers(info: RateLimitStatus) -> None:
+                response.headers.update(rate_limit_headers(info))
+
+            return await verify_api_token(raw_token, required_scopes, rate_status_sink=_attach_rate_headers)
 
         user = await get_optional_user(request)
         if user:
