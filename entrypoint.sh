@@ -5,6 +5,16 @@ set -e
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
+# Refuse to run the app as root unless explicitly allowed
+if [ "$PUID" = "0" ] || [ "$PGID" = "0" ]; then
+    if [ "$ALLOW_ROOT" != "true" ]; then
+        [ "$PUID" = "0" ] && echo "ERROR: PUID=0 would run LogShed as root. Set PUID to a non-root user id, or set ALLOW_ROOT=true to override." >&2
+        [ "$PGID" = "0" ] && echo "ERROR: PGID=0 would run LogShed as root. Set PGID to a non-root group id, or set ALLOW_ROOT=true to override." >&2
+        exit 1
+    fi
+    echo "WARNING: ALLOW_ROOT=true, running LogShed with root ids." >&2
+fi
+
 # Update or create appuser group with PGID
 if getent group appuser >/dev/null 2>&1; then
     groupmod -o -g "$PGID" appuser
@@ -37,7 +47,7 @@ fi
 if [ -S "$DOCKER_SOCKET_PATH" ] || [ -e "$DOCKER_SOCKET_PATH" ]; then
     DOCKER_GID=$(stat -c '%g' "$DOCKER_SOCKET_PATH" 2>/dev/null || stat -f '%g' "$DOCKER_SOCKET_PATH" 2>/dev/null)
     if [ "$DOCKER_GID" = "0" ]; then
-        usermod -aG root appuser 2>/dev/null || true
+        echo "WARNING: Docker socket is owned by group 0 (root); not adding appuser to the root group. Use a Docker socket proxy (such as tecnativa/docker-socket-proxy) via DOCKER_HOST instead." >&2
     elif [ -n "$DOCKER_GID" ]; then
         if ! getent group "$DOCKER_GID" >/dev/null 2>&1; then
             groupadd -o -g "$DOCKER_GID" docker-sock-group 2>/dev/null || true
@@ -56,6 +66,9 @@ if [ "$CURRENT_OWNER" != "$PUID:$PGID" ]; then
     chown -R appuser:appuser /data 2>/dev/null || true
 fi
 chown -R appuser:appuser /data 2>/dev/null || true
+
+# Keep new files (logs.db, -wal, -shm) unreadable by other users on the host
+umask 027
 
 # Default port
 PORT=${PORT:-8080}

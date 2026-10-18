@@ -232,7 +232,7 @@ class TestEntrypointStatic:
         assert "1000" in content
         assert "docker.sock" in content
         assert "stat" in content
-        assert "usermod -aG root appuser" in content
+        assert "usermod -aG root appuser" not in content
         assert "CURRENT_OWNER" in content
         assert "chown -R appuser:appuser /data" in content
         assert "--workers 1" in content
@@ -408,3 +408,69 @@ class TestDockerLiveContainer:
 
         finally:
             subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# ===================================================================
+# Entrypoint hardening (non-e2e: sh plus stub commands, no root, no Docker)
+# ===================================================================
+
+class TestEntrypointHardening:
+
+    @staticmethod
+    def _run_entrypoint(tmp_path: Path, env_extra: dict, socket_gid: str = "999"):
+        """Run entrypoint.sh with stub commands first on PATH; return (result, calls list)."""
+        stubs = tmp_path / "stubs"
+        stubs.mkdir()
+        log = tmp_path / "calls.log"
+        sock = tmp_path / "docker.sock"
+        sock.write_text("")
+
+        def stub(name: str, body: str):
+            path = stubs / name
+            path.write_text("#!/bin/sh\n" + body + "\n")
+            path.chmod(0o755)
+
+        record = f'echo "{{name}} $*" >> "{log}"'
+        for name in ("usermod", "groupmod", "groupadd", "useradd", "chown", "mkdir", "tini"):
+            stub(name, record.format(name=name))
+        stub("getent", "exit 2")
+        stub("stat", f'echo "{socket_gid}"')
+        stub("gosu", f'echo "gosu $*" >> "{log}"\necho "umask $(umask)" >> "{log}"')
+
+        env = {
+            "PATH": f"{stubs}:/usr/bin:/bin",
+            "DOCKER_HOST": f"unix://{sock}",
+        }
+        env.update(env_extra)
+        res = subprocess.run(
+            ["sh", str(ENTRYPOINT_PATH)], env=env, capture_output=True, text=True, timeout=30
+        )
+        calls = log.read_text().splitlines() if log.exists() else []
+        return res, calls
+
+    @pytest.mark.parametrize("var", ["PUID", "PGID"])
+    def test_refuses_root_ids(self, tmp_path: Path, var: str):
+        res, calls = self._run_entrypoint(tmp_path, {var: "0"})
+        assert res.returncode != 0
+        assert var in res.stderr
+        assert "ALLOW_ROOT" in res.stderr
+        assert not any(c.startswith("gosu") for c in calls)
+
+    def test_allow_root_permits_root_ids(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(
+            tmp_path, {"PUID": "0", "PGID": "0", "ALLOW_ROOT": "true"}
+        )
+        assert res.returncode == 0, res.stderr
+        assert any(c.startswith("gosu") for c in calls)
+
+    def test_root_socket_gid_does_not_add_root_group(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {}, socket_gid="0")
+        assert res.returncode == 0, res.stderr
+        assert not any(c.startswith("usermod") and " root " in c + " " and "-aG" in c for c in calls)
+        assert "socket proxy" in res.stderr.lower()
+        assert any(c.startswith("gosu") for c in calls)
+
+    def test_umask_027_applied_before_exec(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {})
+        assert res.returncode == 0, res.stderr
+        assert "umask 0027" in calls
