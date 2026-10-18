@@ -1,7 +1,8 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LiveLogStream, matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import { LiveLogStream, matchesSearchQuery, compileSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import * as savedViewsApi from '../api/savedViews.ts';
 import { formatStreamTimestamp } from '../utils/formatters.ts';
 import * as settingsApi from '../api/settings.ts';
 import * as logDetailModalModule from '../components/logs/LogDetailModal.tsx';
@@ -802,8 +803,8 @@ describe('LiveLogStream Component', () => {
     });
 
     // Verify fetchLogs was called with offset 0 and then offset 500
-    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, limit: 500 }));
-    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 500, limit: 500 }));
+    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, limit: 500 }), expect.anything());
+    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 500, limit: 500 }), expect.anything());
   });
 
   it('pauses live SSE stream and displays indicator when a historical time ceiling (To) is set', async () => {
@@ -848,7 +849,7 @@ describe('LiveLogStream Component', () => {
     }
 
     await waitFor(() => {
-      expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'existing', offset: 0 }));
+      expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'existing', offset: 0 }), expect.anything());
     });
     const queriedTerms = fetchLogsSpy.mock.calls.map(([params]) => params?.query);
     expect(queriedTerms).toEqual(['existing']);
@@ -868,7 +869,7 @@ describe('LiveLogStream Component', () => {
     fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
 
     expect(fetchLogsSpy).toHaveBeenCalledTimes(1);
-    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'timeout', offset: 0 }));
+    expect(fetchLogsSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'timeout', offset: 0 }), expect.anything());
 
     // Outlast the debounce window and confirm no second request was dispatched
     await act(async () => {
@@ -1774,7 +1775,7 @@ describe('LiveLogStream B11 fixes', () => {
     const severitySelect = screen.getByText('Severity:').parentElement!.querySelector('select') as HTMLSelectElement;
     fireEvent.change(severitySelect, { target: { value: '3' } });
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ severity_max: 3 }));
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ severity_max: 3 }), expect.anything());
     });
     fetchSpy.mockClear();
     fireEvent.click(screen.getByText('Filter').closest('button') as HTMLElement);
@@ -1921,7 +1922,7 @@ describe('LiveLogStream B12 fixes', () => {
     window.history.replaceState(null, '', '/?time=1h');
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: '1h' })));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: '1h' }), expect.anything()));
     expect(desktopTimeSelect().value).toBe('1h');
   });
 
@@ -1977,7 +1978,7 @@ describe('LiveLogStream B12 fixes', () => {
     const loadPages = async (fetchSpy: ReturnType<typeof mockHistory>, scroller: ReturnType<typeof setupScroller>, pages: number) => {
       for (let p = 1; p < pages; p++) {
         scroller.toBottom();
-        await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: p * 500 })));
+        await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: p * 500 }), expect.anything()));
         await waitFor(() => expect(bufferCount()).toBe((p + 1) * 500));
       }
     };
@@ -2009,7 +2010,7 @@ describe('LiveLogStream B12 fixes', () => {
       fetchSpy.mockClear();
       scroller.toBottom();
       await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
-      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 2400 }));
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 2400 }), expect.anything());
     });
 
     it('does not trim scrolled-back history when live rows arrive while paused', async () => {
@@ -2121,5 +2122,57 @@ describe('LiveLogStream B12 fixes', () => {
     fireEvent.click(screen.getByText('Fresh row'));
     await screen.findByText(/Log Record #950/i);
     expect(modalSpy).toHaveBeenCalled();
+  });
+
+  it('applying a saved view fetches once and keeps its relative time (E-28, B-23)', async () => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([
+      { id: 9, name: 'Recent nginx', query_params: { query: 'nginx', from: '1h' }, is_pinned: false, created_at: '2026-10-01T00:00:00Z' },
+    ] as any);
+    const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('button', { name: /Saved views menu/i }));
+    const item = await screen.findByTestId('saved-view-item-9');
+    fetchSpy.mockClear();
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(item);
+      // Past the 300 ms search debounce: a second, debounced fetch would have fired by now
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'nginx', from: '1h' }), expect.anything());
+    expect(desktopTimeSelect().value).toBe('1h');
+  });
+
+  it('aborts a superseded log request when a new one starts (E-28)', async () => {
+    const signals: AbortSignal[] = [];
+    vi.spyOn(logsApi, 'fetchLogs').mockImplementation((_params: any, options?: { signal?: AbortSignal }) => {
+      if (options?.signal) signals.push(options.signal);
+      return new Promise(() => {});
+    });
+    renderStream();
+    await waitFor(() => expect(signals.length).toBe(1));
+    fireEvent.click(screen.getByText('Filter'));
+    await waitFor(() => expect(signals.length).toBe(2));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+  });
+});
+
+describe('compileSearchQuery (E-27)', () => {
+  const log: LogEntry = { ...sampleLogs[0] };
+
+  it('compiles the query once and matches like the string form', () => {
+    const compiled = compileSearchQuery('app:nginx timeout');
+    expect(compiled.terms).toEqual(['app:nginx', 'timeout']);
+    expect(matchesSearchQuery(log, compiled)).toBe(true);
+    expect(matchesSearchQuery(log, 'app:nginx timeout')).toBe(true);
+    expect(matchesSearchQuery(log, compileSearchQuery('app:postgres'))).toBe(false);
+    expect(matchesSearchQuery(log, compileSearchQuery('  '))).toBe(true);
   });
 });

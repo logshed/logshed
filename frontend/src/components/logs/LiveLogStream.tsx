@@ -177,14 +177,30 @@ function reformatTimestamps(
 export { LogRow, areLogRowPropsEqual };
 export type { ProcessedLogEntry };
 
+export interface CompiledSearchQuery {
+  /** Trimmed query, lower-cased */
+  lowered: string;
+  /** Space-separated terms with boolean keywords removed */
+  terms: string[];
+}
+
+/** Splits a search query once, so each incoming live log is matched without re-parsing it. */
+export function compileSearchQuery(query?: string): CompiledSearchQuery {
+  const lowered = (query || '').trim().toLowerCase();
+  const terms = lowered
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !['and', 'or', 'not'].includes(t));
+  return { lowered, terms };
+}
+
 export function matchesSearchQuery(
   log: LogEntry,
-  query?: string,
+  query?: string | CompiledSearchQuery,
   precompiledRegex?: RegExp | null,
 ): boolean {
-  if (!query || !query.trim()) return true;
+  const compiled = typeof query === 'string' || query === undefined ? compileSearchQuery(query) : query;
+  if (!compiled.lowered) return true;
 
-  const q = query.trim();
   const fields = [
     log.message || '',
     log.app_name || '',
@@ -194,7 +210,7 @@ export function matchesSearchQuery(
   const combined = fields.join(' ').toLowerCase();
 
   // 1. Direct case-insensitive substring match
-  if (combined.includes(q.toLowerCase())) {
+  if (combined.includes(compiled.lowered)) {
     return true;
   }
 
@@ -204,10 +220,7 @@ export function matchesSearchQuery(
   }
 
   // 3. Multi-term matching (e.g. "nginx error" -> all terms must match)
-  const terms = q
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((t) => t.length > 0 && !['and', 'or', 'not'].includes(t));
+  const terms = compiled.terms;
 
   if (terms.length > 0) {
     const allTermsMatch = terms.every((term) => {
@@ -360,11 +373,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // Live rows held back while scrolled back with a full scrollback buffer (newest first)
   const heldLiveRowsRef = useRef<ProcessedLogEntry[]>([]);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const filtersRef = useRef<LogFilterParams>(filters);
+  // Search query split once per change, then matched against every incoming live log
+  const compiledQueryRef = useRef<CompiledSearchQuery>(compileSearchQuery(filters.query));
 
   useEffect(() => {
-    filtersRef.current = filters;
-  }, [filters]);
+    compiledQueryRef.current = compileSearchQuery(filters.query);
+  }, [filters.query]);
+
+  // Abort an in-flight history request on unmount
+  useEffect(() => () => fetchAbortRef.current?.abort(), []);
 
   const loadSourcesConfig = useCallback(() => {
     Promise.all([
@@ -853,6 +870,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // In-flight query cancellation / stale response guard
   const fetchRequestIdRef = useRef<number>(0);
+  // Aborts the in-flight history request when a newer load supersedes it
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  // Set by handleApplySavedView so the filter effect loads a saved view at once, without the search debounce
+  const skipSearchDebounceRef = useRef<boolean>(false);
   // Pending debounced reload scheduled by free-text search edits
   const searchDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -863,6 +884,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       searchDebounceTimerRef.current = null;
     }
     const reqId = ++fetchRequestIdRef.current;
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     try {
       setIsLoadingHistory(true);
       historicalOffsetRef.current = 0;
@@ -881,7 +905,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         ...activeFilters,
         limit: 500,
         offset: 0,
-      });
+      }, { signal: controller.signal });
 
       // Discard stale responses from superseded requests
       if (reqId !== fetchRequestIdRef.current) {
@@ -933,7 +957,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         ...filters,
         limit: 500,
         offset: currentOffset,
-      });
+      }, { signal: fetchAbortRef.current?.signal });
 
       // Discard stale responses if filter changed while loading more
       if (reqId !== fetchRequestIdRef.current) {
@@ -983,7 +1007,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     const queryChanged = previousQueryRef.current !== filters.query;
     previousQueryRef.current = filters.query;
-    if (!queryChanged) {
+    const skipDebounce = skipSearchDebounceRef.current;
+    skipSearchDebounceRef.current = false;
+    if (!queryChanged || skipDebounce) {
       loadInitialLogs();
       return;
     }
@@ -1000,9 +1026,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   }, [loadInitialLogs, filters.query]);
 
   const handleApplySavedView = useCallback((newParams: LogFilterParams) => {
+    // The filter effect is the only loader, so a saved view fetches once
+    skipSearchDebounceRef.current = true;
     setFilters(newParams);
-    loadInitialLogs(newParams);
-  }, [loadInitialLogs]);
+  }, []);
 
   const sourcesKey = useMemo(() => {
     const s = filters.sources || (filters.source ? (Array.isArray(filters.source) ? filters.source : [filters.source]) : []);
@@ -1045,8 +1072,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         const entry: LogEntry = JSON.parse(event.data);
 
         // Client-Side Query Filtering on Ingest (Issue #2)
-        const currentQuery = filtersRef.current?.query;
-        if (currentQuery && !matchesSearchQuery(entry, currentQuery)) {
+        const compiledQuery = compiledQueryRef.current;
+        if (compiledQuery.lowered && !matchesSearchQuery(entry, compiledQuery)) {
           return;
         }
 
@@ -1458,6 +1485,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   const clearLogsBuffer = () => {
     fetchRequestIdRef.current += 1;
+    fetchAbortRef.current?.abort();
     if (flushTimerRef.current !== null) {
       clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;

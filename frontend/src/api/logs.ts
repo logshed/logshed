@@ -16,7 +16,10 @@ export interface LogListResult {
   total_capped?: boolean;
 }
 
-export async function fetchLogs(params: LogFilterParams = {}): Promise<LogListResult> {
+export async function fetchLogs(
+  params: LogFilterParams = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<LogListResult> {
   const searchParams = new URLSearchParams();
   if (params.query) searchParams.set('query', params.query);
   if (params.severity_max !== undefined && params.severity_max !== null) {
@@ -41,7 +44,7 @@ export async function fetchLogs(params: LogFilterParams = {}): Promise<LogListRe
   if (params.offset !== undefined) searchParams.set('offset', params.offset.toString());
 
   const qs = searchParams.toString();
-  return apiFetch<LogListResult>(`/api/logs${qs ? `?${qs}` : ''}`);
+  return apiFetch<LogListResult>(`/api/logs${qs ? `?${qs}` : ''}`, options.signal ? { signal: options.signal } : {});
 }
 
 export async function fetchLogContext(
