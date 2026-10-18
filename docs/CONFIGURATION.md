@@ -86,6 +86,7 @@ services:
 | `DATA_DIR` | `/data` | Docker Compose only | Path to persistent storage directory for the SQLite database, encryption key, and custom rule presets. | 1.0.0 |
 | `PUID` | `1000` | Docker Compose only | User ID used for internal execution after privilege dropping via `gosu`. | 1.0.0 |
 | `PGID` | `1000` | Docker Compose only | Group ID used for internal execution after privilege dropping via `gosu`. | 1.0.0 |
+| `ALLOW_ROOT` | `false` | Docker Compose only | The container refuses to start when `PUID` or `PGID` is `0`. Set to `true` to run the app as root anyway (not recommended). | 1.3.0 |
 | `TZ` | `UTC` | Docker Compose only | Container timezone identifier (for example, `UTC`, `America/New_York`, `Europe/London`). | 1.0.0 |
 | `APP_URL` | *(empty)* | Web UI or Compose | Public base URL of the LogShed instance (for example, `https://logs.example.com`), used for direct links in push alerts. | 1.1.0 |
 | `LOGSHED_INTERNAL_LOG_LEVEL` | `WARNING` | Web UI or Compose | Log level for LogShed internal diagnostic logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `DISABLED`). Logs from alerting, notifications and AI analysis are stored but never evaluated by alert rules, so a rule cannot trigger itself. | 1.1.0 |
@@ -196,7 +197,7 @@ All persistent application data is stored under the `/data` directory:
 | `/data/logs.db` | Primary SQLite database holding ingested logs, alert rules, drop rules, and settings. |
 | `/data/logs.db-wal` | SQLite Write-Ahead Log file for concurrent writes and non-blocking reads. |
 | `/data/logs.db-shm` | SQLite shared-memory index file for WAL checkpointing. |
-| `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). |
+| `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). Anyone holding a backup of `/data` also holds this key. To keep the key out of `/data` backups, set `LOGSHED_SECRET_KEY` instead (see above) and store the value separately. |
 | `/data/presets/alerts/` | Directory for custom and community alert rule JSON definitions. |
 | `/data/presets/drops/` | Directory for custom and community ingestion drop rule JSON definitions. |
 
