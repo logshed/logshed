@@ -992,12 +992,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 token will immediately fail authentication with HTTP 401 errors.
               </p>
             </div>
-              {modalError && (
-                <div role="alert" className="mx-5 mb-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                  <span>{modalError}</span>
-                </div>
-              )}
+            {modalError && (
+              <div role="alert" className="mx-5 mb-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
             <div className="px-5 py-3.5 bg-dark-950/50 border-t border-dark-800 flex justify-end gap-2">
               <button
                 type="button"

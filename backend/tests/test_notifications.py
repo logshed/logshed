@@ -549,7 +549,6 @@ class TestNotificationsApi:
         assert fresh_executor._thread_name_prefix == "logshed-notifier"
 
 
-
 class TestDigestChannelDelete:
 
     @pytest.mark.asyncio

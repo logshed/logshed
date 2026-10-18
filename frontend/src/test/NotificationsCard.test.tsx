@@ -261,7 +261,7 @@ describe('NotificationsCard Component', () => {
     await waitFor(() => {
       expect(notifApi.sendDailyDigest).toHaveBeenCalled();
       expect(
-        screen.getByText(/Daily digest dispatched successfully to Homelab Discord and saved to History \(1,250 logs analyzed\)\./i)
+        screen.getByText(/Daily digest dispatched successfully to Homelab Discord and saved to History \(1,250 logs\)\./i)
       ).toBeInTheDocument();
     });
   });

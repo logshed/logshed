@@ -153,13 +153,13 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           : null;
         if (channelLabel && !res.notification_sent) {
           setFeedbackMsg({
-            text: `Digest saved to History, but delivery to ${channelLabel} failed (${res.total_logs.toLocaleString()} logs analyzed). Check the target and try again.`,
+            text: `Digest saved to History, but delivery to ${channelLabel} failed (${res.total_logs.toLocaleString()} logs). Check the target and try again.`,
             isError: true,
           });
         } else {
           const successMessage = channelLabel
-            ? `Daily digest dispatched successfully to ${channelLabel} and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`
-            : `Daily digest generated and saved to History (${res.total_logs.toLocaleString()} logs analyzed).`;
+            ? `Daily digest dispatched successfully to ${channelLabel} and saved to History (${res.total_logs.toLocaleString()} logs).`
+            : `Daily digest generated and saved to History (${res.total_logs.toLocaleString()} logs).`;
           setFeedbackMsg({
             text: successMessage,
             isError: false,
