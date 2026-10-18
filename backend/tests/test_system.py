@@ -1668,3 +1668,67 @@ class TestDatabaseVacuum:
 
 
 
+
+
+class TestSuperviseWorkerBackoff:
+    """The restart backoff starts again from 1 s after a worker ran for a while before failing."""
+
+    @pytest.mark.asyncio
+    async def test_backoff_resets_after_a_long_successful_run(self, monkeypatch):
+        import app.main as main_mod
+
+        clock = [1000.0]
+        monkeypatch.setattr(main_mod, "_monotonic", lambda: clock[0], raising=False)
+
+        delays: list[float] = []
+        real_sleep = asyncio.sleep
+
+        async def recording_sleep(delay, *args, **kwargs):
+            delays.append(delay)
+            return await real_sleep(0)
+
+        monkeypatch.setattr(main_mod.asyncio, "sleep", recording_sleep)
+
+        calls = 0
+
+        async def flaky_worker():
+            nonlocal calls
+            calls += 1
+            if calls == 5:
+                clock[0] += 120.0  # this run stays up for two minutes before failing
+            if calls <= 6:
+                raise RuntimeError(f"crash {calls}")
+
+        await asyncio.wait_for(_supervise_worker(flaky_worker, "FlakyWorker"), timeout=5.0)
+
+        assert calls == 7
+        assert delays == [1.0, 2.0, 4.0, 8.0, 1.0, 2.0]
+
+    @pytest.mark.asyncio
+    async def test_backoff_keeps_growing_for_quick_failures(self, monkeypatch):
+        import app.main as main_mod
+
+        clock = [1000.0]
+        monkeypatch.setattr(main_mod, "_monotonic", lambda: clock[0], raising=False)
+
+        delays: list[float] = []
+        real_sleep = asyncio.sleep
+
+        async def recording_sleep(delay, *args, **kwargs):
+            delays.append(delay)
+            return await real_sleep(0)
+
+        monkeypatch.setattr(main_mod.asyncio, "sleep", recording_sleep)
+
+        calls = 0
+
+        async def failing_worker():
+            nonlocal calls
+            calls += 1
+            clock[0] += 5.0
+            if calls <= 8:
+                raise RuntimeError("quick crash")
+
+        await asyncio.wait_for(_supervise_worker(failing_worker, "QuickWorker"), timeout=5.0)
+
+        assert delays == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]

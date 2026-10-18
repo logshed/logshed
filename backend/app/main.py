@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from time import monotonic as _monotonic
 from typing import Any, Optional, Union
 
 from pathlib import Path
@@ -144,19 +145,29 @@ def configure_internal_log_handler(
 
 
 
+_WORKER_INITIAL_BACKOFF_SECONDS = 1.0
+_WORKER_HEALTHY_RUN_SECONDS = 60.0
+
+
 async def _supervise_worker(coro_fn, name: str, *args, **kwargs) -> None:
     """
     Supervisor wrapper running a worker coroutine with exception isolation
     and exponential backoff restart without crashing the event loop (docs/SPEC.md §1).
+    The backoff starts again from its initial value when the worker ran for at least
+    _WORKER_HEALTHY_RUN_SECONDS before failing, so an occasional crash after a long healthy
+    run is retried quickly instead of waiting out the backoff of earlier crashes.
     """
-    backoff = 1.0
+    backoff = _WORKER_INITIAL_BACKOFF_SECONDS
     while True:
+        started_at = _monotonic()
         try:
             await coro_fn(*args, **kwargs)
             break
         except asyncio.CancelledError:
             break
         except Exception as e:
+            if _monotonic() - started_at >= _WORKER_HEALTHY_RUN_SECONDS:
+                backoff = _WORKER_INITIAL_BACKOFF_SECONDS
             logger.error(f"Worker '{name}' crashed with error: {e}. Restarting in {backoff:.1f}s...")
             try:
                 await asyncio.sleep(backoff)
