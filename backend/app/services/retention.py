@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from app.services.operation_guard import OperationInProgressError, operation_guard
+from app.services.operation_guard import OperationInProgressError, run_exclusive
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
 from app.services.storage_metrics import record_metrics, prune_old_metrics
@@ -398,8 +398,12 @@ class PruneWorker:
             try:
                 retention_days = await asyncio.to_thread(self._get_retention_days)
                 try:
-                    with operation_guard("prune"):
-                        await execute_prune_async(self._db_path, retention_days=retention_days)
+                    # run_exclusive keeps the shared lock until the prune thread really finishes,
+                    # even when this task is cancelled (shutdown) while the prune is still running
+                    await run_exclusive(
+                        "prune",
+                        lambda: execute_prune_async(self._db_path, retention_days=retention_days),
+                    )
                 except OperationInProgressError:
                     logger.info(
                         f"PruneWorker: another prune or compaction is running, retrying in {_BUSY_RETRY_SECONDS:.0f}s."

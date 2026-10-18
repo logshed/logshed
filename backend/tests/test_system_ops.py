@@ -5,6 +5,7 @@ rate limit headers, and the OpenAPI Bearer security scheme.
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 import pytest
 import pytest_asyncio
@@ -251,6 +252,41 @@ class TestCancellationKeepsLock:
                 await asyncio.sleep(0.01)
         else:
             pytest.fail("lock was never released after the work finished")
+
+    @pytest.mark.asyncio
+    async def test_prune_worker_cancellation_keeps_lock_until_prune_returns(self, tmp_path: Path, monkeypatch):
+        """B-58: cancelling the PruneWorker mid-prune keeps the shared lock until the prune thread returns."""
+        started = threading.Event()
+        release = threading.Event()
+
+        def _blocking_prune(db_path, retention_days=14, index_pending=True):
+            started.set()
+            release.wait(timeout=5)
+            return {}
+
+        monkeypatch.setattr(retention_mod, "execute_prune", _blocking_prune)
+        worker = retention_mod.PruneWorker(tmp_path / "logs.db")
+        task = asyncio.create_task(worker.run())
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+            # The prune thread is still running, so a vacuum must not be able to start
+            with pytest.raises(OperationInProgressError):
+                with operation_guard("vacuum"):
+                    pass
+        finally:
+            release.set()
+
+        for _ in range(100):
+            try:
+                with operation_guard("vacuum"):
+                    break
+            except OperationInProgressError:
+                await asyncio.sleep(0.02)
+        else:
+            pytest.fail("lock was never released after the prune finished")
 
     @pytest.mark.asyncio
     async def test_external_prune_cancellation_does_not_allow_overlap(
