@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LiveLogStream, matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
 import { formatStreamTimestamp } from '../utils/formatters.ts';
 import * as settingsApi from '../api/settings.ts';
+import * as logDetailModalModule from '../components/logs/LogDetailModal.tsx';
 import * as logsApi from '../api/logs.ts';
 import * as aliasesApi from '../api/aliases.ts';
 import * as dockerHostsApi from '../api/dockerHosts.ts';
@@ -2097,5 +2098,28 @@ describe('LiveLogStream B12 fixes', () => {
     await waitFor(() => expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument());
     // 3 prepended cards of 74px each, not the 28px desktop row height
     expect(top).toBe(200 + 3 * 74);
+  });
+
+  it('keys virtual rows by log id so prepending a batch keeps existing rows (E-07)', async () => {
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    const getItemKey = virtualizerControl.lastOptions.getItemKey;
+    expect(typeof getItemKey).toBe('function');
+    expect(getItemKey(0)).toBe(101);
+    expect(getItemKey(3)).toBe(104);
+  });
+
+  it('does not render the log detail panel while it is closed (E-07)', async () => {
+    const modalSpy = vi.spyOn(logDetailModalModule, 'LogDetailModal');
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    act(() => es.emit('log', { ...sampleLogs[0], id: 950, message: 'Fresh row' }));
+    await waitFor(() => expect(screen.getByText('Fresh row')).toBeInTheDocument());
+    expect(modalSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('Fresh row'));
+    await screen.findByText(/Log Record #950/i);
+    expect(modalSpy).toHaveBeenCalled();
   });
 });

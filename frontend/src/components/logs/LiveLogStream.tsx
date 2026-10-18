@@ -260,6 +260,7 @@ const BATCH_FLUSH_INTERVAL_MS = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const EMPTY_KNOWN_ALIASES: Record<string, string> = {};
+const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
 
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onDiagnoseAi,
@@ -1158,6 +1159,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     getScrollElement: () => parentRef.current,
     estimateSize: () => (isMobile ? 74 : 28),
     overscan: isMobile ? 12 : 25,
+    // Key rows by log id: prepending a batch then leaves existing rows (and LogRow memo) untouched
+    getItemKey: (index) => logs[index]?.id ?? index,
   });
 
   // Cached row sizes come from the previous layout's estimate; re-measure when
@@ -1422,6 +1425,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   };
 
   const selectedLogs = useMemo(() => {
+    if (selectedLogIds.size === 0) return EMPTY_SELECTED_LOGS;
     return logs.filter((l) => selectedLogIds.has(l.id));
   }, [logs, selectedLogIds]);
 
@@ -1847,104 +1851,106 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       )}
 
       {/* Log Detail Slide-Over Inspector */}
-      <LogDetailModal
-        log={activeLogDetail}
-        isOpen={Boolean(activeLogDetail)}
-        onClose={() => setActiveLogDetail(null)}
-        timeZone={serverTimezone}
-        tzName={serverTzName}
-        onExplainWithAi={(log, ctxLogs) => {
-          setActiveLogDetail(null);
-          const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
-          setLogs((prevLogs) => {
-            const existingIds = new Set(prevLogs.map((l) => l.id));
-            const fmt = getFormatContext();
-            const missingLogs = logsToInspect
-              .filter((l) => !existingIds.has(l.id))
-              .map((l) =>
-                prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-              );
-            if (missingLogs.length === 0) return prevLogs;
-            return [...missingLogs, ...prevLogs].sort((a, b) => {
-              const cmp = b.timestamp.localeCompare(a.timestamp);
-              return cmp !== 0 ? cmp : b.id - a.id;
+      {activeLogDetail && (
+        <LogDetailModal
+          log={activeLogDetail}
+          isOpen={Boolean(activeLogDetail)}
+          onClose={() => setActiveLogDetail(null)}
+          timeZone={serverTimezone}
+          tzName={serverTzName}
+          onExplainWithAi={(log, ctxLogs) => {
+            setActiveLogDetail(null);
+            const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
+            setLogs((prevLogs) => {
+              const existingIds = new Set(prevLogs.map((l) => l.id));
+              const fmt = getFormatContext();
+              const missingLogs = logsToInspect
+                .filter((l) => !existingIds.has(l.id))
+                .map((l) =>
+                  prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
+                );
+              if (missingLogs.length === 0) return prevLogs;
+              return [...missingLogs, ...prevLogs].sort((a, b) => {
+                const cmp = b.timestamp.localeCompare(a.timestamp);
+                return cmp !== 0 ? cmp : b.id - a.id;
+              });
             });
-          });
-          setSelectedLogIds(new Set(logsToInspect.map((l) => l.id)));
-          onDiagnoseAi(logsToInspect);
-        }}
-        onInspectWithContext={(targetAndCtxLogs) => {
-          setActiveLogDetail(null);
-          setLogs((prevLogs) => {
-            const existingIds = new Set(prevLogs.map((l) => l.id));
-            const fmt = getFormatContext();
-            const missingLogs = targetAndCtxLogs
-              .filter((l) => !existingIds.has(l.id))
-              .map((l) =>
-                prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-              );
-            if (missingLogs.length === 0) return prevLogs;
-            return [...missingLogs, ...prevLogs].sort((a, b) => {
-              const cmp = b.timestamp.localeCompare(a.timestamp);
-              return cmp !== 0 ? cmp : b.id - a.id;
+            setSelectedLogIds(new Set(logsToInspect.map((l) => l.id)));
+            onDiagnoseAi(logsToInspect);
+          }}
+          onInspectWithContext={(targetAndCtxLogs) => {
+            setActiveLogDetail(null);
+            setLogs((prevLogs) => {
+              const existingIds = new Set(prevLogs.map((l) => l.id));
+              const fmt = getFormatContext();
+              const missingLogs = targetAndCtxLogs
+                .filter((l) => !existingIds.has(l.id))
+                .map((l) =>
+                  prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
+                );
+              if (missingLogs.length === 0) return prevLogs;
+              return [...missingLogs, ...prevLogs].sort((a, b) => {
+                const cmp = b.timestamp.localeCompare(a.timestamp);
+                return cmp !== 0 ? cmp : b.id - a.id;
+              });
             });
-          });
-          setSelectedLogIds(new Set(targetAndCtxLogs.map((l) => l.id)));
-          onDiagnoseAi(targetAndCtxLogs);
-        }}
-        onAddAlias={onAddAlias}
-        onEditDockerHost={onEditDockerHost}
-        onManageDeletedDockerHost={onManageDeletedDockerHost}
-        dockerEndpoints={dockerEndpoints}
-        isHostAliased={
-          activeLogDetail
-            ? Boolean(
-                mergedAliases[activeLogDetail.source_ip] ||
-                (activeLogDetail.source_alias && activeLogDetail.source_alias !== activeLogDetail.source_ip)
-              )
-            : true
-        }
-        onCreateDropRule={(targetLog) => {
-          setActiveLogDetail(null);
-          setDropRuleTargetLog(targetLog);
-        }}
-        onDeleteLog={(deletedLog) => {
-          setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));
-          setTotalCount((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
-          lastSelectedLogIndexRef.current = null;
-          setLastSelectedLogIndex(null);
-          setSelectedLogIds((prev) => {
-            const next = new Set(prev);
-            next.delete(deletedLog.id);
-            return next;
-          });
-        }}
-        onNavigatePrevious={() => {
-          if (!activeLogDetail) return;
-          const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-          if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
-            setActiveLogDetail(processedLogs[currIdx + 1]);
+            setSelectedLogIds(new Set(targetAndCtxLogs.map((l) => l.id)));
+            onDiagnoseAi(targetAndCtxLogs);
+          }}
+          onAddAlias={onAddAlias}
+          onEditDockerHost={onEditDockerHost}
+          onManageDeletedDockerHost={onManageDeletedDockerHost}
+          dockerEndpoints={dockerEndpoints}
+          isHostAliased={
+            activeLogDetail
+              ? Boolean(
+                  mergedAliases[activeLogDetail.source_ip] ||
+                  (activeLogDetail.source_alias && activeLogDetail.source_alias !== activeLogDetail.source_ip)
+                )
+              : true
           }
-        }}
-        onNavigateNext={() => {
-          if (!activeLogDetail) return;
-          const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-          if (currIdx > 0) {
-            setActiveLogDetail(processedLogs[currIdx - 1]);
-          }
-        }}
-        hasPreviousLog={Boolean(
-          activeLogDetail &&
-          (() => {
-            const idx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-            return idx >= 0 && idx < processedLogs.length - 1;
-          })()
-        )}
-        hasNextLog={Boolean(
-          activeLogDetail &&
-          processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
-        )}
-      />
+          onCreateDropRule={(targetLog) => {
+            setActiveLogDetail(null);
+            setDropRuleTargetLog(targetLog);
+          }}
+          onDeleteLog={(deletedLog) => {
+            setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));
+            setTotalCount((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
+            lastSelectedLogIndexRef.current = null;
+            setLastSelectedLogIndex(null);
+            setSelectedLogIds((prev) => {
+              const next = new Set(prev);
+              next.delete(deletedLog.id);
+              return next;
+            });
+          }}
+          onNavigatePrevious={() => {
+            if (!activeLogDetail) return;
+            const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+            if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
+              setActiveLogDetail(processedLogs[currIdx + 1]);
+            }
+          }}
+          onNavigateNext={() => {
+            if (!activeLogDetail) return;
+            const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+            if (currIdx > 0) {
+              setActiveLogDetail(processedLogs[currIdx - 1]);
+            }
+          }}
+          hasPreviousLog={Boolean(
+            activeLogDetail &&
+            (() => {
+              const idx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+              return idx >= 0 && idx < processedLogs.length - 1;
+            })()
+          )}
+          hasNextLog={Boolean(
+            activeLogDetail &&
+            processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
+          )}
+        />
+      )}
 
       {/* Create Drop Rule Modal */}
       {dropRuleTargetLog && (
