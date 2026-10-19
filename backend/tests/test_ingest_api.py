@@ -688,3 +688,118 @@ class TestIngestFutureTimestampWindow:
         rows = _store_through_consumer(_queued_entries())
         assert datetime.fromisoformat(rows["inside"]["timestamp"]) == inside
         assert rows["outside"]["timestamp"] == rows["outside"]["received_at"]
+
+
+class TestIngestEpochTimestamps:
+    """N03-2: numeric Unix times (seconds or milliseconds) are accepted as entry timestamps."""
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (1700000000, datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)),
+            (1700000000123, datetime(2023, 11, 14, 22, 13, 20, 123000, tzinfo=timezone.utc)),
+            ("1700000000", datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)),
+            ("1700000000123", datetime(2023, 11, 14, 22, 13, 20, 123000, tzinfo=timezone.utc)),
+            (1700000000.5, datetime(2023, 11, 14, 22, 13, 20, 500000, tzinfo=timezone.utc)),
+            ("2023-11-14T22:13:20Z", datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)),
+        ],
+    )
+    def test_parse_entry_timestamp(self, value, expected):
+        from app.api.ingest import _parse_entry_timestamp
+
+        assert _parse_entry_timestamp(value) == expected
+
+    @pytest.mark.parametrize(
+        "value", [True, False, "12abc", "17000000001", float("nan"), float("inf"), 1e300, [1700000000], {"t": 1}]
+    )
+    def test_unusable_values_are_rejected(self, value):
+        from app.api.ingest import _parse_entry_timestamp
+
+        assert _parse_entry_timestamp(value) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("isolated_filters")
+    async def test_epoch_timestamps_are_stored(self, client, write_token):
+        base = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=1)
+        secs = int(base.timestamp())
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"message": "seconds", "timestamp": secs},
+                {"message": "milliseconds", "ts": secs * 1000 + 250},
+                {"message": "digit string", "time": str(secs)},
+                {"message": "float", "timestamp": secs + 0.5},
+                {"message": "boolean", "timestamp": True},
+                {"message": "junk", "timestamp": "12abc"},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        by_msg = {e["message"]: e for e in _queued_entries()}
+        assert datetime.fromisoformat(by_msg["seconds"]["timestamp"]) == base
+        assert datetime.fromisoformat(by_msg["milliseconds"]["timestamp"]) == base + timedelta(milliseconds=250)
+        assert datetime.fromisoformat(by_msg["digit string"]["timestamp"]) == base
+        assert datetime.fromisoformat(by_msg["float"]["timestamp"]) == base + timedelta(milliseconds=500)
+        assert by_msg["boolean"]["timestamp"] == by_msg["boolean"]["received_at"]
+        assert by_msg["junk"]["timestamp"] == by_msg["junk"]["received_at"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("isolated_filters")
+    async def test_epoch_outside_the_window_uses_received_time(self, client, write_token):
+        future = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "old", "timestamp": 1700000000}, {"message": "ahead", "timestamp": future}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        for entry in _queued_entries():
+            assert entry["timestamp"] == entry["received_at"]
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestFieldLengths:
+    """N03-3: source_ip, source_alias and app_name are cut to 255 characters, and the entry is stored."""
+
+    @pytest.mark.asyncio
+    async def test_long_fields_are_cut_to_255_characters(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{
+                "message": "long fields",
+                "app_name": "a" * 1000,
+                "source_ip": "  " + "i" * 1000,
+                "source_alias": "s" * 1000,
+            }],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == 1
+        (entry,) = _queued_entries()
+        assert entry["app_name"] == "a" * 255
+        assert entry["source_ip"] == "i" * 255
+        assert entry["source_alias"] == "s" * 255
+
+    @pytest.mark.asyncio
+    async def test_default_alias_follows_the_cut_source_ip(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "m", "source_ip": "h" * 300, "app": "x" * 255}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        (entry,) = _queued_entries()
+        assert entry["source_ip"] == "h" * 255
+        assert entry["source_alias"] == "h" * 255
+        assert entry["app_name"] == "x" * 255
+
+    @pytest.mark.asyncio
+    async def test_long_fields_are_stored_in_the_database(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "stored", "app_name": "b" * 1000}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        rows = _store_through_consumer(_queued_entries())
+        assert rows["stored"]["app_name"] == "b" * 255

@@ -7,6 +7,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any, Optional
@@ -35,6 +36,8 @@ ingest_rate_limiter = ApiTokenRateLimiter(max_requests=6000, window_seconds=60.0
 # Request limits: the body is read into memory, so it is capped (INGEST_MAX_BODY_BYTES overrides the size).
 DEFAULT_INGEST_MAX_BODY_BYTES = 5 * 1024 * 1024
 INGEST_MAX_ENTRIES = 10_000
+# source_ip, source_alias and app_name longer than this are cut to it (characters).
+INGEST_MAX_FIELD_CHARS = 255
 
 # In-memory token validation cache with 60s TTL: token_hash -> (cached_at, token_dict)
 _TOKEN_CACHE_TTL = 60.0
@@ -138,6 +141,36 @@ async def _read_body_limited(request: Request) -> bytes:
     return bytes(body)
 
 
+_EPOCH_DIGITS_RE = re.compile(r"[0-9]{10}|[0-9]{13}")
+
+
+def _epoch_to_utc(value: float) -> Optional[datetime.datetime]:
+    """Unix time in seconds, or in milliseconds when above 1e12, as a UTC datetime."""
+    seconds = value / 1000 if value > 1e12 else value
+    try:
+        return datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _parse_entry_timestamp(value: Any) -> Optional[datetime.datetime]:
+    """
+    An entry timestamp as a UTC datetime, or None when it cannot be used. Accepts an ISO 8601
+    string, a number of Unix seconds (milliseconds when above 1e12), or a string of exactly
+    10 digits (seconds) or 13 digits (milliseconds).
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return _epoch_to_utc(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if _EPOCH_DIGITS_RE.fullmatch(text):
+            return _epoch_to_utc(int(text))
+        return parse_iso_to_utc_datetime(text)
+    return None
+
+
 def _reserved_identity_reason(source_ip: str, source_alias: str) -> Optional[str]:
     """Why source_ip/source_alias may not be used by ingest, or None. They belong to LogShed's own collectors."""
     ip_lower = source_ip.lower()
@@ -197,12 +230,14 @@ async def ingest_logs(
     Accepts JSON arrays or newline-delimited JSON (NDJSON).
 
     Limits: the body may be at most INGEST_MAX_BODY_BYTES (default 5 MiB) and hold at most
-    10,000 entries (413 otherwise); message and raw are cut to 64 KB each. Each record is stored
+    10,000 entries (413 otherwise); message and raw are cut to 64 KB each, and source_ip,
+    source_alias and app_name to 255 characters. Each record is stored
     as one log entry (no multiline merging). Drop rules and maintenance drop_errors sessions apply.
     A request with an entry using a reserved identity (source_ip "docker" or "docker:*", or
     source_ip 127.0.0.1 with source_alias "logshed") is rejected with 422 and nothing is stored.
-    Timestamps older than MAX_RETENTION_DAYS or more than 5 minutes ahead are replaced with the
-    received time. The response reports accepted and dropped counts; ingested equals accepted.
+    Timestamps are ISO 8601 strings or Unix times (seconds, or milliseconds above 1e12, as a
+    number or a 10 or 13 digit string). Timestamps older than MAX_RETENTION_DAYS or more than
+    5 minutes ahead are replaced with the received time. The response reports accepted and dropped counts; ingested equals accepted.
     """
     await _authenticate_ingest_token(request, response)
 
@@ -286,12 +321,12 @@ async def ingest_logs(
         ts_str = now_utc_str
         ts_val = item.get("timestamp") or item.get("time") or item.get("ts")
         if ts_val:
-            parsed_dt = parse_iso_to_utc_datetime(str(ts_val))
+            parsed_dt = _parse_entry_timestamp(ts_val)
             if parsed_dt and earliest_ts <= parsed_dt <= latest_ts:
                 ts_str = parsed_dt.isoformat()
 
-        src_ip = str(item.get("source_ip") or client_ip).strip() or client_ip
-        raw_alias = str(item.get("source_alias") or src_ip).strip() or src_ip
+        src_ip = (str(item.get("source_ip") or client_ip).strip() or client_ip)[:INGEST_MAX_FIELD_CHARS]
+        raw_alias = (str(item.get("source_alias") or src_ip).strip() or src_ip)[:INGEST_MAX_FIELD_CHARS]
         reserved = _reserved_identity_reason(src_ip, raw_alias)
         if reserved:
             raise HTTPException(
@@ -300,7 +335,7 @@ async def ingest_logs(
             )
         src_alias = alias_cache.resolve(raw_alias) if alias_cache else raw_alias
 
-        app_name = str(item.get("app_name") or item.get("app") or "app").strip() or "app"
+        app_name = (str(item.get("app_name") or item.get("app") or "app").strip() or "app")[:INGEST_MAX_FIELD_CHARS]
 
         try:
             fac = int(item.get("facility", 1))
