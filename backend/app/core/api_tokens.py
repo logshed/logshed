@@ -67,8 +67,9 @@ def has_scope_permission(token_scopes: list[str], required_scopes: list[str]) ->
     return True
 
 
-# Single source of truth for token scopes accepted at creation time. Derived from the scopes
-# enforced by require_api_token / require_auth_or_token / REQUIRED_MCP_SCOPES in the API layer.
+# Single source of truth for token scopes accepted at creation time. Derived from the scopes enforced
+# by require_api_token / require_auth_or_token in the API layer and by the MCP server: connecting to MCP
+# needs only logs:read (REQUIRED_MCP_SCOPES in api/mcp.py), and each MCP tool then checks its own scope.
 KNOWN_SCOPES: frozenset[str] = frozenset(
     {
         "logs:read",
