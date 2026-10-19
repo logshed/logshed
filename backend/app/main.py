@@ -4,24 +4,28 @@ Configures lifespan events, CORS middleware, background ingestion workers, and A
 """
 
 import asyncio
+import base64
 import datetime
+import hashlib
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from time import monotonic as _monotonic
 from typing import Any, Optional, Union
 
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import ai, alerts, aliases, auth, docker_hosts, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
-from app.api.deps import run_db_query
+from app.api.deps import get_optional_user, require_auth_or_token, run_db_query
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.docker_pool import DockerCollectorPool
 from app.collectors.syslog import SyslogServer
@@ -558,14 +562,79 @@ _CONTENT_SECURITY_POLICY = (
     "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
 )
 
-# The FastAPI docs pages (Swagger UI and ReDoc) load their bundles from cdn.jsdelivr.net, start
-# with an inline script, and ReDoc uses Google Fonts and blob: workers. They carry no user data.
-_DOCS_CONTENT_SECURITY_POLICY = (
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-    "img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; "
-    "worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
-)
+# API docs (Swagger UI at /docs, ReDoc at /redoc, and /openapi.json) need the web login;
+# /openapi.json also accepts any valid API token. Both pages load Swagger UI and ReDoc from
+# /docs-assets/ (copied there by the frontend build) and LogShed's own favicon, so nothing
+# comes from a CDN or Google Fonts.
+_DOCS_ASSETS_URL = "/docs-assets"
+_DOCS_FAVICON_URL = "/favicon.svg"
+_DOCS_URL = "/docs"
+_REDOC_URL = "/redoc"
+_OPENAPI_URL = "/openapi.json"
+# Inline <script> elements (no src attribute) in the generated docs HTML
+_INLINE_SCRIPT_RE = re.compile(r"<script(?![^>]*\bsrc\s*=)[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
+
+
+def _inline_script_hashes(html: str) -> list[str]:
+    """CSP source expressions ('sha256-...') for every inline script in html."""
+    return [
+        "'sha256-" + base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii") + "'"
+        for script in _INLINE_SCRIPT_RE.findall(html)
+    ]
+
+
+def _docs_content_security_policy(script_hashes: list[str]) -> str:
+    """The strict app policy, plus the docs start-up script by hash and ReDoc's blob: worker."""
+    script_src = " ".join(["'self'", *script_hashes])
+    return (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        f"script-src {script_src}; connect-src 'self'; worker-src 'self' blob:; "
+        "object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+    )
+
+
+def _register_api_docs(app: FastAPI) -> tuple[set[str], str]:
+    """Add the login-protected docs routes; return their paths and their Content-Security-Policy."""
+    # Built once, so the hash in the policy always matches the page that is served
+    swagger_html = get_swagger_ui_html(
+        openapi_url=_OPENAPI_URL,
+        title=f"{app.title} - Swagger UI",
+        swagger_js_url=f"{_DOCS_ASSETS_URL}/swagger-ui-bundle.js",
+        swagger_css_url=f"{_DOCS_ASSETS_URL}/swagger-ui.css",
+        swagger_favicon_url=_DOCS_FAVICON_URL,
+        oauth2_redirect_url=None,
+        # The online validator badge would send the spec URL to validator.swagger.io
+        swagger_ui_parameters={"validatorUrl": None},
+    ).body.decode("utf-8")
+    redoc_html = get_redoc_html(
+        openapi_url=_OPENAPI_URL,
+        title=f"{app.title} - ReDoc",
+        redoc_js_url=f"{_DOCS_ASSETS_URL}/redoc.standalone.js",
+        redoc_favicon_url=_DOCS_FAVICON_URL,
+        with_google_fonts=False,
+    ).body.decode("utf-8")
+    policy = _docs_content_security_policy(
+        _inline_script_hashes(swagger_html) + _inline_script_hashes(redoc_html)
+    )
+
+    @app.get(_DOCS_URL, include_in_schema=False)
+    async def swagger_ui_page(user: Optional[dict] = Depends(get_optional_user)):
+        if not user:
+            return RedirectResponse("/", status_code=302)
+        return HTMLResponse(swagger_html)
+
+    @app.get(_REDOC_URL, include_in_schema=False)
+    async def redoc_page(user: Optional[dict] = Depends(get_optional_user)):
+        if not user:
+            return RedirectResponse("/", status_code=302)
+        return HTMLResponse(redoc_html)
+
+    @app.get(_OPENAPI_URL, include_in_schema=False)
+    async def openapi_document(_auth: dict = Depends(require_auth_or_token([]))):
+        # Session cookie, or any valid API token (any scope) in Authorization: Bearer
+        return JSONResponse(app.openapi(), headers={"Cache-Control": "no-store"})
+
+    return {_DOCS_URL, _REDOC_URL, _OPENAPI_URL}, policy
 
 
 def _api_docs_enabled() -> bool:
@@ -582,15 +651,15 @@ def create_app() -> FastAPI:
         description="Unified syslog and Docker container log aggregator with on-demand AI analysis.",
         version=APP_VERSION,
         lifespan=lifespan,
-        docs_url="/docs" if docs_enabled else None,
-        redoc_url="/redoc" if docs_enabled else None,
-        openapi_url="/openapi.json" if docs_enabled else None,
+        # FastAPI's own docs routes are public; _register_api_docs adds login-protected ones
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
-    docs_paths = (
-        {path for path in (app.docs_url, app.redoc_url, app.swagger_ui_oauth2_redirect_url) if path}
-        if docs_enabled
-        else set()
-    )
+    docs_paths: set[str] = set()
+    docs_policy = _CONTENT_SECURITY_POLICY
+    if docs_enabled:
+        docs_paths, docs_policy = _register_api_docs(app)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -647,7 +716,7 @@ def create_app() -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
-            _DOCS_CONTENT_SECURITY_POLICY if path in docs_paths else _CONTENT_SECURITY_POLICY
+            docs_policy if path in docs_paths else _CONTENT_SECURITY_POLICY
         )
         if path == "/api" or path.startswith("/api/"):
             # API responses can hold secrets (new API tokens, settings) and must not be cached

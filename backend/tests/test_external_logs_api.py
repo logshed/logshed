@@ -757,8 +757,9 @@ class TestKeysetPagination:
         assert res.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_offset_is_not_part_of_the_external_api(self, client: AsyncClient):
-        res = await client.get("/openapi.json")
+    async def test_offset_is_not_part_of_the_external_api(self, client: AsyncClient, logs_token_headers: dict):
+        res = await client.get("/openapi.json", headers=logs_token_headers)
+        assert res.status_code == 200
         params = {p["name"] for p in res.json()["paths"]["/api/v1/logs"]["get"]["parameters"]}
         assert "cursor" in params
         assert "offset" not in params

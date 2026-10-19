@@ -525,8 +525,8 @@ class TestRateLimitHeaders:
 
 class TestOpenApiSecurity:
     @pytest.mark.asyncio
-    async def test_openapi_declares_bearer_scheme_on_external_routes(self, client: AsyncClient):
-        res = await client.get("/openapi.json")
+    async def test_openapi_declares_bearer_scheme_on_external_routes(self, client: AsyncClient, auth_headers: dict):
+        res = await client.get("/openapi.json", headers=auth_headers)
         assert res.status_code == 200
         spec = res.json()
 

@@ -583,7 +583,10 @@ class TestHttpPerimeterHeaders:
 
     @pytest.mark.asyncio
     async def test_api_docs_are_served_by_default_with_a_docs_policy(self, perimeter_env):
+        from app.core.security import SESSION_COOKIE_NAME, create_session_token
+
         async with self._client(create_app.uncached()) as ac:
+            ac.cookies.set(SESSION_COOKIE_NAME, create_session_token(user_id=1))
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
             spec = await ac.get("/openapi.json")
@@ -592,7 +595,7 @@ class TestHttpPerimeterHeaders:
         assert spec.status_code == 200 and "openapi" in spec.json()
         for res in (docs, redoc):
             csp = res.headers.get("Content-Security-Policy", "")
-            assert "https://cdn.jsdelivr.net" in csp
+            assert "cdn.jsdelivr.net" not in csp
             assert "frame-ancestors 'none'" in csp
             assert "object-src 'none'" in csp
             assert res.headers.get("X-Frame-Options") == "DENY"
@@ -610,3 +613,201 @@ class TestHttpPerimeterHeaders:
         assert spec.status_code == 404 or "application/json" not in spec.headers.get("content-type", "")
         for res in (docs, redoc, spec):
             assert "cdn.jsdelivr.net" not in res.headers.get("Content-Security-Policy", "")
+
+
+# ===================================================================
+# API docs behind the login, served from local assets (N05-4, N05-5; D-09, D-10)
+# ===================================================================
+
+STATIC_DIR = REPO_ROOT / "backend" / "app" / "static"
+DOCS_ASSET_FILES = (
+    "swagger-ui-bundle.js",
+    "swagger-ui.css",
+    "redoc.standalone.js",
+)
+
+
+class TestApiDocsAccess:
+
+    @pytest.fixture
+    def docs_env(self, tmp_path: Path, monkeypatch):
+        from app.core.security import get_or_create_master_key, reset_crypto_cache
+
+        db_file = tmp_path / "logs.db"
+        key_file = tmp_path / ".secret_key"
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("DB_PATH", str(db_file))
+        monkeypatch.setenv("SECRET_KEY_PATH", str(key_file))
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        monkeypatch.delenv("ENABLE_API_DOCS", raising=False)
+        reset_crypto_cache()
+        run_migrations(db_file)
+        get_or_create_master_key(key_file)
+        yield
+        reset_crypto_cache()
+
+    @staticmethod
+    def _client(app, logged_in: bool = False) -> AsyncClient:
+        from app.core.security import SESSION_COOKIE_NAME, create_session_token
+
+        ac = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        if logged_in:
+            ac.cookies.set(SESSION_COOKIE_NAME, create_session_token(user_id=1))
+        return ac
+
+    @staticmethod
+    def _inline_scripts(html: str) -> list[str]:
+        import re
+
+        return re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
+
+    @staticmethod
+    def _csp_directives(csp: str) -> dict[str, list[str]]:
+        out = {}
+        for part in csp.split(";"):
+            tokens = part.split()
+            if tokens:
+                out[tokens[0]] = tokens[1:]
+        return out
+
+    @pytest.mark.asyncio
+    async def test_anonymous_docs_pages_redirect_to_the_login(self, docs_env):
+        async with self._client(create_app.uncached()) as ac:
+            docs = await ac.get("/docs")
+            redoc = await ac.get("/redoc")
+        for res in (docs, redoc):
+            assert res.status_code == 302
+            assert res.headers["location"] == "/"
+            assert "swagger-ui" not in res.text
+
+    @pytest.mark.asyncio
+    async def test_anonymous_openapi_json_is_refused(self, docs_env):
+        async with self._client(create_app.uncached()) as ac:
+            res = await ac.get("/openapi.json")
+        assert res.status_code == 401
+        assert "paths" not in res.text
+
+    @pytest.mark.asyncio
+    async def test_logged_in_user_gets_all_three_with_the_docs_policy(self, docs_env):
+        async with self._client(create_app.uncached(), logged_in=True) as ac:
+            docs = await ac.get("/docs")
+            redoc = await ac.get("/redoc")
+            spec = await ac.get("/openapi.json")
+        assert docs.status_code == 200 and "SwaggerUIBundle" in docs.text
+        assert redoc.status_code == 200 and "<redoc" in redoc.text
+        assert spec.status_code == 200 and "/api/v1/logs" in spec.json()["paths"]
+        for res in (docs, redoc, spec):
+            csp = res.headers.get("Content-Security-Policy", "")
+            assert "'sha256-" in csp
+            assert "frame-ancestors 'none'" in csp
+            assert "object-src 'none'" in csp
+            assert res.headers.get("X-Frame-Options") == "DENY"
+
+    @pytest.mark.asyncio
+    async def test_docs_policy_is_strict_and_hashes_the_served_inline_script(self, docs_env):
+        import base64
+        import hashlib
+
+        async with self._client(create_app.uncached(), logged_in=True) as ac:
+            docs = await ac.get("/docs")
+        csp = docs.headers["Content-Security-Policy"]
+        assert "cdn.jsdelivr.net" not in csp
+        assert "fonts.googleapis.com" not in csp
+        assert "fonts.gstatic.com" not in csp
+        directives = self._csp_directives(csp)
+        assert "'unsafe-inline'" not in directives["script-src"]
+        assert "'unsafe-eval'" not in directives["script-src"]
+        assert "https:" not in directives.get("img-src", [])
+        assert directives["default-src"] == ["'self'"]
+
+        scripts = self._inline_scripts(docs.text)
+        assert len(scripts) == 1
+        digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode("ascii")
+        assert f"'sha256-{digest}'" in directives["script-src"]
+
+    @pytest.mark.asyncio
+    async def test_docs_html_references_only_local_assets(self, docs_env):
+        import re
+
+        async with self._client(create_app.uncached(), logged_in=True) as ac:
+            docs = await ac.get("/docs")
+            redoc = await ac.get("/redoc")
+        for res in (docs, redoc):
+            urls = re.findall(r'(?:src|href)="([^"]*)"', res.text)
+            assert urls
+            for url in urls:
+                assert url.startswith("/") and not url.startswith("//"), url
+            assert "http://" not in res.text and "https://" not in res.text
+            assert 'href="/favicon.svg"' in res.text
+        assert 'src="/docs-assets/swagger-ui-bundle.js"' in docs.text
+        assert 'href="/docs-assets/swagger-ui.css"' in docs.text
+        assert 'src="/docs-assets/redoc.standalone.js"' in redoc.text
+        # The online validator badge would send the spec URL to validator.swagger.io
+        assert '"validatorUrl": null' in docs.text
+
+    @pytest.mark.asyncio
+    async def test_any_valid_api_token_reads_openapi_json(self, docs_env):
+        async with self._client(create_app.uncached(), logged_in=True) as ac:
+            created = await ac.post(
+                "/api/tokens",
+                json={"name": "Docs reader", "scopes": ["logs:read"]},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+        assert created.status_code in (200, 201)
+        raw_token = created.json()["raw_token"]
+
+        async with self._client(create_app.uncached()) as ac:
+            ok = await ac.get("/openapi.json", headers={"Authorization": f"Bearer {raw_token}"})
+            lower = await ac.get("/openapi.json", headers={"Authorization": f"bearer {raw_token}"})
+            bad = await ac.get("/openapi.json", headers={"Authorization": "Bearer ls_live_bogus"})
+            docs_with_token = await ac.get("/docs", headers={"Authorization": f"Bearer {raw_token}"})
+        assert ok.status_code == 200 and "paths" in ok.json()
+        assert lower.status_code == 200
+        assert bad.status_code == 401
+        # The docs pages themselves are for the web login only
+        assert docs_with_token.status_code == 302
+
+    @pytest.mark.asyncio
+    async def test_invalid_token_is_not_rescued_by_the_session_cookie(self, docs_env):
+        async with self._client(create_app.uncached(), logged_in=True) as ac:
+            res = await ac.get("/openapi.json", headers={"Authorization": "Bearer ls_live_bogus"})
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", ["false", "0"])
+    async def test_docs_turned_off_stay_off_with_a_session(self, docs_env, monkeypatch, value):
+        monkeypatch.setenv("ENABLE_API_DOCS", value)
+        async with self._client(create_app.uncached(), logged_in=True) as ac:
+            docs = await ac.get("/docs")
+            redoc = await ac.get("/redoc")
+            spec = await ac.get("/openapi.json")
+        assert "SwaggerUIBundle" not in docs.text
+        assert "<redoc" not in redoc.text
+        assert spec.status_code == 404 or "application/json" not in spec.headers.get("content-type", "")
+        for res in (docs, redoc, spec):
+            assert "'sha256-" not in res.headers.get("Content-Security-Policy", "")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", DOCS_ASSET_FILES)
+    async def test_docs_assets_are_served_after_a_build(self, docs_env, name):
+        asset = STATIC_DIR / "docs-assets" / name
+        if not asset.is_file():
+            pytest.skip("frontend is not built (run `cd frontend && npm run build`)")
+        async with self._client(create_app.uncached()) as ac:
+            res = await ac.get(f"/docs-assets/{name}")
+        assert res.status_code == 200
+        expected = "text/css" if name.endswith(".css") else "javascript"
+        assert expected in res.headers["content-type"]
+        assert len(res.content) == asset.stat().st_size
+
+    def test_docs_packages_are_pinned_dev_dependencies(self):
+        import json
+
+        package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text())
+        lock = json.loads((REPO_ROOT / "frontend" / "package-lock.json").read_text())
+        for name in ("swagger-ui-dist", "redoc"):
+            assert name in package["devDependencies"], name
+            assert lock["packages"][f"node_modules/{name}"]["version"], name
+        vite_config = (REPO_ROOT / "frontend" / "vite.config.ts").read_text()
+        for name in DOCS_ASSET_FILES:
+            assert name in vite_config, name
