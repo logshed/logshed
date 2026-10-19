@@ -354,6 +354,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         },
       }));
     } catch (err: any) {
+      if (isStale()) return;
       setModelsError(err.message || 'Failed to load models.');
       setAvailableModels([]);
     } finally {
