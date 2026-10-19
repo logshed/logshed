@@ -33,7 +33,7 @@ describe('IncidentHistoryDetail Component', () => {
 
     // Daily digest title and metrics are rendered
     expect(screen.getByText('Daily Digest Rollup Report')).toBeInTheDocument();
-    expect(screen.getByText('(5,000 logs analyzed)')).toBeInTheDocument();
+    expect(screen.getByText('(5,000 matching logs)')).toBeInTheDocument();
     expect(screen.getByText('Homelab Discord')).toBeInTheDocument();
 
     // The analytical content is rendered

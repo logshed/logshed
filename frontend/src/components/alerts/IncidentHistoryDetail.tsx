@@ -60,7 +60,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
     : item.rule_name;
 
   const countLabel = isDigest
-    ? `${item.trigger_count.toLocaleString()} logs analyzed`
+    ? `${item.trigger_count.toLocaleString()} matching logs`
     : isOnDemand
     ? `${item.trigger_count} log${item.trigger_count === 1 ? '' : 's'}`
     : `${item.trigger_count} matching event${item.trigger_count === 1 ? '' : 's'}`;
