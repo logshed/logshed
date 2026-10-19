@@ -1105,3 +1105,41 @@ class TestLoginRetryAfter:
         limited = [r for r in responses if r.status_code == 429]
         assert len(limited) == 1
         assert limited[0].headers["Retry-After"] == "1"
+
+
+class TestArgon2ExecutorLifecycle:
+
+    @pytest.mark.asyncio
+    async def test_login_works_again_after_the_pool_is_shut_down(self, client: AsyncClient):
+        from app.api import auth as auth_mod
+
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+        first = await client.post("/api/auth/login", json={"password": "correct_password"})
+        assert first.status_code == 200
+        pool_before = auth_mod._get_argon2_executor()
+
+        auth_mod.shutdown_argon2_executor(wait=True)
+
+        second = await client.post("/api/auth/login", json={"password": "correct_password"})
+        assert second.status_code == 200
+        assert auth_mod._get_argon2_executor() is not pool_before
+
+    def test_shutdown_without_a_pool_is_a_no_op(self):
+        from app.api import auth as auth_mod
+
+        auth_mod.shutdown_argon2_executor()
+        auth_mod.shutdown_argon2_executor()
+
+    @pytest.mark.asyncio
+    async def test_lifespan_shutdown_stops_the_argon2_pool(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from app.main import lifespan
+
+        shutdown = MagicMock()
+        monkeypatch.setattr("app.api.auth.shutdown_argon2_executor", shutdown)
+
+        async with lifespan(create_app()):
+            shutdown.assert_not_called()
+
+        shutdown.assert_called_once()

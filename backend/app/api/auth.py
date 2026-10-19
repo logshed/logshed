@@ -10,6 +10,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -250,14 +251,32 @@ _DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$gu2N9vYOMcHlRxyHZpufkw$qw
 
 # Argon2id verification (64 MiB, t=3) gets its own small pool so a burst of login attempts
 # cannot occupy the default to_thread pool that run_db_query uses for every DB read.
-_ARGON2_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="logshed-argon2")
+# The pool is created on first use and again after shutdown_argon2_executor(); it is only
+# touched from the event loop thread, so it needs no lock.
+_argon2_executor: Optional[ThreadPoolExecutor] = None
+
+
+def _get_argon2_executor() -> ThreadPoolExecutor:
+    global _argon2_executor
+    if _argon2_executor is None:
+        _argon2_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="logshed-argon2")
+    return _argon2_executor
+
+
+def shutdown_argon2_executor(wait: bool = False) -> None:
+    """Shut down the Argon2 pool; the next password check creates a fresh one."""
+    global _argon2_executor
+    executor, _argon2_executor = _argon2_executor, None
+    if executor is not None:
+        executor.shutdown(wait=wait)
+
 
 _LOGIN_RATE_LIMITED_DETAIL = "Too many failed login attempts. Please try again in a minute."
 
 
 async def _verify_password_off_loop(password_hash: str, password: str) -> bool:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_ARGON2_EXECUTOR, verify_password, password_hash, password)
+    return await loop.run_in_executor(_get_argon2_executor(), verify_password, password_hash, password)
 
 
 @router.post("/login", response_model=MessageResponse)

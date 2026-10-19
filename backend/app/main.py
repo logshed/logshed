@@ -500,6 +500,12 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Error shutting down notification executor: {e}")
 
     try:
+        from app.api.auth import shutdown_argon2_executor
+        shutdown_argon2_executor(wait=True)
+    except Exception as e:
+        logger.warning(f"Error shutting down password hashing executor: {e}")
+
+    try:
         from app.services.drop_filter import get_drop_filter
         get_drop_filter().flush_counts()
     except Exception as e:
