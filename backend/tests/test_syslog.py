@@ -1961,9 +1961,10 @@ class TestSyslogUdpReceiveBuffer:
 
         sock = _FakeUdpSocket(granted=2 * 8388608)
         with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
-            assert configure_udp_receive_buffer(sock, 8388608) == 2 * 8388608
+            assert configure_udp_receive_buffer(sock, 8388608) == 8388608
         assert sock.set_calls == [(socket_mod.SOL_SOCKET, socket_mod.SO_RCVBUF, 8388608)]
-        assert "16777216" in caplog.text
+        assert "8388608 bytes" in caplog.text
+        assert "16777216" not in caplog.text
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     def test_zero_leaves_the_os_default(self, caplog):
@@ -1973,25 +1974,43 @@ class TestSyslogUdpReceiveBuffer:
 
         sock = _FakeUdpSocket(granted=212992)
         with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
-            assert configure_udp_receive_buffer(sock, 0) == 212992
+            assert configure_udp_receive_buffer(sock, 0) == 106496
         assert sock.set_calls == []
+        assert "106496 bytes (OS default)" in caplog.text
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
-    @pytest.mark.parametrize("granted", [425984, 8388608])
-    def test_capped_grant_logs_rmem_max_hint(self, caplog, granted):
-        """Linux reports double the usable size, so 8 MiB granted for 8 MiB requested is still capped."""
+    @pytest.mark.parametrize("reported, usable", [(425984, 212992), (8388608, 4194304)])
+    def test_capped_grant_logs_rmem_max_hint(self, caplog, reported, usable):
+        """
+        Linux reports double the usable size, so 8 MiB reported for 8 MiB requested is a 4 MiB
+        buffer. The warning states the usable size, never the doubled figure next to the request.
+        """
         import logging
 
         from app.collectors.syslog import configure_udp_receive_buffer
 
-        sock = _FakeUdpSocket(granted=granted)
+        sock = _FakeUdpSocket(granted=reported)
         with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
-            configure_udp_receive_buffer(sock, 8388608)
+            assert configure_udp_receive_buffer(sock, 8388608) == usable
         warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
-        assert "net.core.rmem_max" in warnings[0]
-        assert "sysctls" in warnings[0]
-        assert str(granted) in warnings[0]
+        assert warnings[0].startswith(f"Syslog UDP receive buffer is {usable} bytes, less than the 8388608 bytes")
+        assert "sysctl -w net.core.rmem_max=8388608" in warnings[0]
+        assert f"SYSLOG_UDP_RECEIVE_BUFFER_BYTES={usable}" in warnings[0]
+        assert "sysctls" not in warnings[0]
+
+    def test_other_systems_report_the_size_as_is(self, caplog, monkeypatch):
+        import logging
+
+        import app.collectors.syslog as syslog_mod
+
+        monkeypatch.setattr(syslog_mod, "_KERNEL_DOUBLES_RCVBUF", False)
+        with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
+            assert syslog_mod.configure_udp_receive_buffer(_FakeUdpSocket(granted=8388608), 8388608) == 8388608
+            assert syslog_mod.configure_udp_receive_buffer(_FakeUdpSocket(granted=4194304), 8388608) == 4194304
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "is 4194304 bytes" in warnings[0]
 
     def test_setsockopt_failure_does_not_raise(self, caplog):
         import logging
@@ -2000,7 +2019,7 @@ class TestSyslogUdpReceiveBuffer:
 
         sock = _FakeUdpSocket(granted=212992, fail_set=True)
         with caplog.at_level(logging.WARNING, logger="app.collectors.syslog"):
-            assert configure_udp_receive_buffer(sock, 8388608) == 212992
+            assert configure_udp_receive_buffer(sock, 8388608) == 106496
         assert "SYSLOG_UDP_RECEIVE_BUFFER_BYTES" in caplog.text
 
     @pytest.mark.asyncio

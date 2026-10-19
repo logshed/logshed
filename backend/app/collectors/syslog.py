@@ -548,7 +548,8 @@ def configure_udp_receive_buffer(sock: Any, requested: int) -> Optional[int]:
     """
     Ask for a `requested`-byte receive buffer on the UDP syslog socket (0 leaves the OS default),
     then log the size the kernel granted, with a hint when net.core.rmem_max capped it.
-    Never raises; returns the granted size as getsockopt reports it, or None if it is unknown.
+    Never raises; returns the granted size in the same units as `requested` (on Linux, half of
+    what getsockopt reports), or None if it is unknown.
     """
     if sock is None:
         return None
@@ -566,21 +567,25 @@ def configure_udp_receive_buffer(sock: Any, requested: int) -> Optional[int]:
         logger.warning(f"Could not read the Syslog UDP receive buffer size: {e}")
         return None
 
-    if requested <= 0:
-        logger.info(f"Syslog UDP receive buffer: {granted} bytes (OS default)")
-        return granted
+    # Compare and report in the units the user set, not the doubled figure Linux reports
+    size = granted // 2 if _KERNEL_DOUBLES_RCVBUF else granted
 
-    logger.info(f"Syslog UDP receive buffer: {granted} bytes granted ({requested} bytes requested)")
-    expected = requested * 2 if _KERNEL_DOUBLES_RCVBUF else requested
-    if granted < expected:
+    if requested <= 0:
+        logger.info(f"Syslog UDP receive buffer: {size} bytes (OS default)")
+        return size
+
+    if size < requested:
         logger.warning(
-            f"Syslog UDP receive buffer is {granted} bytes, less than the {requested} bytes requested "
-            f"(SYSLOG_UDP_RECEIVE_BUFFER_BYTES): the kernel limit net.core.rmem_max capped it, so the kernel "
-            f"can drop UDP syslog messages during bursts. Raise the limit on the host "
-            f"(sysctl -w net.core.rmem_max={requested}), or in Docker Compose, if the kernel allows it "
-            f"per container, with 'sysctls: - net.core.rmem_max={requested}'."
+            f"Syslog UDP receive buffer is {size} bytes, less than the {requested} bytes requested "
+            f"(SYSLOG_UDP_RECEIVE_BUFFER_BYTES), because the kernel limit net.core.rmem_max is lower. "
+            f"UDP syslog messages can be lost during bursts. To allow the full size, run "
+            f"'sysctl -w net.core.rmem_max={requested}' on the host (add it to /etc/sysctl.conf to keep it "
+            f"after a reboot), or set SYSLOG_UDP_RECEIVE_BUFFER_BYTES={size} to use the current limit "
+            f"without this warning."
         )
-    return granted
+    else:
+        logger.info(f"Syslog UDP receive buffer: {size} bytes")
+    return size
 
 
 # Kernel UDP counters for this network namespace (Linux only).
