@@ -1229,3 +1229,58 @@ class TestPasswordChangeUsesArgon2Pool:
         assert res.status_code == 409
         monkeypatch.setattr(auth_mod, "hash_password", real_hash)
         assert (await client.post("/api/auth/login", json={"password": "ChangedByAnotherRequest1!"})).status_code == 200
+
+
+class TestSetupUsesArgon2Pool:
+    """N01-11: first-run setup hashes the password on the Argon2 pool, not inside the shared database pool."""
+
+    @pytest.mark.asyncio
+    async def test_setup_hash_runs_on_the_argon2_pool(self, client: AsyncClient, monkeypatch):
+        import threading
+
+        from app.api import auth as auth_mod
+
+        hash_threads: list[str] = []
+        real_hash = auth_mod.hash_password
+
+        def _hash(password: str) -> str:
+            hash_threads.append(threading.current_thread().name)
+            return real_hash(password)
+
+        monkeypatch.setattr(auth_mod, "hash_password", _hash)
+
+        res = await client.post("/api/auth/setup", json={"password": "InitialSecurePass123!"})
+
+        assert res.status_code == 200
+        assert len(hash_threads) == 1 and hash_threads[0].startswith("logshed-argon2")
+        login = await client.post("/api/auth/login", json={"password": "InitialSecurePass123!"})
+        assert login.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_second_setup_is_refused_without_hashing(self, client: AsyncClient, monkeypatch):
+        from app.api import auth as auth_mod
+
+        assert (await client.post("/api/auth/setup", json={"password": "InitialSecurePass123!"})).status_code == 200
+        hashed: list[str] = []
+        real_hash = auth_mod.hash_password
+        monkeypatch.setattr(auth_mod, "hash_password", lambda p: hashed.append(p) or real_hash(p))
+
+        res = await client.post("/api/auth/setup", json={"password": "AnotherSecurePass456!"})
+
+        assert res.status_code == 403
+        assert hashed == []
+        assert (await client.post("/api/auth/login", json={"password": "InitialSecurePass123!"})).status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_racing_setup_keeps_the_first_password(self, client: AsyncClient):
+        """Two setups that both pass the early check: the atomic insert lets only one win."""
+        import asyncio
+
+        results = await asyncio.gather(
+            client.post("/api/auth/setup", json={"password": "FirstSecurePass123!"}),
+            client.post("/api/auth/setup", json={"password": "SecondSecurePass456!"}),
+        )
+        codes = sorted(r.status_code for r in results)
+        assert codes == [200, 403]
+        winner = "FirstSecurePass123!" if results[0].status_code == 200 else "SecondSecurePass456!"
+        assert (await client.post("/api/auth/login", json={"password": winner})).status_code == 200

@@ -208,28 +208,33 @@ async def setup_admin(req: SetupRequest, request: Request, response: Response) -
     First-run setup: creates admin user and password.
     Returns 403 Forbidden once admin_auth is populated.
     """
-    def _check_and_insert(conn):
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM admin_auth")
-        count = cursor.fetchone()[0]
-        if count > 0:
-            return False
+    def _admin_exists(conn) -> bool:
+        return conn.execute("SELECT COUNT(*) FROM admin_auth").fetchone()[0] > 0
 
+    def _insert_if_first(conn, pwd_hash: str) -> bool:
+        # One statement checks and inserts, so of two racing setups only one row is written.
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        pwd_hash = hash_password(req.password)
-        cursor.execute(
-            "INSERT INTO admin_auth (id, password_hash, created_at, updated_at) VALUES (1, ?, ?, ?)",
+        cursor = conn.execute(
+            "INSERT INTO admin_auth (id, password_hash, created_at, updated_at) "
+            "SELECT 1, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM admin_auth)",
             (pwd_hash, now, now),
         )
         conn.commit()
-        return True
+        return cursor.rowcount == 1
 
-    success = await run_db_query(_check_and_insert)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin account has already been set up.",
-        )
+    already_set_up = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin account has already been set up.",
+    )
+
+    # Refuse early so a finished setup never pays for an Argon2id hash.
+    if await run_db_query(_admin_exists):
+        raise already_set_up
+
+    # Hash on the Argon2 pool, not inside the shared database pool, then check again and insert atomically.
+    pwd_hash = await _hash_password_off_loop(req.password)
+    if not await run_db_query(lambda conn: _insert_if_first(conn, pwd_hash)):
+        raise already_set_up
 
     invalidate_admin_auth_cache()
 
