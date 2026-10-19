@@ -1139,3 +1139,66 @@ class TestFutureTimestampWindow:
         ])
         assert rows["ten minutes ahead"] == received.isoformat()
         assert rows["just outside"] == received.isoformat()
+
+
+class TestMultilineEntryCap:
+    """N03-4: a merged multiline entry never grows past MAX_MESSAGE_BYTES in message or raw."""
+
+    @staticmethod
+    def _drain() -> list[dict]:
+        q = get_queue()
+        items = []
+        while not q.empty():
+            items.append(q.get_nowait())
+        return items
+
+    @pytest.mark.asyncio
+    async def test_long_stack_trace_is_split_without_losing_lines(self):
+        cap = pipeline_mod.MAX_MESSAGE_BYTES
+        asm = KeyedMultilineAssembler(flush_timeout=10.0)
+        lines = ["Traceback (most recent call last):"] + [
+            f"  frame {i:03d} " + "x" * 2036 for i in range(100)
+        ]
+        for line in lines:
+            await asm.feed("10.0.0.1:app", _make_entry(message=line, raw=f"<11>host app: {line}"))
+        await asm.flush_all()
+
+        entries = self._drain()
+        assert len(entries) > 1
+        for entry in entries:
+            assert len(entry["message"]) <= cap
+            assert len(entry["raw"]) <= cap
+        assert "\n".join(e["message"] for e in entries) == "\n".join(lines)
+        assert "\n".join(e["raw"] for e in entries) == "\n".join(f"<11>host app: {line}" for line in lines)
+
+    @pytest.mark.asyncio
+    async def test_later_parts_keep_the_stream_and_its_severity(self):
+        asm = KeyedMultilineAssembler(flush_timeout=10.0, max_entry_chars=100)
+        await asm.feed("s:app", _make_entry(message="Exception in thread main", raw="Exception in thread main", severity=3))
+        for i in range(6):
+            line = f"  at com.example.Frame{i}.run(Frame.java:{i})"
+            await asm.feed("s:app", _make_entry(message=line, raw=line, severity=6))
+        # A new header still ends the split stack trace
+        await asm.feed("s:app", _make_entry(message="next event", severity=6))
+        await asm.flush_all()
+
+        entries = self._drain()
+        assert entries[-1]["message"] == "next event"
+        assert entries[-1]["severity"] == 6
+        trace_parts = entries[:-1]
+        assert len(trace_parts) > 1
+        assert all(len(e["message"]) <= 100 for e in trace_parts)
+        assert all(e["severity"] == 3 for e in trace_parts)
+        assert trace_parts[0]["message"].startswith("Exception in thread main\n")
+        assert all(e["message"].startswith("  at com.example.") for e in trace_parts[1:])
+
+    @pytest.mark.asyncio
+    async def test_small_stack_trace_is_still_one_entry(self):
+        asm = KeyedMultilineAssembler(flush_timeout=10.0)
+        lines = ["Traceback (most recent call last):", '  File "/app/x.py", line 1, in <module>', "ValueError: bad"]
+        for line in lines:
+            await asm.feed("s:app", _make_entry(message=line))
+        await asm.flush_all()
+        entries = self._drain()
+        assert len(entries) == 1
+        assert entries[0]["message"] == "\n".join(lines)

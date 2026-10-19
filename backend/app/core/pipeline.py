@@ -498,6 +498,7 @@ class KeyedMultilineAssembler:
         max_stream_bytes: int = MAX_STREAM_BYTES,
         max_total_streams: int = MAX_TOTAL_STREAMS,
         max_stream_lifetime: float = MAX_STREAM_LIFETIME,
+        max_entry_chars: int = MAX_MESSAGE_BYTES,
     ):
         # Maps stream_key to a list of entry dicts buffered so far
         self._buffers: dict[str, list[dict]] = {}
@@ -507,7 +508,10 @@ class KeyedMultilineAssembler:
         self._stream_start_times: dict[str, float] = {}
         # Maps stream_key to cumulative byte size
         self._stream_bytes: dict[str, int] = {}
+        # Maps stream_key to the merged [message, raw] length in characters, joining newlines included
+        self._stream_chars: dict[str, list[int]] = {}
         self._flush_timeout = flush_timeout
+        self.max_entry_chars = max_entry_chars
         self.max_stream_lines = max_stream_lines
         self.max_stream_bytes = max_stream_bytes
         self.max_total_streams = max_total_streams
@@ -573,6 +577,20 @@ class KeyedMultilineAssembler:
             if now - start_time >= self.max_stream_lifetime:
                 self._flush_stream_internal(stream_key)
 
+        # A continuation that would push the merged message or raw past max_entry_chars ends the
+        # current entry and starts the next one on the same stream key, so later continuation
+        # lines keep following it. The next part keeps the most severe level seen so far.
+        msg_chars = len(message)
+        raw_chars = len(entry.get("raw") or "")
+        merged_chars = self._stream_chars.get(stream_key)
+        if self._buffers.get(stream_key) and merged_chars is not None and (
+            merged_chars[0] + 1 + msg_chars > self.max_entry_chars
+            or merged_chars[1] + 1 + raw_chars > self.max_entry_chars
+        ):
+            carried_severity = min(e.get("severity", 7) for e in self._buffers[stream_key])
+            self._flush_stream_internal(stream_key)
+            entry = {**entry, "severity": min(entry.get("severity", 7), carried_severity)}
+
         # If stream buffer is not active, enforce stream capacity and initialize
         if stream_key not in self._buffers:
             while len(self._buffers) >= self.max_total_streams:
@@ -586,6 +604,11 @@ class KeyedMultilineAssembler:
             self._buffers[stream_key] = []
             self._stream_start_times[stream_key] = now
             self._stream_bytes[stream_key] = 0
+
+        # Merged length grows by the line plus its joining newline (none before the first line)
+        chars = self._stream_chars.setdefault(stream_key, [-1, -1])
+        chars[0] += 1 + msg_chars
+        chars[1] += 1 + raw_chars
 
         # Calculate entry bytes
         msg_bytes = len(message.encode("utf-8"))
@@ -639,6 +662,7 @@ class KeyedMultilineAssembler:
 
         self._stream_start_times.pop(stream_key, None)
         self._stream_bytes.pop(stream_key, None)
+        self._stream_chars.pop(stream_key, None)
 
         buffered = self._buffers.pop(stream_key, None)
         if not buffered:
