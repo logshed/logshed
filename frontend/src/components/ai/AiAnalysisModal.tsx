@@ -113,10 +113,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const previewAbortRef = useRef<AbortController | null>(null);
   const diagnoseRunRef = useRef<number>(0);
   const diagnoseAbortRef = useRef<AbortController | null>(null);
+  const modelsRunRef = useRef<number>(0);
 
   const cancelInFlightRuns = () => {
     previewRunRef.current += 1;
     diagnoseRunRef.current += 1;
+    modelsRunRef.current += 1;
     previewAbortRef.current?.abort();
     diagnoseAbortRef.current?.abort();
     previewAbortRef.current = null;
@@ -326,10 +328,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
   const loadModels = async (prov: string, currentPreview?: AiPreviewResponse) => {
+    const runId = ++modelsRunRef.current;
+    const isStale = () => runId !== modelsRunRef.current;
     try {
       setIsLoadingModels(true);
       setModelsError(null);
       const res = await getAiModels(prov);
+      if (isStale()) return;
       const discovered = res.models || [];
       setAvailableModels(discovered);
       const activePrev = currentPreview || preview;
@@ -352,7 +357,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       setModelsError(err.message || 'Failed to load models.');
       setAvailableModels([]);
     } finally {
-      setIsLoadingModels(false);
+      if (!isStale()) setIsLoadingModels(false);
     }
   };
 

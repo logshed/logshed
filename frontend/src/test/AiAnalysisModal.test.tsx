@@ -963,3 +963,65 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     });
   });
 });
+
+describe('AiAnalysisModal N07 model list run guard', () => {
+  const logsA: LogEntry[] = [
+    {
+      id: 1,
+      timestamp: '2026-09-04T08:00:00.000Z',
+      received_at: '2026-09-04T08:00:00.100Z',
+      source_ip: '192.168.1.1',
+      source_alias: 'router',
+      app_name: 'dnsmasq',
+      facility: 1,
+      severity: 3,
+      message: 'first log line',
+      raw: 'raw',
+    },
+  ];
+  const logsB: LogEntry[] = [{ ...logsA[0], id: 2, message: 'second log line' }];
+  const preview = {
+    redacted_prompt: 'prompt body',
+    estimated_tokens: 10,
+    provider: 'gemini',
+    model: 'gemini-3.7-flash',
+    log_count: 1,
+    source_alias: 'router',
+    app_name: 'dnsmasq',
+    system_prompt: 'system',
+  };
+  const modelsFor = (id: string) => ({
+    provider: 'gemini',
+    models: [{ id, name: id, supports_thinking: false }],
+    has_api_key: true,
+    cached_at: null,
+    is_live: true,
+  });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue(preview);
+  });
+
+  it('ignores a late model list from a closed run after reopening for other logs', async () => {
+    let resolveFirst!: (v: any) => void;
+    vi.spyOn(aiApi, 'getAiModels')
+      .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
+      .mockResolvedValueOnce(modelsFor('fresh-model'));
+
+    const { rerender } = render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logsA} />);
+    await waitFor(() => expect(aiApi.getAiModels).toHaveBeenCalledTimes(1));
+
+    rerender(<AiAnalysisModal isOpen={false} onClose={vi.fn()} selectedLogs={[]} />);
+    rerender(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logsB} />);
+    await waitFor(() => expect(aiApi.getAiModels).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getAllByRole('option', { name: /fresh-model/ }).length).toBeGreaterThan(0));
+
+    await act(async () => {
+      resolveFirst(modelsFor('stale-model'));
+    });
+
+    expect(screen.queryAllByRole('option', { name: /stale-model/ })).toHaveLength(0);
+    expect(screen.getAllByRole('option', { name: /fresh-model/ }).length).toBeGreaterThan(0);
+  });
+});
