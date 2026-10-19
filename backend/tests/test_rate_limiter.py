@@ -53,16 +53,13 @@ class TestSlidingWindowLimiter:
         assert limiter.check_and_record("k")
         assert not limiter.check_and_record("k")
 
-    def test_discard_forget_and_reset(self):
+    def test_forget_and_reset(self):
         clock = FakeClock()
         limiter = SlidingWindowLimiter(5, 10.0, clock=clock)
-        t1 = limiter.record("k")
+        limiter.record("k")
         clock.advance(1)
         limiter.record("k")
-        limiter.discard("k", t1)
-        assert limiter.count("k") == 1
-        limiter.discard("k", t1)  # already removed: no-op
-        limiter.discard("missing", t1)
+        assert limiter.count("k") == 2
         limiter.forget("k")
         assert "k" not in limiter
         limiter.record("x")

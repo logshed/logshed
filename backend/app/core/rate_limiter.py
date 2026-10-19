@@ -120,18 +120,6 @@ class SlidingWindowLimiter:
         self._append(key, now)
         return now
 
-    def discard(self, key: str, timestamp: float) -> None:
-        """Remove one previously recorded event (no-op if it already expired)."""
-        window = self._windows.get(key)
-        if window is None:
-            return
-        try:
-            window.remove(timestamp)
-        except ValueError:
-            return
-        if not window:
-            del self._windows[key]
-
     def forget(self, key: str) -> None:
         """Drop all state for one key."""
         self._windows.pop(key, None)
