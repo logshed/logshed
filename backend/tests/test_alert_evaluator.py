@@ -1961,3 +1961,68 @@ class TestAlertRuleUserRegexEngine:
         assert counts == {"alert rule 11 (Probe)": 1}
         assert any("alert rule 11" in r.getMessage() for r in caplog.records)
         regex_validator.reset_user_regex_timeout_stats()
+
+
+class TestAlertPatternBackslashCodes:
+    """N06-1 (D-12): a backslash makes an alert pattern a regular expression."""
+
+    def _rule(self, pattern: str, rule_id: int = 21, name: str = "Backslash") -> CompiledAlertRule:
+        return CompiledAlertRule(
+            id=rule_id, name=name, rule_type="pattern", channel_id=None, filter_app=None,
+            filter_severity=None, match_pattern=pattern, threshold_count=1, window_seconds=60,
+            cooldown_seconds=60, ai_enrichment=False, is_enabled=True,
+        )
+
+    def test_word_boundary_code_matches_whole_word_only(self):
+        rule = self._rule(r"\bKilled")
+        assert rule.matches({"message": "process Killed"}) is True
+        assert rule.matches({"message": "unKilled"}) is False
+
+    def test_digit_code_matches_numbers(self):
+        rule = self._rule(r"error \d+")
+        assert rule.matches({"message": "error 42"}) is True
+        assert rule.matches({"message": "error none"}) is False
+
+    def test_backslash_codes_alone_make_a_regex(self):
+        rule = self._rule(r"exit code \d\d")
+        assert rule.compiled_regex is not None
+        assert rule.matches({"message": "worker exit code 137"}) is True
+        assert rule.matches({"message": "worker exit code 1"}) is False
+
+    def test_invalid_regex_falls_back_to_plain_text_with_one_warning(self, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
+        rule = self._rule(r"C:\Temp", rule_id=22, name="Windows path")
+        warnings = [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]
+        assert len(warnings) == 1
+        assert "22" in warnings[0].getMessage() and "Windows path" in warnings[0].getMessage()
+        assert rule.matches({"message": r"copied C:\Temp\file.txt"}) is True
+        assert rule.matches({"message": r"copied C:\temp\file.txt"}) is True
+        assert rule.matches({"message": "copied D:/other"}) is False
+        for _ in range(3):
+            rule.matches({"message": r"C:\Temp"})
+        warnings = [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]
+        assert len(warnings) == 1
+
+    def test_plain_words_still_match_as_text(self, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
+        rule = self._rule("Out of memory")
+        assert rule.compiled_regex is None
+        assert rule.matches({"message": "kernel: OUT OF MEMORY"}) is True
+        assert rule.matches({"message": "memory ok"}) is False
+        assert not caplog.records
+
+    def test_invalid_pattern_with_other_metacharacters_still_never_matches(self):
+        rule = self._rule(r"\bfoo(")
+        assert rule.matches({"message": r"\bfoo("}) is False
+        assert rule.matches({"message": "foo("}) is False
+
+    def test_valid_escape_in_a_path_now_runs_as_regex(self):
+        # Documents a change from 1.2.x: \t is a tab, so C:\temp no longer matches the literal path
+        rule = self._rule(r"C:\temp")
+        assert rule.compiled_regex is not None
+        assert rule.matches({"message": "C:\temp"}) is True
+        assert rule.matches({"message": r"C:\temp"}) is False

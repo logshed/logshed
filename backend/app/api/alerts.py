@@ -793,20 +793,13 @@ async def test_alert_pattern(
     Test pattern matching and IP extraction against a sample log payload.
     """
     try:
-        temp_rule = CompiledAlertRule(
-            id=0,
-            name="test",
-            rule_type=payload.rule_type,
-            channel_id=None,
-            filter_app=payload.filter_app,
-            filter_severity=payload.filter_severity,
-            match_pattern=payload.match_pattern,
-            threshold_count=1,
-            window_seconds=60,
-            cooldown_seconds=0,
-            ai_enrichment=False,
-            is_enabled=True,
-        )
+        # Check the pattern first, so a pattern that saving would refuse never builds a rule
+        # (building one logs a warning meant for stored rules)
+        regex_error = None
+        if payload.match_pattern and payload.match_pattern.strip() and payload.match_pattern.strip() != "*":
+            is_safe, err = check_regex_safety(payload.match_pattern.strip())
+            if not is_safe:
+                regex_error = err
 
         sample_entry = {
             "app_name": payload.sample_app or "",
@@ -815,13 +808,23 @@ async def test_alert_pattern(
             "raw": payload.sample_message,
         }
 
-        regex_error = None
-        if payload.match_pattern and payload.match_pattern.strip() and payload.match_pattern.strip() != "*":
-            is_safe, err = check_regex_safety(payload.match_pattern.strip())
-            if not is_safe:
-                regex_error = err
-
-        matched = False if regex_error else temp_rule.matches(sample_entry)
+        matched = False
+        if not regex_error:
+            temp_rule = CompiledAlertRule(
+                id=0,
+                name="test",
+                rule_type=payload.rule_type,
+                channel_id=None,
+                filter_app=payload.filter_app,
+                filter_severity=payload.filter_severity,
+                match_pattern=payload.match_pattern,
+                threshold_count=1,
+                window_seconds=60,
+                cooldown_seconds=0,
+                ai_enrichment=False,
+                is_enabled=True,
+            )
+            matched = temp_rule.matches(sample_entry)
         extracted_ip = extract_ip_from_message(payload.sample_message)
 
         return AlertTestResponse(

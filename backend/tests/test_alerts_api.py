@@ -732,3 +732,43 @@ class TestAlertRuleRegressions:
         assert res.status_code == 200
         assert res.json()["matched"] is True
         assert res.json()["error"] is None
+
+
+class TestAlertRunTestBackslashCodes:
+    """N06-1 (D-12): Run Test treats backslash codes the same way as the live rule."""
+
+    @pytest.mark.asyncio
+    async def test_word_boundary_code_matches_in_run_test(self, client: AsyncClient, auth_headers: dict):
+        hit = await client.post(
+            "/api/alerts/test",
+            json={"rule_type": "pattern", "match_pattern": r"\bKilled", "sample_message": "process Killed"},
+            headers=auth_headers,
+        )
+        assert hit.status_code == 200
+        assert hit.json()["matched"] is True
+        assert hit.json()["error"] is None
+
+        miss = await client.post(
+            "/api/alerts/test",
+            json={"rule_type": "pattern", "match_pattern": r"\bKilled", "sample_message": "unKilled"},
+            headers=auth_headers,
+        )
+        assert miss.json()["matched"] is False
+
+    @pytest.mark.asyncio
+    async def test_invalid_backslash_pattern_reports_error_without_rule_warning(
+        self, client: AsyncClient, auth_headers: dict, caplog
+    ):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
+        res = await client.post(
+            "/api/alerts/test",
+            json={"rule_type": "pattern", "match_pattern": r"C:\Temp", "sample_message": r"C:\Temp"},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        # Saving this pattern is refused, so Run Test reports the syntax error too
+        assert res.json()["matched"] is False
+        assert "invalid regex syntax" in res.json()["error"].lower()
+        assert not [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]

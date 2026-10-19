@@ -30,7 +30,9 @@ from app.services.alert_presets import extract_ip_from_message
 
 logger = logging.getLogger(__name__)
 
-_REGEX_METACHARS = frozenset("*+?[](){}^$|")
+# Characters that make an alert pattern a regular expression; anything else is plain text
+_REGEX_METACHARS_BEFORE_BACKSLASH = frozenset("*+?[](){}^$|")
+_REGEX_METACHARS = _REGEX_METACHARS_BEFORE_BACKSLASH | {"\\"}
 
 
 def format_sample_log_for_alert(raw_msg: str, max_lines: int = 5, max_chars: int = 500) -> str:
@@ -123,14 +125,26 @@ class CompiledAlertRule:
                 try:
                     self.compiled_regex = compile_user_pattern(clean_pat, re.IGNORECASE)
                 except Exception as exc:
-                    logger.warning(
-                        "Alert rule %s pattern '%s' failed regex validation: %s",
-                        self.id,
-                        clean_pat,
-                        exc,
-                    )
                     self.compiled_regex = None
-                    self._invalid = True
+                    if not any(c in _REGEX_METACHARS_BEFORE_BACKSLASH for c in clean_pat):
+                        # Only a backslash made this a regex (such as C:\Temp): keep matching it as text
+                        logger.warning(
+                            "Alert rule %s (%s) pattern '%s' is not a valid regular expression; "
+                            "matching it as plain text (%s)",
+                            self.id,
+                            self.name,
+                            clean_pat,
+                            exc,
+                        )
+                        self._has_regex_metachars = False
+                    else:
+                        logger.warning(
+                            "Alert rule %s pattern '%s' failed regex validation: %s",
+                            self.id,
+                            clean_pat,
+                            exc,
+                        )
+                        self._invalid = True
 
     def _recompute_suppress_epoch(self) -> None:
         """Parse suppress_until ISO string into a UTC epoch timestamp."""
