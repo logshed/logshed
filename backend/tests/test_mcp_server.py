@@ -1764,8 +1764,10 @@ class TestQueryTokenIsSupportedOptIn:
         assert token["raw"] not in caplog.text
 
     @pytest.mark.asyncio
-    async def test_openapi_does_not_mark_token_parameter_deprecated(self, client: AsyncClient):
-        spec = (await client.get("/openapi.json")).json()
+    async def test_openapi_does_not_mark_token_parameter_deprecated(self, client: AsyncClient, auth_headers: dict):
+        res = await client.get("/openapi.json", headers=auth_headers)
+        assert res.status_code == 200
+        spec = res.json()
         checked = 0
         for path in ("/mcp", "/api/v1/mcp", "/api/v1/mcp/sse"):
             for operation in spec["paths"].get(path, {}).values():
