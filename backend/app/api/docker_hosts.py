@@ -5,7 +5,6 @@ Provides CRUD operations, live connection health metrics, and ad-hoc connection 
 
 import asyncio
 import datetime
-import ipaddress
 import logging
 import os
 import socket
@@ -29,6 +28,7 @@ from app.collectors.docker_collector import (
 )
 from app.collectors.docker_pool import TLS_HOSTNAME_HINT, is_tls_hostname_mismatch
 from app.core.config import invalidate_settings_cache
+from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
 
 logger = logging.getLogger(__name__)
@@ -41,37 +41,11 @@ URL_MAX_LENGTH = 512
 TEXT_MAX_LENGTH = 512
 
 
-# Link-local ranges and cloud metadata service addresses are never valid Docker targets
-_BLOCKED_NETWORKS = (
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("fe80::/10"),
-)
-_BLOCKED_ADDRESSES = frozenset({
-    ipaddress.ip_address("100.100.100.200"),
-    ipaddress.ip_address("fd00:ec2::254"),
-})
 _BLOCKED_TARGET_MESSAGE = "Docker URL points to a link-local or cloud metadata address, which is not allowed."
 _SOCKET_NOT_ALLOWED_MESSAGE = (
     "Unix socket path must end in docker.sock or be listed in the DOCKER_ALLOWED_SOCKETS environment variable."
 )
 _RESOLVE_TIMEOUT_SECONDS = 3.0
-
-
-def _parse_ip(host: str) -> Optional[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    try:
-        ip = ipaddress.ip_address(host.split("%", 1)[0])
-    except ValueError:
-        return None
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        return ip.ipv4_mapped
-    return ip
-
-
-def _is_blocked_address(host: str) -> bool:
-    ip = _parse_ip(host)
-    if ip is None:
-        return False
-    return ip in _BLOCKED_ADDRESSES or any(ip in net for net in _BLOCKED_NETWORKS)
 
 
 def _allowed_socket_paths() -> set[str]:
@@ -107,7 +81,7 @@ def _validate_docker_url_str(v: Optional[str]) -> Optional[str]:
         parsed = urlparse(v)
         if not parsed.hostname:
             raise ValueError("Network Docker URL must specify a valid host.")
-        if _is_blocked_address(parsed.hostname):
+        if is_blocked_docker_address(parsed.hostname):
             raise ValueError(_BLOCKED_TARGET_MESSAGE)
         return v
     raise ValueError("Docker URL scheme must be unix://, tcp://, http://, or https://.")
@@ -131,18 +105,18 @@ async def _ensure_url_target_allowed(url: Optional[str]) -> None:
     if not url or not url.startswith(("tcp://", "http://", "https://")):
         return
     host = urlparse(url).hostname
-    if not host or _parse_ip(host) is not None:
+    if not host or parse_ip(host) is not None:
         # IP literals are already checked by _validate_docker_url_str
         return
     addresses = await _resolve_host_addresses(host)
-    if any(_is_blocked_address(addr) for addr in addresses):
+    if any(is_blocked_docker_address(addr) for addr in addresses):
         raise HTTPException(status_code=422, detail=_BLOCKED_TARGET_MESSAGE)
 
 
 def _is_loopback_host(host: str) -> bool:
     if host.lower() == "localhost":
         return True
-    ip = _parse_ip(host)
+    ip = parse_ip(host)
     return ip is not None and ip.is_loopback
 
 

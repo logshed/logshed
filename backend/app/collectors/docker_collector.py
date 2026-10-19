@@ -29,6 +29,7 @@ import httpx
 from app.collectors.syslog import AliasCache
 from app.core.config import get_db_path
 from app.core.migrations import get_connection
+from app.core.net_guard import GuardedAsyncHTTPTransport
 from app.core.pipeline import (
     MAX_MESSAGE_BYTES,
     KeyedMultilineAssembler,
@@ -231,7 +232,8 @@ def _build_client(
                 socket_options.append((socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3))
 
         verify_param = ssl_context if ssl_context is not None else True
-        transport = httpx.AsyncHTTPTransport(verify=verify_param, socket_options=socket_options, limits=limits)
+        # The transport checks the address it actually connects to (DNS rebinding)
+        transport = GuardedAsyncHTTPTransport(verify=verify_param, socket_options=socket_options, limits=limits)
         return httpx.AsyncClient(
             transport=transport,
             base_url=base_url,
