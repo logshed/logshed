@@ -163,7 +163,7 @@ class TestHttpIngestApi:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["ingested"] == 2
+        assert data["accepted"] == 2
 
     @pytest.mark.asyncio
     async def test_ingest_ndjson_streaming_payload(self, client: AsyncClient, write_token: str):
@@ -184,18 +184,18 @@ class TestHttpIngestApi:
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["ingested"] == 3
+        assert resp.json()["accepted"] == 3
 
     @pytest.mark.asyncio
     async def test_empty_payload_handling(self, client: AsyncClient, write_token: str):
-        """Empty or whitespace-only payload returns ingested: 0 without error."""
+        """Empty or whitespace-only payload returns accepted: 0 without error."""
         resp = await client.post(
             "/api/v1/ingest",
             content="",
             headers={"Authorization": f"Bearer {write_token}"},
         )
         assert resp.status_code == 200
-        assert resp.json()["ingested"] == 0
+        assert resp.json()["accepted"] == 0
 
     @pytest.mark.asyncio
     async def test_token_cache_performance(self, client: AsyncClient, write_token: str):
@@ -309,7 +309,7 @@ class TestIngestPipelinePath:
         data = resp.json()
         assert data["accepted"] == 1
         assert data["dropped"] == 1
-        assert data["ingested"] == 1
+        assert data["accepted"] == 1
         assert [e["message"] for e in _queued_entries()] == ["real event"]
         assert pipeline_mod.get_dropped_by_filter_count() == 1
 
@@ -462,7 +462,7 @@ class TestIngestLimitsAndFields:
             headers={"Authorization": f"Bearer {write_token}"},
         )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok", "ingested": 2, "accepted": 2, "dropped": 0}
+        assert resp.json() == {"status": "ok", "accepted": 2, "dropped": 0}
 
 
 @pytest.mark.usefixtures("isolated_filters")
@@ -803,3 +803,28 @@ class TestIngestFieldLengths:
         assert resp.status_code == 200
         rows = _store_through_consumer(_queued_entries())
         assert rows["stored"]["app_name"] == "b" * 255
+
+
+class TestIngestResponseShape:
+    """N01-3: the ingest response is {status, accepted, dropped} only (no ingested alias)."""
+
+    @pytest.mark.asyncio
+    async def test_success_response_has_no_ingested_key(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "one"}, {"message": "two"}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "accepted": 2, "dropped": 0}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", ["", "   \n", "[]"])
+    async def test_empty_responses_have_no_ingested_key(self, client, write_token, content):
+        resp = await client.post(
+            "/api/v1/ingest",
+            content=content,
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "accepted": 0, "dropped": 0}

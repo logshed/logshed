@@ -237,13 +237,13 @@ async def ingest_logs(
     source_ip 127.0.0.1 with source_alias "logshed") is rejected with 422 and nothing is stored.
     Timestamps are ISO 8601 strings or Unix times (seconds, or milliseconds above 1e12, as a
     number or a 10 or 13 digit string). Timestamps older than MAX_RETENTION_DAYS or more than
-    5 minutes ahead are replaced with the received time. The response reports accepted and dropped counts; ingested equals accepted.
+    5 minutes ahead are replaced with the received time. The response reports accepted and dropped counts.
     """
     await _authenticate_ingest_token(request, response)
 
     body_bytes = await _read_body_limited(request)
     if not body_bytes or not body_bytes.strip():
-        return {"status": "ok", "ingested": 0, "accepted": 0, "dropped": 0}
+        return {"status": "ok", "accepted": 0, "dropped": 0}
 
     body_str = body_bytes.decode("utf-8", errors="replace").strip()
     raw_entries: list[dict[str, Any]] = []
@@ -286,7 +286,7 @@ async def ingest_logs(
                 )
 
     if not raw_entries:
-        return {"status": "ok", "ingested": 0, "accepted": 0, "dropped": 0}
+        return {"status": "ok", "accepted": 0, "dropped": 0}
 
     if len(raw_entries) > INGEST_MAX_ENTRIES:
         raise HTTPException(
@@ -374,7 +374,6 @@ async def ingest_logs(
 
     return {
         "status": "ok",
-        "ingested": accepted,
         "accepted": accepted,
         "dropped": len(entries) - accepted,
     }
