@@ -590,3 +590,48 @@ class TestRedactorTruncation:
         result = redact(text)
         assert "hunter2" not in result
         assert result.startswith(f"password={REDACTED} ")
+
+
+class TestRedactorInputCap:
+    """N05-3: one call to redact() never processes more than MAX_REDACT_INPUT_CHARS of text."""
+
+    _LINE = "2026-10-19T10:00:00Z web-01 app[123]: user=alice password=hunter2 token=abcdef ok\n"
+
+    def _big_text(self, chars: int) -> str:
+        return self._LINE * (chars // len(self._LINE) + 1)
+
+    def test_five_megabyte_input_is_capped_and_fast(self):
+        text = self._big_text(5_000_000)
+        assert len(text) > 5_000_000
+        start = time.perf_counter()
+        result = redact(text)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, f"redact took {elapsed:.2f}s on a 5 MB input"
+        assert result.endswith("\n" + TRUNCATION_MARKER)
+        from app.core.redactor import MAX_REDACT_INPUT_CHARS
+
+        # Only the first MAX_REDACT_INPUT_CHARS of input are kept (redaction itself may lengthen them)
+        assert result.count("\n") <= MAX_REDACT_INPUT_CHARS // len(self._LINE) + 1
+        assert "hunter2" not in result
+
+    def test_cut_falls_on_a_line_boundary(self):
+        from app.core.redactor import MAX_REDACT_INPUT_CHARS
+
+        result = redact(self._big_text(MAX_REDACT_INPUT_CHARS + 50_000))
+        body = result[: -len("\n" + TRUNCATION_MARKER)]
+        assert body.endswith(" ok")
+        assert all(line.endswith(" ok") for line in body.split("\n"))
+
+    def test_input_at_the_cap_is_not_cut(self):
+        from app.core.redactor import MAX_REDACT_INPUT_CHARS
+
+        text = ("x" * 99 + "\n") * (MAX_REDACT_INPUT_CHARS // 100)
+        assert len(text) == MAX_REDACT_INPUT_CHARS
+        assert redact(text) == text
+
+    def test_list_items_are_capped_individually(self):
+        from app.core.redactor import MAX_REDACT_INPUT_CHARS
+
+        result = redact(["short", self._big_text(MAX_REDACT_INPUT_CHARS + 10)])
+        assert result[0] == "short"
+        assert result[1].endswith("\n" + TRUNCATION_MARKER)

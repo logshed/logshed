@@ -16,7 +16,8 @@ every pattern must run in linear time on hostile input:
   text. Starts are pinned by lookbehinds or by delimiters the scan cannot
   cross (for example, a URL userinfo scan stops at `/`, which every new
   `scheme://` start contains).
-- Lines longer than MAX_REDACT_LINE_CHARS are truncated before matching.
+- Input longer than MAX_REDACT_INPUT_CHARS, and lines longer than
+  MAX_REDACT_LINE_CHARS, are truncated before matching.
   Redacted text is only ever sent outside the box, never stored, so this
   loses nothing that is kept.
 """
@@ -31,6 +32,11 @@ REDACTED = "[REDACTED]"
 # Applied per line (not per field) so that whole AI prompts made of many log lines are kept.
 MAX_REDACT_LINE_CHARS = 16_384
 TRUNCATION_MARKER = "...[truncated]"
+# Any single string longer than this is cut (at the last line break before the cap) before
+# matching, with "\n" + TRUNCATION_MARKER appended. Matching costs about 0.1 s per 100,000
+# characters, so this bounds one call at about half a second. The largest legitimate input
+# is a whole AI prompt (log text is budgeted at 100,000 characters), well under the cap.
+MAX_REDACT_INPUT_CHARS = 500_000
 # When cutting, back off to a delimiter within this many characters so no fragment of a
 # token is left at the cut (a partial token no longer matches its pattern).
 _CUT_BACKOFF_CHARS = 512
@@ -324,8 +330,10 @@ def redact(text: Union[str, list[str]]) -> Union[str, list[str]]:
     """
     Scrub sensitive secrets from log text.
 
-    Lines longer than MAX_REDACT_LINE_CHARS are truncated (with TRUNCATION_MARKER)
-    before matching, which bounds the work done on hostile input.
+    Input longer than MAX_REDACT_INPUT_CHARS is cut at a line break (with a new line and
+    TRUNCATION_MARKER appended), and lines longer than MAX_REDACT_LINE_CHARS are cut (with
+    TRUNCATION_MARKER), before matching, which bounds the work done on hostile input.
+    A list is processed item by item, and the cap applies to each item.
 
     Args:
         text: A single log string or a list of log strings.
@@ -363,9 +371,20 @@ def _truncate_long_lines(text: str) -> str:
     )
 
 
+def _cap_input(text: str) -> str:
+    """Cut text longer than MAX_REDACT_INPUT_CHARS at the last line break before the cap."""
+    if len(text) <= MAX_REDACT_INPUT_CHARS:
+        return text
+    cut = text.rfind("\n", 0, MAX_REDACT_INPUT_CHARS)
+    if cut <= 0:
+        # No line break: _truncate_long_lines then cuts the over-long line at a delimiter
+        cut = MAX_REDACT_INPUT_CHARS
+    return text[:cut] + "\n" + TRUNCATION_MARKER
+
+
 def _redact_single(text: str) -> str:
     """Apply all redaction patterns to a single string."""
-    result = _truncate_long_lines(text)
+    result = _truncate_long_lines(_cap_input(text))
     for _name, pattern, replacement in _PATTERNS:
         result = pattern.sub(replacement, result)
     return result
