@@ -80,8 +80,8 @@ QUERY_TOKEN_WARNING_INTERVAL_SECONDS = 600.0
 _last_query_token_warning = 0.0
 
 QUERY_TOKEN_DESCRIPTION = (
-    "Deprecated and refused by default: accepted only when MCP_ALLOW_QUERY_TOKEN=true. "
-    "Send the token in the Authorization: Bearer header instead."
+    "Refused by default; accepted only when MCP_ALLOW_QUERY_TOKEN=true, for clients that cannot send headers. "
+    "URLs can end up in proxy logs, so prefer the Authorization: Bearer header."
 )
 
 _ENDPOINT_EVENT_RE = re.compile(rb"event:\s*endpoint")
@@ -218,9 +218,8 @@ def _warn_query_token_used() -> None:
         return
     _last_query_token_warning = now
     logger.warning(
-        "An MCP client sent its API token in the URL query string (?token=). This form is deprecated and "
-        "accepted only because MCP_ALLOW_QUERY_TOKEN=true; URLs are written to proxy access logs, so move "
-        "the client to the Authorization: Bearer header."
+        "MCP accepted an API token from the URL query string (MCP_ALLOW_QUERY_TOKEN is on); URLs can end up "
+        "in proxy logs, so prefer the Authorization header."
     )
 
 
@@ -438,7 +437,7 @@ async def _dispatch_streamable_http(request: Request, token: Optional[str] = Non
 @router.delete("/")
 async def handle_mcp_streamable_http_root(
     request: Request,
-    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
+    token: Optional[str] = Query(None, description=QUERY_TOKEN_DESCRIPTION),
 ):
     """Handle Streamable HTTP transport requests on the root MCP endpoint."""
     return await _dispatch_streamable_http(request, token)
@@ -449,7 +448,7 @@ async def handle_mcp_streamable_http_root(
 @router.delete("/sse")
 async def handle_mcp_streamable_http_sse(
     request: Request,
-    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
+    token: Optional[str] = Query(None, description=QUERY_TOKEN_DESCRIPTION),
 ):
     """Handle Streamable HTTP requests directed at the SSE sub-path."""
     return await _dispatch_streamable_http(request, token)
@@ -458,7 +457,7 @@ async def handle_mcp_streamable_http_sse(
 @router.get("/sse")
 async def handle_mcp_sse(
     request: Request,
-    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
+    token: Optional[str] = Query(None, description=QUERY_TOKEN_DESCRIPTION),
 ):
     """
     Handle incoming SSE transport stream for Model Context Protocol.
@@ -512,7 +511,7 @@ async def handle_mcp_sse(
 @router.post("/messages/")
 async def handle_mcp_messages(
     request: Request,
-    token: Optional[str] = Query(None, deprecated=True, description=QUERY_TOKEN_DESCRIPTION),
+    token: Optional[str] = Query(None, description=QUERY_TOKEN_DESCRIPTION),
     session_id: Optional[str] = Query(None),
 ):
     """Handle incoming JSON-RPC client messages linked to active SSE transport sessions."""

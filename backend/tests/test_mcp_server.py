@@ -1337,7 +1337,10 @@ class TestQueryStringToken:
             res = await client.post(f"/mcp?token={token['raw']}", json=INIT_PAYLOAD, headers=accept)
         assert res.status_code == 200
         assert "LogShed" in res.text
-        assert any("deprecated" in r.getMessage() and "MCP_ALLOW_QUERY_TOKEN" in r.getMessage() for r in caplog.records)
+        messages = [r.getMessage() for r in caplog.records if "MCP_ALLOW_QUERY_TOKEN" in r.getMessage()]
+        assert len(messages) == 1
+        assert "deprecated" not in messages[0].lower()
+        assert "Authorization header" in messages[0]
         assert token["raw"] not in caplog.text
 
     @pytest.mark.asyncio
@@ -1736,3 +1739,39 @@ class TestMCPStdioUdpReceiveErrors:
         with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
             http_metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
         assert http_metrics["udp_receive_errors"] == 7
+
+
+class TestQueryTokenIsSupportedOptIn:
+    """N01-2: MCP_ALLOW_QUERY_TOKEN is a supported opt-in for header-less clients, not a deprecated form."""
+
+    @pytest.mark.asyncio
+    async def test_warning_is_logged_once_across_requests_and_not_called_deprecated(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch, caplog
+    ):
+        monkeypatch.setenv("MCP_ALLOW_QUERY_TOKEN", "true")
+        mcp_api_mod._last_query_token_warning = 0.0
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        accept = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+
+        with caplog.at_level("WARNING", logger="app.api.mcp"):
+            for _ in range(3):
+                res = await client.post(f"/mcp?token={token['raw']}", json=INIT_PAYLOAD, headers=accept)
+                assert res.status_code == 200
+        warnings = [r.getMessage() for r in caplog.records if "MCP_ALLOW_QUERY_TOKEN" in r.getMessage()]
+        assert len(warnings) == 1
+        assert "deprecated" not in warnings[0].lower()
+        assert token["raw"] not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_openapi_does_not_mark_token_parameter_deprecated(self, client: AsyncClient):
+        spec = (await client.get("/openapi.json")).json()
+        checked = 0
+        for path in ("/mcp", "/api/v1/mcp", "/api/v1/mcp/sse"):
+            for operation in spec["paths"].get(path, {}).values():
+                for param in operation.get("parameters", []):
+                    if param["name"] == "token":
+                        checked += 1
+                        assert not param.get("deprecated", False), path
+                        assert "deprecated" not in param.get("description", "").lower(), path
+        assert checked > 0
