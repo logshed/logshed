@@ -18,6 +18,7 @@ from app.api.deps import bearer_scheme, parse_bearer_token, rate_limit_headers, 
 from app.core.api_tokens import ApiTokenRateLimiter
 from app.core.config import get_max_retention_days
 from app.core.pipeline import (
+    MAX_FUTURE_TIMESTAMP_SKEW_SECONDS,
     MAX_MESSAGE_BYTES,
     clean_log_text,
     filter_and_enqueue,
@@ -34,9 +35,6 @@ ingest_rate_limiter = ApiTokenRateLimiter(max_requests=6000, window_seconds=60.0
 # Request limits: the body is read into memory, so it is capped (INGEST_MAX_BODY_BYTES overrides the size).
 DEFAULT_INGEST_MAX_BODY_BYTES = 5 * 1024 * 1024
 INGEST_MAX_ENTRIES = 10_000
-
-# Entry timestamps outside [now - MAX_RETENTION_DAYS, now + this] are replaced with the received time.
-_MAX_FUTURE_TIMESTAMP_SKEW = datetime.timedelta(minutes=5)
 
 # In-memory token validation cache with 60s TTL: token_hash -> (cached_at, token_dict)
 _TOKEN_CACHE_TTL = 60.0
@@ -264,8 +262,9 @@ async def ingest_logs(
     client_ip = request.client.host if request.client else "external"
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     now_utc_str = now_dt.isoformat()
+    # Entry timestamps outside this range are replaced with the received time.
     earliest_ts = now_dt - datetime.timedelta(days=get_max_retention_days())
-    latest_ts = now_dt + _MAX_FUTURE_TIMESTAMP_SKEW
+    latest_ts = now_dt + datetime.timedelta(seconds=MAX_FUTURE_TIMESTAMP_SKEW_SECONDS)
 
     alias_cache = None
     try:

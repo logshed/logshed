@@ -1087,3 +1087,55 @@ class TestQueueConsumerPersistentConnection:
 
 
 
+class TestFutureTimestampWindow:
+    """N03-1: the consumer clamp uses the same 5 minute future window as HTTP ingest and syslog."""
+
+    @staticmethod
+    def _store(db_path: Path, entries: list[dict]) -> dict[str, str]:
+        consumer = QueueConsumer(db_path)
+        try:
+            consumer._insert_batch(entries)
+        finally:
+            consumer._close_conn()
+        conn = get_connection(db_path)
+        try:
+            return {row[0]: row[1] for row in conn.execute("SELECT message, timestamp FROM logs")}
+        finally:
+            conn.close()
+
+    def test_window_is_five_minutes(self):
+        assert pipeline_mod.MAX_FUTURE_TIMESTAMP_SKEW_SECONDS == 300
+
+    def test_consumer_keeps_timestamps_inside_the_window(self, db_path: Path):
+        received = datetime.datetime(2026, 10, 19, 12, 0, tzinfo=datetime.timezone.utc)
+        rows = self._store(db_path, [
+            _make_entry(
+                message="three minutes ahead",
+                timestamp=(received + datetime.timedelta(minutes=3)).isoformat(),
+                received_at=received.isoformat(),
+            ),
+            _make_entry(
+                message="just inside, Z suffix",
+                timestamp="2026-10-19T12:04:59Z",
+                received_at=received.isoformat(),
+            ),
+        ])
+        assert rows["three minutes ahead"] == (received + datetime.timedelta(minutes=3)).isoformat()
+        assert rows["just inside, Z suffix"] == "2026-10-19T12:04:59+00:00"
+
+    def test_consumer_resets_timestamps_beyond_the_window(self, db_path: Path):
+        received = datetime.datetime(2026, 10, 19, 12, 0, tzinfo=datetime.timezone.utc)
+        rows = self._store(db_path, [
+            _make_entry(
+                message="ten minutes ahead",
+                timestamp=(received + datetime.timedelta(minutes=10)).isoformat(),
+                received_at=received.isoformat(),
+            ),
+            _make_entry(
+                message="just outside",
+                timestamp=(received + datetime.timedelta(seconds=301)).isoformat(),
+                received_at=received.isoformat(),
+            ),
+        ])
+        assert rows["ten minutes ahead"] == received.isoformat()
+        assert rows["just outside"] == received.isoformat()

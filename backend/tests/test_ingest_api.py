@@ -645,3 +645,46 @@ class TestIngestBearerSchemeCase:
         assert (await client.delete(f"/api/tokens/{token_id}", headers=auth_headers)).status_code == 200
 
         assert (await client.post("/api/v1/ingest", json=[{"message": "b"}], headers=headers)).status_code == 401
+
+
+def _store_through_consumer(entries: list[dict]) -> dict[str, dict]:
+    """Write queued entries with the real QueueConsumer insert and read them back by message."""
+    import sqlite3
+
+    from app.core.config import get_db_path
+    from app.core.pipeline import QueueConsumer
+
+    consumer = QueueConsumer(get_db_path())
+    try:
+        consumer._insert_batch(entries)
+    finally:
+        consumer._close_conn()
+    conn = sqlite3.connect(str(get_db_path()))
+    conn.row_factory = sqlite3.Row
+    try:
+        return {r["message"]: dict(r) for r in conn.execute("SELECT * FROM logs")}
+    finally:
+        conn.close()
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestFutureTimestampWindow:
+    """N03-1: an ingest timestamp up to 5 minutes ahead is stored as sent, through the queue consumer too."""
+
+    @pytest.mark.asyncio
+    async def test_five_minute_window_holds_end_to_end(self, client, write_token):
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        inside = now + timedelta(minutes=4)
+        outside = now + timedelta(minutes=6)
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[
+                {"message": "inside", "timestamp": inside.isoformat()},
+                {"message": "outside", "timestamp": outside.isoformat()},
+            ],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        rows = _store_through_consumer(_queued_entries())
+        assert datetime.fromisoformat(rows["inside"]["timestamp"]) == inside
+        assert rows["outside"]["timestamp"] == rows["outside"]["received_at"]

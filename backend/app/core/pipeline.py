@@ -26,6 +26,10 @@ SKIP_ALERT_RULES_KEY = "_skip_alert_rules"
 # Longest message or raw text (in characters) stored for a single log entry from any source.
 MAX_MESSAGE_BYTES = 65536
 
+# How far ahead of the received time a log timestamp may be. Later timestamps are replaced with
+# the received time. Shared by HTTP ingest, the syslog parser and the QueueConsumer clamp.
+MAX_FUTURE_TIMESTAMP_SKEW_SECONDS = 300
+
 
 class InternalLogHandler(logging.Handler):
     """
@@ -991,7 +995,7 @@ class QueueConsumer:
             cursor = conn.cursor()
             for entry in batch:
                 # Defensive clamp & UTC normalization: ensure timestamp is in canonical UTC
-                # and no entry is saved with a timestamp in the future compared to received_at
+                # and no entry is saved more than MAX_FUTURE_TIMESTAMP_SKEW_SECONDS after received_at
                 try:
                     ts_val = entry.get("timestamp")
                     rec_val = entry.get("received_at")
@@ -1023,7 +1027,7 @@ class QueueConsumer:
                                 else:
                                     dt_rec = dt_rec.astimezone(utc)
 
-                                if (dt_ts - dt_rec).total_seconds() > 60:
+                                if (dt_ts - dt_rec).total_seconds() > MAX_FUTURE_TIMESTAMP_SKEW_SECONDS:
                                     dt_ts = dt_rec
 
                             entry["timestamp"] = dt_ts.isoformat()

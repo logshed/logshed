@@ -1790,3 +1790,36 @@ class TestSyslogShutdownDrain:
 
         await asyncio.wait_for(proto.stop(), timeout=1.0)
         assert not proto._workers
+
+
+class TestSyslogFutureTimestampWindow:
+    """N03-1: syslog keeps timestamps up to 5 minutes ahead, like HTTP ingest and the queue consumer."""
+
+    NOW = datetime.datetime(2026, 10, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+
+    @staticmethod
+    def _messages(ts: datetime.datetime) -> list[bytes]:
+        return [
+            f"<14>1 {ts.strftime('%Y-%m-%dT%H:%M:%SZ')} host app - - - rfc5424".encode(),
+            f"<14>{ts.strftime('%b %d %H:%M:%S')} host app: rfc3164".encode(),
+            f"<14>{ts.strftime('%Y-%m-%dT%H:%M:%SZ')} host app: iso".encode(),
+        ]
+
+    def test_timestamp_inside_window_is_kept(self):
+        ahead = self.NOW + datetime.timedelta(minutes=4)
+        for data in self._messages(ahead):
+            parsed = parse_syslog_message(data, "10.0.0.1", now=self.NOW, local_tz=datetime.timezone.utc)
+            assert parsed["timestamp"] == ahead.isoformat(), data
+
+    def test_timestamp_beyond_window_uses_received_time(self):
+        ahead = self.NOW + datetime.timedelta(minutes=10)
+        for data in self._messages(ahead):
+            parsed = parse_syslog_message(data, "10.0.0.1", now=self.NOW, local_tz=datetime.timezone.utc)
+            assert parsed["timestamp"] == self.NOW.isoformat(), data
+
+    def test_whole_hour_offset_is_still_corrected(self):
+        """A sender one hour ahead (wrong time zone) is still pulled back by whole hours."""
+        ahead = self.NOW + datetime.timedelta(hours=1, minutes=2)
+        data = f"<14>1 {ahead.strftime('%Y-%m-%dT%H:%M:%SZ')} host app - - - tz".encode()
+        parsed = parse_syslog_message(data, "10.0.0.1", now=self.NOW, local_tz=datetime.timezone.utc)
+        assert parsed["timestamp"] == (self.NOW + datetime.timedelta(minutes=2)).isoformat()

@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 
 from app.core.migrations import get_connection
 from app.core.pipeline import (
+    MAX_FUTURE_TIMESTAMP_SKEW_SECONDS,
     MAX_MESSAGE_BYTES,
     KeyedMultilineAssembler,
     detect_severity,
@@ -33,6 +34,21 @@ _MONTH_MAP = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
+
+def _correct_future_timestamp(dt_utc: datetime.datetime, now: datetime.datetime) -> datetime.datetime:
+    """
+    A timestamp more than MAX_FUTURE_TIMESTAMP_SKEW_SECONDS ahead of now is pulled back by whole
+    hours (a sender reporting the wrong time zone). If it is still too far ahead, now is used.
+    """
+    diff_seconds = (dt_utc - now).total_seconds()
+    if diff_seconds > MAX_FUTURE_TIMESTAMP_SKEW_SECONDS:
+        offset_hours = round(diff_seconds / 3600)
+        if offset_hours > 0:
+            dt_utc -= datetime.timedelta(hours=offset_hours)
+        if (dt_utc - now).total_seconds() > MAX_FUTURE_TIMESTAMP_SKEW_SECONDS:
+            dt_utc = now
+    return dt_utc
+
 
 def _parse_valkey_datetime(
     day_str: str,
@@ -120,14 +136,7 @@ def _parse_iso_or_datetime(
                 dt_utc = candidate_a
         else:
             dt_utc = dt.astimezone(datetime.timezone.utc)
-        diff_seconds = (dt_utc - now).total_seconds()
-        if diff_seconds > 60:
-            offset_hours = round(diff_seconds / 3600)
-            if offset_hours > 0:
-                dt_utc -= datetime.timedelta(hours=offset_hours)
-            if (dt_utc - now).total_seconds() > 60:
-                dt_utc = now
-        return dt_utc.isoformat()
+        return _correct_future_timestamp(dt_utc, now).isoformat()
     except Exception:
         return ts_str
 
@@ -275,14 +284,7 @@ def parse_syslog_message(
                             dt_utc = candidate_a
                     else:
                         dt_utc = dt.astimezone(datetime.timezone.utc)
-                    diff_seconds = (dt_utc - now).total_seconds()
-                    if diff_seconds > 60:
-                        offset_hours = round(diff_seconds / 3600)
-                        if offset_hours > 0:
-                            dt_utc -= datetime.timedelta(hours=offset_hours)
-                        if (dt_utc - now).total_seconds() > 60:
-                            dt_utc = now
-                    result["timestamp"] = dt_utc.isoformat()
+                    result["timestamp"] = _correct_future_timestamp(dt_utc, now).isoformat()
                 except Exception:
                     result["timestamp"] = timestamp
             if hostname != "-":
@@ -327,14 +329,8 @@ def parse_syslog_message(
             else:
                 dt_utc = candidate_a
 
-            diff_seconds = (dt_utc - now).total_seconds()
-            if diff_seconds > 60:
-                offset_hours = round(diff_seconds / 3600)
-                if offset_hours > 0:
-                    dt_utc -= datetime.timedelta(hours=offset_hours)
-                if (dt_utc - now).total_seconds() > 60:
-                    dt_utc = now
-            
+            dt_utc = _correct_future_timestamp(dt_utc, now)
+
             # Preserve microsecond arrival precision for proper sub-second ordering
             dt_utc = dt_utc.replace(microsecond=now.microsecond)
             result["timestamp"] = dt_utc.isoformat()
