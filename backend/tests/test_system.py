@@ -924,7 +924,7 @@ class TestSettingsEncryptionAndKeyManagement:
     ):
         """
         Verify retention_overridden flag is True when MAX_RETENTION_DAYS is set,
-        and the saved value (7) is used again, untouched by the override, when the variable is removed.
+        and, once saved at startup, the override value stays after the variable is removed (1.2.x outcome).
         """
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
 
@@ -942,6 +942,11 @@ class TestSettingsEncryptionAndKeyManagement:
         assert data_override["max_retention_days"] == 60
         assert data_override["retention_days"] == 60
 
+        # Startup saves the override value; a read never does
+        from app.api.deps import run_db_query
+        from app.api.settings import persist_retention_override
+        assert await run_db_query(persist_retention_override) is True
+
         # Step 3: Remove MAX_RETENTION_DAYS (simulating container restart without env var)
         monkeypatch.delenv("MAX_RETENTION_DAYS", raising=False)
         res_reboot = await client.get("/api/settings")
@@ -949,8 +954,9 @@ class TestSettingsEncryptionAndKeyManagement:
         data_reboot = res_reboot.json()
         assert data_reboot["retention_overridden"] is False
         assert data_reboot["max_retention_days"] == 30
-        # A read never overwrites the saved value, so the user's 7 days come back (B-78)
-        assert data_reboot["retention_days"] == 7
+        # The saved value became the override (60), which the default maximum of 30 then caps
+        # (without the startup save the old 7 days would come back)
+        assert data_reboot["retention_days"] == 30
 
     @pytest.mark.asyncio
     async def test_ai_enabled_setting_toggle_and_persistence(
@@ -1732,3 +1738,115 @@ class TestSuperviseWorkerBackoff:
         await asyncio.wait_for(_supervise_worker(failing_worker, "QuickWorker"), timeout=5.0)
 
         assert delays == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]
+
+
+class TestRetentionOverridePersistence:
+    """MAX_RETENTION_DAYS is saved at startup, never by a read (1.2.x outcome without the GET write)."""
+
+    @staticmethod
+    def _stored(db_file: Path):
+        with get_connection(db_file) as conn:
+            row = conn.execute(
+                "SELECT value, updated_at FROM system_settings WHERE key = 'retention_days'"
+            ).fetchone()
+        return (row[0], row[1]) if row else None
+
+    @staticmethod
+    def _store(db_file: Path, days: int):
+        with get_connection(db_file) as conn:
+            conn.execute(
+                "INSERT INTO system_settings (key, value, is_encrypted, updated_at) "
+                "VALUES ('retention_days', ?, 0, '2026-01-01T00:00:00+00:00') "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (str(days),),
+            )
+            conn.commit()
+
+    @pytest.mark.asyncio
+    async def test_startup_stores_the_override_value(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.main import lifespan
+
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, 7)
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "30")
+
+        async with lifespan(create_app.uncached()):
+            pass
+
+        assert self._stored(db_file)[0] == "30"
+
+    @pytest.mark.asyncio
+    async def test_get_reports_override_without_writing(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, 7)
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "30")
+
+        res = await client.get("/api/settings")
+        assert res.status_code == 200
+        assert res.json()["retention_days"] == 30
+        assert self._stored(db_file) == ("7", "2026-01-01T00:00:00+00:00")
+
+    @pytest.mark.asyncio
+    async def test_value_stays_after_variable_is_removed_and_restarted(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.main import lifespan
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, 7)
+
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "30")
+        async with lifespan(create_app.uncached()):
+            pass
+
+        monkeypatch.delenv("MAX_RETENTION_DAYS")
+        async with lifespan(create_app.uncached()):
+            pass
+
+        res = await client.get("/api/settings")
+        assert res.json()["retention_overridden"] is False
+        assert res.json()["retention_days"] == 30
+
+    @pytest.mark.asyncio
+    async def test_persist_function_writes_only_when_needed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.api.deps import run_db_query
+        from app.api.settings import persist_retention_override
+
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, 7)
+
+        # Variable not set: nothing is written
+        monkeypatch.delenv("MAX_RETENTION_DAYS", raising=False)
+        assert await run_db_query(persist_retention_override) is False
+        assert self._stored(db_file) == ("7", "2026-01-01T00:00:00+00:00")
+
+        # Variable set and different: stored
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "30")
+        assert await run_db_query(persist_retention_override) is True
+        value, updated_at = self._stored(db_file)
+        assert value == "30"
+        assert updated_at != "2026-01-01T00:00:00+00:00"
+
+        # Already equal: not written again
+        self._store(db_file, 30)
+        assert await run_db_query(persist_retention_override) is False
+        assert self._stored(db_file) == ("30", "2026-01-01T00:00:00+00:00")
+
+    @pytest.mark.asyncio
+    async def test_persist_function_inserts_when_nothing_is_stored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.api.deps import run_db_query
+        from app.api.settings import persist_retention_override
+
+        monkeypatch.setenv("MAX_RETENTION_DAYS", "21")
+        assert await run_db_query(persist_retention_override) is True
+        assert self._stored(tmp_path / "logs.db")[0] == "21"

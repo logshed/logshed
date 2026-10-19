@@ -285,6 +285,12 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(run_migrations, db_path)
     await asyncio.to_thread(get_or_create_master_key)
 
+    # Save MAX_RETENTION_DAYS as the stored retention (a settings read never writes)
+    try:
+        await run_db_query(settings.persist_retention_override, custom_db_path=Path(db_path))
+    except Exception as e:
+        logger.warning(f"Could not save the MAX_RETENTION_DAYS retention override: {e}")
+
     # Pre-seed Docker endpoints from DOCKER_ADDITIONAL_HOSTS if present
     try:
         import sqlite3

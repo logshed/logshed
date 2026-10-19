@@ -58,6 +58,36 @@ DEFAULT_AI_MODELS: dict[str, str] = {
 }
 
 
+def persist_retention_override(conn) -> bool:
+    """
+    Save MAX_RETENTION_DAYS as the stored retention when the variable is set.
+
+    Called once at startup (a settings read never writes). While the variable is set the
+    saved retention becomes its value, and removing the variable later leaves retention at
+    that value until the user changes it in the UI, as in 1.2.x. Returns True when a value
+    was written, False when the variable is unset or the stored value already matches.
+    """
+    if not is_max_retention_days_overridden():
+        return False
+    max_days = str(get_max_retention_days())
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'retention_days'").fetchone()
+    if row is not None and row[0] == max_days:
+        return False
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT INTO system_settings (key, value, is_encrypted, updated_at)
+        VALUES ('retention_days', ?, 0, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        """,
+        (max_days, now),
+    )
+    conn.commit()
+    invalidate_settings_cache()
+    logger.info(f"Retention set to {max_days} days from MAX_RETENTION_DAYS.")
+    return True
+
+
 @router.get("", response_model=SettingsResponse)
 async def get_settings(user: dict = Depends(get_current_user)) -> SettingsResponse:
     """
