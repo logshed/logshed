@@ -156,10 +156,6 @@ class LoginAttempt:
     """A login attempt reserved by LoginRateLimiter.begin(); pass it to finish()."""
 
     key: str
-    recorded_at: float
-
-
-_GLOBAL_KEY = "*"
 
 
 class LoginRateLimiter:
@@ -168,9 +164,8 @@ class LoginRateLimiter:
 
     - Per key (client IP, IPv6 by /64): up to `max_attempts` failed attempts per window.
     - Per key: at most `max_in_flight` attempts being verified at the same time.
-    - Global: up to `global_max_failures` failed attempts per window across all keys.
 
-    begin() reserves the attempt in both windows before the caller awaits anything, so
+    begin() reserves the attempt before the caller awaits anything, so
     concurrent requests see each other's attempts. finish(success=True) releases the
     reservation and clears the key's history so a legitimate user is not locked out by
     earlier typos; finish(success=False) leaves the attempt counted as a failure.
@@ -182,8 +177,6 @@ class LoginRateLimiter:
         window_seconds: float = 60.0,
         *,
         max_in_flight: int = 2,
-        global_max_failures: int = 30,
-        global_window_seconds: float = 60.0,
         sweep_threshold: int = DEFAULT_SWEEP_THRESHOLD,
         clock: Callable[[], float] = time.monotonic,
     ):
@@ -191,7 +184,6 @@ class LoginRateLimiter:
         self._per_key = SlidingWindowLimiter(
             max_attempts, window_seconds, sweep_threshold=sweep_threshold, clock=clock
         )
-        self._global = SlidingWindowLimiter(global_max_failures, global_window_seconds, clock=clock)
         self._in_flight: dict[str, int] = {}
 
     def __len__(self) -> int:
@@ -201,16 +193,15 @@ class LoginRateLimiter:
     def begin(self, key: str) -> Optional[LoginAttempt]:
         """
         Reserve a login attempt for `key`. Returns None when the attempt must be rejected
-        (per-key limit, per-key in-flight cap or global limit reached); nothing is recorded then.
+        (per-key limit or per-key in-flight cap reached); nothing is recorded then.
         """
         if self._in_flight.get(key, 0) >= self.max_in_flight:
             return None
-        if self._per_key.is_rate_limited(key) or self._global.is_rate_limited(_GLOBAL_KEY):
+        if self._per_key.is_rate_limited(key):
             return None
-        recorded_at = self._per_key.record(key)
-        self._global.record(_GLOBAL_KEY, recorded_at)
+        self._per_key.record(key)
         self._in_flight[key] = self._in_flight.get(key, 0) + 1
-        return LoginAttempt(key=key, recorded_at=recorded_at)
+        return LoginAttempt(key=key)
 
     def finish(self, attempt: LoginAttempt, *, success: bool) -> None:
         """Release the in-flight slot; on success also undo the reservation and clear history."""
@@ -221,12 +212,10 @@ class LoginRateLimiter:
             self._in_flight.pop(attempt.key, None)
         if success:
             self._per_key.forget(attempt.key)
-            self._global.discard(_GLOBAL_KEY, attempt.recorded_at)
 
     def reset(self) -> None:
         """Clear all rate limit state (useful for testing)."""
         self._per_key.reset()
-        self._global.reset()
         self._in_flight.clear()
 
 

@@ -265,7 +265,7 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Mess
     """
     Session login endpoint.
     Enforces strict in-memory rate limiting on login attempts: per client IP (IPv6 by /64),
-    per-IP concurrency, and a global cap on failed attempts across all IPs.
+    and per-IP concurrency.
     """
     limiter_key = ip_bucket_key(_get_client_ip(request))
 

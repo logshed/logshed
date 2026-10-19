@@ -147,42 +147,31 @@ class TestLoginRateLimiter:
         clock.advance(60)
         assert limiter.begin("ip") is not None
 
-    def test_success_clears_key_history_and_global_reservation(self):
+    def test_success_clears_key_history(self):
         clock = FakeClock()
-        limiter = LoginRateLimiter(max_attempts=5, global_max_failures=5, clock=clock)
+        limiter = LoginRateLimiter(max_attempts=5, clock=clock)
         for _ in range(4):
             limiter.finish(limiter.begin("ip"), success=False)
         ok = limiter.begin("ip")
         limiter.finish(ok, success=True)
 
         assert "ip" not in limiter._per_key
-        assert limiter._global.count("*") == 4
-        # One more global failure is still allowed, then the global limit applies to everyone
-        limiter.finish(limiter.begin("ip2"), success=False)
-        assert limiter.begin("ip3") is None
-
-    def test_global_limit_across_keys(self):
-        clock = FakeClock()
-        limiter = LoginRateLimiter(max_attempts=5, global_max_failures=30, clock=clock)
-        for i in range(30):
-            attempt = limiter.begin(f"10.0.0.{i}")
-            assert attempt is not None
-            limiter.finish(attempt, success=False)
-        assert limiter.begin("10.0.1.1") is None
-        clock.advance(60)
-        assert limiter.begin("10.0.1.1") is not None
+        # The key starts over with a full budget
+        for _ in range(5):
+            limiter.finish(limiter.begin("ip"), success=False)
+        assert limiter.begin("ip") is None
 
     def test_rejected_attempts_record_nothing(self):
-        limiter = LoginRateLimiter(max_attempts=1, global_max_failures=100, clock=FakeClock())
+        limiter = LoginRateLimiter(max_attempts=1, clock=FakeClock())
         limiter.finish(limiter.begin("ip"), success=False)
         for _ in range(10):
             assert limiter.begin("ip") is None
-        assert limiter._global.count("*") == 1
+        assert limiter._per_key.count("ip") == 1
 
     def test_per_key_sweep_bounds_tracked_ips(self):
         clock = FakeClock()
         limiter = LoginRateLimiter(
-            max_attempts=5, window_seconds=10.0, global_max_failures=10**9, sweep_threshold=100, clock=clock
+            max_attempts=5, window_seconds=10.0, sweep_threshold=100, clock=clock
         )
         for i in range(2000):
             limiter.finish(limiter.begin(f"ip-{i}"), success=False)
@@ -195,7 +184,6 @@ class TestLoginRateLimiter:
         limiter.reset()
         assert len(limiter) == 0
         assert limiter._in_flight == {}
-        assert limiter._global.count("*") == 0
 
 
 class TestIpBucketKey:
@@ -214,3 +202,19 @@ class TestIpBucketKey:
     )
     def test_keys(self, ip, expected):
         assert ip_bucket_key(ip) == expected
+
+
+class TestLoginLimiterHasNoGlobalLimit:
+
+    def test_failures_spread_over_many_keys_are_never_limited(self):
+        limiter = LoginRateLimiter(max_attempts=5, clock=FakeClock())
+        for i in range(200):
+            attempt = limiter.begin(f"10.0.{i // 250}.{i}")
+            assert attempt is not None
+            limiter.finish(attempt, success=False)
+
+        # A brand new key is still allowed, and the per-key limit still applies to a busy key
+        assert limiter.begin("192.0.2.1") is not None
+        for _ in range(5):
+            limiter.finish(limiter.begin("busy"), success=False)
+        assert limiter.begin("busy") is None

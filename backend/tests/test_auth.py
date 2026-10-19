@@ -741,7 +741,7 @@ class TestCLIPasswordReset:
 
 
 # ===================================================================
-# Login limiter: concurrency, global cap, IPv6 buckets, Argon2 pool
+# Login limiter: concurrency, IPv6 buckets, Argon2 pool
 # ===================================================================
 
 def _slow_counting_verify(calls: list[str], result: bool = False, delay: float = 0.05):
@@ -799,29 +799,7 @@ class TestLoginLimiterHardening:
         assert sorted(r.status_code for r in responses) == [401, 401, 429]
 
     @pytest.mark.asyncio
-    async def test_global_failed_login_limit_across_many_ips(self, client: AsyncClient):
-        """30 failed logins per minute across all IPs trips a global limit for every IP."""
-        await client.post("/api/auth/setup", json={"password": "correct_password"})
-
-        # Loopback peer is a trusted proxy, so each X-Forwarded-For value is a distinct client
-        for i in range(30):
-            res = await client.post(
-                "/api/auth/login",
-                json={"password": "wrong_password"},
-                headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
-            )
-            assert res.status_code == 401
-
-        res_new_ip = await client.post(
-            "/api/auth/login",
-            json={"password": "wrong_password"},
-            headers={"X-Forwarded-For": "198.51.100.200"},
-        )
-        assert res_new_ip.status_code == 429
-        assert "Too many failed login attempts" in res_new_ip.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_successful_logins_do_not_count_toward_global_limit(self, client: AsyncClient):
+    async def test_successful_logins_from_many_addresses_all_succeed(self, client: AsyncClient):
         await client.post("/api/auth/setup", json={"password": "correct_password"})
 
         for i in range(40):
@@ -1057,3 +1035,44 @@ class TestCorsAndBearerHardening:
             ac.cookies.update(auth_cookie)
             res = await ac.get("/api/v1/maintenance/status")
             assert res.status_code == 200
+
+
+class TestLoginHasNoGlobalFailureLimit:
+
+    @pytest.mark.asyncio
+    async def test_failures_from_many_addresses_do_not_trip_a_limit(self, client: AsyncClient):
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+
+        # Loopback peer is a trusted proxy, so each X-Forwarded-For value is a distinct client
+        for i in range(40):
+            res = await client.post(
+                "/api/auth/login",
+                json={"password": "wrong_password"},
+                headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+            )
+            assert res.status_code == 401
+
+        res_new_ip = await client.post(
+            "/api/auth/login",
+            json={"password": "correct_password"},
+            headers={"X-Forwarded-For": "198.51.100.200"},
+        )
+        assert res_new_ip.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_per_address_limit_still_applies(self, client: AsyncClient):
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+
+        for _ in range(5):
+            res = await client.post(
+                "/api/auth/login",
+                json={"password": "wrong_password"},
+                headers={"X-Forwarded-For": "203.0.113.9"},
+            )
+            assert res.status_code == 401
+        res = await client.post(
+            "/api/auth/login",
+            json={"password": "wrong_password"},
+            headers={"X-Forwarded-For": "203.0.113.9"},
+        )
+        assert res.status_code == 429
