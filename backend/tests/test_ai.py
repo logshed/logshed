@@ -2084,17 +2084,17 @@ class TestAiRateLimiting:
 
     def test_rate_limiter_sliding_window_expiration(self):
         from app.core.rate_limiter import AiRateLimiter
-        import time
 
-        limiter = AiRateLimiter(max_requests=2, window_seconds=1.0)
+        now = [1000.0]
+        limiter = AiRateLimiter(max_requests=2, window_seconds=1.0, clock=lambda: now[0])
         session_id = "test-session-sliding"
 
         assert limiter.check_and_record(session_id) is True
         assert limiter.check_and_record(session_id) is True
         assert limiter.check_and_record(session_id) is False
 
-        # Sleep past window
-        time.sleep(1.05)
+        # Advance the fake clock past the window
+        now[0] += 1.05
         assert limiter.is_rate_limited(session_id) is False
         assert limiter.check_and_record(session_id) is True
 
