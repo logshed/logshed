@@ -1899,3 +1899,129 @@ class TestSyslogTcpDisconnectDrain:
             release.set()
             await server.stop()
             await asyncio.wait_for(task, timeout=2.0)
+
+
+class _FakeUdpSocket:
+    """Records setsockopt calls and reports a chosen SO_RCVBUF from getsockopt."""
+
+    def __init__(self, granted: int, fail_set: bool = False):
+        self.granted = granted
+        self.fail_set = fail_set
+        self.set_calls: list[tuple] = []
+
+    def setsockopt(self, level, option, value):
+        self.set_calls.append((level, option, value))
+        if self.fail_set:
+            raise OSError("not permitted")
+
+    def getsockopt(self, level, option):
+        import socket as socket_mod
+
+        assert (level, option) == (socket_mod.SOL_SOCKET, socket_mod.SO_RCVBUF)
+        return self.granted
+
+
+class TestSyslogUdpReceiveBuffer:
+    """N03-6: the UDP listener asks for a large receive buffer (SYSLOG_UDP_RECEIVE_BUFFER_BYTES)."""
+
+    @pytest.fixture(autouse=True)
+    def _linux_kernel(self, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        monkeypatch.setattr(syslog_mod, "_KERNEL_DOUBLES_RCVBUF", True)
+
+    def test_config_default_and_overrides(self, monkeypatch, caplog):
+        from app.core.config import get_syslog_udp_receive_buffer_bytes
+
+        monkeypatch.delenv("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", raising=False)
+        assert get_syslog_udp_receive_buffer_bytes() == 8 * 1024 * 1024
+        monkeypatch.setenv("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", "0")
+        assert get_syslog_udp_receive_buffer_bytes() == 0
+        monkeypatch.setenv("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", " 1048576 ")
+        assert get_syslog_udp_receive_buffer_bytes() == 1048576
+        monkeypatch.setenv("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", "")
+        assert get_syslog_udp_receive_buffer_bytes() == 8 * 1024 * 1024
+
+    @pytest.mark.parametrize("bad", ["abc", "-1", "1.5", str(2**31)])
+    def test_config_invalid_value_uses_default_with_warning(self, monkeypatch, caplog, bad):
+        import logging
+
+        from app.core.config import get_syslog_udp_receive_buffer_bytes
+
+        monkeypatch.setenv("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", bad)
+        with caplog.at_level(logging.WARNING, logger="app.core.config"):
+            assert get_syslog_udp_receive_buffer_bytes() == 8 * 1024 * 1024
+        assert "SYSLOG_UDP_RECEIVE_BUFFER_BYTES" in caplog.text
+
+    def test_requested_size_is_set_and_granted_size_logged(self, caplog):
+        import logging
+        import socket as socket_mod
+
+        from app.collectors.syslog import configure_udp_receive_buffer
+
+        sock = _FakeUdpSocket(granted=2 * 8388608)
+        with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
+            assert configure_udp_receive_buffer(sock, 8388608) == 2 * 8388608
+        assert sock.set_calls == [(socket_mod.SOL_SOCKET, socket_mod.SO_RCVBUF, 8388608)]
+        assert "16777216" in caplog.text
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_zero_leaves_the_os_default(self, caplog):
+        import logging
+
+        from app.collectors.syslog import configure_udp_receive_buffer
+
+        sock = _FakeUdpSocket(granted=212992)
+        with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
+            assert configure_udp_receive_buffer(sock, 0) == 212992
+        assert sock.set_calls == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    @pytest.mark.parametrize("granted", [425984, 8388608])
+    def test_capped_grant_logs_rmem_max_hint(self, caplog, granted):
+        """Linux reports double the usable size, so 8 MiB granted for 8 MiB requested is still capped."""
+        import logging
+
+        from app.collectors.syslog import configure_udp_receive_buffer
+
+        sock = _FakeUdpSocket(granted=granted)
+        with caplog.at_level(logging.INFO, logger="app.collectors.syslog"):
+            configure_udp_receive_buffer(sock, 8388608)
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "net.core.rmem_max" in warnings[0]
+        assert "sysctls" in warnings[0]
+        assert str(granted) in warnings[0]
+
+    def test_setsockopt_failure_does_not_raise(self, caplog):
+        import logging
+
+        from app.collectors.syslog import configure_udp_receive_buffer
+
+        sock = _FakeUdpSocket(granted=212992, fail_set=True)
+        with caplog.at_level(logging.WARNING, logger="app.collectors.syslog"):
+            assert configure_udp_receive_buffer(sock, 8388608) == 212992
+        assert "SYSLOG_UDP_RECEIVE_BUFFER_BYTES" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_server_applies_the_configured_size(self, db_path: Path, monkeypatch):
+        import socket as socket_mod
+
+        import app.collectors.syslog as syslog_mod
+
+        calls = []
+        monkeypatch.setattr(
+            syslog_mod, "configure_udp_receive_buffer", lambda sock, requested: calls.append((sock, requested))
+        )
+        monkeypatch.setenv("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", "262144")
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        try:
+            await _wait_until(lambda: _listening(server))
+            assert len(calls) == 1
+            sock, requested = calls[0]
+            assert requested == 262144
+            assert sock.type == socket_mod.SOCK_DGRAM
+        finally:
+            await server.stop()
+            await asyncio.wait_for(task, timeout=2.0)

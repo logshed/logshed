@@ -9,11 +9,13 @@ import logging
 import re
 import socket
 import sqlite3
+import sys
 import threading
 import weakref
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from app.core.config import get_syslog_udp_receive_buffer_bytes
 from app.core.migrations import get_connection
 from app.core.pipeline import (
     MAX_FUTURE_TIMESTAMP_SKEW_SECONDS,
@@ -536,6 +538,49 @@ class AliasCache:
                 break
             except Exception as e:
                 logger.error(f"Error refreshing alias cache: {e}")
+
+
+# Linux stores (and getsockopt reports) double the SO_RCVBUF value requested, keeping half for overhead.
+_KERNEL_DOUBLES_RCVBUF = sys.platform.startswith("linux")
+
+
+def configure_udp_receive_buffer(sock: Any, requested: int) -> Optional[int]:
+    """
+    Ask for a `requested`-byte receive buffer on the UDP syslog socket (0 leaves the OS default),
+    then log the size the kernel granted, with a hint when net.core.rmem_max capped it.
+    Never raises; returns the granted size as getsockopt reports it, or None if it is unknown.
+    """
+    if sock is None:
+        return None
+    if requested > 0:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, requested)
+        except (OSError, OverflowError, ValueError) as e:
+            logger.warning(
+                f"Could not set the Syslog UDP receive buffer to {requested} bytes "
+                f"(SYSLOG_UDP_RECEIVE_BUFFER_BYTES): {e}"
+            )
+    try:
+        granted = int(sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
+    except (OSError, TypeError, ValueError) as e:
+        logger.warning(f"Could not read the Syslog UDP receive buffer size: {e}")
+        return None
+
+    if requested <= 0:
+        logger.info(f"Syslog UDP receive buffer: {granted} bytes (OS default)")
+        return granted
+
+    logger.info(f"Syslog UDP receive buffer: {granted} bytes granted ({requested} bytes requested)")
+    expected = requested * 2 if _KERNEL_DOUBLES_RCVBUF else requested
+    if granted < expected:
+        logger.warning(
+            f"Syslog UDP receive buffer is {granted} bytes, less than the {requested} bytes requested "
+            f"(SYSLOG_UDP_RECEIVE_BUFFER_BYTES): the kernel limit net.core.rmem_max capped it, so the kernel "
+            f"can drop UDP syslog messages during bursts. Raise the limit on the host "
+            f"(sysctl -w net.core.rmem_max={requested}), or in Docker Compose, if the kernel allows it "
+            f"per container, with 'sysctls: - net.core.rmem_max={requested}'."
+        )
+    return granted
 
 
 NUM_PARSER_WORKERS = 4
@@ -1105,6 +1150,9 @@ class SyslogServer:
                 logger.error(f"Failed to start Syslog UDP server on {self.host}:{self.port}: {e}")
                 raise
             logger.info(f"Started Syslog UDP server on {self.host}:{self.port}")
+            configure_udp_receive_buffer(
+                self.udp_transport.get_extra_info("socket"), get_syslog_udp_receive_buffer_bytes()
+            )
 
             try:
                 self.tcp_server = await loop.create_server(

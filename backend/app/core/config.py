@@ -79,6 +79,30 @@ def get_syslog_max_tcp_connections_per_ip() -> int:
         pass
     return 20
 
+DEFAULT_SYSLOG_UDP_RECEIVE_BUFFER_BYTES = 8 * 1024 * 1024
+_MAX_SOCKET_BUFFER_BYTES = 2**31 - 1
+
+def get_syslog_udp_receive_buffer_bytes() -> int:
+    """
+    Returns the receive buffer size (SO_RCVBUF) requested for the Syslog UDP socket, in bytes.
+    Reads SYSLOG_UDP_RECEIVE_BUFFER_BYTES (default: 8 MiB); 0 leaves the OS default. A value
+    that is not an integer from 0 to 2147483647 falls back to the default with a warning.
+    """
+    raw = os.environ.get("SYSLOG_UDP_RECEIVE_BUFFER_BYTES", "").strip()
+    if not raw:
+        return DEFAULT_SYSLOG_UDP_RECEIVE_BUFFER_BYTES
+    try:
+        val = int(raw)
+        if 0 <= val <= _MAX_SOCKET_BUFFER_BYTES:
+            return val
+    except ValueError:
+        pass
+    logging.getLogger(__name__).warning(
+        f"Invalid SYSLOG_UDP_RECEIVE_BUFFER_BYTES value {raw!r}: expected a whole number of bytes "
+        f"from 0 to {_MAX_SOCKET_BUFFER_BYTES}. Using the default of {DEFAULT_SYSLOG_UDP_RECEIVE_BUFFER_BYTES}."
+    )
+    return DEFAULT_SYSLOG_UDP_RECEIVE_BUFFER_BYTES
+
 def get_syslog_tcp_inactivity_timeout() -> float:
     """
     Returns the Syslog TCP inactivity timeout in seconds.
