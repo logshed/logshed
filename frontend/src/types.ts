@@ -119,10 +119,10 @@ export interface StorageMetricsResponse {
 export interface HealthResponse {
   status: string;
   db?: string;
-  /** Not sent by the backend; kept optional so older test fixtures still type-check. */
-  database?: string;
   queue_depth?: number;
   dropped_logs?: number;
+  /** Syslog UDP datagrams the kernel dropped (receive buffer full); null when unknown. Separate from dropped_logs. */
+  udp_receive_errors?: number | null;
   ingest_rate?: number;
 }
 

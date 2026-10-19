@@ -50,7 +50,6 @@ describe('URL Routing and History API Synchronization', () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
       status: 'ok',
       db: 'ok',
-      database: 'ok',
       queue_depth: 0,
       dropped_logs: 0,
       ingest_rate: 0.0,

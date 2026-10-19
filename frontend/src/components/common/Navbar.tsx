@@ -184,6 +184,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {health.dropped_logs ?? 0}
                 </span>
               </span>
+              {typeof health.udp_receive_errors === 'number' && health.udp_receive_errors > 0 && (
+                <span
+                  title="Syslog UDP messages the operating system discarded because LogShed's receive buffer was full. Not included in Dropped. TCP syslog avoids this."
+                  className="hidden sm:inline"
+                  data-testid="udp-lost"
+                >
+                  UDP lost: <span className="text-amber-400 font-bold">{health.udp_receive_errors}</span>
+                </span>
+              )}
             </div>
           )}
         </div>

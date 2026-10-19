@@ -20,7 +20,6 @@ describe('Navbar Component', () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
       status: 'ok',
       db: 'ok',
-      database: 'ok',
       queue_depth: 0,
       dropped_logs: 0,
       ingest_rate: 0.0,
@@ -49,7 +48,6 @@ describe('Navbar Component', () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
       status: 'ok',
       db: 'ok',
-      database: 'ok',
       queue_depth: 42,
       dropped_logs: 0,
       ingest_rate: 18.5,
@@ -508,5 +506,48 @@ describe('Navbar maintenance and health handling (B11)', () => {
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
     render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
     expect(await screen.findByTestId('health-degraded')).toBeInTheDocument();
+  });
+});
+
+describe('Navbar UDP lost figure (N07)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const renderWithHealth = async (udp: number | null | undefined) => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 7,
+      ingest_rate: 1.0,
+      ...(udp === undefined ? {} : { udp_receive_errors: udp }),
+    });
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    await waitFor(() => expect(systemApi.fetchHealth).toHaveBeenCalled());
+    await screen.findByText(/Dropped:/);
+  };
+
+  it('shows the UDP lost figure, separate from Dropped, when it is above 0', async () => {
+    await renderWithHealth(1234);
+    const udp = screen.getByTestId('udp-lost');
+    expect(udp).toHaveTextContent('UDP lost: 1234');
+    expect(udp.getAttribute('title')).toContain('Not included in Dropped');
+    expect(screen.getByText(/Dropped:/)).toHaveTextContent('Dropped: 7');
+  });
+
+  it('shows nothing for a null UDP figure', async () => {
+    await renderWithHealth(null);
+    expect(screen.queryByTestId('udp-lost')).toBeNull();
+  });
+
+  it('shows nothing for a UDP figure of 0', async () => {
+    await renderWithHealth(0);
+    expect(screen.queryByTestId('udp-lost')).toBeNull();
+  });
+
+  it('shows nothing when the field is missing', async () => {
+    await renderWithHealth(undefined);
+    expect(screen.queryByTestId('udp-lost')).toBeNull();
   });
 });
