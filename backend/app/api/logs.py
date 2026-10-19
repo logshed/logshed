@@ -30,6 +30,7 @@ from app.services.log_deletion import count_matching_logs_async, execute_delete_
 from app.services.log_query import (
     INVALID_DATETIME_DETAIL,
     add_fts_filter,
+    check_ui_filter_value_counts,
     context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
@@ -70,6 +71,7 @@ async def list_logs(
     and automatic prefix matching for search-as-you-type. Time bounds accept ISO-8601
     strings with any offset or relative durations such as '1h', and are compared in UTC.
     """
+    check_ui_filter_value_counts(source=source, app_name=app_name)
     try:
         from_time = to_utc_bound(from_)
         to_time = to_utc_bound(to)
@@ -180,6 +182,7 @@ async def stream_logs(
     """
     Server-Sent Events (SSE) endpoint to stream real-time incoming logs to the browser.
     """
+    check_ui_filter_value_counts(source=source, app_name=app_name)
     parsed_sources = set(
         await run_db_query(lambda conn: expand_source_aliases(source, conn=conn))
     )

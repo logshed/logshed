@@ -15,7 +15,12 @@ from typing import Any, Callable, Optional, TypeVar
 
 from fastapi import HTTPException, status
 
-from app.core.utils import escape_fts_tokens, format_fts_query, parse_relative_or_iso_time
+from app.core.utils import (
+    escape_fts_tokens,
+    format_fts_query,
+    parse_multi_values,
+    parse_relative_or_iso_time,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +135,23 @@ def execute_with_fts_fallback(
                 raise
             logger.info(f"Escaped FTS5 query {fallback_term!r} also failed ({retry_exc}).")
             return empty
+
+
+# The web UI routes accept as many source or app_name values as the facets lists can hold
+# (the facets cap is 500), so the UI can always send every value it can show. Longer lists
+# are refused early: each value becomes SQL parameters and SQLite rejects statements with
+# more than 32,766 of them. REST v1 and MCP use a stricter cap in ``api/external_v1.py``.
+MAX_UI_FILTER_VALUES = 500
+
+
+def check_ui_filter_value_counts(**filters: Optional[list[str]]) -> None:
+    """Raise HTTP 422 when a web UI multi-value filter lists more than MAX_UI_FILTER_VALUES values."""
+    for name, values in filters.items():
+        if len(parse_multi_values(values)) > MAX_UI_FILTER_VALUES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Too many '{name}' values: at most {MAX_UI_FILTER_VALUES} are allowed.",
+            )
 
 
 def db_busy_exception(exc: BaseException, action: str) -> HTTPException:
