@@ -716,8 +716,10 @@ class TestMCPServer:
         # Disable maintenance window using session_id
         end_res = await disable_tool.fn(session_id=session_id)
         assert end_res["status"] == "ok"
-        assert end_res["terminated_count"] == 1
-        assert end_res["remaining_active_count"] == 0
+        assert end_res["terminated_sessions"] == 1
+        assert "terminated_count" not in end_res
+        assert "remaining_active_count" not in end_res
+        assert end_res["remaining_active_sessions"] == 0
 
         # Verify deactivated
         metrics_res_after = await metrics_tool.fn()
@@ -1441,7 +1443,7 @@ class TestMCPDisableMaintenance:
     """B-66: disable_maintenance uses the REST response keys and refuses unknown session ids."""
 
     @pytest.mark.asyncio
-    async def test_response_uses_rest_keys_and_keeps_old_ones(self, client: AsyncClient, auth_headers: dict):
+    async def test_response_uses_rest_keys_only(self, client: AsyncClient, auth_headers: dict):
         tools = create_mcp_server(stdio=True)._tool_manager._tools
         first = await tools["enable_maintenance"].fn(duration_minutes=5)
         await tools["enable_maintenance"].fn(duration_minutes=5)
@@ -1451,9 +1453,8 @@ class TestMCPDisableMaintenance:
         assert res["remaining_active_sessions"] == 1
         assert res["active"] is True
         assert res["server_time"]
-        # Old key names stay for one release
-        assert res["terminated_count"] == 1
-        assert res["remaining_active_count"] == 1
+        assert "terminated_count" not in res
+        assert "remaining_active_count" not in res
 
         res_all = await tools["disable_maintenance"].fn()
         assert res_all["terminated_sessions"] == 1
@@ -1715,3 +1716,23 @@ class TestMcpBearerSchemeCase:
         res = await client.post("/mcp", json=INIT_PAYLOAD, headers=headers)
         assert res.status_code == 401
         assert res.headers["WWW-Authenticate"] == "Bearer"
+
+
+class TestMCPStdioUdpReceiveErrors:
+    """N01-10: udp_receive_errors is a web-process figure, so stdio reports it as unavailable."""
+
+    @pytest.mark.asyncio
+    async def test_stdio_metrics_report_udp_receive_errors_as_unavailable(self, tmp_path: Path, monkeypatch):
+        from app.mcp.server import STDIO_UNAVAILABLE_COUNTERS
+
+        seed_sample_data(tmp_path / "logs.db")
+        monkeypatch.setattr("app.collectors.syslog.get_udp_receive_errors", lambda: 7)
+
+        assert "udp_receive_errors" in STDIO_UNAVAILABLE_COUNTERS
+        stdio_metrics = await create_mcp_server(stdio=True)._tool_manager._tools["get_system_metrics"].fn()
+        assert stdio_metrics["live_counters_available"] is False
+        assert stdio_metrics["udp_receive_errors"] is None
+
+        with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
+            http_metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
+        assert http_metrics["udp_receive_errors"] == 7
