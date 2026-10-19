@@ -279,6 +279,11 @@ async def _verify_password_off_loop(password_hash: str, password: str) -> bool:
     return await loop.run_in_executor(_get_argon2_executor(), verify_password, password_hash, password)
 
 
+async def _hash_password_off_loop(password: str) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_get_argon2_executor(), hash_password, password)
+
+
 @router.post("/login", response_model=MessageResponse)
 async def login(req: LoginRequest, request: Request, response: Response) -> MessageResponse:
     """
@@ -370,26 +375,36 @@ async def change_password(
     user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """Change the admin password for an authenticated session."""
-    def _verify_and_update(conn):
+    def _read_hash(conn):
         cursor = conn.cursor()
         cursor.execute("SELECT password_hash FROM admin_auth WHERE id = 1")
         row = cursor.fetchone()
-        if not row or not verify_password(row[0], req.current_password):
-            return False
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        new_hash = hash_password(req.new_password)
-        cursor.execute(
-            "UPDATE admin_auth SET password_hash = ?, updated_at = ? WHERE id = 1",
-            (new_hash, now),
-        )
-        conn.commit()
-        return True
+        return row[0] if row else None
 
-    success = await run_db_query(_verify_and_update)
-    if not success:
+    # Argon2 runs on its own pool so concurrent password changes cannot stall database reads.
+    current_hash = await run_db_query(_read_hash)
+    if not current_hash or not await _verify_password_off_loop(current_hash, req.current_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect.",
+        )
+    new_hash = await _hash_password_off_loop(req.new_password)
+
+    def _store_hash(conn):
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cursor = conn.cursor()
+        # Only replace the hash that was verified, so a concurrent change is not overwritten silently.
+        cursor.execute(
+            "UPDATE admin_auth SET password_hash = ?, updated_at = ? WHERE id = 1 AND password_hash = ?",
+            (new_hash, now, current_hash),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
+    if not await run_db_query(_store_hash):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The password was changed by another request. Please try again.",
         )
     invalidate_admin_auth_cache()
 

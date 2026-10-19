@@ -1143,3 +1143,89 @@ class TestArgon2ExecutorLifecycle:
             shutdown.assert_not_called()
 
         shutdown.assert_called_once()
+
+
+class TestPasswordChangeUsesArgon2Pool:
+
+    @pytest.mark.asyncio
+    async def test_verify_and_hash_run_on_the_argon2_pool(self, client: AsyncClient, monkeypatch):
+        import threading
+
+        from app.api import auth as auth_mod
+
+        await client.post("/api/auth/setup", json={"password": "InitialSecurePass123!"})
+
+        verify_threads: list[str] = []
+        hash_threads: list[str] = []
+        real_verify = auth_mod.verify_password
+        real_hash = auth_mod.hash_password
+
+        def _verify(password_hash: str, password: str) -> bool:
+            verify_threads.append(threading.current_thread().name)
+            return real_verify(password_hash, password)
+
+        def _hash(password: str) -> str:
+            hash_threads.append(threading.current_thread().name)
+            return real_hash(password)
+
+        monkeypatch.setattr(auth_mod, "verify_password", _verify)
+        monkeypatch.setattr(auth_mod, "hash_password", _hash)
+
+        res = await client.post(
+            "/api/auth/password",
+            json={"current_password": "InitialSecurePass123!", "new_password": "BrandNewPassword987!"},
+        )
+
+        assert res.status_code == 200
+        assert len(verify_threads) == 1 and verify_threads[0].startswith("logshed-argon2")
+        assert len(hash_threads) == 1 and hash_threads[0].startswith("logshed-argon2")
+
+        login = await client.post("/api/auth/login", json={"password": "BrandNewPassword987!"})
+        assert login.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_wrong_current_password_is_rejected_without_hashing(self, client: AsyncClient, monkeypatch):
+        from app.api import auth as auth_mod
+
+        await client.post("/api/auth/setup", json={"password": "InitialSecurePass123!"})
+        hashed: list[str] = []
+        real_hash = auth_mod.hash_password
+        monkeypatch.setattr(auth_mod, "hash_password", lambda p: hashed.append(p) or real_hash(p))
+
+        res = await client.post(
+            "/api/auth/password",
+            json={"current_password": "wrong-password-123", "new_password": "BrandNewPassword987!"},
+        )
+
+        assert res.status_code == 400
+        assert hashed == []
+        assert (await client.post("/api/auth/login", json={"password": "InitialSecurePass123!"})).status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_concurrent_change_is_not_overwritten(self, client: AsyncClient, monkeypatch):
+        import os
+        import sqlite3
+
+        from app.api import auth as auth_mod
+        from app.core.security import hash_password as real_hash
+
+        await client.post("/api/auth/setup", json={"password": "InitialSecurePass123!"})
+        other_hash = real_hash("ChangedByAnotherRequest1!")
+
+        def _hash_and_race(password: str) -> str:
+            conn = sqlite3.connect(os.environ["DB_PATH"])
+            conn.execute("UPDATE admin_auth SET password_hash = ? WHERE id = 1", (other_hash,))
+            conn.commit()
+            conn.close()
+            return real_hash(password)
+
+        monkeypatch.setattr(auth_mod, "hash_password", _hash_and_race)
+
+        res = await client.post(
+            "/api/auth/password",
+            json={"current_password": "InitialSecurePass123!", "new_password": "BrandNewPassword987!"},
+        )
+
+        assert res.status_code == 409
+        monkeypatch.setattr(auth_mod, "hash_password", real_hash)
+        assert (await client.post("/api/auth/login", json={"password": "ChangedByAnotherRequest1!"})).status_code == 200
