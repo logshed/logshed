@@ -744,3 +744,69 @@ class TestFTSIndexWorkerPersistentConnection:
         # Stop closes connection cleanly without descriptor leaks
         await worker.stop()
         assert worker._conn is None
+
+
+async def _poll_until(predicate, timeout: float = 2.0) -> None:
+    """Poll predicate() until it is true, failing the test after timeout seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            raise AssertionError("condition not met in time")
+        await asyncio.sleep(0.005)
+
+
+class TestFTSIndexWorkerCancelledPass:
+    """N03-8: a cancelled run() keeps the index lock until its worker thread has finished the pass."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_mid_pass_holds_lock_and_stop_waits(self, db_path: Path, monkeypatch):
+        worker = FTSIndexWorker(db_path, batch_size=10, poll_interval=0.01)
+        entered = threading.Event()
+        release = threading.Event()
+        state = {"finished": False, "closed_while_busy": None}
+
+        def blocking_chunk(batch_size):
+            entered.set()
+            release.wait(timeout=10)
+            state["finished"] = True
+            return 0
+
+        real_close = worker.close
+
+        def recording_close():
+            state["closed_while_busy"] = not state["finished"]
+            real_close()
+
+        monkeypatch.setattr(worker, "_index_pending_chunk", blocking_chunk)
+        monkeypatch.setattr(worker, "close", recording_close)
+        monkeypatch.setattr(fts_indexer_mod, "index_pending_logs", lambda *args, **kwargs: 0)
+
+        run_task = asyncio.create_task(worker.run())
+        stop_task = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            run_task.cancel()
+            for _ in range(20):
+                await asyncio.sleep(0)
+            # The thread is still working on the connection, so the lock must still be held
+            assert worker._index_lock.locked()
+            assert not run_task.done()
+
+            stop_task = asyncio.create_task(worker.stop())
+            await _poll_until(lambda: bool(worker._index_lock._waiters))
+            assert not stop_task.done()
+            assert state["closed_while_busy"] is None
+
+            release.set()
+            await asyncio.wait_for(stop_task, timeout=2.0)
+            await asyncio.wait_for(run_task, timeout=2.0)
+            assert state["closed_while_busy"] is False
+            assert not worker._index_lock.locked()
+        finally:
+            release.set()
+            if stop_task is not None and not stop_task.done():
+                await stop_task
+            if not run_task.done():
+                run_task.cancel()
+                await asyncio.gather(run_task, return_exceptions=True)

@@ -238,9 +238,7 @@ class FTSIndexWorker:
                     # stop() may have begun while this pass waited for the lock
                     if self._paused or not self._running:
                         continue
-                    indexed_count = await asyncio.to_thread(
-                        self._index_pending_chunk, self._batch_size
-                    )
+                    indexed_count = await self._run_pass_holding_lock()
 
                 if indexed_count >= self._batch_size:
                     # Backlog exists: immediately process next chunk without sleeping
@@ -263,6 +261,26 @@ class FTSIndexWorker:
                     break
 
         logger.info("FTSIndexWorker stopped.")
+
+    async def _run_pass_holding_lock(self) -> int:
+        """
+        Run one indexing pass in a worker thread. Called with _index_lock held. If the caller is
+        cancelled, wait for the thread to finish before re-raising, so the lock is not released
+        while the thread still uses the persistent connection (stop() and pause_indexing() close
+        it under the lock; closing a sqlite3 connection in use by another thread crashes the process).
+        """
+        work = asyncio.ensure_future(asyncio.to_thread(self._index_pending_chunk, self._batch_size))
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            while not work.done():
+                try:
+                    await asyncio.wait([work])
+                except asyncio.CancelledError:
+                    pass
+            if not work.cancelled() and work.exception() is not None:
+                logger.warning(f"FTSIndexWorker pass failed while being cancelled: {work.exception()}")
+            raise
 
     def _index_pending_chunk(self, batch_size: int) -> int:
         """Synchronously index one batch chunk using the persistent worker connection."""
