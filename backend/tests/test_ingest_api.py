@@ -606,3 +606,42 @@ class TestIngestTokenRevocationRace:
         assert ingest_mod.is_ingest_token_revoked(4242)
         clock["now"] += 2
         assert not ingest_mod.is_ingest_token_revoked(4242)
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestBearerSchemeCase:
+    """The Bearer scheme name is case-insensitive (RFC 7235) on the ingest endpoint."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scheme", ["bearer", "BEARER"])
+    async def test_scheme_in_any_case_is_accepted(self, client: AsyncClient, write_token: str, scheme: str):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "case test"}],
+            headers={"Authorization": f"{scheme} {write_token}", "X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 200, resp.text
+
+    @pytest.mark.asyncio
+    async def test_basic_scheme_is_refused(self, client: AsyncClient, write_token: str):
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "case test"}],
+            headers={"Authorization": f"Basic {write_token}", "X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 401
+        assert resp.headers["WWW-Authenticate"] == "Bearer"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scheme", ["Bearer", "bearer"])
+    async def test_revoked_token_is_refused_immediately_in_any_case(
+        self, client: AsyncClient, write_token: str, auth_headers: dict, scheme: str
+    ):
+        headers = {"Authorization": f"{scheme} {write_token}", "X-Requested-With": "XMLHttpRequest"}
+        assert (await client.post("/api/v1/ingest", json=[{"message": "a"}], headers=headers)).status_code == 200
+
+        list_resp = await client.get("/api/tokens", headers=auth_headers)
+        token_id = next(t["id"] for t in list_resp.json() if t["name"] == "Edge Shipper")
+        assert (await client.delete(f"/api/tokens/{token_id}", headers=auth_headers)).status_code == 200
+
+        assert (await client.post("/api/v1/ingest", json=[{"message": "b"}], headers=headers)).status_code == 401

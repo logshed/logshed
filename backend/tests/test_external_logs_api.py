@@ -1003,3 +1003,33 @@ class TestMultiValueCaps:
         values = ",".join(f"v{i}" for i in range(50))
         res = await client.get("/api/v1/logs", params={"source": values, "app_name": values}, headers=logs_token_headers)
         assert res.status_code == 200
+
+
+class TestBearerSchemeCase:
+    """The Bearer scheme name is case-insensitive (RFC 7235) on every token-protected route."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scheme", ["bearer", "BEARER"])
+    @pytest.mark.parametrize("path", ["/api/v1/logs", "/api/v1/auth/verify", "/api/v1/maintenance/status"])
+    async def test_scheme_in_any_case_is_accepted(
+        self, client: AsyncClient, logs_token_headers: dict, auth_headers: dict, scheme: str, path: str
+    ):
+        raw = logs_token_headers["Authorization"].split(" ", 1)[1]
+        if path.endswith("/maintenance/status"):
+            res = await client.post(
+                "/api/tokens",
+                json={"name": "Maint", "scopes": ["maintenance:read"]},
+                headers=auth_headers,
+            )
+            raw = res.json()["raw_token"]
+        res = await client.get(path, headers={"Authorization": f"{scheme} {raw}"})
+        assert res.status_code == 200, res.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["/api/v1/logs", "/api/v1/maintenance/status"])
+    async def test_other_schemes_are_refused(self, client: AsyncClient, logs_token_headers: dict, path: str):
+        raw = logs_token_headers["Authorization"].split(" ", 1)[1]
+        for value in (f"Basic {raw}", raw):
+            res = await client.get(path, headers={"Authorization": value})
+            assert res.status_code == 401
+            assert res.headers["WWW-Authenticate"] == "Bearer"

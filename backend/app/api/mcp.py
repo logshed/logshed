@@ -30,7 +30,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import Message, Receive, Scope, Send
 
-from app.api.deps import rate_limit_headers, run_db_query, verify_api_token
+from app.api.deps import parse_bearer_token, rate_limit_headers, run_db_query, verify_api_token
 from app.core.api_tokens import api_token_rate_limiter, has_scope_permission, should_update_last_used
 from app.core.config import get_cached_setting
 from app.core.utils import parse_iso_to_utc_datetime
@@ -228,10 +228,10 @@ def _extract_raw_token(request: Request, query_token: Optional[str]) -> Optional
     """Token from the Authorization header (Bearer or raw value), else from ?token= when allowed."""
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.strip():
-        value = auth_header.strip()
-        if value.startswith("Bearer "):
-            return value[7:].strip() or None
-        return value
+        bearer_token = parse_bearer_token(auth_header)
+        if bearer_token is not None:
+            return bearer_token or None
+        return auth_header.strip()
     if query_token and query_token.strip():
         if not query_token_allowed():
             raise _unauthorized(

@@ -14,7 +14,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, Response, Security, status
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import bearer_scheme, rate_limit_headers, verify_api_token
+from app.api.deps import bearer_scheme, parse_bearer_token, rate_limit_headers, verify_api_token
 from app.core.api_tokens import ApiTokenRateLimiter
 from app.core.config import get_max_retention_days
 from app.core.pipeline import (
@@ -154,15 +154,13 @@ async def _authenticate_ingest_token(request: Request, response: Response) -> di
     """
     Authenticate Bearer API token with dedicated 60-second caching and logs:write scope verification.
     """
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    raw_token = parse_bearer_token(request.headers.get("Authorization"))
+    if raw_token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization Bearer token required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    raw_token = auth_header[7:].strip()
     if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

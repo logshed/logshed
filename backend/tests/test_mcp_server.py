@@ -1681,3 +1681,37 @@ class TestMCPQueryLogsCursor:
         query_tool = server._tool_manager._tools.get("query_logs")
         with pytest.raises(Exception, match="cursor"):
             await query_tool.fn(limit=5, cursor="garbage!!")
+
+
+class TestMcpBearerSchemeCase:
+    """The Bearer scheme name is case-insensitive (RFC 7235) on the MCP endpoint."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scheme", ["bearer", "BEARER"])
+    @pytest.mark.parametrize("path", ["/mcp", "/api/v1/mcp"])
+    async def test_scheme_in_any_case_is_accepted(
+        self, client: AsyncClient, auth_headers: dict, scheme: str, path: str
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        headers = {
+            "Authorization": f"{scheme} {token['raw']}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        res = await client.post(path, json=INIT_PAYLOAD, headers=headers)
+        assert res.status_code == 200, res.text
+        assert "LogShed" in res.text
+
+    @pytest.mark.asyncio
+    async def test_basic_scheme_is_refused(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        headers = {
+            "Authorization": f"Basic {token['raw']}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        res = await client.post("/mcp", json=INIT_PAYLOAD, headers=headers)
+        assert res.status_code == 401
+        assert res.headers["WWW-Authenticate"] == "Bearer"

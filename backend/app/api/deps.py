@@ -259,6 +259,20 @@ def _bearer_error(detail: str) -> HTTPException:
     )
 
 
+def parse_bearer_token(header: Optional[str]) -> Optional[str]:
+    """
+    Token from an `Authorization: Bearer <token>` header; the scheme name is case-insensitive (RFC 7235).
+    Returns None when the header is missing or uses another scheme, and an empty string for a Bearer
+    header that carries no token.
+    """
+    if not header:
+        return None
+    scheme, _, credentials = header.strip().partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return credentials.strip()
+
+
 def rate_limit_headers(status_info: RateLimitStatus) -> dict[str, str]:
     """X-RateLimit-* headers (reset is in seconds until the oldest request leaves the window)."""
     return {
@@ -389,11 +403,9 @@ def require_api_token(required_scopes: list[str]) -> Callable[[Request], Any]:
         response: Response,
         _bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
     ) -> dict[str, Any]:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+        raw_token = parse_bearer_token(request.headers.get("Authorization"))
+        if raw_token is None:
             raise _bearer_error("Authorization Bearer token required.")
-
-        raw_token = auth_header[7:].strip()
         if not raw_token:
             raise _bearer_error("Invalid Bearer token.")
 
@@ -423,10 +435,9 @@ def require_auth_or_token(required_scopes: list[str]) -> Callable[[Request], Any
     ) -> dict[str, Any]:
         auth_header = request.headers.get("Authorization")
         if auth_header is not None:
-            scheme, _, credentials = auth_header.strip().partition(" ")
-            if scheme.lower() != "bearer":
+            raw_token = parse_bearer_token(auth_header)
+            if raw_token is None:
                 raise _bearer_error("Authorization Bearer token required.")
-            raw_token = credentials.strip()
             if not raw_token:
                 raise _bearer_error("Invalid Bearer token.")
 

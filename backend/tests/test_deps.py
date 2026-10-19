@@ -258,3 +258,30 @@ async def test_wal_concurrency_reads_do_not_block_wal_checkpoint(db_path: Path):
     cp_res = await run_db_query(_checkpoint, custom_db_path=db_path)
     # busy flag must be 0, indicating truncation was not blocked by dangling shared locks
     assert cp_res[0] == 0
+
+
+class TestParseBearerToken:
+    """RFC 7235: the auth scheme name is case-insensitive."""
+
+    @pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER", "bEaReR"])
+    def test_scheme_in_any_case_returns_the_token(self, scheme):
+        from app.api.deps import parse_bearer_token
+
+        assert parse_bearer_token(f"{scheme} ls_live_abc") == "ls_live_abc"
+
+    def test_surrounding_whitespace_is_ignored(self):
+        from app.api.deps import parse_bearer_token
+
+        assert parse_bearer_token("  Bearer   ls_live_abc  ") == "ls_live_abc"
+
+    @pytest.mark.parametrize("header", [None, "", "   ", "Basic dXNlcjpwYXNz", "ls_live_abc", "Bearerx ls_live_abc"])
+    def test_other_schemes_and_missing_headers_return_none(self, header):
+        from app.api.deps import parse_bearer_token
+
+        assert parse_bearer_token(header) is None
+
+    @pytest.mark.parametrize("header", ["Bearer", "Bearer ", "bearer    "])
+    def test_bearer_without_a_token_returns_an_empty_string(self, header):
+        from app.api.deps import parse_bearer_token
+
+        assert parse_bearer_token(header) == ""
