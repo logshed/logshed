@@ -732,6 +732,8 @@ class SyslogTCPProtocol(asyncio.Protocol):
         self.admit = admit
         self._inactivity_handle: Optional[asyncio.TimerHandle] = None
         self._stopping = False
+        # Set by connection_lost on a normal disconnect: finishes the frames already queued.
+        self.drain_task: Optional[asyncio.Task] = None
 
     @property
     def peer_ip(self) -> Optional[str]:
@@ -886,10 +888,19 @@ class SyslogTCPProtocol(asyncio.Protocol):
             self._inactivity_handle = None
         logger.debug(f"Syslog TCP connection lost from {self.peername}")
         if not self._stopping:
-            # During stop() the workers are drained there instead of cancelled here.
-            for task in self._workers:
-                task.cancel()
-            self._workers.clear()
+            # A normal disconnect (during stop() the workers are drained there instead): the
+            # workers finish the frames already read in a background task, bounded by
+            # WORKER_DRAIN_TIMEOUT, so this callback does not block.
+            self._stopping = True
+            workers, self._workers = self._workers, []
+            if workers:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    for task in workers:
+                        task.cancel()
+                else:
+                    self.drain_task = loop.create_task(_drain_workers(self.queue, workers, "TCP"))
         if self.on_close:
             self.on_close(self)
 
@@ -932,6 +943,8 @@ class SyslogServer:
         self.udp_protocol: SyslogUDPProtocol | None = None
         self.tcp_server = None
         self.tcp_protocols: set[SyslogTCPProtocol] = set()
+        # Parser drains of TCP connections that closed normally, still finishing queued frames
+        self._tcp_drain_tasks: set[asyncio.Task] = set()
         self.alias_cache = AliasCache(db_path, preload=False)
         # Set once by stop(); a stopped server never binds again.
         self._stopped = False
@@ -976,6 +989,11 @@ class SyslogServer:
 
     def _remove_tcp_protocol(self, proto: SyslogTCPProtocol) -> None:
         self.tcp_protocols.discard(proto)
+        # Keep the disconnect drain referenced until it ends, so stop() can wait for it
+        task = proto.drain_task
+        if task is not None and not task.done():
+            self._tcp_drain_tasks.add(task)
+            task.add_done_callback(self._tcp_drain_tasks.discard)
 
     def _create_tcp_protocol(self) -> SyslogTCPProtocol:
         if len(self.tcp_protocols) >= self.max_tcp_connections:
@@ -1039,9 +1057,11 @@ class SyslogServer:
         if udp_transport is not None:
             udp_transport.close()
 
-        drains = [proto.stop() for proto in protocols]
+        drains: list[Any] = [proto.stop() for proto in protocols]
         if udp_protocol is not None:
             drains.append(udp_protocol.stop())
+        # Each is bounded by WORKER_DRAIN_TIMEOUT
+        drains.extend(self._tcp_drain_tasks)
         if drains:
             await asyncio.gather(*drains, return_exceptions=True)
 

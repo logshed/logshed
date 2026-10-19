@@ -1823,3 +1823,79 @@ class TestSyslogFutureTimestampWindow:
         data = f"<14>1 {ahead.strftime('%Y-%m-%dT%H:%M:%SZ')} host app - - - tz".encode()
         parsed = parse_syslog_message(data, "10.0.0.1", now=self.NOW, local_tz=datetime.timezone.utc)
         assert parsed["timestamp"] == (self.NOW + datetime.timedelta(minutes=2)).isoformat()
+
+
+class TestSyslogTcpDisconnectDrain:
+    """N03-5: frames read before a sender disconnects are still parsed, and stop() waits for that."""
+
+    @staticmethod
+    async def _send_and_disconnect(server: SyslogServer, count: int) -> None:
+        tcp_port = server.tcp_server.sockets[0].getsockname()[1]
+        _, writer = await asyncio.open_connection("127.0.0.1", tcp_port)
+        await _wait_until(lambda: server.active_tcp_connections == 1)
+        writer.write(b"".join(f"<14>line {i}\n".encode() for i in range(count)))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+        await _wait_until(lambda: server.active_tcp_connections == 0)
+
+    @pytest.mark.asyncio
+    async def test_frames_queued_before_disconnect_are_all_dispatched(self, db_path: Path, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        release = asyncio.Event()
+        dispatched = []
+
+        async def slow_dispatch(data, source_ip, alias_cache, assembler):
+            await release.wait()
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", slow_dispatch)
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        try:
+            await _wait_until(lambda: _listening(server))
+            await self._send_and_disconnect(server, 50)
+            # The parser is still blocked: the frames wait in the closed connection's queue
+            assert dispatched == []
+            release.set()
+            await _wait_until(lambda: len(dispatched) == 50)
+            # Four parser workers run in parallel, so only the set of frames is fixed
+            assert sorted(dispatched) == sorted(f"<14>line {i}".encode() for i in range(50))
+            await _wait_until(lambda: not server._tcp_drain_tasks)
+        finally:
+            release.set()
+            await server.stop()
+            await asyncio.wait_for(task, timeout=2.0)
+
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_disconnect_drains(self, db_path: Path, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        release = asyncio.Event()
+        dispatched = []
+
+        async def slow_dispatch(data, source_ip, alias_cache, assembler):
+            await release.wait()
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", slow_dispatch)
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        try:
+            await _wait_until(lambda: _listening(server))
+            await self._send_and_disconnect(server, 20)
+            assert len(server._tcp_drain_tasks) == 1
+
+            stop_task = asyncio.create_task(server.stop())
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert not stop_task.done()
+            release.set()
+            await asyncio.wait_for(stop_task, timeout=2.0)
+            assert len(dispatched) == 20
+            assert not server._tcp_drain_tasks
+        finally:
+            release.set()
+            await server.stop()
+            await asyncio.wait_for(task, timeout=2.0)
