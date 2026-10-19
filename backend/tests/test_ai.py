@@ -3257,3 +3257,35 @@ class TestAiModelRefreshStoredKeyScope:
             )
         assert res.status_code == 200
         assert mock_fetch.await_args.kwargs["api_key"] == "typed-key"
+
+
+class TestAiRateLimitRetryAfter:
+
+    def test_429_carries_retry_after_from_the_limiter_window(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from fastapi import HTTPException
+
+        from app.api.ai import _check_ai_rate_limit
+        from app.core.rate_limiter import AiRateLimiter
+
+        now = [1000.0]
+        limiter = AiRateLimiter(max_requests=1, window_seconds=60.0, clock=lambda: now[0])
+        monkeypatch.setattr("app.api.ai.ai_rate_limiter", limiter)
+        request = SimpleNamespace(cookies={})
+
+        _check_ai_rate_limit(request, {"user_id": 1})
+        now[0] += 20
+        with pytest.raises(HTTPException) as exc_info:
+            _check_ai_rate_limit(request, {"user_id": 1})
+
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.headers["Retry-After"] == "40"
+
+    @pytest.mark.asyncio
+    async def test_diagnose_429_response_has_retry_after_header(self, populated_db, auth_client, auth_cookie):
+        for _ in range(10):
+            ai_rate_limiter.check_and_record(next(iter(auth_cookie.values())))
+        res = await auth_client.post("/api/ai/diagnose", json={"log_ids": [1]})
+        assert res.status_code == 429
+        assert 1 <= int(res.headers["Retry-After"]) <= 60

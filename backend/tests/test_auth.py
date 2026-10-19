@@ -1076,3 +1076,32 @@ class TestLoginHasNoGlobalFailureLimit:
             headers={"X-Forwarded-For": "203.0.113.9"},
         )
         assert res.status_code == 429
+
+
+class TestLoginRetryAfter:
+
+    @pytest.mark.asyncio
+    async def test_per_address_429_has_retry_after(self, client: AsyncClient):
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+        for _ in range(5):
+            await client.post("/api/auth/login", json={"password": "wrong_password"})
+
+        res = await client.post("/api/auth/login", json={"password": "wrong_password"})
+        assert res.status_code == 429
+        assert 1 <= int(res.headers["Retry-After"]) <= 60
+
+    @pytest.mark.asyncio
+    async def test_in_flight_429_has_retry_after_of_one_second(self, client: AsyncClient, monkeypatch):
+        import asyncio
+
+        await client.post("/api/auth/setup", json={"password": "correct_password"})
+        calls: list[str] = []
+        monkeypatch.setattr("app.api.auth.verify_password", _slow_counting_verify(calls))
+
+        responses = await asyncio.gather(
+            *(client.post("/api/auth/login", json={"password": f"guess-{i}"}) for i in range(3))
+        )
+
+        limited = [r for r in responses if r.status_code == 429]
+        assert len(limited) == 1
+        assert limited[0].headers["Retry-After"] == "1"

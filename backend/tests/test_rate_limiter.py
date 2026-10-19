@@ -218,3 +218,46 @@ class TestLoginLimiterHasNoGlobalLimit:
         for _ in range(5):
             limiter.finish(limiter.begin("busy"), success=False)
         assert limiter.begin("busy") is None
+
+
+class TestRetryAfter:
+
+    def test_retry_after_is_whole_seconds_until_oldest_event_expires(self):
+        clock = FakeClock()
+        limiter = SlidingWindowLimiter(2, 60.0, clock=clock)
+        limiter.record("k")
+        clock.advance(10.5)
+        limiter.record("k")
+
+        # The oldest event leaves the window 49.5 s from now, rounded up
+        assert limiter.retry_after("k") == 50
+        clock.advance(20)
+        assert limiter.retry_after("k") == 30
+
+    def test_retry_after_is_at_least_one_second(self):
+        clock = FakeClock()
+        limiter = SlidingWindowLimiter(1, 60.0, clock=clock)
+        assert limiter.retry_after("unknown") == 1
+        limiter.record("k")
+        clock.advance(59.9)
+        assert limiter.retry_after("k") == 1
+
+    def test_retry_after_does_not_record_anything(self):
+        limiter = SlidingWindowLimiter(1, 60.0, clock=FakeClock())
+        limiter.retry_after("k")
+        assert "k" not in limiter
+
+    def test_login_retry_after_uses_the_per_key_window(self):
+        clock = FakeClock()
+        limiter = LoginRateLimiter(max_attempts=2, window_seconds=60.0, max_in_flight=10, clock=clock)
+        for _ in range(2):
+            limiter.finish(limiter.begin("ip"), success=False)
+        clock.advance(15)
+        assert limiter.begin("ip") is None
+        assert limiter.retry_after("ip") == 45
+
+    def test_login_retry_after_for_in_flight_rejection_is_one_second(self):
+        limiter = LoginRateLimiter(max_attempts=5, max_in_flight=1, clock=FakeClock())
+        assert limiter.begin("ip") is not None
+        assert limiter.begin("ip") is None
+        assert limiter.retry_after("ip") == 1

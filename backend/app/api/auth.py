@@ -275,6 +275,7 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Mess
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_LOGIN_RATE_LIMITED_DETAIL,
+            headers={"Retry-After": str(login_rate_limiter.retry_after(limiter_key))},
         )
 
     is_valid = False

@@ -64,6 +64,7 @@ def _check_ai_rate_limit(request: Request, user: dict) -> None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded. Maximum 10 AI diagnosis requests per minute.",
+            headers={"Retry-After": str(ai_rate_limiter.retry_after(session_key))},
         )
 
 

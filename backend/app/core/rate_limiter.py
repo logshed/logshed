@@ -13,6 +13,7 @@ requests on the loop.
 """
 
 import ipaddress
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -87,6 +88,14 @@ class SlidingWindowLimiter:
         """Number of events for `key` still inside the window."""
         window = self._prune(key, self._clock())
         return len(window) if window else 0
+
+    def retry_after(self, key: str) -> int:
+        """Whole seconds until the oldest event for `key` leaves the window (at least 1)."""
+        now = self._clock()
+        window = self._prune(key, now)
+        if not window:
+            return 1
+        return max(1, math.ceil(window[0] + self.window_seconds - now))
 
     def is_rate_limited(self, key: str) -> bool:
         return self.count(key) >= self.max_requests
@@ -202,6 +211,12 @@ class LoginRateLimiter:
         self._per_key.record(key)
         self._in_flight[key] = self._in_flight.get(key, 0) + 1
         return LoginAttempt(key=key)
+
+    def retry_after(self, key: str) -> int:
+        """Seconds a client rejected by begin() should wait: the key's window, or 1 for the in-flight cap."""
+        if self._per_key.is_rate_limited(key):
+            return self._per_key.retry_after(key)
+        return 1
 
     def finish(self, attempt: LoginAttempt, *, success: bool) -> None:
         """Release the in-flight slot; on success also undo the reservation and clear history."""
