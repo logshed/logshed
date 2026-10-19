@@ -754,3 +754,142 @@ class TestNotifierDestinationHardening:
         for record in records:
             assert "SuperSecretToken123" not in record.getMessage()
             assert not record.exc_info
+
+
+_PROXY_ENV_NAMES = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+)
+
+
+class TestNotifierProxyHandling:
+    """N05-2: sends through an administrator-configured HTTP proxy are not refused."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_proxy_env(self, monkeypatch):
+        import app.services.notifier as notifier_mod
+
+        for name in _PROXY_ENV_NAMES:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(notifier_mod, "_proxy_notice_logged", False, raising=False)
+
+    @staticmethod
+    def _resolver(answers: dict):
+        def resolver(host, port, *args, **kwargs):
+            if isinstance(host, bytes):
+                host = host.decode("ascii")
+            return _fake_addrinfo(answers.get(host, host), port)
+        return resolver
+
+    @staticmethod
+    def _private_targets_off():
+        def _setting(key, default=None):
+            if key == "allow_private_notification_targets":
+                return False
+            return default
+        return patch("app.core.config.get_cached_setting", side_effect=_setting)
+
+    def test_send_through_loopback_proxy_is_attempted(self, monkeypatch, caplog):
+        import logging
+        import socket as socket_mod
+        from app.services.notifier import _sync_send_notification
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
+        resolver = self._resolver({"hooks.example.com": _PUBLIC_IP})
+        with patch("_socket.getaddrinfo", side_effect=resolver):
+            with patch.object(socket_mod.socket, "connect", side_effect=ConnectionRefusedError("refused")) as mock_connect:
+                with caplog.at_level(logging.WARNING, logger="app.services.notifier"):
+                    _sync_send_notification(["jsons://hooks.example.com/hook"], "Alert", "Body")
+
+        connected = [c.args[0] for c in mock_connect.call_args_list]
+        assert ("127.0.0.1", 3128) in connected, connected
+        assert not any("at connect time" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize("env_name", ["HTTP_PROXY", "http_proxy"])
+    def test_private_proxy_host_name_lookup_is_not_blocked(self, monkeypatch, env_name):
+        import socket as socket_mod
+        from app.services.notifier import _pinned_destination_guard
+
+        monkeypatch.setenv(env_name, "http://proxy.lan:3128")
+        resolver = self._resolver({"proxy.lan": "192.168.1.5"})
+        with patch("_socket.getaddrinfo", side_effect=resolver), self._private_targets_off():
+            with _pinned_destination_guard():
+                results = socket_mod.getaddrinfo("proxy.lan", 3128)
+        assert results[0][4][0] == "192.168.1.5"
+
+    def test_proxy_exemption_covers_only_the_proxy_endpoint(self, monkeypatch):
+        import socket as socket_mod
+        from app.services.notifier import BlockedNotificationDestinationError, _pinned_destination_guard
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.lan:3128")
+        resolver = self._resolver({"proxy.lan": "192.168.1.5", "other.lan": "192.168.1.6"})
+        with patch("_socket.getaddrinfo", side_effect=resolver), self._private_targets_off():
+            with _pinned_destination_guard():
+                with pytest.raises(BlockedNotificationDestinationError):
+                    socket_mod.getaddrinfo("proxy.lan", 8080)
+                with pytest.raises(BlockedNotificationDestinationError):
+                    socket_mod.getaddrinfo("other.lan", 3128)
+
+    def test_no_proxy_destination_keeps_the_connect_time_check(self, monkeypatch, caplog):
+        """A destination in NO_PROXY connects directly, so a rebinding answer is still refused."""
+        import logging
+        import socket as socket_mod
+        import app.services.notifier as notifier_mod
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
+        monkeypatch.setenv("NO_PROXY", "rebind.example.com")
+        state = {"validating": 0}
+        real_validate = notifier_mod.validate_notification_url
+
+        def tracking_validate(url):
+            state["validating"] += 1
+            try:
+                return real_validate(url)
+            finally:
+                state["validating"] -= 1
+
+        def resolver(host, port, *args, **kwargs):
+            if host == "rebind.example.com":
+                return _fake_addrinfo(_PUBLIC_IP if state["validating"] else "127.0.0.1", port)
+            return _fake_addrinfo(host, port)
+
+        with patch.object(notifier_mod, "validate_notification_url", side_effect=tracking_validate), \
+                patch("_socket.getaddrinfo", side_effect=resolver), \
+                patch.object(socket_mod.socket, "connect", side_effect=ConnectionRefusedError("refused")) as mock_connect:
+            with caplog.at_level(logging.WARNING, logger="app.services.notifier"):
+                ok = notifier_mod._sync_send_notification(["jsons://rebind.example.com/hook"], "Alert", "Body")
+
+        assert ok is False
+        connected = [c.args[0] for c in mock_connect.call_args_list]
+        assert ("127.0.0.1", 3128) not in connected, connected
+        assert not any(addr[0] == "127.0.0.1" for addr in connected), connected
+        assert any("at connect time" in r.getMessage() for r in caplog.records)
+
+    def test_proxy_use_is_logged_once(self, monkeypatch, caplog):
+        import logging
+        import socket as socket_mod
+        from app.services.notifier import _sync_send_notification
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://user:s3cret@127.0.0.1:3128")
+        resolver = self._resolver({"hooks.example.com": _PUBLIC_IP})
+        with patch("_socket.getaddrinfo", side_effect=resolver), \
+                patch.object(socket_mod.socket, "connect", side_effect=ConnectionRefusedError("refused")):
+            with caplog.at_level(logging.INFO, logger="app.services.notifier"):
+                _sync_send_notification(["jsons://hooks.example.com/hook"], "Alert", "Body")
+                _sync_send_notification(["jsons://hooks.example.com/hook"], "Alert", "Body")
+
+        notices = [
+            r for r in caplog.records
+            if r.levelno == logging.INFO and "proxy" in r.getMessage() and "DNS rebinding" in r.getMessage()
+        ]
+        assert len(notices) == 1
+        assert "s3cret" not in notices[0].getMessage()
+
+    def test_no_proxy_configured_means_no_exemption(self):
+        import socket as socket_mod
+        from app.services.notifier import BlockedNotificationDestinationError, _pinned_destination_guard
+
+        with patch("_socket.getaddrinfo", side_effect=self._resolver({})):
+            with _pinned_destination_guard():
+                with pytest.raises(BlockedNotificationDestinationError):
+                    socket_mod.getaddrinfo("127.0.0.1", 3128)

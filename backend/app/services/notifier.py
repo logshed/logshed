@@ -18,6 +18,7 @@ import socket
 import threading
 from typing import Optional, Tuple, Union
 import urllib.parse
+import urllib.request
 
 import apprise
 
@@ -509,6 +510,72 @@ def _port_number(port) -> Optional[int]:
     return None
 
 
+# HTTP proxies configured by the administrator (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and their
+# lower case forms). requests connects to the proxy instead of the destination, so the lookup
+# inside the guard is for the proxy, which whoever writes a notification URL does not control.
+# Lookups for a configured proxy's host and port are not blocked. Destinations then rely on the
+# static check in validate_notification_url, because the proxy resolves their names. Destinations
+# listed in NO_PROXY connect directly, so requests resolves them here and they keep the full
+# connect-time check.
+_DEFAULT_PROXY_PORTS = {"http": 80, "https": 443}
+_SOCKS_DEFAULT_PORT = 1080
+_proxy_notice_logged = False
+_proxy_notice_lock = threading.Lock()
+
+
+def _configured_proxy_endpoints() -> frozenset:
+    """(host, port) pairs of the proxies requests would use, read from the environment."""
+    endpoints = set()
+    for scheme, proxy_url in urllib.request.getproxies().items():
+        if scheme == "no" or not proxy_url:
+            continue
+        proxy_url = str(proxy_url).strip()
+        if "://" not in proxy_url:
+            # requests treats a proxy without a scheme as http://
+            proxy_url = f"http://{proxy_url}"
+        try:
+            parsed = urllib.parse.urlsplit(proxy_url)
+            host = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            continue
+        if not host:
+            continue
+        if port is None:
+            proxy_scheme = parsed.scheme.lower()
+            port = _DEFAULT_PROXY_PORTS.get(proxy_scheme, _SOCKS_DEFAULT_PORT if proxy_scheme.startswith("socks") else 80)
+        endpoints.add((host.lower().strip("[]"), port))
+    return frozenset(endpoints)
+
+
+def _log_proxy_notice_once(endpoints: frozenset) -> None:
+    global _proxy_notice_logged
+    with _proxy_notice_lock:
+        if _proxy_notice_logged:
+            return
+        _proxy_notice_logged = True
+    proxies = ", ".join(sorted(f"{host}:{port}" for host, port in endpoints))
+    logger.info(
+        f"Notifications use the HTTP proxy configured in the environment ({proxies}). Destinations "
+        "reached through the proxy are checked when the channel is saved and before each send, but "
+        "DNS rebinding protection for them then depends on the proxy. Destinations listed in NO_PROXY "
+        "keep the connect-time check."
+    )
+
+
+def _is_proxy_lookup(host, port_num: Optional[int], endpoints: frozenset) -> bool:
+    if not endpoints or port_num is None:
+        return False
+    if isinstance(host, bytes):
+        try:
+            host = host.decode("ascii")
+        except UnicodeDecodeError:
+            return False
+    if not isinstance(host, str):
+        return False
+    return (host.lower().strip("[]"), port_num) in endpoints
+
+
 def _guarded_getaddrinfo(host, port, *args, **kwargs):
     results = _system_getaddrinfo(host, port, *args, **kwargs)
     allow_private = getattr(_dispatch_guard, "allow_private", None)
@@ -516,6 +583,9 @@ def _guarded_getaddrinfo(host, port, *args, **kwargs):
         return results
 
     port_num = _port_number(port)
+    if _is_proxy_lookup(host, port_num, getattr(_dispatch_guard, "proxy_endpoints", frozenset())):
+        # The administrator's proxy, not a destination taken from a notification URL
+        return results
     if port_num in _BLOCKED_PORTS:
         logger.warning(f"Blocked notification connection to port {port_num} at connect time.")
         raise BlockedNotificationDestinationError(
@@ -552,12 +622,19 @@ def _pinned_destination_guard():
     from app.core.config import get_cached_setting
 
     allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
+    # Read once per send, as requests reads them for the request it makes
+    proxy_endpoints = _configured_proxy_endpoints()
+    if proxy_endpoints:
+        _log_proxy_notice_once(proxy_endpoints)
     previous = getattr(_dispatch_guard, "allow_private", None)
+    previous_proxies = getattr(_dispatch_guard, "proxy_endpoints", frozenset())
     _dispatch_guard.allow_private = allow_private
+    _dispatch_guard.proxy_endpoints = proxy_endpoints
     try:
         yield
     finally:
         _dispatch_guard.allow_private = previous
+        _dispatch_guard.proxy_endpoints = previous_proxies
 
 
 def _new_dispatch_apprise() -> apprise.Apprise:
