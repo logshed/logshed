@@ -1433,43 +1433,47 @@ class TestSseLimitsAndPayload:
 class TestUiFilterValueCap:
     """The web UI list and stream routes refuse more than 500 source or app_name values."""
 
+    @pytest.fixture(autouse=True)
+    def _log_in(self, client, auth_cookie):
+        client.cookies.update(auth_cookie)
+
     @pytest.mark.parametrize("param", ["source", "app_name"])
     @pytest.mark.asyncio
-    async def test_list_over_cap_is_422(self, client, auth_cookie, param):
+    async def test_list_over_cap_is_422(self, client, param):
         values = [f"v{i}" for i in range(501)]
-        res = await client.get("/api/logs", params={param: values}, cookies=auth_cookie)
+        res = await client.get("/api/logs", params={param: values})
         assert res.status_code == 422
         assert param in res.json()["detail"]
         assert "500" in res.json()["detail"]
 
     @pytest.mark.parametrize("param", ["source", "app_name"])
     @pytest.mark.asyncio
-    async def test_list_at_cap_works(self, client, auth_cookie, param):
+    async def test_list_at_cap_works(self, client, param):
         values = [f"v{i}" for i in range(500)]
-        res = await client.get("/api/logs", params={param: values}, cookies=auth_cookie)
+        res = await client.get("/api/logs", params={param: values})
         assert res.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_list_comma_separated_values_count_too(self, client, auth_cookie):
+    async def test_list_comma_separated_values_count_too(self, client):
         joined = ",".join(f"v{i}" for i in range(501))
-        res = await client.get("/api/logs", params={"source": joined}, cookies=auth_cookie)
+        res = await client.get("/api/logs", params={"source": joined})
         assert res.status_code == 422
 
     @pytest.mark.parametrize("param", ["source", "app_name"])
     @pytest.mark.asyncio
-    async def test_stream_over_cap_is_422(self, client, auth_cookie, param):
+    async def test_stream_over_cap_is_422(self, client, param):
         values = [f"v{i}" for i in range(501)]
         res = await client.get(
-            "/api/logs/stream", params={param: values, "max_events": 0}, cookies=auth_cookie
+            "/api/logs/stream", params={param: values, "max_events": 0}
         )
         assert res.status_code == 422
         assert param in res.json()["detail"]
 
     @pytest.mark.parametrize("param", ["source", "app_name"])
     @pytest.mark.asyncio
-    async def test_stream_at_cap_works(self, client, auth_cookie, param):
+    async def test_stream_at_cap_works(self, client, param):
         values = [f"v{i}" for i in range(500)]
         async with client.stream(
-            "GET", "/api/logs/stream", params={param: values, "max_events": 0}, cookies=auth_cookie
+            "GET", "/api/logs/stream", params={param: values, "max_events": 0}
         ) as response:
             assert response.status_code == 200
