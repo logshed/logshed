@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
+logger = logging.getLogger(__name__)
+
 def get_data_dir() -> Path:
     """Returns the configured data directory path."""
     return Path(os.environ.get("DATA_DIR", "/data"))

@@ -842,3 +842,16 @@ class TestDockerHostsFixes:
         body = resp.json()
         assert body["success"] is False
         assert "Verify TLS host name" in body["error"]
+
+
+class TestAdditionalHostsEnvParsing:
+    """N01-9: bad DOCKER_ADDITIONAL_HOSTS values log a warning and give the empty default."""
+
+    @pytest.mark.parametrize("raw", ["{not json", '{"name": "a", "url": "tcp://h:2375"}', '"just a string"', "42"])
+    def test_invalid_values_warn_and_return_empty_list(self, monkeypatch, caplog, raw):
+        from app.core.config import get_docker_additional_hosts
+
+        monkeypatch.setenv("DOCKER_ADDITIONAL_HOSTS", raw)
+        with caplog.at_level("WARNING", logger="app.core.config"):
+            assert get_docker_additional_hosts() == []
+        assert any("DOCKER_ADDITIONAL_HOSTS" in r.getMessage() for r in caplog.records)
