@@ -3289,3 +3289,90 @@ class TestAiRateLimitRetryAfter:
         res = await auth_client.post("/api/ai/diagnose", json={"log_ids": [1]})
         assert res.status_code == 429
         assert 1 <= int(res.headers["Retry-After"]) <= 60
+
+
+class TestAiModelRefreshBaseUrlScope:
+    """The model refresh keeps each provider's base URL and typed key apart."""
+
+    _MODELS = [{"id": "m1", "name": "m1", "supports_thinking": False}]
+
+    async def _save(self, auth_client, **fields):
+        res = await auth_client.post("/api/settings", json=fields)
+        assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_inactive_provider_ignores_global_base_url(self, auth_client):
+        await self._save(
+            auth_client,
+            ai_provider="openai_compatible",
+            ai_api_key="compat-key",
+            ai_base_url="http://ollama.lan:11434/v1",
+        )
+        mock_fetch = AsyncMock(return_value=self._MODELS)
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai",
+                json={"api_key": "sk-typed-openai-key"},
+            )
+        assert res.status_code == 200
+        assert mock_fetch.await_args.kwargs["base_url"] is None
+        assert mock_fetch.await_args.kwargs["provider"] == "openai"
+
+    @pytest.mark.asyncio
+    async def test_active_provider_still_uses_global_base_url(self, auth_client):
+        await self._save(
+            auth_client,
+            ai_provider="openai_compatible",
+            ai_api_key="compat-key",
+            ai_base_url="http://ollama.lan:11434/v1",
+        )
+        mock_fetch = AsyncMock(return_value=self._MODELS)
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post("/api/ai/models/refresh?provider=openai_compatible")
+        assert res.status_code == 200
+        assert mock_fetch.await_args.kwargs["base_url"] == "http://ollama.lan:11434/v1"
+
+    @pytest.mark.asyncio
+    async def test_typed_key_without_base_url_is_stored(self, auth_client):
+        await self._save(auth_client, ai_provider="openai")
+        mock_fetch = AsyncMock(return_value=self._MODELS)
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai", json={"api_key": "sk-typed-key"}
+            )
+        assert res.status_code == 200
+        settings = (await auth_client.get("/api/settings")).json()
+        assert settings["ai_providers_config"]["openai"]["has_api_key"] is True
+
+    @pytest.mark.asyncio
+    async def test_typed_key_with_stored_base_url_is_stored(self, auth_client):
+        await self._save(
+            auth_client, ai_provider="openai_compatible", ai_base_url="http://ollama.lan:11434/v1"
+        )
+        mock_fetch = AsyncMock(return_value=self._MODELS)
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai_compatible",
+                json={"api_key": "typed-key", "base_url": "http://ollama.lan:11434/v1/"},
+            )
+        assert res.status_code == 200
+        assert mock_fetch.await_args.kwargs["api_key"] == "typed-key"
+        settings = (await auth_client.get("/api/settings")).json()
+        assert settings["ai_providers_config"]["openai_compatible"]["ai_api_key"] != ""
+
+    @pytest.mark.asyncio
+    async def test_typed_key_with_different_base_url_is_used_but_not_stored(self, auth_client):
+        await self._save(
+            auth_client, ai_provider="openai_compatible", ai_base_url="http://ollama.lan:11434/v1"
+        )
+        mock_fetch = AsyncMock(return_value=self._MODELS)
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai_compatible",
+                json={"api_key": "typed-key", "base_url": "http://other.example.net/v1"},
+            )
+        assert res.status_code == 200
+        assert mock_fetch.await_args.kwargs["api_key"] == "typed-key"
+        assert mock_fetch.await_args.kwargs["base_url"] == "http://other.example.net/v1"
+        settings = (await auth_client.get("/api/settings")).json()
+        assert settings["ai_providers_config"]["openai_compatible"]["ai_api_key"] == ""

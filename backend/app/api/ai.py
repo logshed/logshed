@@ -259,7 +259,8 @@ async def refresh_available_models(
     if payload_base_url:
         base_url = payload_base_url
     else:
-        base_url = stored_settings.get(f"ai_base_url_{clean_provider}") or stored_settings.get("ai_base_url")
+        # The global ai_base_url belongs to the active provider only.
+        base_url = stored_base_url
 
     # If the provider requires an API key and none is set, prompt user
     if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
@@ -291,7 +292,9 @@ async def refresh_available_models(
 
         def _persist_refresh(conn):
             now_iso = save_models_cache(conn, cache_key, discovered)
-            if key_from_payload:
+            # A typed key is stored only with its own endpoint: when the request carries a
+            # different base URL, the key is used for this refresh only and Save stores both.
+            if key_from_payload and not foreign_base_url:
                 from app.core.security import encrypt_value
                 from app.core.config import invalidate_settings_cache
                 enc = encrypt_value(api_key)
