@@ -583,6 +583,61 @@ def configure_udp_receive_buffer(sock: Any, requested: int) -> Optional[int]:
     return granted
 
 
+# Kernel UDP counters for this network namespace (Linux only).
+PROC_NET_SNMP_PATH = "/proc/net/snmp"
+
+# RcvbufErrors when the syslog listener first started in this process; None until then.
+_udp_receive_errors_baseline: Optional[int] = None
+
+
+def read_udp_snmp_counters(path: str | Path | None = None) -> Optional[dict[str, int]]:
+    """
+    The `Udp:` counters from /proc/net/snmp (a header line, then a value line), by name.
+    None when the file is missing or unreadable (such as on a system other than Linux) or malformed.
+    """
+    try:
+        text = Path(path or PROC_NET_SNMP_PATH).read_text()
+    except (OSError, ValueError):
+        return None
+    udp_lines = [line.split()[1:] for line in text.splitlines() if line.startswith("Udp:")]
+    if len(udp_lines) < 2 or len(udp_lines[0]) != len(udp_lines[1]):
+        return None
+    try:
+        return {name: int(value) for name, value in zip(udp_lines[0], udp_lines[1])}
+    except ValueError:
+        return None
+
+
+def read_udp_receive_buffer_errors(path: str | Path | None = None) -> Optional[int]:
+    """UDP datagrams the kernel dropped because a socket receive buffer was full (RcvbufErrors), or None."""
+    counters = read_udp_snmp_counters(path)
+    if counters is None:
+        return None
+    return counters.get("RcvbufErrors")
+
+
+def record_udp_receive_errors_baseline() -> None:
+    """Remember the kernel counter when the syslog listener first starts; later restarts keep it."""
+    global _udp_receive_errors_baseline
+    if _udp_receive_errors_baseline is None:
+        _udp_receive_errors_baseline = read_udp_receive_buffer_errors()
+
+
+def get_udp_receive_errors() -> Optional[int]:
+    """
+    UDP datagrams dropped by the kernel because a receive buffer was full since the syslog
+    listener started, or None when unknown (listener not started in this process, or the
+    counter cannot be read). Counts every UDP socket in the network namespace.
+    """
+    baseline = _udp_receive_errors_baseline
+    if baseline is None:
+        return None
+    current = read_udp_receive_buffer_errors()
+    if current is None:
+        return None
+    return max(0, current - baseline)
+
+
 NUM_PARSER_WORKERS = 4
 # How long stop() waits for parser workers to finish the queued messages before cancelling them.
 WORKER_DRAIN_TIMEOUT = 2.0
@@ -1153,6 +1208,7 @@ class SyslogServer:
             configure_udp_receive_buffer(
                 self.udp_transport.get_extra_info("socket"), get_syslog_udp_receive_buffer_bytes()
             )
+            record_udp_receive_errors_baseline()
 
             try:
                 self.tcp_server = await loop.create_server(

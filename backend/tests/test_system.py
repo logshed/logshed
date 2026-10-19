@@ -1850,3 +1850,34 @@ class TestRetentionOverridePersistence:
         monkeypatch.setenv("MAX_RETENTION_DAYS", "21")
         assert await run_db_query(persist_retention_override) is True
         assert self._stored(tmp_path / "logs.db")[0] == "21"
+
+
+class TestHealthUdpReceiveErrors:
+    """N03-7: the authenticated health response reports kernel UDP receive drops since start."""
+
+    @pytest.mark.asyncio
+    async def test_health_reports_change_since_baseline(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        monkeypatch.setattr(syslog_mod, "_udp_receive_errors_baseline", 1000)
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: 1375)
+
+        res = await client.get("/api/health")
+        assert res.json() == {"status": "ok"}
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        data = (await client.get("/api/health")).json()
+        assert data["udp_receive_errors"] == 375
+        assert isinstance(data["dropped_logs"], int)
+
+    @pytest.mark.asyncio
+    async def test_health_reports_null_when_unknown(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        monkeypatch.setattr(syslog_mod, "_udp_receive_errors_baseline", 1000)
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: None)
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        data = (await client.get("/api/health")).json()
+        assert "udp_receive_errors" in data
+        assert data["udp_receive_errors"] is None

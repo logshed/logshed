@@ -226,3 +226,32 @@ class TestSystemMetricsApi:
         res_vac2 = await client.post("/api/v1/system/vacuum", headers=full_token_headers)
         assert res_vac2.status_code == 429
         assert "cooldown active" in res_vac2.json()["detail"].lower()
+
+
+class TestSystemMetricsUdpReceiveErrors:
+    """N03-7: system metrics (REST and the MCP tool) report kernel UDP receive drops since start."""
+
+    @pytest.mark.asyncio
+    async def test_metrics_report_change_since_baseline(self, client: AsyncClient, full_token_headers: dict, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        monkeypatch.setattr(syslog_mod, "_udp_receive_errors_baseline", 10)
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: 52)
+        res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        assert res.status_code == 200
+        assert res.json()["udp_receive_errors"] == 42
+
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: None)
+        res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        assert res.json()["udp_receive_errors"] is None
+
+    @pytest.mark.asyncio
+    async def test_mcp_system_metrics_include_the_field(self, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+        from app.mcp.server import McpAccess, create_mcp_server, mcp_access_context
+
+        monkeypatch.setattr(syslog_mod, "_udp_receive_errors_baseline", 10)
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: 17)
+        with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
+            metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
+        assert metrics["udp_receive_errors"] == 7

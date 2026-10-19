@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app.api.deps import get_current_user, get_optional_user, run_db_query
+from app.collectors.syslog import get_udp_receive_errors
 from app.core.config import get_db_path, get_max_retention_days, is_max_retention_days_overridden
 from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
@@ -37,7 +38,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["System & Maintenance"])
 
 
-@router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
+# exclude_unset: anonymous callers get only status, while authenticated callers get every field,
+# including udp_receive_errors as null when it is unknown.
+@router.get("/health", response_model=HealthResponse, response_model_exclude_unset=True)
 async def health_check(request: Request, response: Response) -> HealthResponse:
     """
     Container healthcheck endpoint.
@@ -76,6 +79,7 @@ async def health_check(request: Request, response: Response) -> HealthResponse:
         queue_depth=queue_depth,
         dropped_logs=dropped_count,
         ingest_rate=ingest_rate,
+        udp_receive_errors=get_udp_receive_errors(),
     )
 
 

@@ -306,6 +306,8 @@ async def get_system_metrics(
     Retrieve comprehensive system metrics, throughput, error breakdown, and alert state.
     Serves rolling error stats from an in-memory cache to maintain high polling performance.
     """
+    from app.collectors.syslog import get_udp_receive_errors
+
     db_path = get_db_path()
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -398,6 +400,7 @@ async def get_system_metrics(
             active_sessions_count=maint_status.active_sessions_count,
             log_handling=maint_status.log_handling,
         ),
+        udp_receive_errors=get_udp_receive_errors(),
     )
 
 

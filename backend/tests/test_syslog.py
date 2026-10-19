@@ -2025,3 +2025,76 @@ class TestSyslogUdpReceiveBuffer:
         finally:
             await server.stop()
             await asyncio.wait_for(task, timeout=2.0)
+
+
+SAMPLE_PROC_NET_SNMP = """Ip: Forwarding DefaultTTL InReceives InHdrErrors
+Ip: 1 64 1017100 0
+Udp: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors InCsumErrors IgnoredMulti MemErrors
+Udp: 1017038 0 812722 4 812722 0 0 3330 0
+UdpLite: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors InCsumErrors IgnoredMulti MemErrors
+UdpLite: 0 0 0 0 0 0 0 0 0
+"""
+
+
+class TestUdpReceiveErrorCounter:
+    """N03-7: UDP datagrams the kernel dropped (RcvbufErrors) are read from /proc/net/snmp."""
+
+    def test_parser_reads_counters_by_header_name(self, tmp_path: Path):
+        from app.collectors.syslog import read_udp_receive_buffer_errors, read_udp_snmp_counters
+
+        snmp = tmp_path / "snmp"
+        snmp.write_text(SAMPLE_PROC_NET_SNMP)
+        counters = read_udp_snmp_counters(snmp)
+        assert counters["RcvbufErrors"] == 812722
+        assert counters["InErrors"] == 812722
+        assert counters["InDatagrams"] == 1017038
+        assert read_udp_receive_buffer_errors(snmp) == 812722
+
+    def test_missing_or_malformed_file_gives_none(self, tmp_path: Path):
+        from app.collectors.syslog import read_udp_receive_buffer_errors
+
+        assert read_udp_receive_buffer_errors(tmp_path / "missing") is None
+        bad = tmp_path / "bad"
+        bad.write_text("Udp: InDatagrams RcvbufErrors\nUdp: 12 abc\n")
+        assert read_udp_receive_buffer_errors(bad) is None
+        no_udp = tmp_path / "no_udp"
+        no_udp.write_text("Ip: Forwarding\nIp: 1\n")
+        assert read_udp_receive_buffer_errors(no_udp) is None
+        old_kernel = tmp_path / "old_kernel"
+        old_kernel.write_text("Udp: InDatagrams NoPorts InErrors OutDatagrams\nUdp: 1 0 0 1\n")
+        assert read_udp_receive_buffer_errors(old_kernel) is None
+
+    def test_change_since_baseline(self, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        current = {"value": 1500}
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: current["value"])
+        monkeypatch.setattr(syslog_mod, "_udp_receive_errors_baseline", None)
+        assert syslog_mod.get_udp_receive_errors() is None  # no syslog listener started yet
+
+        syslog_mod.record_udp_receive_errors_baseline()
+        assert syslog_mod.get_udp_receive_errors() == 0
+        current["value"] = 1742
+        assert syslog_mod.get_udp_receive_errors() == 242
+        current["value"] = None
+        assert syslog_mod.get_udp_receive_errors() is None
+
+    @pytest.mark.asyncio
+    async def test_server_start_records_baseline_once(self, db_path: Path, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        current = {"value": 400}
+        monkeypatch.setattr(syslog_mod, "read_udp_receive_buffer_errors", lambda path=None: current["value"])
+        monkeypatch.setattr(syslog_mod, "_udp_receive_errors_baseline", None)
+        for expected_baseline in (400, 400):
+            server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+            task = asyncio.create_task(server.start())
+            try:
+                await _wait_until(lambda: _listening(server))
+                assert syslog_mod._udp_receive_errors_baseline == expected_baseline
+            finally:
+                await server.stop()
+                await asyncio.wait_for(task, timeout=2.0)
+            # A listener restart in the same process keeps counting from the first start
+            current["value"] = 450
+        assert syslog_mod.get_udp_receive_errors() == 50

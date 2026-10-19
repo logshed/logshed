@@ -505,6 +505,8 @@ class HealthResponse(BaseModel):
     queue_depth: Optional[int] = None
     dropped_logs: Optional[int] = None
     ingest_rate: Optional[float] = None
+    # UDP datagrams the kernel dropped (receive buffer full) since syslog started; None when unknown
+    udp_receive_errors: Optional[int] = None
 
 
 class StorageMetricItem(BaseModel):
@@ -1274,6 +1276,8 @@ class SystemMetricsResponse(BaseModel):
     disk_total_bytes: int
     disk_used_percent: float
     maintenance: SystemMaintenanceMetrics
+    # UDP datagrams the kernel dropped (receive buffer full) since syslog started; None when unknown
+    udp_receive_errors: Optional[int] = None
 
 
 
