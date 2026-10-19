@@ -5,14 +5,13 @@ set -e
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
-# Refuse to run the app as root unless explicitly allowed
-if [ "$PUID" = "0" ] || [ "$PGID" = "0" ]; then
-    if [ "$ALLOW_ROOT" != "true" ]; then
-        [ "$PUID" = "0" ] && echo "ERROR: PUID=0 would run LogShed as root. Set PUID to a non-root user id, or set ALLOW_ROOT=true to override." >&2
-        [ "$PGID" = "0" ] && echo "ERROR: PGID=0 would run LogShed as root. Set PGID to a non-root group id, or set ALLOW_ROOT=true to override." >&2
-        exit 1
-    fi
-    echo "WARNING: ALLOW_ROOT=true, running LogShed with root ids." >&2
+# Warn loudly when the app would run as root. It still starts, as in 1.2.x, but a later release
+# will refuse to start with PUID or PGID set to 0.
+if [ "$PUID" = "0" ]; then
+    echo "WARNING: PUID=0 runs LogShed as root inside the container. Set PUID and PGID to a non-root user (for example 1000). A later release will refuse to start with PUID or PGID set to 0." >&2
+fi
+if [ "$PGID" = "0" ]; then
+    echo "WARNING: PGID=0 runs LogShed with the root group inside the container. Set PUID and PGID to a non-root user (for example 1000). A later release will refuse to start with PUID or PGID set to 0." >&2
 fi
 
 # Update or create appuser group with PGID
@@ -47,7 +46,8 @@ fi
 if [ -S "$DOCKER_SOCKET_PATH" ] || [ -e "$DOCKER_SOCKET_PATH" ]; then
     DOCKER_GID=$(stat -c '%g' "$DOCKER_SOCKET_PATH" 2>/dev/null || stat -f '%g' "$DOCKER_SOCKET_PATH" 2>/dev/null)
     if [ "$DOCKER_GID" = "0" ]; then
-        echo "WARNING: Docker socket is owned by group 0 (root); not adding appuser to the root group. Use a Docker socket proxy (such as tecnativa/docker-socket-proxy) via DOCKER_HOST instead." >&2
+        usermod -aG root appuser 2>/dev/null || true
+        echo "WARNING: Docker socket is owned by group 0 (root), so appuser was added to the root group to read it. Prefer a Docker socket proxy (such as tecnativa/docker-socket-proxy) via DOCKER_HOST." >&2
     elif [ -n "$DOCKER_GID" ]; then
         if ! getent group "$DOCKER_GID" >/dev/null 2>&1; then
             groupadd -o -g "$DOCKER_GID" docker-sock-group 2>/dev/null || true

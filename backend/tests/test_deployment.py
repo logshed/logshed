@@ -232,7 +232,7 @@ class TestEntrypointStatic:
         assert "1000" in content
         assert "docker.sock" in content
         assert "stat" in content
-        assert "usermod -aG root appuser" not in content
+        assert "usermod -aG root appuser" in content
         assert "CURRENT_OWNER" in content
         assert "chown -R appuser:appuser /data" in content
         assert "--workers 1" in content
@@ -449,26 +449,48 @@ class TestEntrypointHardening:
         return res, calls
 
     @pytest.mark.parametrize("var", ["PUID", "PGID"])
-    def test_refuses_root_ids(self, tmp_path: Path, var: str):
+    def test_root_ids_start_with_a_loud_warning(self, tmp_path: Path, var: str):
         res, calls = self._run_entrypoint(tmp_path, {var: "0"})
-        assert res.returncode != 0
-        assert var in res.stderr
-        assert "ALLOW_ROOT" in res.stderr
-        assert not any(c.startswith("gosu") for c in calls)
-
-    def test_allow_root_permits_root_ids(self, tmp_path: Path):
-        res, calls = self._run_entrypoint(
-            tmp_path, {"PUID": "0", "PGID": "0", "ALLOW_ROOT": "true"}
-        )
         assert res.returncode == 0, res.stderr
         assert any(c.startswith("gosu") for c in calls)
+        warning = [line for line in res.stderr.splitlines() if f"{var}=0" in line]
+        assert warning, res.stderr
+        assert "WARNING" in warning[0]
+        assert "non-root" in res.stderr
+        assert "later release will refuse to start" in res.stderr
+        assert "ALLOW_ROOT" not in res.stderr
 
-    def test_root_socket_gid_does_not_add_root_group(self, tmp_path: Path):
+    def test_root_ids_warn_for_both_variables(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": "0", "PGID": "0"})
+        assert res.returncode == 0, res.stderr
+        assert "PUID=0" in res.stderr and "PGID=0" in res.stderr
+        assert any(c.startswith("gosu") for c in calls)
+
+    def test_allow_root_is_no_longer_a_setting(self, tmp_path: Path):
+        assert "ALLOW_ROOT" not in ENTRYPOINT_PATH.read_text()
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": "0", "PGID": "0", "ALLOW_ROOT": "true"})
+        assert res.returncode == 0, res.stderr
+        assert "PUID=0" in res.stderr
+        assert any(c.startswith("gosu") for c in calls)
+
+    def test_non_root_ids_print_no_root_warning(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": "1000", "PGID": "1000"})
+        assert res.returncode == 0, res.stderr
+        assert "runs LogShed as root" not in res.stderr
+
+    def test_root_socket_gid_adds_root_group_and_recommends_a_proxy(self, tmp_path: Path):
         res, calls = self._run_entrypoint(tmp_path, {}, socket_gid="0")
         assert res.returncode == 0, res.stderr
-        assert not any(c.startswith("usermod") and " root " in c + " " and "-aG" in c for c in calls)
+        assert "usermod -aG root appuser" in calls
+        assert "WARNING" in res.stderr
         assert "socket proxy" in res.stderr.lower()
         assert any(c.startswith("gosu") for c in calls)
+
+    def test_other_socket_gid_does_not_add_root_group(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {}, socket_gid="999")
+        assert res.returncode == 0, res.stderr
+        assert "usermod -aG root appuser" not in calls
+        assert "WARNING: Docker socket" not in res.stderr
 
     def test_umask_027_applied_before_exec(self, tmp_path: Path):
         res, calls = self._run_entrypoint(tmp_path, {})
