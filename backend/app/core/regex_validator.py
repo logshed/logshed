@@ -509,11 +509,3 @@ def safe_regex_search(
         return False
 
     return user_pattern_search(compiled, string, rule_label=rule_label, timeout=timeout)
-
-
-def shutdown_regex_executor(wait: bool = True) -> None:
-    """
-    No-op kept for the lifespan shutdown hook. User patterns now run inline under the
-    `regex` engine's own timeout, so there is no regex thread pool to stop.
-    """
-    return None

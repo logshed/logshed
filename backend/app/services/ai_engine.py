@@ -946,22 +946,19 @@ async def call_anthropic(
         await _close_sdk_client(client)
 
 
-# Single-turn dispatch names used by execute_ai_analysis. Tests patch these names
-# (including test_alert_evaluator.py), so _analysis_dispatcher resolves them at call time.
-dispatch_gemini_request = call_gemini
-dispatch_openai_request = call_openai
-dispatch_anthropic_request = call_anthropic
-
 _OPENAI_PROVIDERS = ("openai", "openai_compatible")
 
 
 def _analysis_dispatcher(provider: str) -> Optional[Callable[..., Any]]:
-    """Single-turn dispatch function for a normalised provider name, or None if unsupported."""
+    """Single-turn dispatch function for a normalised provider name, or None if unsupported.
+
+    The names are looked up at call time, so tests can patch call_gemini, call_openai and call_anthropic.
+    """
     return {
-        "gemini": dispatch_gemini_request,
-        "openai": dispatch_openai_request,
-        "openai_compatible": dispatch_openai_request,
-        "anthropic": dispatch_anthropic_request,
+        "gemini": call_gemini,
+        "openai": call_openai,
+        "openai_compatible": call_openai,
+        "anthropic": call_anthropic,
     }.get(provider)
 
 

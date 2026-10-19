@@ -1022,7 +1022,7 @@ class TestQueueConsumerAlertIntegration:
                 return "SUMMARY: Upstream gateway recovery\nROOT CAUSE: Node latency spike\nREMEDIATION: Scale worker pods", 100, 50, 0, 150
             raise RuntimeError(f"Unexpected model: {model}")
 
-        monkeypatch.setattr(ai_engine, "dispatch_gemini_request", mock_dispatch_gemini)
+        monkeypatch.setattr(ai_engine, "call_gemini", mock_dispatch_gemini)
 
         sent_payloads = []
 
@@ -1101,7 +1101,7 @@ class TestQueueConsumerAlertIntegration:
                 code=503,
             )
 
-        monkeypatch.setattr(ai_engine, "dispatch_gemini_request", mock_dispatch_gemini)
+        monkeypatch.setattr(ai_engine, "call_gemini", mock_dispatch_gemini)
 
         sent_payloads = []
 

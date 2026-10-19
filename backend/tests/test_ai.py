@@ -192,7 +192,7 @@ Multiple transaction queries deadlock on shared index.
         assert remediation == ""
 
     @pytest.mark.asyncio
-    async def test_dispatch_gemini_request_mocked(self):
+    async def test_call_gemini_mocked(self):
         mock_usage = MagicMock()
         mock_usage.prompt_token_count = 250
         mock_usage.candidates_token_count = 70
@@ -209,7 +209,7 @@ Multiple transaction queries deadlock on shared index.
             mock_client_instance.aio.models.generate_content = mock_generate
             mock_genai.Client.return_value = mock_client_instance
 
-            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.dispatch_gemini_request(
+            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.call_gemini(
                 api_key="test-key",
                 model="gemini-3.7-flash",
                 prompt="test prompt",
@@ -242,7 +242,7 @@ Multiple transaction queries deadlock on shared index.
             mock_genai.Client.return_value = mock_client_instance
 
             with pytest.raises(RuntimeError) as exc_info:
-                await ai_engine.dispatch_gemini_request(
+                await ai_engine.call_gemini(
                     api_key="test-key",
                     model="gemini-3.7-flash",
                     prompt="test prompt",
@@ -251,7 +251,7 @@ Multiple transaction queries deadlock on shared index.
             assert "[REDACTED]" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_dispatch_openai_request_mocked(self):
+    async def test_call_openai_mocked(self):
         mock_usage = MagicMock()
         mock_usage.prompt_tokens = 160
         mock_usage.completion_tokens = 50
@@ -274,7 +274,7 @@ Multiple transaction queries deadlock on shared index.
             mock_client_instance.chat.completions.create = mock_create
             mock_openai_cls.return_value = mock_client_instance
 
-            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.dispatch_openai_request(
+            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.call_openai(
                 api_key="sk-test",
                 model="gpt-4o",
                 prompt="test prompt",
@@ -315,7 +315,7 @@ Multiple transaction queries deadlock on shared index.
             mock_client_instance.chat.completions.create = mock_create
             mock_openai_cls.return_value = mock_client_instance
 
-            text, _, _, thoughts, _ = await ai_engine.dispatch_openai_request(
+            text, _, _, thoughts, _ = await ai_engine.call_openai(
                 api_key="sk-test",
                 model="o3-mini",
                 prompt="test prompt",
@@ -326,7 +326,7 @@ Multiple transaction queries deadlock on shared index.
             assert create_kwargs.get("reasoning_effort") == "low"
 
     @pytest.mark.asyncio
-    async def test_dispatch_anthropic_request_mocked(self):
+    async def test_call_anthropic_mocked(self):
         mock_content = [MagicMock(type="text", text="## Summary\nClaude summary\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix")]
         mock_usage = MagicMock(input_tokens=150, output_tokens=50, thinking_tokens=0)
         mock_response = MagicMock(content=mock_content, usage=mock_usage)
@@ -337,7 +337,7 @@ Multiple transaction queries deadlock on shared index.
             mock_inst.messages.create = mock_create
             mock_cls.return_value = mock_inst
 
-            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.dispatch_anthropic_request(
+            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.call_anthropic(
                 api_key="ant-key",
                 model="claude-3-5-haiku-20241022",
                 prompt="test prompt",
@@ -352,7 +352,7 @@ Multiple transaction queries deadlock on shared index.
             assert create_kwargs["temperature"] == 0.2
 
     @pytest.mark.asyncio
-    async def test_dispatch_anthropic_request_thinking(self):
+    async def test_call_anthropic_thinking(self):
         mock_content = [
             MagicMock(type="thinking", text="Internal thought"),
             MagicMock(type="text", text="## Summary\nThinking summary\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix"),
@@ -366,7 +366,7 @@ Multiple transaction queries deadlock on shared index.
             mock_inst.messages.create = mock_create
             mock_cls.return_value = mock_inst
 
-            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.dispatch_anthropic_request(
+            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.call_anthropic(
                 api_key="ant-key",
                 model="claude-sonnet-4-6",
                 prompt="test prompt",
@@ -395,7 +395,7 @@ Multiple transaction queries deadlock on shared index.
             mock_client_instance.aio.models.generate_content = mock_generate
             mock_genai.Client.return_value = mock_client_instance
 
-            await ai_engine.dispatch_gemini_request(
+            await ai_engine.call_gemini(
                 api_key="test-key",
                 model="gemini-1.5-flash",
                 prompt="test prompt",
@@ -407,7 +407,7 @@ Multiple transaction queries deadlock on shared index.
 
     @pytest.mark.asyncio
     async def test_execute_ai_analysis_with_prompt_override(self):
-        with patch("app.services.ai_engine.dispatch_gemini_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_gemini", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = (
                 "## Summary\nCustom summary\n\n## Root Cause\nCustom cause\n\n## Actionable Remediation\nCustom fix",
                 100,
@@ -440,7 +440,7 @@ Multiple transaction queries deadlock on shared index.
 
     @pytest.mark.asyncio
     async def test_execute_ai_analysis_with_openai_provider(self):
-        with patch("app.services.ai_engine.dispatch_openai_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_openai", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = (
                 "## Summary\nOpenAI summary\n\n## Root Cause\nOpenAI cause\n\n## Actionable Remediation\nOpenAI fix",
                 120,
@@ -474,7 +474,7 @@ Multiple transaction queries deadlock on shared index.
 
     @pytest.mark.asyncio
     async def test_execute_ai_analysis_with_anthropic_provider(self):
-        with patch("app.services.ai_engine.dispatch_anthropic_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_anthropic", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = (
                 "## Summary\nClaude summary\n\n## Root Cause\nClaude cause\n\n## Actionable Remediation\nClaude fix",
                 120,
@@ -510,7 +510,7 @@ Multiple transaction queries deadlock on shared index.
         massive_logs_text = ("Log line with data: " + ("X" * 150) + "\n") * 700
         assert len(massive_logs_text) > 100_000
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_gemini", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = (
                 "## Summary\nTruncated summary\n\n## Root Cause\nTruncated cause\n\n## Actionable Remediation\nTruncated fix",
                 100,
@@ -548,7 +548,7 @@ Multiple transaction queries deadlock on shared index.
             monkeypatch.delenv("DEBUG", raising=False)
             monkeypatch.delenv("ENVIRONMENT", raising=False)
             with pytest.raises(RuntimeError):
-                await ai_engine.dispatch_gemini_request(
+                await ai_engine.call_gemini(
                     api_key="test-key",
                     model="gemini-3.7-flash",
                     prompt="test prompt",
@@ -558,7 +558,7 @@ Multiple transaction queries deadlock on shared index.
             # 2. In development (DEBUG=True), include stack trace
             monkeypatch.setenv("DEBUG", "True")
             with pytest.raises(RuntimeError):
-                await ai_engine.dispatch_gemini_request(
+                await ai_engine.call_gemini(
                     api_key="test-key",
                     model="gemini-3.7-flash",
                     prompt="test prompt",
@@ -584,7 +584,7 @@ Multiple transaction queries deadlock on shared index.
 
     @pytest.mark.asyncio
     async def test_execute_ai_analysis_redacts_prompt_override_user_context_and_host_notes(self):
-        with patch("app.services.ai_engine.dispatch_gemini_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_gemini", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = ("Summary", 50, 20, 0, 70)
 
             # Test prompt_override scrubbing
@@ -625,7 +625,7 @@ Multiple transaction queries deadlock on shared index.
             assert "password=[REDACTED]" in sent_prompt
 
     @pytest.mark.asyncio
-    async def test_dispatch_gemini_request_timeout_raises_timeout_error(self):
+    async def test_call_gemini_timeout_raises_timeout_error(self):
         async def slow_generate(*args, **kwargs):
             await asyncio.sleep(0.5)
             mock_resp = MagicMock()
@@ -638,7 +638,7 @@ Multiple transaction queries deadlock on shared index.
             mock_genai.Client.return_value = mock_client_instance
 
             with pytest.raises(asyncio.TimeoutError):
-                await ai_engine.dispatch_gemini_request(
+                await ai_engine.call_gemini(
                     api_key="test-key",
                     model="gemini-3.7-flash",
                     prompt="test prompt",
@@ -646,7 +646,7 @@ Multiple transaction queries deadlock on shared index.
                 )
 
     @pytest.mark.asyncio
-    async def test_dispatch_openai_request_timeout_raises_timeout_error(self):
+    async def test_call_openai_timeout_raises_timeout_error(self):
         from openai import APITimeoutError
         import httpx
 
@@ -658,7 +658,7 @@ Multiple transaction queries deadlock on shared index.
             mock_openai_cls.return_value = mock_client_instance
 
             with pytest.raises(TimeoutError):
-                await ai_engine.dispatch_openai_request(
+                await ai_engine.call_openai(
                     api_key="sk-test",
                     model="gpt-4o",
                     prompt="test prompt",
@@ -667,7 +667,7 @@ Multiple transaction queries deadlock on shared index.
 
     @pytest.mark.asyncio
     async def test_execute_ai_analysis_with_openai_compatible_provider(self):
-        with patch("app.services.ai_engine.dispatch_openai_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_openai", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = (
                 "## Summary\nLlama summary\n\n## Root Cause\nLlama cause\n\n## Actionable Remediation\nLlama fix",
                 100,
@@ -1408,7 +1408,7 @@ class TestDefaultModelFallback:
     @pytest.mark.asyncio
     async def test_execute_ai_analysis_fallback_when_model_is_none(self):
         """execute_ai_analysis falls back to DEFAULT_AI_MODEL when model is None or empty."""
-        with patch("app.services.ai_engine.dispatch_gemini_request", new_callable=AsyncMock) as mock_dispatch:
+        with patch("app.services.ai_engine.call_gemini", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = ("Summary", 10, 10, 0, 20)
             await ai_engine.execute_ai_analysis(
                 provider="gemini",
@@ -1446,7 +1446,7 @@ class TestAiFastFailoverAndFallback:
                 155,
             )
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             res = await ai_engine.execute_ai_analysis(
                 provider="gemini",
                 model="gemini-3.7-flash",
@@ -1482,7 +1482,7 @@ class TestAiFastFailoverAndFallback:
                 120,
             )
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             res = await ai_engine.execute_ai_analysis(
                 provider="gemini",
                 model="gemini-3.7-flash",
@@ -1521,7 +1521,7 @@ class TestAiFastFailoverAndFallback:
                 130,
             )
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             res = await ai_engine.execute_ai_analysis(
                 provider="gemini",
                 model="gemini-3.8-flash",
@@ -1561,7 +1561,7 @@ class TestAiFastFailoverAndFallback:
                 120,
             )
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             res = await ai_engine.execute_ai_analysis(
                 provider="gemini",
                 model="nonexistent-model",
@@ -1590,7 +1590,7 @@ class TestAiFastFailoverAndFallback:
             calls.append(model)
             raise ValueError("Invalid API key provided")
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             with pytest.raises(ValueError) as exc:
                 await ai_engine.execute_ai_analysis(
                     provider="gemini",
@@ -1615,7 +1615,7 @@ class TestAiFastFailoverAndFallback:
             calls.append(model)
             raise ai_engine.AiServiceUnavailableError(f"{model} overloaded", code=503)
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             with pytest.raises(ai_engine.AiServiceUnavailableError):
                 await ai_engine.execute_ai_analysis(
                     provider="gemini",
@@ -1658,7 +1658,7 @@ class TestAiFastFailoverAndFallback:
                 205,
             )
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             res = await auth_client.post(
                 "/api/ai/diagnose",
                 json={"log_ids": [1, 2]},
@@ -1741,7 +1741,7 @@ class TestAiFastFailoverAndFallback:
                 155,
             )
 
-        with patch("app.services.ai_engine.dispatch_gemini_request", side_effect=fake_dispatch):
+        with patch("app.services.ai_engine.call_gemini", side_effect=fake_dispatch):
             res = await auth_client.post(
                 "/api/ai/diagnose/stream",
                 json={"log_ids": [1, 2]},
@@ -2967,10 +2967,10 @@ class TestAiProviderDispatch:
     @pytest.mark.parametrize(
         "provider, dispatch_name",
         [
-            ("gemini", "dispatch_gemini_request"),
-            ("openai", "dispatch_openai_request"),
-            ("openai_compatible", "dispatch_openai_request"),
-            ("anthropic", "dispatch_anthropic_request"),
+            ("gemini", "call_gemini"),
+            ("openai", "call_openai"),
+            ("openai_compatible", "call_openai"),
+            ("anthropic", "call_anthropic"),
         ],
     )
     async def test_every_provider_receives_thinking_budget(self, provider, dispatch_name):
@@ -2991,8 +2991,8 @@ class TestAiProviderDispatch:
 
     @pytest.mark.asyncio
     async def test_only_openai_providers_receive_base_url(self):
-        with patch("app.services.ai_engine.dispatch_gemini_request", new_callable=AsyncMock) as mock_gemini, \
-             patch("app.services.ai_engine.dispatch_openai_request", new_callable=AsyncMock) as mock_openai:
+        with patch("app.services.ai_engine.call_gemini", new_callable=AsyncMock) as mock_gemini, \
+             patch("app.services.ai_engine.call_openai", new_callable=AsyncMock) as mock_openai:
             mock_gemini.return_value = mock_openai.return_value = (_STRUCTURED_REPLY, 10, 5, 0, 15)
             for provider in ("gemini", "openai_compatible"):
                 await ai_engine.execute_ai_analysis(
@@ -3376,3 +3376,28 @@ class TestAiModelRefreshBaseUrlScope:
         assert mock_fetch.await_args.kwargs["base_url"] == "http://other.example.net/v1"
         settings = (await auth_client.get("/api/settings")).json()
         assert settings["ai_providers_config"]["openai_compatible"]["ai_api_key"] == ""
+
+
+class TestNoLegacyDispatchAliases:
+    """N01-4: the dispatch_*_request aliases and shutdown_regex_executor are gone."""
+
+    def test_aliases_are_removed(self):
+        from app.core import regex_validator
+
+        for name in ("dispatch_gemini_request", "dispatch_openai_request", "dispatch_anthropic_request"):
+            assert not hasattr(ai_engine, name), name
+        assert not hasattr(regex_validator, "shutdown_regex_executor")
+
+    @pytest.mark.parametrize(
+        "provider, function",
+        [
+            ("gemini", "call_gemini"),
+            ("openai", "call_openai"),
+            ("openai_compatible", "call_openai"),
+            ("anthropic", "call_anthropic"),
+        ],
+    )
+    def test_provider_table_resolves_the_call_functions_at_call_time(self, provider, function):
+        sentinel = object()
+        with patch(f"app.services.ai_engine.{function}", sentinel):
+            assert ai_engine._analysis_dispatcher(provider) is sentinel
