@@ -365,6 +365,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // Decoupled facet accumulation states
   const [accumulatedSources, setAccumulatedSources] = useState<string[]>([]);
   const [accumulatedApps, setAccumulatedApps] = useState<string[]>([]);
+  const [facetsTruncated, setFacetsTruncated] = useState<boolean>(false);
   const [hostToAppsMap, setHostToAppsMap] = useState<Record<string, string[]>>({});
   const [appToHostsMap, setAppToHostsMap] = useState<Record<string, string[]>>({});
 
@@ -1243,6 +1244,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     fetchLogFacets()
       .then((facets) => {
+        setFacetsTruncated(Boolean(facets.truncated));
         if (facets.sources && facets.sources.length > 0) {
           setAccumulatedSources((prev) => Array.from(new Set([...prev, ...facets.sources])).sort());
         }
@@ -1534,6 +1536,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onApplySavedView={handleApplySavedView}
           totalCount={totalCount ?? undefined}
           totalCapped={totalCapped}
+          facetsTruncated={facetsTruncated}
         />
 
         {/* Stream Controls & Filter Pills Bar */}

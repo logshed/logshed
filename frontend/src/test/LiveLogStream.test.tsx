@@ -166,6 +166,7 @@ describe('LiveLogStream Component', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
     MockEventSource.instances = [];
     virtualizerControl.edgeRows = null;
     virtualizerControl.headOnly = false;
@@ -1740,6 +1741,7 @@ describe('LiveLogStream B11 fixes', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
     MockEventSource.instances = [];
     virtualizerControl.edgeRows = null;
     virtualizerControl.headOnly = false;
@@ -2174,5 +2176,73 @@ describe('compileSearchQuery (E-27)', () => {
     expect(matchesSearchQuery(log, 'app:nginx timeout')).toBe(true);
     expect(matchesSearchQuery(log, compileSearchQuery('app:postgres'))).toBe(false);
     expect(matchesSearchQuery(log, compileSearchQuery('  '))).toBe(true);
+  });
+});
+
+describe('LiveLogStream N07 fixes', () => {
+  const renderStream = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+  const facets = (truncated: boolean) => ({
+    sources: ['host-a'],
+    apps: ['nginx'],
+    host_to_apps: { 'host-a': ['nginx'] },
+    app_to_hosts: { nginx: ['host-a'] },
+    truncated,
+  });
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.restoreAllMocks();
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    MockEventSource.instances = [];
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as any;
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+  });
+
+  const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
+
+  it('shows the capped note in the host list when the facets were truncated', async () => {
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(facets(true) as any);
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    await act(async () => {});
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.getByText(/Showing the first 500 hosts/)).toBeInTheDocument();
+  });
+
+  it('shows no capped note when the facets were not truncated', async () => {
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(facets(false) as any);
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    await act(async () => {});
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.queryByText(/Showing the first 500/)).toBeNull();
+  });
+
+  it('sends from=since_midnight when Today is chosen', async () => {
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(facets(false) as any);
+    const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
+    renderStream();
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    fireEvent.change(desktopTimeSelect(), { target: { value: 'since_midnight' } });
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }), expect.anything())
+    );
+    expect(desktopTimeSelect().value).toBe('since_midnight');
   });
 });

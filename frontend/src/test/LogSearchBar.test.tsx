@@ -266,3 +266,45 @@ describe('LogSearchBar time presets (B-23)', () => {
     expect(desktopTimeSelect().value).toBe('custom');
   });
 });
+
+describe('LogSearchBar N07 fixes', () => {
+  const baseProps = {
+    onSearch: vi.fn(),
+    onReset: vi.fn(),
+    availableSources: ['host-a'],
+    availableApps: ['nginx'],
+  };
+
+  it('shows a note in the host and app lists when the facets were capped', () => {
+    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated />);
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.getByText(/Showing the first 500 hosts/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('All Apps'));
+    expect(screen.getByText(/Showing the first 500 apps/)).toBeInTheDocument();
+  });
+
+  it('shows no capped note when the facets were not capped', () => {
+    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated={false} />);
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.queryByText(/Showing the first 500/)).toBeNull();
+  });
+
+  it('offers a Today preset that sends since_midnight', () => {
+    const onFilterChange = vi.fn();
+    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={onFilterChange} />);
+    const select = screen.getAllByRole('combobox').find((el) =>
+      Array.from((el as HTMLSelectElement).options).some((o) => o.value === '15m')
+    ) as HTMLSelectElement;
+    expect(Array.from(select.options).some((o) => o.value === 'since_midnight' && o.text === 'Today')).toBe(true);
+    fireEvent.change(select, { target: { value: 'since_midnight' } });
+    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }));
+  });
+
+  it('shows Today for a saved view or link carrying since_midnight', () => {
+    render(<LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={vi.fn()} />);
+    const select = screen.getAllByRole('combobox').find((el) =>
+      Array.from((el as HTMLSelectElement).options).some((o) => o.value === '15m')
+    ) as HTMLSelectElement;
+    expect(select.value).toBe('since_midnight');
+  });
+});

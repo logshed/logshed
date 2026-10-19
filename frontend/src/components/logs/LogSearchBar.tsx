@@ -17,10 +17,19 @@ const TIME_PRESET_MS: Record<string, number> = {
   '7d': 7 * 24 * 60 * 60 * 1000,
 };
 
+const FACETS_NOTE_HOSTS = 'Showing the first 500 hosts. Type a name to add others.';
+const FACETS_NOTE_APPS = 'Showing the first 500 apps. Type a name to add others.';
+
+// 'since_midnight' is a relative preset too: the backend resolves it as 00:00 today in the server
+// time zone, the zone the UI shows times in.
+const SINCE_MIDNIGHT = 'since_midnight';
+const isTimePreset = (from?: string): from is string =>
+  Boolean(from) && (from === SINCE_MIDNIGHT || Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, from as string));
+
 /** The time preset matching the filters: 'all', a relative preset such as '1h', or 'custom' for absolute bounds. */
 export function deriveTimePreset(from?: string, to?: string): string {
   if (!from && !to) return 'all';
-  if (from && !to && Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, from)) return from;
+  if (from && !to && isTimePreset(from)) return from;
   return 'custom';
 }
 
@@ -34,6 +43,8 @@ interface LogSearchBarProps {
   onApplySavedView?: (filters: LogFilterParams) => void;
   totalCount?: number;
   totalCapped?: boolean;
+  /** True when the host and app lists were capped by the facets endpoint. */
+  facetsTruncated?: boolean;
 }
 
 export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
@@ -46,6 +57,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   onApplySavedView,
   totalCount,
   totalCapped = false,
+  facetsTruncated = false,
 }) => {
   // The selected preset follows the filters (saved views, links, Reset); "Custom" chosen before any
   // bounds are entered is the only local choice.
@@ -173,7 +185,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
     if (preset === 'custom') {
       setCustomTimeRequested(true);
       // Start the pickers from the preset's current window rather than leaving them empty
-      if (filters.from && Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, filters.from)) {
+      if (filters.from === SINCE_MIDNIGHT) {
+        const midnight = new Date();
+        midnight.setHours(0, 0, 0, 0);
+        onFilterChange({ ...filters, from: midnight.toISOString() });
+      } else if (filters.from && Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, filters.from)) {
         onFilterChange({
           ...filters,
           from: new Date(Date.now() - TIME_PRESET_MS[filters.from]).toISOString(),
@@ -295,6 +311,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             });
           }}
           placeholder="All Hosts"
+          note={facetsTruncated ? FACETS_NOTE_HOSTS : undefined}
         />
 
         {/* App / Container Multi-Select */}
@@ -310,6 +327,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             });
           }}
           placeholder="All Apps"
+          note={facetsTruncated ? FACETS_NOTE_APPS : undefined}
         />
 
         {/* Severity Filter Dropdown */}
@@ -351,6 +369,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <option value="6h" className="bg-dark-900">Last 6h</option>
             <option value="24h" className="bg-dark-900">Last 24h</option>
             <option value="7d" className="bg-dark-900">Last 7d</option>
+            <option value="since_midnight" className="bg-dark-900">Today</option>
             <option value="custom" className="bg-dark-900">Custom...</option>
           </select>
         </div>
@@ -459,6 +478,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 });
               }}
               placeholder="All Hosts"
+              note={facetsTruncated ? FACETS_NOTE_HOSTS : undefined}
             />
           </div>
 
@@ -477,6 +497,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 });
               }}
               placeholder="All Apps"
+              note={facetsTruncated ? FACETS_NOTE_APPS : undefined}
             />
           </div>
 
@@ -517,6 +538,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               <option value="6h">Last 6h</option>
               <option value="24h">Last 24h</option>
               <option value="7d">Last 7d</option>
+              <option value="since_midnight">Today</option>
               <option value="custom">Custom Range...</option>
             </select>
           </div>

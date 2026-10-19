@@ -11,6 +11,8 @@ export interface MultiSelectDropdownProps {
   icon?: React.ReactNode;
   allowCustomInput?: boolean;
   variant?: 'filter' | 'form';
+  /** Optional hint shown under the search box, for example when the option list was capped. */
+  note?: string;
 }
 
 export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
@@ -22,6 +24,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   icon,
   allowCustomInput = true,
   variant = 'filter',
+  note,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -223,6 +226,12 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
           )}
         </div>
       </div>
+
+      {note && (
+        <div className="px-2.5 py-1 text-[10px] text-amber-400 border-b border-dark-800" data-testid="multiselect-note">
+          {note}
+        </div>
+      )}
 
       {/* Quick Header Actions */}
       <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-slate-400 border-b border-dark-800 bg-dark-950/50">
