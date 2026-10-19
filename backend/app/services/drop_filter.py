@@ -5,20 +5,27 @@ Evaluates incoming log records against configured drop rules before SQLite inser
 and FTS5 indexing. Tracks dropped counts in memory and flushes periodically to SQLite.
 """
 
+import asyncio
 import fnmatch
 import logging
 import re
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import regex
 
 from app.core.config import get_db_path
 from app.core.migrations import get_connection
-from app.core.regex_validator import compile_user_pattern, safe_regex_search, user_pattern_search
+from app.core.regex_validator import (
+    RuleTimeoutTracker,
+    compile_user_pattern,
+    describe_rule_timeout_limit,
+    safe_regex_search,
+    user_pattern_search,
+)
 from app.core.utils import match_wildcard
 
 logger = logging.getLogger(__name__)
@@ -36,6 +43,8 @@ class CompiledDropRule:
     severity_threshold: Optional[int] = None
     compiled_regex: Optional[regex.Pattern] = None
     display_order: int = 0
+    # Set by DropFilter so pattern timeouts count towards disabling the rule automatically
+    on_pattern_timeout: Optional[Callable[[], None]] = field(default=None, repr=False, compare=False)
 
     def match_message(self, message: str) -> bool:
         """
@@ -51,7 +60,9 @@ class CompiledDropRule:
                 return False
             if not message:
                 return False
-            return user_pattern_search(self.compiled_regex, message, rule_label=f"drop rule {self.id}")
+            return user_pattern_search(
+                self.compiled_regex, message, rule_label=f"drop rule {self.id}", on_timeout=self.on_pattern_timeout
+            )
         else:
             pattern = self.message_pattern.strip()
             if "*" in pattern or "?" in pattern:
@@ -141,6 +152,13 @@ class DropFilter:
         self._rules: list[CompiledDropRule] = []
         self._pending_counts: dict[int, int] = {}
         self._lock = threading.Lock()
+        # Automatic disabling of rules whose pattern keeps timing out (D-13), guarded by self._lock
+        self._timeout_tracker = RuleTimeoutTracker()
+        # Rule ids switched off in memory whose database write has not landed yet; reloads skip them
+        self._auto_disable_pending: set[int] = set()
+        # Rule ids whose database write is still to be done
+        self._auto_disable_queue: list[int] = []
+        self._auto_disable_tasks: set[asyncio.Task] = set()
         if self.db_path:
             self.reload_rules()
 
@@ -192,7 +210,9 @@ class DropFilter:
         """
         Flush accumulated drop counts to SQLite.
         Returns the total count of drops written.
+        Also stores any automatic rule disables still waiting (D-13).
         """
+        self.store_auto_disables(conn=conn)
         with self._lock:
             if not self._pending_counts:
                 return 0
@@ -222,6 +242,76 @@ class DropFilter:
                 c.close()
 
         return total_flushed
+
+    def _note_pattern_timeout(self, rule: CompiledDropRule) -> None:
+        """
+        Count a pattern timeout for the rule. On reaching the limit (once per rule per process),
+        take the rule out of the in-memory cache at once and queue the database write. Runs on
+        the ingest path, so the write happens in a worker thread: scheduled now when an event
+        loop is running here, and in any case with the next count flush.
+        """
+        if not self._timeout_tracker.record(rule.id):
+            return
+        rule.is_enabled = False
+        with self._lock:
+            self._rules = [r for r in self._rules if r.id != rule.id]
+            self._auto_disable_pending.add(rule.id)
+            self._auto_disable_queue.append(rule.id)
+        logger.error(
+            "Drop rule %s (pattern '%s') disabled automatically: %s. Simplify the pattern, then enable the rule again.",
+            rule.id,
+            rule.message_pattern,
+            describe_rule_timeout_limit(),
+        )
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(asyncio.to_thread(self.store_auto_disables))
+        self._auto_disable_tasks.add(task)
+        task.add_done_callback(self._auto_disable_tasks.discard)
+
+    def store_auto_disables(self, conn: Optional[sqlite3.Connection] = None) -> None:
+        """
+        Store is_enabled = 0 for rules disabled automatically and not yet written, then reload
+        the rule cache. Blocking; call it from a worker thread. A failed write is retried with
+        the next count flush, and the rule stays off in memory meanwhile.
+        """
+        with self._lock:
+            if not self._auto_disable_queue:
+                return
+            rule_ids = self._auto_disable_queue
+            self._auto_disable_queue = []
+
+        def _do_disable(c: sqlite3.Connection) -> None:
+            for rule_id in rule_ids:
+                c.execute("UPDATE drop_rules SET is_enabled = 0 WHERE id = ? AND is_enabled = 1", (rule_id,))
+            c.commit()
+
+        effective_db = self.db_path or get_db_path()
+        try:
+            if conn is not None:
+                _do_disable(conn)
+            elif effective_db and Path(effective_db).exists():
+                c = get_connection(effective_db)
+                try:
+                    _do_disable(c)
+                finally:
+                    c.close()
+            else:
+                return
+        except Exception as exc:
+            logger.warning(f"Failed to store the automatic disable of drop rules {rule_ids}, will retry: {exc}")
+            with self._lock:
+                self._auto_disable_queue.extend(rule_ids)
+            return
+
+        with self._lock:
+            self._auto_disable_pending.difference_update(rule_ids)
+        try:
+            self.reload_rules(conn=conn)
+        except Exception as exc:
+            logger.warning(f"Failed to reload drop rules after disabling rules {rule_ids}: {exc}")
 
     def _flush_pending_counts(self, conn: Optional[sqlite3.Connection] = None) -> int:
         """
@@ -289,9 +379,19 @@ class DropFilter:
                     display_order=disp_ord,
                 )
             )
+            if compiled_re is not None:
+                compiled[-1].on_pattern_timeout = self._make_timeout_callback(compiled[-1])
 
         with self._lock:
+            if self._auto_disable_pending:
+                compiled = [rule for rule in compiled if rule.id not in self._auto_disable_pending]
             self._rules = compiled
+
+    def _make_timeout_callback(self, rule: CompiledDropRule) -> Callable[[], None]:
+        """Return the callback a rule calls each time its pattern times out."""
+        def _on_timeout() -> None:
+            self._note_pattern_timeout(rule)
+        return _on_timeout
 
 
 # Module-level singleton instance

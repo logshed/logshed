@@ -17,13 +17,18 @@ import re
 import sqlite3
 import threading
 import time
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import regex
 
 from app.core.pipeline import SKIP_ALERT_RULES_KEY
 from app.core.redactor import redact
-from app.core.regex_validator import compile_user_pattern, user_pattern_search
+from app.core.regex_validator import (
+    RuleTimeoutTracker,
+    compile_user_pattern,
+    describe_rule_timeout_limit,
+    user_pattern_search,
+)
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
@@ -117,6 +122,8 @@ class CompiledAlertRule:
         self._has_regex_metachars: bool = False
         # Set once when the pattern fails validation or compilation; such a rule never matches
         self._invalid: bool = False
+        # Set by AlertEvaluator so pattern timeouts count towards disabling the rule automatically
+        self.on_pattern_timeout: Optional[Callable[[], None]] = None
         if self.match_pattern and self.match_pattern.strip() and self.match_pattern.strip() != "*":
             clean_pat = self.match_pattern.strip()
             self._match_pattern_lower = clean_pat.lower()
@@ -196,12 +203,13 @@ class CompiledAlertRule:
                 if self.compiled_regex is None:
                     return False
                 label = f"alert rule {self.id} ({self.name})"
-                if user_pattern_search(self.compiled_regex, message, rule_label=label):
+                on_timeout = self.on_pattern_timeout
+                if user_pattern_search(self.compiled_regex, message, rule_label=label, on_timeout=on_timeout):
                     return True
                 # Searching identical text again cannot change the result
                 if not raw or raw == message:
                     return False
-                if not user_pattern_search(self.compiled_regex, raw, rule_label=label):
+                if not user_pattern_search(self.compiled_regex, raw, rule_label=label, on_timeout=on_timeout):
                     return False
 
         return True
@@ -226,6 +234,14 @@ class AlertEvaluator:
         self._windows: dict[int, deque[tuple[float, dict[str, Any]]]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self._lock = threading.Lock()
+        # Automatic disabling of rules whose pattern keeps timing out (D-13).
+        # Lock order: self._lock, then self._auto_disable_lock.
+        self._timeout_tracker = RuleTimeoutTracker()
+        self._auto_disable_lock = threading.Lock()
+        # Rule ids switched off in memory whose database write has not landed yet; reloads skip them
+        self._auto_disable_pending: set[int] = set()
+        # Rule ids whose database write still has to be scheduled
+        self._auto_disable_queue: list[int] = []
         if self.db_path:
             self.reload_rules()
 
@@ -282,10 +298,16 @@ class AlertEvaluator:
                 suppress_until=r[14],
                 display_order=r[15] if len(r) > 15 else 0,
             )
+            if rule.compiled_regex is not None:
+                rule.on_pattern_timeout = self._make_timeout_callback(rule)
             compiled.append(rule)
             active_ids.add(rule.id)
 
         with self._lock:
+            with self._auto_disable_lock:
+                if self._auto_disable_pending:
+                    compiled = [rule for rule in compiled if rule.id not in self._auto_disable_pending]
+                    active_ids = {rule.id for rule in compiled}
             self._rules = compiled
             # Clean up windows for rules that are no longer active
             stale_ids = [rid for rid in self._windows if rid not in active_ids]
@@ -445,12 +467,69 @@ class AlertEvaluator:
                         logger.debug(f"Error evaluating rule {rule.id}: {e}")
                         continue
 
+        # Store automatic disables off the hot path, once per rule (D-13)
+        with self._auto_disable_lock:
+            to_store = self._auto_disable_queue
+            self._auto_disable_queue = []
+        for rule_id in to_store:
+            store_task = asyncio.create_task(asyncio.to_thread(self._store_auto_disabled_rule, rule_id))
+            self._pending_tasks.add(store_task)
+            store_task.add_done_callback(self._pending_tasks.discard)
+
         # Process fired alert events outside lock (PERF-04)
         for rule, logs in fired_events:
             # Dispatch alert notification asynchronously in background with lifecycle tracking
             task = asyncio.create_task(self._dispatch_alert(rule, logs))
             self._pending_tasks.add(task)
             task.add_done_callback(self._pending_tasks.discard)
+
+    def _make_timeout_callback(self, rule: CompiledAlertRule) -> Callable[[], None]:
+        """Return the callback a rule calls each time its pattern times out."""
+        def _on_timeout() -> None:
+            self._note_pattern_timeout(rule)
+        return _on_timeout
+
+    def _note_pattern_timeout(self, rule: CompiledAlertRule) -> None:
+        """
+        Count a pattern timeout for the rule. On reaching the limit (once per rule per process),
+        switch the rule off in memory at once and queue the database write, which evaluate_batch
+        schedules in a worker thread. Runs on the ingest path, so it never touches the database
+        and never takes self._lock (evaluate_batch may already hold it).
+        """
+        if not self._timeout_tracker.record(rule.id):
+            return
+        rule.is_enabled = False
+        with self._auto_disable_lock:
+            self._auto_disable_pending.add(rule.id)
+            self._auto_disable_queue.append(rule.id)
+        logger.error(
+            "Alert rule %s (%s) disabled automatically: %s. Simplify the pattern, then enable the rule again.",
+            rule.id,
+            rule.name,
+            describe_rule_timeout_limit(),
+        )
+
+    def _store_auto_disabled_rule(self, rule_id: int) -> None:
+        """Store is_enabled = 0 for an automatically disabled rule, then reload the rule cache (worker thread)."""
+        from app.core.config import get_db_path
+        from app.api.deps import get_thread_read_connection
+        effective_db = self.db_path or get_db_path()
+        if not effective_db:
+            return
+        try:
+            conn = get_thread_read_connection(effective_db)
+            with conn:
+                conn.execute("UPDATE alert_rules SET is_enabled = 0 WHERE id = ? AND is_enabled = 1", (rule_id,))
+        except Exception as exc:
+            # The rule stays off in memory until restart; the next start runs it again
+            logger.error(f"Failed to store the automatic disable of alert rule {rule_id}: {exc}")
+            return
+        with self._auto_disable_lock:
+            self._auto_disable_pending.discard(rule_id)
+        try:
+            self.reload_rules()
+        except Exception as exc:
+            logger.warning(f"Failed to reload alert rules after disabling rule {rule_id}: {exc}")
 
     def _update_rule_trigger_state(self, rule: CompiledAlertRule) -> None:
         """Persist last_triggered_at, suppress_until, and trigger_count to SQLite."""

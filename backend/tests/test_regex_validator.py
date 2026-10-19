@@ -254,3 +254,63 @@ class TestStaticDetectorCost:
         is_safe, err = check_regex_safety(pattern)
         assert time.monotonic() - started < 0.5
         assert is_safe is True, err
+
+
+class TestRuleTimeoutTracker:
+    """N06-2 (D-13): per-rule sliding window of pattern timeouts."""
+
+    class _FakePattern:
+        pattern = "slow"
+
+        def search(self, text, timeout=None):
+            raise TimeoutError("injected")
+
+    def test_on_timeout_callback_runs_for_each_timeout(self):
+        from app.core.regex_validator import reset_user_regex_timeout_stats as _reset
+
+        _reset()
+        calls = []
+        assert user_pattern_search(self._FakePattern(), "x", rule_label="probe", on_timeout=lambda: calls.append(1)) is False
+        assert user_pattern_search(self._FakePattern(), "x", rule_label="probe", on_timeout=lambda: calls.append(1)) is False
+        assert calls == [1, 1]
+        _reset()
+
+    def test_trips_once_at_threshold_within_window(self):
+        from app.core.regex_validator import (
+            RULE_TIMEOUT_DISABLE_THRESHOLD,
+            RULE_TIMEOUT_DISABLE_WINDOW_SECONDS,
+            RuleTimeoutTracker,
+        )
+
+        assert RULE_TIMEOUT_DISABLE_THRESHOLD == 20
+        assert RULE_TIMEOUT_DISABLE_WINDOW_SECONDS == 300
+        now = [1000.0]
+        tracker = RuleTimeoutTracker(clock=lambda: now[0])
+        results = [tracker.record(7) for _ in range(19)]
+        assert not any(results)
+        assert tracker.record(8) is False
+        assert tracker.record(7) is True
+        # Never reported twice for the same rule
+        assert not any(tracker.record(7) for _ in range(50))
+        assert tracker.has_tripped(7) is True
+        assert tracker.has_tripped(8) is False
+
+    def test_old_timeouts_leave_the_window(self):
+        from app.core.regex_validator import RuleTimeoutTracker
+
+        now = [0.0]
+        tracker = RuleTimeoutTracker(clock=lambda: now[0])
+        for _ in range(19):
+            assert tracker.record(3) is False
+        now[0] = 301.0
+        for _ in range(19):
+            assert tracker.record(3) is False
+        assert tracker.record(3) is True
+
+    def test_thresholds_are_patchable_module_constants(self, monkeypatch):
+        import app.core.regex_validator as regex_validator
+
+        monkeypatch.setattr(regex_validator, "RULE_TIMEOUT_DISABLE_THRESHOLD", 2)
+        tracker = regex_validator.RuleTimeoutTracker(clock=lambda: 0.0)
+        assert tracker.record(1) is False
+        assert tracker.record(1) is True

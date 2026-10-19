@@ -15,7 +15,8 @@ import os
 import re
 import threading
 import time
-from typing import Optional, Tuple, Union
+from collections import deque
+from typing import Callable, Optional, Tuple, Union
 
 import regex
 from fastapi import HTTPException, status
@@ -461,16 +462,63 @@ def reset_user_regex_timeout_stats() -> None:
         _timeout_last_warned.clear()
 
 
+# A rule whose pattern times out this many times within the window is disabled automatically
+RULE_TIMEOUT_DISABLE_THRESHOLD = 20
+RULE_TIMEOUT_DISABLE_WINDOW_SECONDS = 300.0
+
+
+def describe_rule_timeout_limit() -> str:
+    """Return the reason logged when a rule is disabled for timing out, such as '... 20 times in 5 minutes'."""
+    window = RULE_TIMEOUT_DISABLE_WINDOW_SECONDS
+    span = f"{window / 60:g} minutes" if window >= 60 else f"{window:g} seconds"
+    return f"its pattern timed out {RULE_TIMEOUT_DISABLE_THRESHOLD} times in {span}"
+
+
+class RuleTimeoutTracker:
+    """
+    Count pattern timeouts per rule in a sliding window. `record` returns True exactly once
+    per rule for the life of the tracker (one per process), when the rule reaches the threshold.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._events: dict[int, deque[float]] = {}
+        self._tripped: set[int] = set()
+
+    def record(self, rule_id: int) -> bool:
+        threshold = max(1, int(RULE_TIMEOUT_DISABLE_THRESHOLD))
+        now = self._clock()
+        cutoff = now - RULE_TIMEOUT_DISABLE_WINDOW_SECONDS
+        with self._lock:
+            if rule_id in self._tripped:
+                return False
+            events = self._events.setdefault(rule_id, deque())
+            events.append(now)
+            while events and (events[0] <= cutoff or len(events) > threshold):
+                events.popleft()
+            if len(events) < threshold:
+                return False
+            self._tripped.add(rule_id)
+            self._events.pop(rule_id, None)
+            return True
+
+    def has_tripped(self, rule_id: int) -> bool:
+        with self._lock:
+            return rule_id in self._tripped
+
+
 def user_pattern_search(
     compiled: "regex.Pattern",
     text: Optional[str],
     rule_label: str = "user pattern",
     timeout: Optional[float] = None,
+    on_timeout: Optional[Callable[[], None]] = None,
 ) -> bool:
     """
     Search `text` (truncated to 16,384 characters) with a compiled user pattern under a real
-    per-match timeout. A timeout counts against `rule_label`, logs a rate-limited WARNING and
-    is treated as no match.
+    per-match timeout. A timeout counts against `rule_label`, logs a rate-limited WARNING,
+    calls `on_timeout` when given, and is treated as no match.
     """
     if text is None:
         return False
@@ -480,6 +528,8 @@ def user_pattern_search(
         return compiled.search(candidate, timeout=effective_timeout) is not None
     except TimeoutError:
         _record_timeout(rule_label, effective_timeout)
+        if on_timeout is not None:
+            on_timeout()
         return False
 
 

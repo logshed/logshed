@@ -2026,3 +2026,158 @@ class TestAlertPatternBackslashCodes:
         assert rule.compiled_regex is not None
         assert rule.matches({"message": "C:\temp"}) is True
         assert rule.matches({"message": r"C:\temp"}) is False
+
+
+class TestAlertRuleTimeoutAutoDisable:
+    """N06-2 (D-13): an alert rule whose pattern keeps timing out is disabled automatically."""
+
+    class _TimingOutPattern:
+        def __init__(self, pattern):
+            self.pattern = pattern
+            self.calls = 0
+
+        def search(self, text, timeout=None):
+            self.calls += 1
+            raise TimeoutError("injected")
+
+    @pytest.fixture
+    def setup(self, tmp_path: Path, monkeypatch):
+        import app.core.regex_validator as regex_validator
+        import app.services.alert_evaluator as alert_evaluator_mod
+        from app.services.notifier import NotifierService
+
+        db_file = tmp_path / "auto_disable.db"
+        run_migrations(db_file)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn = get_connection(db_file)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO alert_rules (name, rule_type, match_pattern, threshold_count, window_seconds, "
+            "cooldown_seconds, is_enabled, created_at) VALUES (?, 'threshold', ?, 1000, 60, 0, 1, ?)",
+            ("Slow rule", "slow(x|y)", now_iso),
+        )
+        slow_id = cur.lastrowid
+        cur.execute(
+            "INSERT INTO alert_rules (name, rule_type, match_pattern, threshold_count, window_seconds, "
+            "cooldown_seconds, is_enabled, created_at) VALUES (?, 'threshold', ?, 1, 60, 0, 1, ?)",
+            ("Fast rule", "boom", now_iso),
+        )
+        fast_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        fake = self._TimingOutPattern("slow(x|y)")
+        real_compile = alert_evaluator_mod.compile_user_pattern
+
+        def _compile(pattern, flags=0):
+            if pattern == "slow(x|y)":
+                return fake
+            return real_compile(pattern, flags)
+
+        monkeypatch.setattr(alert_evaluator_mod, "compile_user_pattern", _compile)
+
+        sent = []
+
+        async def mock_send(self, title, body, channel_id=None):
+            sent.append(title)
+            return True
+
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+        regex_validator.reset_user_regex_timeout_stats()
+
+        clock = [5000.0]
+        evaluator = AlertEvaluator(db_file)
+        evaluator._timeout_tracker = regex_validator.RuleTimeoutTracker(clock=lambda: clock[0])
+        yield {
+            "db": db_file, "evaluator": evaluator, "fake": fake, "clock": clock,
+            "slow_id": slow_id, "fast_id": fast_id, "sent": sent,
+        }
+        regex_validator.reset_user_regex_timeout_stats()
+
+    @staticmethod
+    def _batch(n: int, message: str = "line") -> list[dict]:
+        ts = datetime.now(timezone.utc).isoformat()
+        return [{"id": i, "message": f"{message} {i}", "timestamp": ts} for i in range(n)]
+
+    @staticmethod
+    def _is_enabled(db_file: Path, rule_id: int) -> int:
+        conn = get_connection(db_file)
+        try:
+            return conn.execute("SELECT is_enabled FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()[0]
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_rule_disabled_after_threshold_and_error_logged_once(self, setup, caplog):
+        import logging
+
+        caplog.set_level(logging.ERROR, logger="app.services.alert_evaluator")
+        ev = setup["evaluator"]
+        await ev.evaluate_batch(self._batch(19))
+        await ev.stop()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        assert not [r for r in caplog.records if "disabled automatically" in r.getMessage()]
+
+        await ev.evaluate_batch(self._batch(5))
+        await ev.stop()
+        assert setup["fake"].calls == 20
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+        assert [r.id for r in ev._rules] == [setup["fast_id"]]
+
+        errors = [r for r in caplog.records if "disabled automatically" in r.getMessage()]
+        assert len(errors) == 1
+        msg = errors[0].getMessage()
+        assert errors[0].levelno == logging.ERROR
+        assert "Slow rule" in msg and str(setup["slow_id"]) in msg and "alert rule" in msg.lower()
+        assert "timed out 20 times in 5 minutes" in msg
+
+        # The slow rule no longer runs; the other rule still fires
+        await ev.evaluate_batch(self._batch(3, message="boom"))
+        await ev.stop()
+        assert setup["fake"].calls == 20
+        assert setup["sent"]
+        assert self._is_enabled(setup["db"], setup["fast_id"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_timeouts_spread_beyond_the_window_do_not_disable(self, setup):
+        ev = setup["evaluator"]
+        await ev.evaluate_batch(self._batch(19))
+        setup["clock"][0] += 301.0
+        await ev.evaluate_batch(self._batch(19))
+        await ev.stop()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        assert setup["slow_id"] in [r.id for r in ev._rules]
+
+    @pytest.mark.asyncio
+    async def test_re_enabled_rule_is_not_disabled_again_in_the_same_process(self, setup, caplog):
+        import logging
+
+        caplog.set_level(logging.ERROR, logger="app.services.alert_evaluator")
+        ev = setup["evaluator"]
+        await ev.evaluate_batch(self._batch(20))
+        await ev.stop()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+
+        conn = get_connection(setup["db"])
+        conn.execute("UPDATE alert_rules SET is_enabled = 1 WHERE id = ?", (setup["slow_id"],))
+        conn.commit()
+        conn.close()
+        ev.reload_rules()
+        assert setup["slow_id"] in [r.id for r in ev._rules]
+
+        await ev.evaluate_batch(self._batch(40))
+        await ev.stop()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        assert len([r for r in caplog.records if "disabled automatically" in r.getMessage()]) == 1
+
+    @pytest.mark.asyncio
+    async def test_reload_before_the_write_lands_keeps_the_rule_off(self, setup, monkeypatch):
+        ev = setup["evaluator"]
+        written = []
+        monkeypatch.setattr(ev, "_store_auto_disabled_rule", lambda rule_id: written.append(rule_id))
+        await ev.evaluate_batch(self._batch(20))
+        # An unrelated rules edit reloads the cache while the database still says enabled
+        ev.reload_rules()
+        assert setup["slow_id"] not in [r.id for r in ev._rules]
+        await ev.stop()
+        assert written == [setup["slow_id"]]

@@ -1133,3 +1133,142 @@ class TestDropRuleUserRegexEngine:
         assert regex_validator.get_user_regex_timeout_counts() == {f"drop rule {rule_id}": 1}
         assert any(f"drop rule {rule_id}" in r.getMessage() for r in caplog.records)
         regex_validator.reset_user_regex_timeout_stats()
+
+
+class TestDropRuleTimeoutAutoDisable:
+    """N06-2 (D-13): a drop rule whose pattern keeps timing out is disabled automatically."""
+
+    class _TimingOutPattern:
+        def __init__(self, pattern):
+            self.pattern = pattern
+            self.calls = 0
+
+        def search(self, text, timeout=None):
+            self.calls += 1
+            raise TimeoutError("injected")
+
+    @pytest.fixture
+    def setup(self, tmp_path: Path, monkeypatch):
+        import app.core.regex_validator as regex_validator
+        import app.services.drop_filter as drop_filter_mod
+
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
+            "VALUES (NULL, NULL, 'slow(x|y)', 1, 1, 0, datetime('now'))"
+        )
+        slow_id = cur.lastrowid
+        cur.execute(
+            "INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
+            "VALUES (NULL, NULL, 'noise', 0, 1, 0, datetime('now'))"
+        )
+        fast_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        fake = self._TimingOutPattern("slow(x|y)")
+        real_compile = drop_filter_mod.compile_user_pattern
+
+        def _compile(pattern, flags=0):
+            if pattern == "slow(x|y)":
+                return fake
+            return real_compile(pattern, flags)
+
+        monkeypatch.setattr(drop_filter_mod, "compile_user_pattern", _compile)
+        regex_validator.reset_user_regex_timeout_stats()
+        clock = [100.0]
+        flt = DropFilter(db_file)
+        flt._timeout_tracker = regex_validator.RuleTimeoutTracker(clock=lambda: clock[0])
+        yield {"db": db_file, "flt": flt, "fake": fake, "clock": clock, "slow_id": slow_id, "fast_id": fast_id}
+        regex_validator.reset_user_regex_timeout_stats()
+
+    @staticmethod
+    def _is_enabled(db_file: Path, rule_id: int) -> int:
+        conn = get_connection(db_file)
+        try:
+            return conn.execute("SELECT is_enabled FROM drop_rules WHERE id = ?", (rule_id,)).fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_rule_disabled_after_threshold_and_error_logged_once(self, setup, caplog):
+        import logging
+
+        caplog.set_level(logging.ERROR, logger="app.services.drop_filter")
+        flt = setup["flt"]
+        for i in range(19):
+            assert flt.should_drop(None, None, None, f"line {i}") is None
+        flt.flush_counts()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+
+        assert flt.should_drop(None, None, None, "line 19") is None
+        # The rule stops running at once, before the database write
+        assert setup["slow_id"] not in [r.id for r in flt._rules]
+        for i in range(5):
+            assert flt.should_drop(None, None, None, f"more {i}") is None
+        assert setup["fake"].calls == 20
+
+        # Without a running event loop the write happens with the next count flush
+        flt.flush_counts()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+        assert [r.id for r in flt._rules] == [setup["fast_id"]]
+        assert flt.should_drop(None, None, None, "noise here") == setup["fast_id"]
+
+        errors = [r for r in caplog.records if "disabled automatically" in r.getMessage()]
+        assert len(errors) == 1
+        msg = errors[0].getMessage()
+        assert "drop rule" in msg.lower() and str(setup["slow_id"]) in msg
+        assert "timed out 20 times in 5 minutes" in msg
+
+        # Flushing again does nothing more
+        flt.flush_counts()
+        assert len([r for r in caplog.records if "disabled automatically" in r.getMessage()]) == 1
+
+    @pytest.mark.asyncio
+    async def test_write_is_scheduled_at_once_inside_an_event_loop(self, setup):
+        flt = setup["flt"]
+        for i in range(20):
+            flt.should_drop(None, None, None, f"line {i}")
+        assert flt._auto_disable_tasks
+        await asyncio.gather(*list(flt._auto_disable_tasks))
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+
+    def test_timeouts_spread_beyond_the_window_do_not_disable(self, setup):
+        flt = setup["flt"]
+        for i in range(19):
+            flt.should_drop(None, None, None, f"line {i}")
+        setup["clock"][0] += 301.0
+        for i in range(19):
+            flt.should_drop(None, None, None, f"line {i}")
+        flt.flush_counts()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        assert setup["slow_id"] in [r.id for r in flt._rules]
+
+    def test_reload_before_the_write_lands_keeps_the_rule_off(self, setup):
+        flt = setup["flt"]
+        for i in range(20):
+            flt.should_drop(None, None, None, f"line {i}")
+        flt.reload_rules()
+        assert setup["slow_id"] not in [r.id for r in flt._rules]
+        flt.flush_counts()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+
+    def test_re_enabled_rule_is_not_disabled_again_in_the_same_process(self, setup, caplog):
+        import logging
+
+        caplog.set_level(logging.ERROR, logger="app.services.drop_filter")
+        flt = setup["flt"]
+        for i in range(20):
+            flt.should_drop(None, None, None, f"line {i}")
+        flt.flush_counts()
+        conn = get_connection(setup["db"])
+        conn.execute("UPDATE drop_rules SET is_enabled = 1 WHERE id = ?", (setup["slow_id"],))
+        conn.commit()
+        conn.close()
+        flt.reload_rules()
+        for i in range(40):
+            flt.should_drop(None, None, None, f"line {i}")
+        flt.flush_counts()
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        assert len([r for r in caplog.records if "disabled automatically" in r.getMessage()]) == 1
