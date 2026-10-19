@@ -181,7 +181,8 @@ describe('AiFollowUpThread', () => {
 
     expect(await screen.findByText('Request timed out')).toBeInTheDocument();
     expect(onSendingChange).toHaveBeenCalledWith(true);
-    expect(onSendingChange).toHaveBeenLastCalledWith(false);
+    // onSendingChange fires from an effect after the render that shows the error, so wait for it
+    await waitFor(() => expect(onSendingChange).toHaveBeenLastCalledWith(false));
   });
 
   it('does not send on plain Enter or with an empty question', async () => {
