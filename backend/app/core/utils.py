@@ -387,6 +387,15 @@ _RE_RELATIVE_TIME = re.compile(
 )
 
 
+def _local_midnight_utc(days_back: int = 0) -> datetime.datetime:
+    """Return midnight (in the process local time zone) of the date ``days_back`` days ago, in UTC."""
+    local_date = datetime.datetime.now().astimezone().date() - datetime.timedelta(days=days_back)
+    # A naive datetime is read as local time, so astimezone() applies the zone's rules for
+    # that date (including daylight saving time).
+    local_midnight = datetime.datetime.combine(local_date, datetime.time.min)
+    return local_midnight.astimezone(datetime.timezone.utc)
+
+
 def parse_relative_or_iso_time(val: Any) -> Optional[str]:
     """
     Parse a relative time string (e.g. '15m', '1h', '24h', '7d', 'since_midnight', 'today', 'yesterday')
@@ -410,15 +419,13 @@ def parse_relative_or_iso_time(val: Any) -> Optional[str]:
     clean_lower = clean.lower()
     now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-    # Human relative keywords
+    # Human relative keywords: "today" starts at midnight in the server's local time zone
+    # (the zone the UI reports as server_tz_name), converted to UTC. Midnight is built from
+    # the local date, not by subtracting hours, so days with a DST change stay correct.
     if clean_lower in ("since_midnight", "today"):
-        midnight = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        return midnight.isoformat()
+        return _local_midnight_utc(days_back=0).isoformat()
     if clean_lower == "yesterday":
-        yesterday_midnight = (now_utc - datetime.timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        return yesterday_midnight.isoformat()
+        return _local_midnight_utc(days_back=1).isoformat()
 
     # Relative duration pattern (e.g., "1h", "30m", "24h", "7d")
     m = _RE_RELATIVE_TIME.match(clean)

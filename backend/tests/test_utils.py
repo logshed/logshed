@@ -168,3 +168,102 @@ class TestExpandSourceAliases:
         finally:
             conn.close()
 
+
+
+@pytest.fixture
+def server_tz(monkeypatch):
+    """Set the process time zone and fully restore it (including time.tzset) afterwards."""
+    import os
+    import time
+
+    original = os.environ.get("TZ")
+
+    def _set(name: str) -> None:
+        monkeypatch.setenv("TZ", name)
+        time.tzset()
+
+    yield _set
+
+    if original is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = original
+    time.tzset()
+
+
+def _freeze_local_now(monkeypatch, naive_local: datetime.datetime) -> None:
+    """Make the parser see ``naive_local`` (a wall-clock time in the process zone) as now."""
+    from app.core import utils as utils_mod
+
+    class _FrozenDatetime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            aware_local = naive_local.astimezone()
+            return aware_local if tz is None else aware_local.astimezone(tz)
+
+    monkeypatch.setattr(utils_mod.datetime, "datetime", _FrozenDatetime)
+
+
+class TestParseRelativeLocalMidnight:
+    """since_midnight, today and yesterday start at midnight in the server time zone."""
+
+    def test_today_in_utc_minus_5(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("Etc/GMT+5")  # UTC-5
+        _freeze_local_now(monkeypatch, datetime.datetime(2026, 10, 19, 10, 0, 0))
+        assert parse_relative_or_iso_time("today") == "2026-10-19T05:00:00+00:00"
+        assert parse_relative_or_iso_time("since_midnight") == "2026-10-19T05:00:00+00:00"
+
+    def test_yesterday_in_utc_minus_5(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("Etc/GMT+5")
+        _freeze_local_now(monkeypatch, datetime.datetime(2026, 10, 19, 10, 0, 0))
+        assert parse_relative_or_iso_time("yesterday") == "2026-10-18T05:00:00+00:00"
+
+    def test_late_evening_local_is_next_utc_day(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("Etc/GMT+5")
+        # 22:00 local is 03:00 UTC on the next date, but the local date is still the 19th
+        _freeze_local_now(monkeypatch, datetime.datetime(2026, 10, 19, 22, 0, 0))
+        assert parse_relative_or_iso_time("today") == "2026-10-19T05:00:00+00:00"
+        assert parse_relative_or_iso_time("yesterday") == "2026-10-18T05:00:00+00:00"
+
+    def test_utc_server_is_unchanged(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("UTC")
+        _freeze_local_now(monkeypatch, datetime.datetime(2026, 10, 19, 10, 0, 0))
+        assert parse_relative_or_iso_time("today") == "2026-10-19T00:00:00+00:00"
+        assert parse_relative_or_iso_time("since_midnight") == "2026-10-19T00:00:00+00:00"
+        assert parse_relative_or_iso_time("yesterday") == "2026-10-18T00:00:00+00:00"
+
+    def test_utc_plus_offset_server(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("Etc/GMT-10")  # UTC+10
+        _freeze_local_now(monkeypatch, datetime.datetime(2026, 10, 19, 3, 0, 0))
+        # Local midnight on the 19th is 14:00 UTC on the 18th
+        assert parse_relative_or_iso_time("today") == "2026-10-18T14:00:00+00:00"
+        assert parse_relative_or_iso_time("yesterday") == "2026-10-17T14:00:00+00:00"
+
+    def test_yesterday_uses_local_date_across_dst_change(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("America/New_York")
+        # DST ended on 2026-11-01 (a 25 hour day): midnight was EDT (UTC-4) on the 1st and
+        # is EST (UTC-5) on the 2nd.
+        _freeze_local_now(monkeypatch, datetime.datetime(2026, 11, 2, 12, 0, 0))
+        assert parse_relative_or_iso_time("today") == "2026-11-02T05:00:00+00:00"
+        assert parse_relative_or_iso_time("yesterday") == "2026-11-01T04:00:00+00:00"
+
+    def test_relative_durations_and_iso_are_not_affected_by_zone(self, monkeypatch, server_tz):
+        from app.core.utils import parse_relative_or_iso_time
+
+        server_tz("Etc/GMT+5")
+        assert parse_relative_or_iso_time("2026-10-19T10:00:00Z") == "2026-10-19T10:00:00+00:00"
+        before = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+        got = datetime.datetime.fromisoformat(parse_relative_or_iso_time("1h"))
+        assert abs((got - before).total_seconds()) < 5
