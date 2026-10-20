@@ -28,7 +28,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 - `since_midnight` or `today`: 00:00 today in the server time zone (`TZ`).
 - `yesterday`: 00:00 on the previous local date in the server time zone.
 
-Midnight is built from the local date, so days with a daylight saving change stay correct. All values are converted to UTC before they are compared with stored timestamps. An unrecognised value returns `422`.
+Midnight is built from the local date, so days with a daylight saving change stay correct. All values are converted to UTC before they are compared with stored timestamps. An unknown value returns `422`.
 
 ## 3. Endpoint Directory
 

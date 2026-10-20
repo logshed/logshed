@@ -136,7 +136,7 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | `DOCKER_HEARTBEAT_INTERVAL` | `30.0` | Docker Compose only | Interval in seconds between Docker API connection health checks. | 1.1.0 |
 | `DOCKER_SOCKET_POLL_INTERVAL` | `5.0` | Docker Compose only | Initial delay in seconds when polling for socket availability during startup or reconnect. | 1.1.0 |
 | `DOCKER_SOCKET_POLL_MAX` | `60.0` | Docker Compose only | Maximum backoff duration in seconds for Docker socket reconnect attempts. | 1.1.0 |
-| `DOCKER_DISCOVERY_INTERVAL` | `60.0` | Docker Compose only | Interval in seconds between periodic container discovery scans to detect newly started or stopped containers. | 1.3.0 |
+| `DOCKER_DISCOVERY_INTERVAL` | `60.0` | Docker Compose only | Interval in seconds between periodic container discovery scans to detect newly started or stopped containers. | 1.2.0 |
 | `DOCKER_ALLOWED_SOCKETS` | *(empty)* | Docker Compose only | Comma-separated list of extra Unix socket paths that Docker hosts may use. By default a `unix://` host URL must end in `docker.sock` or be the `DOCKER_HOST` socket; any other path is refused with `422` when you save the host. Stored hosts are not re-checked, so collection from an already saved host keeps running. Example: `/run/podman/podman.sock`. | 1.3.0 |
 | `DOCKER_ADDITIONAL_HOSTS` | *(empty)* | Docker Compose only | JSON-encoded array of remote Docker endpoints to pre-seed on startup (for example, `[{"name": "remote-node", "url": "tcp://192.168.1.50:2375", "source_alias": "remote-docker"}]`). | 1.3.0 |
 
