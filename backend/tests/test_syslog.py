@@ -612,6 +612,30 @@ class TestSyslogNetworkAndProtocol:
         assert received[0][1]["source_alias"] == "192.168.1.4"
 
     @pytest.mark.asyncio
+    async def test_syslog_hostname_matching_docker_alias_retains_ip(self, db_path: Path):
+        """A hostname equal to a Docker host alias (any letter case) is not adopted, so the rows stay syslog rows."""
+        received = []
+
+        class MockAssembler:
+            async def feed(self, stream_key: str, entry: dict):
+                received.append((stream_key, entry))
+
+        with get_connection(db_path) as conn:
+            conn.execute("UPDATE docker_endpoints SET source_alias = 'tower' WHERE id = 1")
+            conn.commit()
+
+        alias_cache = AliasCache(db_path)
+        assert alias_cache.is_docker_alias("Tower")
+        proto = SyslogUDPProtocol(MockAssembler(), alias_cache)
+
+        proto.datagram_received(b"<14>Jan 15 10:00:00 Tower kernel: disk spun down", ("192.168.1.50", 514))
+        proto.datagram_received(b"<14>Jan 15 10:00:01 nas01 kernel: disk spun up", ("192.168.1.51", 514))
+        await asyncio.sleep(0.05)
+
+        aliases = {entry["source_ip"]: entry["source_alias"] for _, entry in received}
+        assert aliases == {"192.168.1.50": "192.168.1.50", "192.168.1.51": "nas01"}
+
+    @pytest.mark.asyncio
     async def test_syslog_omitted_hostname_uses_configured_alias_or_ip(self, db_path: Path):
         """Messages omitting hostname (e.g. crond[330276]:) should resolve via host_aliases or retain source_ip."""
         received = []

@@ -26,6 +26,7 @@ from app.core.pipeline import (
     _is_continuation,
     _RE_PYTHON_EXCEPTION,
 )
+from app.core.utils import load_docker_source_aliases
 
 logger = logging.getLogger(__name__)
 
@@ -471,6 +472,8 @@ class AliasCache:
         self._db_path = Path(db_path)
         self._refresh_interval = refresh_interval
         self._aliases: dict[str, str] = {}
+        # Docker host aliases, lowercased: a syslog hostname equal to one is never used as an alias
+        self._docker_aliases: frozenset[str] = frozenset()
         self._lock = threading.Lock()
         self._refresh_task: asyncio.Task | None = None
         if preload:
@@ -482,13 +485,19 @@ class AliasCache:
         with self._lock:
             return self._aliases.get(source_ip, source_ip)
 
+    def is_docker_alias(self, name: str) -> bool:
+        """True when name matches a Docker host alias, ignoring letter case."""
+        with self._lock:
+            return name.lower() in self._docker_aliases
+
     def get_alias(self, source_ip: str) -> str:
         """Alias for resolve() to support get_alias interface."""
         return self.resolve(source_ip)
 
     def load_aliases(self) -> None:
-        """Synchronous: bulk-load all aliases from host_aliases table."""
+        """Synchronous: bulk-load all aliases from host_aliases, and the Docker host aliases."""
         new_aliases: dict[str, str] = {}
+        new_docker_aliases: frozenset[str] = frozenset()
         try:
             conn = get_connection(self._db_path)
             try:
@@ -496,6 +505,7 @@ class AliasCache:
                 cursor.execute("SELECT ip, alias FROM host_aliases")
                 for row in cursor.fetchall():
                     new_aliases[row[0]] = row[1]
+                new_docker_aliases = frozenset(a.lower() for a in load_docker_source_aliases(conn))
             finally:
                 conn.close()
         except sqlite3.OperationalError:
@@ -507,6 +517,7 @@ class AliasCache:
 
         with self._lock:
             self._aliases = new_aliases
+            self._docker_aliases = new_docker_aliases
 
     async def start(self) -> None:
         """Start the periodic refresh background task. Safe to call again while running."""
@@ -694,7 +705,8 @@ async def dispatch_syslog_message(
         source_alias = alias_cache.resolve(source_ip)
         if source_alias == source_ip:
             hostname = parsed.get("hostname")
-            if hostname and hostname not in ("-", "unknown"):
+            # A hostname that is also a Docker host alias would make these rows read as container logs
+            if hostname and hostname not in ("-", "unknown") and not alias_cache.is_docker_alias(hostname):
                 source_alias = hostname
         parsed["source_alias"] = source_alias
         stream_key = f"{source_ip}:{parsed['app_name']}"

@@ -168,6 +168,25 @@ class TestExpandSourceAliases:
         finally:
             conn.close()
 
+    def test_docker_alias_keeps_apart_from_syslog_alias_of_same_machine(self):
+        import sqlite3
+        from app.core.utils import expand_source_aliases
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute("CREATE TABLE host_aliases (ip TEXT, alias TEXT)")
+            conn.execute("CREATE TABLE docker_endpoints (name TEXT, source_alias TEXT, enabled INTEGER)")
+            conn.execute("INSERT INTO host_aliases VALUES ('192.168.1.50', 'Tower')")
+            conn.execute("INSERT INTO docker_endpoints VALUES ('Tower', 'tower', 1)")
+
+            # The Docker alias differs from the syslog alias only in letter case
+            assert expand_source_aliases(["tower"], conn=conn) == ["tower"]
+            # The syslog alias never pulls in the Docker alias, even though the endpoint name matches
+            assert expand_source_aliases(["Tower"], conn=conn) == ["192.168.1.50", "Tower"]
+            assert expand_source_aliases(["192.168.1.50"], conn=conn) == ["192.168.1.50", "Tower"]
+        finally:
+            conn.close()
+
 
 
 @pytest.fixture

@@ -14,9 +14,35 @@ logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
+from app.core.utils import load_docker_source_aliases
 from app.models import HostAliasCreate, HostAliasResponse, MessageResponse
 
 router = APIRouter(prefix="/aliases", tags=["Host Aliases"])
+
+_ALIAS_CLASH_HINT = "Choose a different name so syslog and container logs from the same machine stay separate."
+
+
+def raise_if_alias_used_by_docker(conn, alias: str) -> None:
+    """409 when a syslog host alias would match a Docker host alias (letter case ignored)."""
+    folded = alias.strip().lower()
+    if any(a.lower() == folded for a in load_docker_source_aliases(conn)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The alias '{alias.strip()}' is already used by a Docker host. {_ALIAS_CLASH_HINT}",
+        )
+
+
+def raise_if_alias_used_by_syslog(conn, alias: str) -> None:
+    """409 when a Docker host alias would match a syslog host alias (letter case ignored)."""
+    row = conn.execute(
+        "SELECT 1 FROM host_aliases WHERE ip != 'docker' AND lower(alias) = lower(?) LIMIT 1",
+        (alias.strip(),),
+    ).fetchone()
+    if row:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The alias '{alias.strip()}' is already used by a syslog host alias. {_ALIAS_CLASH_HINT}",
+        )
 
 
 @router.get("", response_model=list[HostAliasResponse])
@@ -105,24 +131,7 @@ def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_siz
             batch_size,
         )
     else:
-        docker_aliases: list[str] = []
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL")
-            docker_aliases = [r[0].strip() for r in cur.fetchall() if r[0] and str(r[0]).strip()]
-        except Exception:
-            docker_aliases = []
-
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT value FROM system_settings WHERE key = 'docker_source_alias'")
-            row = cur.fetchone()
-            if row and row[0] and str(row[0]).strip():
-                docker_aliases.append(str(row[0]).strip())
-        except Exception:
-            pass
-
-        docker_aliases = list(set(docker_aliases) | {"docker"})
+        docker_aliases = sorted(load_docker_source_aliases(conn))
         placeholders = ",".join("?" for _ in docker_aliases)
         keyset_alias_backfill(
             conn,
@@ -147,6 +156,11 @@ async def create_or_update_alias(
 
     def _upsert(conn):
         cursor = conn.cursor()
+        if clean_ip != "docker":
+            cursor.execute("SELECT alias FROM host_aliases WHERE ip = ?", (clean_ip,))
+            current = cursor.fetchone()
+            if not current or current[0] != clean_alias:
+                raise_if_alias_used_by_docker(conn, clean_alias)
         cursor.execute(
             """
             INSERT INTO host_aliases (ip, alias, notes, created_at)

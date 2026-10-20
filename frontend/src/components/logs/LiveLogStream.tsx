@@ -141,7 +141,7 @@ export function prepareLogEntry(
   const isDocker =
     entry.source_ip === 'docker' ||
     Boolean(
-      dockerAliases && entry.source_alias && dockerAliases.has(entry.source_alias.toLowerCase())
+      dockerAliases && entry.source_alias && dockerAliases.has(entry.source_alias)
     );
 
   const canonical =
@@ -408,8 +408,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       dockerEndpointsRef.current = endpointsList;
       const s = new Set<string>();
       endpointsList.forEach((ep) => {
-        if (ep.source_alias) s.add(ep.source_alias.toLowerCase());
-        if (ep.name) s.add(ep.name.toLowerCase());
+        if (ep.source_alias) s.add(ep.source_alias);
       });
       dockerAliasesRef.current = s;
     });
@@ -446,8 +445,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           dockerEndpointsRef.current = endpointsList;
           const s = new Set<string>();
           endpointsList.forEach((ep) => {
-            if (ep.source_alias) s.add(ep.source_alias.toLowerCase());
-            if (ep.name) s.add(ep.name.toLowerCase());
+            if (ep.source_alias) s.add(ep.source_alias);
           });
           dockerAliasesRef.current = s;
         }
@@ -455,12 +453,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         // Build all current and previous Docker aliases to reliably identify Docker logs
         const allDockerAliases = new Set<string>();
         endpointsList?.forEach((ep) => {
-          if (ep.source_alias) allDockerAliases.add(ep.source_alias.toLowerCase());
-          if (ep.name) allDockerAliases.add(ep.name.toLowerCase());
+          if (ep.source_alias) allDockerAliases.add(ep.source_alias);
         });
         previousDockerEndpoints.forEach((ep) => {
-          if (ep.source_alias) allDockerAliases.add(ep.source_alias.toLowerCase());
-          if (ep.name) allDockerAliases.add(ep.name.toLowerCase());
+          if (ep.source_alias) allDockerAliases.add(ep.source_alias);
         });
         allDockerAliases.add('docker');
 
@@ -535,7 +531,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           prev.map((log) => {
             const isDocker =
               log.source_ip === 'docker' ||
-              Boolean(log.source_alias && allDockerAliases.has(log.source_alias.toLowerCase()));
+              Boolean(log.source_alias && allDockerAliases.has(log.source_alias));
 
             if (isDocker) {
               // Primary Docker endpoint
@@ -553,7 +549,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                   if (ep.id > 1) {
                     const prevEp = previousDockerEndpoints.find((e) => e.id === ep.id);
                     if (prevEp && prevEp.source_alias && ep.source_alias && prevEp.source_alias !== ep.source_alias) {
-                      if (log.source_alias.toLowerCase() === prevEp.source_alias.toLowerCase()) {
+                      if (log.source_alias === prevEp.source_alias) {
                         return { ...log, source_alias: ep.source_alias };
                       }
                     }
@@ -735,7 +731,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const getLogCanonicalHost = (log: LogEntry): string => {
       const isDocker =
         log.source_ip === 'docker' ||
-        Boolean(dockerAliasesRef.current && log.source_alias && dockerAliasesRef.current.has(log.source_alias.toLowerCase()));
+        Boolean(dockerAliasesRef.current && log.source_alias && dockerAliasesRef.current.has(log.source_alias));
 
       if (isDocker) {
         return log.source_alias || 'docker';

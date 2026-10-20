@@ -18,7 +18,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.aliases import keyset_alias_backfill
+from app.api.aliases import keyset_alias_backfill, raise_if_alias_used_by_syslog
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.docker_collector import (
     _build_client,
@@ -27,6 +27,7 @@ from app.collectors.docker_collector import (
     effective_source_ip,
 )
 from app.collectors.docker_pool import TLS_HOSTNAME_HINT, is_tls_hostname_mismatch
+from app.collectors.syslog import reload_active_alias_caches
 from app.core.config import invalidate_settings_cache
 from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
@@ -311,6 +312,7 @@ async def create_docker_endpoint(
 
     def _insert(conn: sqlite3.Connection):
         cur = conn.cursor()
+        raise_if_alias_used_by_syslog(conn, payload.source_alias.strip() or "docker")
         cur.execute("SELECT id FROM docker_endpoints WHERE name = ?", (payload.name.strip(),))
         if cur.fetchone():
             raise HTTPException(
@@ -346,6 +348,7 @@ async def create_docker_endpoint(
         return new_id
 
     new_id = await run_db_query(_insert)
+    await asyncio.to_thread(reload_active_alias_caches)
 
     ep_data = {
         "id": new_id,
@@ -456,7 +459,9 @@ async def update_docker_endpoint(
                     )
 
         url_val = payload.url.strip() if payload.url is not None else row["url"]
-        alias_val = payload.source_alias.strip() if payload.source_alias is not None else row["source_alias"]
+        alias_val = (payload.source_alias.strip() or "docker") if payload.source_alias is not None else row["source_alias"]
+        if alias_val != row["source_alias"]:
+            raise_if_alias_used_by_syslog(conn, alias_val)
         enabled_val = (1 if payload.enabled else 0) if payload.enabled is not None else row["enabled"]
         tls_val = (1 if payload.tls_enabled else 0) if payload.tls_enabled is not None else row["tls_enabled"]
         # None keeps the stored certificate; an empty string clears it (as for client_key)
@@ -574,6 +579,8 @@ async def update_docker_endpoint(
     new_alias = updated["source_alias"]
     target_ip = effective_ip_box[0]
     if prev_alias and new_alias and prev_alias != new_alias:
+        await asyncio.to_thread(reload_active_alias_caches)
+
         def _run_docker_batch(conn: sqlite3.Connection):
             try:
                 _batch_update_docker_aliases(
@@ -617,6 +624,7 @@ async def delete_docker_endpoint(
         conn.commit()
 
     await run_db_query(_delete)
+    await asyncio.to_thread(reload_active_alias_caches)
 
     from app.main import get_docker_pool
     pool = get_docker_pool()

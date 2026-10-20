@@ -172,6 +172,30 @@ describe('LogRow Component and Optimization', () => {
     expect(unaliased.source_alias).toBe('10.0.0.1');
   });
 
+  it('prepareLogEntry keeps Docker rows on their alias and matches Docker aliases exactly', () => {
+    const base = {
+      id: 202,
+      timestamp: '2026-09-03T14:30:15.123Z',
+      received_at: '2026-09-03T14:30:15.150Z',
+      source_ip: '192.168.1.50',
+      app_name: 'plex',
+      facility: 1,
+      severity: 6,
+      message: 'started',
+      raw: 'started',
+    };
+    const aliases = { '192.168.1.50': 'Tower NAS' };
+    const dockerAliases = new Set(['tower']);
+
+    // Container row from the Docker host on the same machine keeps its Docker alias
+    const container = prepareLogEntry({ ...base, source_alias: 'tower' }, aliases, undefined, dockerAliases);
+    expect(container.source_alias).toBe('tower');
+
+    // Syslog row stamped with the machine's hostname, spelled differently from the Docker alias
+    const syslog = prepareLogEntry({ ...base, source_alias: 'Tower' }, aliases, undefined, dockerAliases);
+    expect(syslog.source_alias).toBe('Tower NAS');
+  });
+
   it('matchesSearchQuery supports precompiled RegExp pattern', () => {
     const precompiled = new RegExp('upstream', 'i');
     expect(matchesSearchQuery(baseLog, 'upstream', precompiled)).toBe(true);

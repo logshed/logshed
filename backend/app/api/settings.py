@@ -3,6 +3,7 @@ System settings API endpoints for LogShed.
 Provides secure storage with encryption at rest for API keys.
 """
 
+import asyncio
 import datetime
 import logging
 import os
@@ -258,6 +259,9 @@ async def update_settings(
             ep1_row = cursor.fetchone()
             if ep1_row:
                 old_docker_alias_box[0] = ep1_row[0]
+            if not ep1_row or ep1_row[0] != req.docker_source_alias:
+                from app.api.aliases import raise_if_alias_used_by_syslog
+                raise_if_alias_used_by_syslog(conn, req.docker_source_alias)
 
         updates: list[tuple[str, str, int]] = []
 
@@ -543,6 +547,9 @@ async def update_settings(
         if prev_alias and prev_alias != new_alias:
             from app.api.docker_hosts import _batch_update_docker_aliases
             from app.collectors.docker_collector import effective_source_ip
+            from app.collectors.syslog import reload_active_alias_caches
+
+            await asyncio.to_thread(reload_active_alias_caches)
 
             def _run_docker_batch(conn):
                 try:

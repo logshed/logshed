@@ -593,6 +593,81 @@ class TestDockerHostsFixes:
         assert _log_aliases(db_file, "rootless-old") == ["rootless-new", "rootless-new"]
 
     @pytest.mark.asyncio
+    async def test_syslog_and_docker_filters_stay_apart_on_one_machine(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """A Docker host named like the machine's syslog alias filters, and lists, only its own rows."""
+        db_file = tmp_path / "docker_hosts_test.db"
+        _seed_endpoint(db_file, id=2, name="Tower", url="tcp://192.168.1.50:2375", source_alias="Tower-Docker")
+        with get_connection(db_file) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.50', 'Tower', '2026-10-12T00:00:00Z')"
+            )
+            conn.commit()
+        _seed_logs(db_file, [("192.168.1.50", "Tower", "syslog line"), ("192.168.1.50", "Tower-Docker", "container line")])
+
+        for source, expected in (("Tower-Docker", ["container line"]), ("Tower", ["syslog line"])):
+            resp = await client.get("/api/logs", params={"source": source}, headers=auth_headers)
+            assert resp.status_code == 200
+            assert [log["message"] for log in resp.json()["logs"]] == expected
+
+        facets = (await client.get("/api/logs/facets", headers=auth_headers)).json()
+        assert {"Tower", "Tower-Docker"} <= set(facets["sources"])
+        assert "tower-docker" not in facets["sources"]
+
+    @pytest.mark.asyncio
+    async def test_syslog_and_docker_aliases_must_differ(self, client: AsyncClient, auth_headers: dict):
+        """A syslog host alias and a Docker host alias with the same name (any letter case) are refused with 409."""
+        resp = await client.post("/api/aliases", json={"ip": "192.168.1.50", "alias": "Tower"}, headers=auth_headers)
+        assert resp.status_code == 200
+
+        resp = await client.post(
+            "/api/docker/hosts",
+            json={"name": "Tower", "url": "tcp://192.168.1.50:2375", "source_alias": "tower"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 409
+        assert "already used by a syslog host alias" in resp.json()["detail"]
+
+        resp = await client.post(
+            "/api/docker/hosts",
+            json={"name": "Tower", "url": "tcp://192.168.1.50:2375", "source_alias": "tower-docker"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        host_id = resp.json()["id"]
+
+        resp = await client.put(f"/api/docker/hosts/{host_id}", json={"source_alias": "TOWER"}, headers=auth_headers)
+        assert resp.status_code == 409
+        resp = await client.post("/api/settings", json={"docker_source_alias": "Tower"}, headers=auth_headers)
+        assert resp.status_code == 409
+        # Requests that leave the alias unchanged still work
+        resp = await client.put(f"/api/docker/hosts/{host_id}", json={"enabled": False}, headers=auth_headers)
+        assert resp.status_code == 200
+
+        for alias in ("Tower-Docker", "docker"):
+            resp = await client.post("/api/aliases", json={"ip": "192.168.1.60", "alias": alias}, headers=auth_headers)
+            assert resp.status_code == 409
+            assert "already used by a Docker host" in resp.json()["detail"]
+        resp = await client.post(
+            "/api/aliases", json={"ip": "192.168.1.50", "alias": "Tower", "notes": "rack 1"}, headers=auth_headers
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_blank_alias_on_update_falls_back_to_docker(self, client: AsyncClient, auth_headers: dict):
+        """Clearing a host's alias stores "docker", the label its collector uses, as on create."""
+        resp = await client.post(
+            "/api/docker/hosts",
+            json={"name": "Spare", "url": "tcp://10.0.0.9:2375", "source_alias": "spare"},
+            headers=auth_headers,
+        )
+        host_id = resp.json()["id"]
+        resp = await client.put(f"/api/docker/hosts/{host_id}", json={"source_alias": "  "}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["source_alias"] == "docker"
+
+    @pytest.mark.asyncio
     async def test_oversize_fields_rejected(self, client: AsyncClient, auth_headers: dict):
         """S-30: oversize URL, exclusion list and PEM fields are rejected with 422."""
         big_pem = "A" * 16385

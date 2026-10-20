@@ -79,6 +79,28 @@ def parse_multi_values(values: Optional[list[str]]) -> list[str]:
     return result
 
 
+def load_docker_source_aliases(conn: Any) -> set[str]:
+    """
+    Return the source_alias values that mark a log row as Docker container output: every
+    Docker host alias, the primary Docker alias setting and "docker".
+
+    Syslog and Docker rows from the same machine share a source_ip, so this set is what
+    keeps them apart. Matching is exact (as in SQL `IN`), never case-insensitive.
+    """
+    aliases = {"docker"}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL")
+        aliases.update(str(r[0]).strip() for r in cursor.fetchall() if r[0] and str(r[0]).strip())
+        cursor.execute("SELECT value FROM system_settings WHERE key = 'docker_source_alias'")
+        row = cursor.fetchone()
+        if row and row[0] and str(row[0]).strip():
+            aliases.add(str(row[0]).strip())
+    except Exception:
+        pass
+    return aliases
+
+
 def expand_source_aliases(
     sources: Optional[list[str]],
     conn: Optional[Any] = None,
@@ -88,6 +110,10 @@ def expand_source_aliases(
     For each source, adds its corresponding IP and alias equivalents (bidirectionally and
     case-insensitively), ensuring queries and deletion filters match both raw IPs and
     historical alias spellings without requiring costly unindexed SQL functions.
+
+    A source that is exactly a Docker host alias only expands through an exact host alias
+    match, so a syslog alias spelled the same apart from letter case (for the same machine)
+    never pulls that host's syslog logs into a Docker host filter.
     """
     parsed = parse_multi_values(sources)
     if not parsed:
@@ -106,8 +132,9 @@ def expand_source_aliases(
     except Exception:
         return sorted(expanded)
 
-    # Build bidirectional lookup maps keyed by lowercase string
+    # Build bidirectional lookup maps keyed by lowercase string, and by exact string
     lookup: dict[str, set[str]] = {}
+    exact_lookup: dict[str, set[str]] = {}
     for row in rows:
         ip = str(row[0]).strip() if row[0] is not None else ""
         alias = str(row[1]).strip() if row[1] is not None else ""
@@ -116,30 +143,12 @@ def expand_source_aliases(
 
         pair_items = {item for item in (ip, alias) if item}
         for item in pair_items:
-            key = item.lower()
-            if key not in lookup:
-                lookup[key] = set()
-            lookup[key].update(pair_items)
+            lookup.setdefault(item.lower(), set()).update(pair_items)
+            exact_lookup.setdefault(item, set()).update(pair_items)
 
-    try:
-        cursor.execute("SELECT name, source_alias FROM docker_endpoints WHERE enabled = 1")
-        docker_rows = cursor.fetchall()
-        for row in docker_rows:
-            name = str(row[0]).strip() if row[0] is not None else ""
-            d_alias = str(row[1]).strip() if row[1] is not None else ""
-            if not name and not d_alias:
-                continue
-            pair_items = {item for item in (name, d_alias) if item}
-            for item in pair_items:
-                key = item.lower()
-                if key not in lookup:
-                    lookup[key] = set()
-                lookup[key].update(pair_items)
-    except Exception:
-        pass
-
+    docker_aliases = load_docker_source_aliases(conn)
     for item in parsed:
-        matches = lookup.get(item.lower())
+        matches = exact_lookup.get(item) if item in docker_aliases else lookup.get(item.lower())
         if matches:
             expanded.update(matches)
 
