@@ -88,6 +88,14 @@ A case-insensitive keyword substring or regular expression pattern matched again
 - Regular expression matching: `Failed (password|publickey) for .* from (?P<ip>\d+\.\d+\.\d+\.\d+)`
 - Leave empty or enter `*` to match all log entries satisfying the app and severity filters.
 
+**How LogShed decides between regex and plain text:** a pattern is treated as a regular expression when it contains at least one of `* + ? [ ] ( ) { } ^ $ | \`. Otherwise it is matched as case-insensitive plain text.
+- Backslash codes work as in any regular expression: `\bKilled` matches "Killed" at the start of a word, `error \d+` matches "error " followed by digits, and `foo\.bar` matches a literal dot.
+- **To match a literal backslash, write `\\`** (for example `C:\\Temp` to match `C:\Temp`). A single backslash starts an escape code, so `C:\temp` means "C:", a tab and "emp".
+- Every pattern in a new or edited alert rule is checked as a regular expression when you save it, plain text included. A new rule with the pattern `C:\Temp` is refused with an error because `\T` is not a valid escape; write `C:\\Temp` instead. Only rules that were stored earlier get a fallback: if such a stored pattern turns out not to be a valid regular expression, LogShed logs a warning naming the rule each time the rules load and keeps matching it as plain text.
+- Patterns that are prone to catastrophic backtracking, such as `(a|a)+` or `(.*a){20}`, are refused when you save or import a rule. Rules saved earlier keep running under the time limit below.
+
+**Time limit and automatic disabling:** each match attempt is stopped after 50 ms (`USER_REGEX_TIMEOUT_MS`) and counts as no match, with a warning in the LogShed log that names the rule. A rule whose pattern times out 20 times within 5 minutes is **disabled automatically**: it is saved as disabled (it shows as off in the rules list), and LogShed logs an error naming the rule and the reason. Simplify the pattern (for example, anchor it or replace `.*` with a narrower class), then switch the rule on again. This applies to alert rules and to drop rules alike.
+
 #### 7. Threshold Count & Window Duration (seconds)
 *Appears when Rule Type is set to Threshold or Rate Spike.*
 - **Threshold Count**: Minimum number of matching events (for Threshold rules) or target logs per second (for Rate Spike rules).
@@ -196,7 +204,7 @@ When creating or editing a drop rule, you configure:
 | **Host / Source Pattern** | Filter by originating host or IP | Supports wildcards (for example, `192.168.1.*` or `router-*`). Optional if App or Message is set |
 | **App / Container Pattern** | Filter by application or container name | Supports wildcards (for example, `CRON`, `systemd*`, or `traefik`). Optional if Host or Message is set |
 | **Message Pattern** | Keyword substring or regular expression | Matches log payload. Can be a case-insensitive substring or regex. Enter `*` to match all messages |
-| **Regex Toggle** | Regular expression parsing toggle | Enables safe regex evaluation when checked, or fast case-insensitive substring matching when unchecked |
+| **Regex Toggle** | Regular expression parsing toggle | Enables safe regex evaluation when checked (with a 50 ms limit per match; a rule that times out 20 times in 5 minutes is disabled automatically, see the alert rule notes above), or fast case-insensitive substring matching when unchecked. With the toggle on, write `\\` for a literal backslash |
 | **Severity Threshold** | Minimum syslog severity level to drop | Preserves critical entries while discarding routine chatter (detailed below) |
 
 ### Severity Threshold Handling

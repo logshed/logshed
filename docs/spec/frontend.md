@@ -25,12 +25,13 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * Configurable auto-scroll operation with automatic pause detection when the operator scrolls upward.
 * **Severity Tinting & Badges:**
   * Visual badges reflecting RFC 5424 severity priorities: Emergency / Alert / Critical / Error (Red), Warning (Yellow), Notice / Informational / Debug (Slate / Blue).
+* **Navbar Health Figures:** Ingest rate, and on small screens and up queue depth and **Dropped** (logs LogShed itself dropped). **UDP lost: N** appears after Dropped only when `udp_receive_errors` is above 0: the syslog UDP messages the kernel discarded because the receive buffer was full. It is separate from Dropped, hidden when 0 or unknown, and counts per network namespace (with `network_mode: host` every UDP socket on the host). TCP syslog avoids this loss.
 * **Selection & Batch Action Bar:**
   * Checkbox multi-select mode with a floating action bar: `"Run Analysis (N)"` or `"Delete Selected (N)"`.
 * **Search & Filter Bar (Query Builder & Facet Bars):**
   * Full-text search supporting SQLite FTS5 query syntax.
-  * Date and timestamp picker for bounded historical queries.
-  * Multi-select dropdown facet filters for Host Alias (`source_alias`), Source IP, and Container/Application Name (`app_name`).
+  * Time selector with presets (Last 15m, 1h, 6h, 24h, 7d and Today, which starts at 00:00 in the server time zone) and a custom date and timestamp picker for bounded historical queries. Presets are saved as relative values, so a saved view keeps meaning "the last hour"; links and saved views carrying `since_midnight` show Today.
+  * Multi-select dropdown facet filters for Host Alias (`source_alias`), Source IP, and Container/Application Name (`app_name`). The host and app lists hold at most 500 entries each; when a list was capped, the dropdown (and the mobile filter drawer) shows a note such as "Showing the first 500 hosts. Type a name to add others."
   * Numerical severity threshold slider and filter pills (RFC 5424 numerical priorities 0 = Emergency through 7 = Debug).
 * **Saved Views Menu:**
   * Quick-load saved search filters.

@@ -22,6 +22,7 @@ This guide provides step-by-step instructions for forwarding syslog traffic and 
 
 ## Table of Contents
 
+- [UDP or TCP Syslog](#udp-or-tcp-syslog)
 - [OPNsense](#opnsense)
 - [Proxmox VE](#proxmox-ve)
 - [Synology DSM](#synology-dsm)
@@ -31,6 +32,26 @@ This guide provides step-by-step instructions for forwarding syslog traffic and 
 - [Generic Linux with rsyslog](#generic-linux-with-rsyslog)
 - [Generic Linux with syslog-ng](#generic-linux-with-syslog-ng)
 - [Docker Containers (via DockerTailer)](#docker-containers-via-dockertailer)
+- [HTTP Ingest API](#http-ingest-api)
+
+---
+
+## UDP or TCP Syslog
+
+Most devices let you choose UDP or TCP when you add LogShed as a syslog target. The choice matters when a lot of logs arrive at once.
+
+- **UDP can lose messages in bursts.** UDP has no delivery guarantee. If a burst arrives faster than LogShed reads it, the kernel discards the datagrams that do not fit in the socket receive buffer. The sender is not told, and LogShed never sees those messages, so they are not part of the **Dropped** figure. LogShed counts them separately and shows **UDP lost: N** in the navbar (only when above 0). The same count is `udp_receive_errors` in `GET /api/health` and `GET /api/v1/system/metrics`.
+- **TCP does not lose messages this way.** TCP resends data and slows the sender down instead of discarding it, so nothing is lost in the kernel buffer. Use TCP for sources that must not lose lines (firewalls, authentication logs), when the device supports it. Persistent TCP connections count towards `SYSLOG_MAX_TCP_CONNECTIONS` (250) and `SYSLOG_MAX_TCP_CONNECTIONS_PER_IP` (20).
+- **Raise the UDP buffer for busy UDP sources.** LogShed asks for an 8 MiB receive buffer by default (`SYSLOG_UDP_RECEIVE_BUFFER_BYTES`), but the kernel caps the request at `net.core.rmem_max`, which is only 212992 bytes on many Linux hosts. The startup log reports the size LogShed actually got and logs a warning with the fix when it is smaller than requested. On the Docker host, run:
+
+  ```bash
+  sudo sysctl -w net.core.rmem_max=8388608                           # takes effect at once
+  echo "net.core.rmem_max=8388608" | sudo tee -a /etc/sysctl.conf    # keeps it after a reboot
+  ```
+
+  Then restart the LogShed container. Do not try to set this with a `sysctls:` entry in `docker-compose.yml`: Docker refuses `net.core.rmem_max` there because it is a host-wide setting. If you cannot change the host, set `SYSLOG_UDP_RECEIVE_BUFFER_BYTES` to the size the startup log reports to silence the warning (the buffer then stays small).
+- **What "UDP lost" counts.** It is the kernel's receive-buffer error counter for UDP since the syslog listener started. The counter belongs to the network namespace: in a normal container it counts only LogShed's own sockets, but with `network_mode: host` it counts every UDP socket on the host, including ones that have nothing to do with syslog. It is blank (and the navbar hides it) when LogShed cannot read it, for example on a host that is not Linux.
+- **What was measured.** In a load test on 2026-10-19 with the 8 MiB buffer, 10,000 logs per second sent over UDP arrived with no loss on the maintainer's test setup. Results depend on message size, CPU and the host's kernel limit, so check **UDP lost** on your own setup.
 
 ---
 
@@ -303,3 +324,64 @@ LogShed automatically structures container log records as follows:
 If you run high-volume containers whose logs you do not want in LogShed, exclude them using either:
 - The `DOCKER_EXCLUDE_CONTAINERS` environment variable (comma-separated list of container names).
 - The web interface under **Settings > Advanced > Exclude Containers**.
+
+---
+
+## HTTP Ingest API
+
+Tools that cannot send syslog (scripts, Vector, Fluent Bit, edge services) can push logs over HTTP.
+
+### Token
+
+Create an API token in **Settings > API & MCP Access** with the `logs:write` scope (the "Edge Shipper / Ingest" preset has exactly that). The raw token (`ls_live_...`) is shown once. Send it in the `Authorization: Bearer <token>` header (the word `Bearer` is accepted in any letter case). Each token may send up to 6,000 requests per minute; responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`, and a `429` response also carries `Retry-After`.
+
+### Request
+
+`POST /api/v1/ingest` with a JSON body in one of three shapes:
+- a JSON array of entries: `[{"message": "a"}, {"message": "b"}]`;
+- a single JSON object: `{"message": "a"}`;
+- newline-delimited JSON (NDJSON), one entry per line.
+
+| Field | Meaning | Default |
+|---|---|---|
+| `message` (or `msg`) | The log text | empty |
+| `timestamp` (or `time`, `ts`) | When the event happened: an ISO 8601 string, or Unix time in seconds or milliseconds, as a number or as a string of exactly 10 (seconds) or 13 (milliseconds) digits | the time LogShed received the entry |
+| `severity` (or `level`) | `0` to `7`, or a name such as `error`, `warning`, `info` or `debug` | `6` (info) |
+| `app_name` (or `app`) | Application or service name | `app` |
+| `source_ip` | Address or name of the sending host | the address the request came from |
+| `source_alias` | Display name of the source host | `source_ip` |
+| `raw` | The original unparsed line | `message` |
+| `facility` | Syslog facility `0` to `23` | `1` |
+
+Each entry is stored as one log entry. Entries are not merged with the previous one (indented lines or lines starting with `at ...` stay separate), and ANSI and control characters are removed from the text. Your drop rules and any maintenance `drop_errors` session apply to ingested entries as they do to syslog.
+
+### Limits
+
+- **Body size:** at most `INGEST_MAX_BODY_BYTES` (5 MiB by default); a larger body returns `413`.
+- **Entries:** at most 10,000 per request; more returns `413`.
+- **Text length:** `message` and `raw` are cut to 64 KB (65,536 characters) each.
+- **Field length:** `source_ip`, `source_alias` and `app_name` are cut to 255 characters each. The entry is stored, not refused.
+- **Timestamps:** an entry timestamp that is unreadable, older than your retention limit (`MAX_RETENTION_DAYS`, default 30 days), or more than 5 minutes ahead of the server clock is replaced with the time LogShed received the entry. A device with a clock up to 5 minutes fast keeps its own timestamps. This 5 minute window applies to every source, not only HTTP ingest.
+- **Reserved identities:** LogShed's own identities cannot be used. If any entry has `source_ip` `docker` or starting with `docker:`, or `source_ip` `127.0.0.1` together with `source_alias` `logshed` (in any letter case), the **whole request** is refused with `422` and nothing is stored.
+
+### Response
+
+```json
+{"status": "ok", "accepted": 2, "dropped": 0}
+```
+
+`accepted` is the number of entries queued for storage. `dropped` counts entries removed by a drop rule or a maintenance `drop_errors` session, or lost because LogShed's in-memory queue was full. Other status codes: `400` (the body is not valid JSON), `401` (missing or invalid token), `403` (the token lacks `logs:write`), `413`, `422` and `429` as above.
+
+### Example
+
+```bash
+curl -X POST http://<LOGSHED_IP>:8080/api/v1/ingest \
+  -H "Authorization: Bearer ls_live_REPLACE_WITH_YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"message": "backup finished", "app_name": "backup", "source_alias": "nas", "severity": "info"},
+    {"message": "disk almost full", "app_name": "backup", "source_alias": "nas", "severity": "warning", "timestamp": 1760000000}
+  ]'
+```
+
+An NDJSON body works the same way; send one JSON object per line and use `Content-Type: application/x-ndjson`. To explore the other endpoints, open `/docs` in the browser after logging in to LogShed.

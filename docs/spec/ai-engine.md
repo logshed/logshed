@@ -59,7 +59,7 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
   - Queries provider endpoints live to discover available models from the configured provider, cached in SQLite for 24 hours.
   - Non-text models (such as speech, audio transcription, image generation, video, embeddings, and safety moderation) are filtered out automatically using keyword detection.
   - A background worker (`ModelRefreshWorker`) refreshes the model cache every 12 hours.
-  - Manual cache refresh can be initiated on demand via `POST /api/ai/models/refresh`.
+  - Manual cache refresh can be initiated on demand via `POST /api/ai/models/refresh`. The base URL used is the one in the request, else the stored base URL of that provider; the single global `ai_base_url` belongs to the active provider only, so a refresh for another provider never sends its key to that URL. A key typed into the refresh request is stored only when the request carries no different base URL; otherwise it is used for that refresh only and Save stores both.
 
 ---
 
@@ -109,7 +109,7 @@ The model response is formatted in Markdown with three designated sections, pars
   - Private keys, certificates, and hashed credential lines.
   - Common password assignments and key-value secret pairs.
   - Secrets in JSON and quoted keys (double or single quotes, escaped JSON inside a log message, quoted values with spaces), `Cookie` and `Set-Cookie` headers (the rest of the line after `Cookie:`), the user name in any `scheme://user@host` URL, Discord webhook URLs, Telegram bot tokens, Google API keys, Stripe live keys, GitLab and GitHub fine-grained tokens, bare LogShed API tokens, encrypted and PGP private keys (text after a lone `-----BEGIN ... PRIVATE KEY-----` up to the next punctuation), and signed-URL `sig=` and `signature=` parameters.
-- **Bounded Cost:** Matching runs in linear time on hostile input. Lines longer than 16,384 characters in redacted output (AI prompts, MCP and external API responses, alert samples) are cut and end with a `...[truncated]` marker.
+- **Bounded Cost:** Matching runs in linear time on hostile input. Lines longer than 16,384 characters in redacted output (AI prompts, MCP and external API responses, alert samples) are cut and end with a `...[truncated]` marker, and any single input longer than 500,000 characters is cut at a line break and marked truncated before matching. The log lines of an AI analysis (up to 200) and of an alert enrichment (up to 50) are redacted in one call in a worker thread, so a large batch cannot stall the event loop.
 - **Known Limit:** The redactor sees one message at a time, so a private key split across separate syslog messages (one line each) is not caught. Redaction is best-effort.
 - **Preview Assurance:** On-demand requests present the scrubbed preview text in the modal prior to execution, ensuring the operator can review redacted text before dispatch.
 

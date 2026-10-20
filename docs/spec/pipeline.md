@@ -21,7 +21,10 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Connection Ceilings:** Default TCP connection ceiling is 250 concurrent connections (configurable via `SYSLOG_MAX_TCP_CONNECTIONS`). TCP keepalive is enabled (`SO_KEEPALIVE`).
 - **Per-IP Connection Cap:** One source IP may hold at most 20 concurrent TCP connections (`SYSLOG_MAX_TCP_CONNECTIONS_PER_IP`, environment only, values below 1 or not a number fall back to 20), so one host cannot use every slot. Extra connections are refused with a warning.
 - **Message Size:** Messages longer than 65,536 characters are cut and end with a `[truncated]` marker.
-- **Startup and Shutdown:** If the port is in use at startup, the listener retries with backoff. Shutdown does not wait for connected TCP senders, and messages already received but not yet parsed are processed first.
+- **Startup and Shutdown:** If the port is in use at startup, the listener retries with backoff. When a TCP sender disconnects normally (for example an rsyslog restart), the messages already received from it are still parsed and stored; this drain is bounded and can add up to 2 seconds to a shutdown that follows right after. Shutdown does not wait for connected TCP senders, and messages already received but not yet parsed are processed first.
+- **Timestamps:** A syslog timestamp more than 5 minutes ahead of the received time is first pulled back by whole hours (a sender reporting the wrong time zone); if it is still more than 5 minutes ahead it is replaced with the received time. Timestamps up to 5 minutes ahead are kept. The same 5 minute window (`MAX_FUTURE_TIMESTAMP_SKEW_SECONDS` in `backend/app/core/pipeline.py`) applies to HTTP ingest and to the batch writer, which resets any entry from any source (syslog, Docker, ingest) that is still more than 5 minutes ahead of its received time.
+- **UDP Receive Buffer:** The UDP socket asks the kernel for a receive buffer of `SYSLOG_UDP_RECEIVE_BUFFER_BYTES` (default 8 MiB; `0` keeps the OS default). The kernel caps the request at `net.core.rmem_max`. The startup log states the size actually granted (on Linux, half of what `getsockopt` reports, since the kernel stores double) and logs a warning with the host `sysctl -w net.core.rmem_max=<bytes>` fix (or the `SYSLOG_UDP_RECEIVE_BUFFER_BYTES` value to use the current limit) when the grant is smaller than requested; a default Linux host (`rmem_max` 212992) therefore logs this warning at every start. `net.core.rmem_max` is a host setting, not a per-container one, so a Compose `sysctls:` entry cannot set it.
+- **UDP Loss Counter (`udp_receive_errors`):** The kernel `RcvbufErrors` count from `/proc/net/snmp` since the syslog listener started: UDP datagrams discarded because a socket receive buffer was full. These never reach LogShed, so the `dropped_logs` counter cannot include them. The counter is per network namespace: in a normal container it counts only LogShed's sockets, with `network_mode: host` it counts every UDP socket on the host. It is `null` when unknown (not Linux, `/proc/net/snmp` unreadable, before the listener has started, or in the stdio MCP process). It appears in `GET /api/health` and `GET /api/v1/system/metrics`, and as "UDP lost" in the navbar when above 0. UDP syslog can lose messages in bursts; TCP syslog does not lose them in the kernel.
 - **TCP Inactivity Timeout:** Defaults to disabled (`0.0`, configurable via `SYSLOG_TCP_INACTIVITY_TIMEOUT`) to prevent disconnection of persistent log forwarders during idle periods.
 - **Fallback Severity:** Unparseable messages default to severity 6 (Info) while preserving the complete raw message content.
 
@@ -53,6 +56,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Flush Triggers:** Flushes buffered lines into a single combined log entry upon either:
   - A **150ms per-stream timeout** window expiring without new continuation fragments.
   - Receipt of a new RFC-compliant timestamped header for that stream key.
+- **Entry Size Limit (64 KB):** A merged entry never exceeds 65,536 characters in `message` or `raw` (joining newlines included). A continuation line that would push either past the limit ends the current entry and starts the next one on the same stream key, so later continuation lines keep following it. No lines are lost, and the later parts keep the stream and the most severe level seen so far.
 
 ---
 
@@ -81,16 +85,17 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Alert Rules Evaluation Order:**
   - Alert rules evaluate in user-configured sequence (`ORDER BY display_order ASC, id ASC`).
   - Each rule evaluates within its own sliding window, and notification dispatch within a batch deterministically follows this configured order.
+- **Pattern Time Limit and Automatic Disabling:** Each match of a user-written alert or drop rule pattern is stopped after `USER_REGEX_TIMEOUT_MS` (default 50 ms) and counts as no match. A rule whose pattern times out 20 times within 5 minutes is switched off automatically: it is stored as disabled (the rules list shows it as off), and an error naming the rule and the reason is logged (once per rule per process). Simplify the pattern, then enable the rule again.
 
 ### 5.1 HTTP Ingest (`POST /api/v1/ingest`)
 
 - **Implementation Reference:** [backend/app/api/ingest.py](../../backend/app/api/ingest.py)
-- **Limits:** The body may be at most `INGEST_MAX_BODY_BYTES` (default 5 MiB) and hold at most 10,000 entries (`413` otherwise). `message` and `raw` are cut to 64 KB each.
+- **Limits:** The body may be at most `INGEST_MAX_BODY_BYTES` (default 5 MiB) and hold at most 10,000 entries (`413` otherwise). `message` and `raw` are cut to 64 KB (65,536 characters) each, and `source_ip`, `source_alias` and `app_name` to 255 characters each; the entry is stored, not rejected.
 - **Reserved identities:** A request is rejected as a whole (`422`, nothing stored) if any entry uses `source_ip` `docker` or `docker:*`, or `127.0.0.1` with `source_alias` `logshed`.
-- **Timestamps:** A timestamp older than `MAX_RETENTION_DAYS` or more than 5 minutes ahead is replaced with the received time.
+- **Timestamps:** An ISO-8601 string, or Unix time in seconds or milliseconds (a number, or a string of exactly 10 or 13 digits; numbers above 1e12 are milliseconds). A timestamp older than `MAX_RETENTION_DAYS` or more than 5 minutes ahead of the received time, or one that cannot be read, is replaced with the received time. The field names `timestamp`, `time` and `ts` are tried in that order.
 - **No merging:** Each record is stored as its own entry. HTTP records skip the multiline assembler, so indented records or records starting with `at ...` are never merged into the previous one. Drop rules and maintenance `drop_errors` sessions always apply, and a full queue does not block the request.
 - **Field cleanup:** An empty severity is stored as info (6); ANSI and control characters are removed from `raw`.
-- **Response:** `accepted` (entries queued) and `dropped` (entries removed by drop rules or maintenance sessions, or lost to a full queue); `ingested` equals `accepted`.
+- **Response:** `{"status": "ok", "accepted": int, "dropped": int}`: `accepted` counts entries queued and `dropped` entries removed by drop rules or maintenance sessions, or lost to a full queue.
 - **Docker streams:** Container output that arrives without newlines (non-TTY) is split into 64 KB entries instead of growing an unbounded buffer.
 
 ## 6. Internal Application Logs (`InternalLogHandler`)

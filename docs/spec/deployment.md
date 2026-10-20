@@ -37,13 +37,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 ### 3.1 Non-Root User & Group Resolution
 * LogShed drops root privileges via `gosu` to run as an unprivileged user defined by `PUID` and `PGID` environment variables (defaulting to `1000:1000`).
 * `entrypoint.sh` checks for existing users or groups matching `PUID`/`PGID` and dynamically maps or creates the `appuser` account and group.
-* `PUID` or `PGID` set to `0` is refused (the container exits with an error) unless `ALLOW_ROOT=true`, which starts it with a warning.
+* `PUID` or `PGID` set to `0` still starts, as in 1.2.x, but the entrypoint logs a warning at startup. A later release will refuse to start with either set to `0`; use a non-root user (for example `1000`) now.
 
 ### 3.2 Dynamic Docker Socket Permissions
 * When `/var/run/docker.sock` is mounted into the container:
   1. The entrypoint detects the socket filesystem path from `DOCKER_HOST` (defaulting to `/var/run/docker.sock`).
   2. The entrypoint inspects the numeric GID of the socket via `stat`.
-  3. If the socket GID is `0`, `appuser` is not added to the `root` group. The entrypoint logs a warning recommending a Docker socket proxy (such as `tecnativa/docker-socket-proxy`) via `DOCKER_HOST`, and Docker collection from that socket fails until one is used.
+  3. If the socket GID is `0`, `appuser` is added to the `root` group so it can read the socket, as in 1.2.x, and the entrypoint logs a warning recommending a Docker socket proxy (such as `tecnativa/docker-socket-proxy`) via `DOCKER_HOST`.
   4. If the socket GID belongs to another group, the entrypoint dynamically creates `docker-sock-group` with that GID if missing and appends `appuser` to that group.
   5. For sockets owned by a non-root group, this lets `appuser` stream Docker events without root privileges.
 

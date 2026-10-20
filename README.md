@@ -58,7 +58,7 @@ LogShed is a compact, self-hosted log hub designed for home labs and personal se
 - **On-Demand & Alert AI Diagnosis**: Get human-readable root-cause explanations and practical fix commands when deciphering a cryptic stack trace. All passwords, tokens, and sensitive network addresses are automatically masked before reaching your chosen model (Gemini, OpenAI, or local Ollama).
 - **Daily Digest Summaries**: Receive an automated 24-hour analytical rollup delivered to your notification channels, detailing recurring error counts, top logging containers, and storage trends.
 - **Maintenance Windows & Automation**: Silence notification channels or drop error chatter during planned package updates, homelab restarts, or scheduled backups. Trigger on-demand windows programmatically via external scripts.
-- **Programmatic External API**: Generate scoped Bearer tokens for external automation, Home Assistant integrations, backup runners (Proxmox VE, cron), and AI agents with fine-grained permissions and sliding rate limits.
+- **Programmatic External API**: Generate scoped Bearer tokens for external automation, Home Assistant integrations, backup runners (Proxmox VE, cron), and AI agents with fine-grained permissions and sliding rate limits. Edge shippers and scripts can also push logs over HTTP (`POST /api/v1/ingest`), and the interactive API docs at `/docs` open behind your web login.
 - **Model Context Protocol (MCP) Server**: Connect external AI assistants (Claude Desktop, Cursor, Windsurf) directly to your homelab. Assistants can run full-text log searches, inspect surrounding context, review incident history, and manage maintenance mode.
 - **Unified Incident & AI History**: Review past alert triggers alongside full AI diagnostic logs, token usage statistics, and prompt history in a single chronological timeline.
 - **Targeted Deletion & Database Compaction**: Prune specific noisy records on demand and compact your SQLite database to reclaim disk space immediately.
@@ -91,7 +91,7 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 | Guide | Description |
 |---|---|
 | [Configuration Reference](docs/CONFIGURATION.md) | Complete environment variable reference, settings hierarchy, and storage paths |
-| [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Linux, and Docker |
+| [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Linux, and Docker, UDP versus TCP guidance, and the HTTP ingest API |
 | [Rules Guide](docs/RULES_GUIDE.md) | In-depth guide to real-time threshold, pattern, and rate spike alert rules, plus ingestion drop rules |
 | [Model Context Protocol (MCP) Guide](docs/MCP_GUIDE.md) | Connect Claude Desktop, Cursor, and AI assistants to investigate homelab issues with conversational prompt examples |
 | [Technical Specification](docs/SPEC.md) | Architecture, SQLite schema, FTS5 triggers, and system design |
@@ -113,7 +113,7 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 
 - **Memory Footprint**: ~150 to 250 MB RAM under normal operation.
 - **Storage Ratio**: ~650 to 750 bytes per record on disk (includes raw text, relational indexes, and FTS5 full-text search segments). 100,000 logs occupy roughly 67 MB, and 1,000,000 logs occupy roughly 670 MB.
-- **Burst Tolerance**: Built with an in-memory staging queue and batching SQLite WAL writer. While normal homelab traffic is typically 10 to 100 logs/second, on direct SSD storage the pipeline can absorb brief bursts of several thousand logs/second without packet drops during container restart loops or service incidents.
+- **Burst Tolerance**: Built with an in-memory staging queue and batching SQLite WAL writer. While normal homelab traffic is typically 10 to 100 logs/second, on direct SSD storage the pipeline can absorb brief bursts of several thousand logs/second during container restart loops or service incidents. UDP syslog can still lose messages in a burst when the kernel receive buffer fills; LogShed shows these as "UDP lost", and TCP syslog avoids that loss (see the [Forwarding Logs Guide](docs/SENDING_LOGS.md#udp-or-tcp-syslog)).
 
 > [!WARNING]
 > **Storage & Filesystem Notice for SQLite WAL Mode:**
@@ -265,6 +265,14 @@ cd ..
 # 6. Run local development server
 python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
 ```
+
+### Updating Pinned Dependencies
+
+Backend dependencies are pinned to exact versions in `backend/requirements.txt` for reproducible builds. Transitive dependencies are not pinned. To update one:
+
+1. Change its version in `backend/requirements.txt` and reinstall it (`pip install -r backend/requirements.txt`).
+2. Run the full backend test suite (`.venv/bin/pytest backend/tests/ -q`) and the frontend tests (`cd frontend && npm test`).
+3. Build the Docker image and run the end-to-end suite (`.venv/bin/pytest backend/tests/ -m e2e -v`) before releasing. It builds the image from `Dockerfile`, so it confirms the new versions install on the Python 3.12 base image.
 
 ---
 
