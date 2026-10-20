@@ -11,7 +11,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from app.collectors.docker_collector import DockerTailer, create_docker_ssl_context
+from app.collectors.docker_collector import DockerTailer, create_docker_ssl_context, env_docker_disabled
 from app.collectors.syslog import AliasCache
 from app.core.config import get_cached_setting, get_db_path
 from app.core.migrations import get_connection
@@ -79,7 +79,8 @@ class DockerCollectorPool:
         self._tailers: dict[int, DockerTailer] = {}
         self._tasks: dict[int, asyncio.Task] = {}
         self._running: bool = False
-        self._pool_enabled: bool = bool(get_cached_setting("enable_docker", True))
+        # enable_docker is the switch of the local host (id 1) only; other hosts follow their own row.
+        self._primary_enabled: bool = bool(get_cached_setting("enable_docker", True))
         self._lock = asyncio.Lock()
 
     @property
@@ -87,8 +88,15 @@ class DockerCollectorPool:
         return self._running
 
     @property
-    def pool_enabled(self) -> bool:
-        return self._pool_enabled
+    def primary_enabled(self) -> bool:
+        return self._primary_enabled
+
+    def _endpoint_enabled(self, row: dict[str, Any]) -> bool:
+        """Whether an endpoint should collect: its own flag, and enable_docker and ENABLE_DOCKER for host 1."""
+        enabled = bool(row.get("enabled", 1))
+        if int(row["id"]) == 1:
+            enabled = enabled and self._primary_enabled and not env_docker_disabled()
+        return enabled
 
     def get_tailer(self, endpoint_id: int = 1) -> Optional[DockerTailer]:
         """Retrieve a specific DockerTailer instance by endpoint ID."""
@@ -104,7 +112,7 @@ class DockerCollectorPool:
         name = str(row["name"])
         url = str(row["url"])
         source_alias = str(row.get("source_alias") or "docker")
-        enabled = bool(row.get("enabled", 1)) and self._pool_enabled
+        enabled = self._endpoint_enabled(row)
         exclude_containers = str(row.get("exclude_containers") or "")
         tls_enabled = bool(row.get("tls_enabled", 0))
 
@@ -220,7 +228,7 @@ class DockerCollectorPool:
             if eid in self._tailers:
                 await self._stop_endpoint_internal(eid)
 
-            if bool(endpoint_data.get("enabled", 1)) and self._pool_enabled and self._running:
+            if self._endpoint_enabled(endpoint_data) and self._running:
                 try:
                     tailer = self._build_tailer(endpoint_data)
                     self._tailers[eid] = tailer
@@ -261,7 +269,7 @@ class DockerCollectorPool:
         """Restart a Docker endpoint worker with updated configuration."""
         async with self._lock:
             await self._stop_endpoint_internal(endpoint_id)
-            if bool(endpoint_data.get("enabled", 1)) and self._pool_enabled and self._running:
+            if self._endpoint_enabled(endpoint_data) and self._running:
                 try:
                     tailer = self._build_tailer(endpoint_data)
                     self._tailers[endpoint_id] = tailer
@@ -274,47 +282,16 @@ class DockerCollectorPool:
                 except Exception as exc:
                     logger.error(f"Failed to reload Docker tailer (id={endpoint_id}): {exc}")
 
-    async def set_pool_enabled(self, enabled: bool) -> None:
-        """Update master pool enabled state."""
+    async def set_primary_enabled(self, enabled: bool) -> None:
+        """Record enable_docker, the switch of the local host (id 1) only.
+
+        Other Docker hosts keep collecting: each follows its own enabled flag. Callers apply
+        the change with reload_endpoint(1, ...).
+        """
         async with self._lock:
-            if self._pool_enabled == enabled:
-                return
-            self._pool_enabled = enabled
-            logger.info(f"Docker collector pool master state set to: {enabled}")
-
-            if not enabled:
-                for eid in list(self._tailers.keys()):
-                    await self._stop_endpoint_internal(eid)
-            else:
-                if self._running:
-                    # Reload all enabled endpoints from database
-                    def _query_enabled(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-                        cur = conn.cursor()
-                        cur.execute(
-                            """
-                            SELECT id, name, url, source_alias, enabled, tls_enabled,
-                                   ca_cert, client_cert, client_key, exclude_containers, verify_hostname
-                            FROM docker_endpoints
-                            WHERE enabled = 1
-                            ORDER BY id ASC
-                            """
-                        )
-                        return [dict(r) for r in cur.fetchall()]
-
-                    from app.api.deps import run_db_query
-                    endpoints = await run_db_query(_query_enabled, custom_db_path=self._db_path)
-                    for ep in endpoints:
-                        eid = ep["id"]
-                        try:
-                            tailer = self._build_tailer(ep)
-                            self._tailers[eid] = tailer
-                            task = asyncio.create_task(
-                                _supervise_tailer(tailer),
-                                name=f"docker-collector-{eid}",
-                            )
-                            self._tasks[eid] = task
-                        except Exception as exc:
-                            logger.error(f"Failed to start Docker tailer for endpoint {eid} ({ep.get('name')}): {exc}")
+            if self._primary_enabled != enabled:
+                self._primary_enabled = enabled
+                logger.info(f"Local Docker host (id=1) collection set to: {enabled}")
 
     async def get_statuses(self) -> list[dict[str, Any]]:
         """Collect live connection statuses and metrics for all configured hosts."""

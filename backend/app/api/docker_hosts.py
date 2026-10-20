@@ -569,9 +569,10 @@ async def update_docker_endpoint(
     from app.main import get_docker_pool
     pool = get_docker_pool()
     if pool:
-        # Host 1 enabled is the pool master switch (enable_docker), as in POST /api/settings
+        # Host 1 enabled is stored as enable_docker, as in POST /api/settings; it switches
+        # only the local host, so the other hosts keep running.
         if endpoint_id == 1 and payload.enabled is not None:
-            await pool.set_pool_enabled(bool(updated["enabled"]))
+            await pool.set_primary_enabled(bool(updated["enabled"]))
         await pool.reload_endpoint(endpoint_id, updated)
 
     # If source_alias was modified, retroactively update matching historical logs

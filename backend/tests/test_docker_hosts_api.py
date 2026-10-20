@@ -368,10 +368,10 @@ class TestDockerHostsFixes:
     """Regression tests for the 1.3.0 Docker host fixes."""
 
     @pytest.mark.asyncio
-    async def test_toggling_primary_host_updates_pool_master_state(
+    async def test_toggling_primary_host_leaves_remote_hosts_running(
         self, client: AsyncClient, auth_headers: dict, tmp_path: Path
     ):
-        """B-10: PUT host 1 enabled flips the pool master switch and stops or starts remote tailers."""
+        """PUT host 1 enabled switches only the local host; remote tailers keep running (B-10 keeps the pool in sync)."""
         from app.collectors.docker_collector import DockerTailer
         from app.collectors.docker_pool import DockerCollectorPool
         from app.core.pipeline import KeyedMultilineAssembler
@@ -389,12 +389,12 @@ class TestDockerHostsFixes:
 
                 resp = await client.put("/api/docker/hosts/1", json={"enabled": False}, headers=auth_headers)
                 assert resp.status_code == 200
-                assert pool.pool_enabled is False
-                assert pool.get_tailers() == {}
+                assert pool.primary_enabled is False
+                assert set(pool.get_tailers()) == {2}
 
                 resp = await client.put("/api/docker/hosts/1", json={"enabled": True}, headers=auth_headers)
                 assert resp.status_code == 200
-                assert pool.pool_enabled is True
+                assert pool.primary_enabled is True
                 assert set(pool.get_tailers()) == {1, 2}
             finally:
                 await pool.stop()

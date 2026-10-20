@@ -39,7 +39,7 @@ class TestDockerCollectorPool:
         """Pool starts tailers for enabled endpoints and stops cleanly."""
         pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
         assert not pool.is_running
-        assert pool.pool_enabled
+        assert pool.primary_enabled
 
         with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
             mock_run.side_effect = asyncio.CancelledError
@@ -138,28 +138,81 @@ class TestDockerCollectorPool:
 
             await pool.stop()
 
+    @staticmethod
+    def _add_remote(db: Path, enabled: int = 1) -> None:
+        with get_connection(db) as conn:
+            conn.execute(
+                """
+                INSERT INTO docker_endpoints (name, url, source_alias, enabled, tls_enabled, created_at, updated_at)
+                VALUES ('Remote Docker', 'tcp://192.168.1.100:2375', 'remote', ?, 0, datetime('now'), datetime('now'))
+                """,
+                (enabled,),
+            )
+            conn.commit()
+
     @pytest.mark.asyncio
-    async def test_set_pool_enabled_toggle(
+    async def test_primary_switch_only_affects_local_host(
         self, test_db: Path, assembler: KeyedMultilineAssembler
     ):
-        """Toggling pool enablement controls tailers across all endpoints."""
+        """Turning enable_docker off stops the local host (id 1) and leaves other hosts running."""
+        self._add_remote(test_db)
         pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
+        ep1 = {"id": 1, "name": "Primary Docker", "url": "unix:///var/run/docker.sock", "enabled": 1}
 
         with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
             mock_run.side_effect = _run_until_cancelled
             await pool.start()
-            assert len(pool.get_tailers()) == 1
+            assert set(pool.get_tailers()) == {1, 2}
 
-            # Disable pool
-            await pool.set_pool_enabled(False)
-            assert not pool.pool_enabled
-            assert len(pool.get_tailers()) == 0
+            await pool.set_primary_enabled(False)
+            await pool.reload_endpoint(1, ep1)
+            assert not pool.primary_enabled
+            assert set(pool.get_tailers()) == {2}
 
-            # Re-enable pool
-            await pool.set_pool_enabled(True)
-            assert pool.pool_enabled
-            assert len(pool.get_tailers()) == 1
+            await pool.set_primary_enabled(True)
+            await pool.reload_endpoint(1, ep1)
+            assert pool.primary_enabled
+            assert set(pool.get_tailers()) == {1, 2}
 
+            await pool.stop()
+
+    @pytest.mark.asyncio
+    async def test_remote_hosts_start_when_local_host_is_disabled(
+        self, test_db: Path, assembler: KeyedMultilineAssembler
+    ):
+        """A disabled local host does not keep remote hosts from starting."""
+        self._add_remote(test_db)
+        with get_connection(test_db) as conn:
+            conn.execute("UPDATE docker_endpoints SET enabled = 0 WHERE id = 1")
+            conn.commit()
+        pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
+        await pool.set_primary_enabled(False)
+
+        with patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
+            mock_run.side_effect = _run_until_cancelled
+            await pool.start()
+            assert set(pool.get_tailers()) == {2}
+            assert pool.get_tailer(2).enable_docker is True
+
+            await pool.add_endpoint({"id": 3, "name": "Edge", "url": "tcp://10.0.0.3:2375", "enabled": True})
+            assert set(pool.get_tailers()) == {2, 3}
+
+            await pool.stop()
+
+    @pytest.mark.asyncio
+    async def test_enable_docker_env_off_stops_only_local_host(
+        self, test_db: Path, assembler: KeyedMultilineAssembler
+    ):
+        """ENABLE_DOCKER=false keeps the local host off (as in 1.2.x) without stopping remote hosts."""
+        self._add_remote(test_db)
+        pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
+
+        with patch.dict("os.environ", {"ENABLE_DOCKER": "false"}), \
+                patch.object(DockerTailer, "run", new_callable=AsyncMock) as mock_run:
+            mock_run.side_effect = _run_until_cancelled
+            await pool.start()
+            assert pool.get_tailer(1).enable_docker is False
+            assert pool.get_tailer(2).enable_docker is True
             await pool.stop()
 
     def test_docker_tailer_backward_compatibility(self, test_db: Path, assembler: KeyedMultilineAssembler):

@@ -135,6 +135,11 @@ def create_docker_ssl_context(
     return ctx
 
 
+def env_docker_disabled() -> bool:
+    """True when ENABLE_DOCKER turns the local Docker host off, whatever the stored setting says (as in 1.2.x)."""
+    return os.environ.get("ENABLE_DOCKER", "true").lower() in ("0", "false", "no", "disabled")
+
+
 def _parse_docker_host(
     enable_docker: Optional[bool] = None,
     docker_host: Optional[str] = None,
@@ -148,22 +153,29 @@ def _parse_docker_host(
            - For unix sockets: ("http://localhost/v1.43", "/var/run/docker.sock")
            - For tcp: ("http://proxy:2375/v1.43", None) or ("https://proxy:2376/v1.43", None)
     """
+    # enable_docker (setting, then ENABLE_DOCKER) belongs to the local host from DOCKER_HOST. An
+    # explicit docker_host is another endpoint, which only the caller's enable_docker can turn off.
     if enable_docker is None:
-        try:
-            from app.core.config import get_cached_setting
-            enable_docker = bool(get_cached_setting("enable_docker", True))
-        except Exception:
-            enable_docker = os.environ.get("ENABLE_DOCKER", "true").lower() not in ("0", "false", "no", "disabled")
+        if docker_host is not None:
+            enable_docker = True
+        else:
+            try:
+                from app.core.config import get_cached_setting
+                enable_docker = bool(get_cached_setting("enable_docker", True))
+            except Exception:
+                enable_docker = os.environ.get("ENABLE_DOCKER", "true").lower() not in ("0", "false", "no", "disabled")
 
     if not enable_docker:
         return "", None
 
     if docker_host is None:
+        if env_docker_disabled():
+            return "", None
         docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock").strip()
     else:
         docker_host = docker_host.strip()
 
-    if not docker_host or docker_host.lower() in ("none", "off", "disabled") or os.environ.get("ENABLE_DOCKER", "true").lower() in ("0", "false", "no", "disabled"):
+    if not docker_host or docker_host.lower() in ("none", "off", "disabled"):
         return "", None
 
     if docker_host.startswith("unix://"):

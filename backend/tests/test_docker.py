@@ -91,6 +91,18 @@ class TestDockerHostParsing:
             assert uds_path is None
             assert base_url == "https://docker.lan:2376/v1.43"
 
+    def test_enable_docker_env_off_disables_local_host(self):
+        """ENABLE_DOCKER=false turns off the DOCKER_HOST endpoint, as in 1.2.x."""
+        with patch.dict(os.environ, {"ENABLE_DOCKER": "false", "DOCKER_HOST": "unix:///var/run/docker.sock"}):
+            assert _parse_docker_host(enable_docker=True) == ("", None)
+
+    def test_enable_docker_env_off_keeps_explicit_hosts(self):
+        """ENABLE_DOCKER=false does not block another Docker host's URL or its connection test."""
+        with patch.dict(os.environ, {"ENABLE_DOCKER": "false"}), \
+                patch("app.core.config.get_cached_setting", return_value=False):
+            assert _parse_docker_host(docker_host="tcp://10.0.0.5:2375")[0] == "http://10.0.0.5:2375/v1.43"
+            assert _parse_docker_host(enable_docker=True, docker_host="tcp://10.0.0.5:2375")[0] == "http://10.0.0.5:2375/v1.43"
+
 
 # ===================================================================
 # 2. Docker Log Framing & Parsing

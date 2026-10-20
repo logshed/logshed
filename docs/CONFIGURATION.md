@@ -129,7 +129,7 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Compose only | Docker daemon endpoint (`unix:///path/to/socket` or `tcp://host:port`). Set to `none` or `disabled` to deactivate Docker log tailing. | 1.0.0 |
-| `ENABLE_DOCKER` | `true` | Web UI or Compose | Enable or disable Docker container log collection (`true` or `false`). | 1.1.0 |
+| `ENABLE_DOCKER` | `true` | Web UI or Compose | Enable or disable log collection from the local Docker host (`DOCKER_HOST`, shown as "Primary Docker" in Settings > Sources; `true` or `false`). `false` keeps it off even if it is switched on in the Web UI. Other Docker hosts have their own switches and keep collecting. | 1.1.0 |
 | `DOCKER_SOURCE_ALIAS` | `docker` | Web UI or Compose | Host or source name assigned to logs collected from Docker containers. | 1.1.0 |
 | `DOCKER_EXCLUDE_CONTAINERS` | *(empty)* | Web UI or Compose | Comma-separated list of container names or container IDs to exclude from log tailing. | 1.1.0 |
 | `DOCKER_READ_TIMEOUT` | `60.0` | Docker Compose only | Read timeout in seconds for streaming container log output from the Docker API. | 1.1.0 |

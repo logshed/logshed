@@ -521,23 +521,19 @@ async def update_settings(
             from app.main import get_docker_pool
             docker_pool = get_docker_pool()
             if docker_pool is not None:
-                pool_toggled = False
+                # enable_docker switches the local host (endpoint 1) only; other hosts keep running.
                 if req.enable_docker is not None:
-                    pool_toggled = docker_pool.pool_enabled != req.enable_docker
-                    await docker_pool.set_pool_enabled(req.enable_docker)
+                    await docker_pool.set_primary_enabled(req.enable_docker)
 
-                # Toggling the pool already started (or stopped) endpoint 1 from the saved
-                # database row, so restarting it again would only bounce the collector twice.
-                if not pool_toggled:
-                    def _get_ep1(conn):
-                        cur = conn.cursor()
-                        cur.execute("SELECT * FROM docker_endpoints WHERE id = 1")
-                        row = cur.fetchone()
-                        return dict(row) if row else None
+                def _get_ep1(conn):
+                    cur = conn.cursor()
+                    cur.execute("SELECT * FROM docker_endpoints WHERE id = 1")
+                    row = cur.fetchone()
+                    return dict(row) if row else None
 
-                    ep1_data = await run_db_query(_get_ep1)
-                    if ep1_data:
-                        await docker_pool.reload_endpoint(1, ep1_data)
+                ep1_data = await run_db_query(_get_ep1)
+                if ep1_data:
+                    await docker_pool.reload_endpoint(1, ep1_data)
         except Exception:
             logger.exception("Failed to apply Docker settings to the collector pool after saving settings")
 

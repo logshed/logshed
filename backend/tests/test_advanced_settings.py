@@ -870,8 +870,7 @@ class TestSettingsReloadErrorsAndReads:
         """B-62: a failing Docker pool reload is logged with its traceback, not swallowed."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         pool = MagicMock()
-        pool.pool_enabled = True
-        pool.set_pool_enabled = AsyncMock()
+        pool.set_primary_enabled = AsyncMock()
         pool.reload_endpoint = AsyncMock(side_effect=RuntimeError("pool reload boom"))
         with patch("app.main.get_docker_pool", return_value=pool), \
              caplog.at_level(logging.ERROR, logger="app.api.settings"):
@@ -884,27 +883,26 @@ class TestSettingsReloadErrorsAndReads:
     async def test_enabling_docker_starts_endpoint_one_only_once(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-62: when set_pool_enabled has just started the pool, endpoint 1 is not restarted again."""
+        """B-62: enabling Docker records the local host switch and starts endpoint 1 exactly once."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         pool = MagicMock()
-        pool.pool_enabled = False
-        pool.set_pool_enabled = AsyncMock()
+        pool.set_primary_enabled = AsyncMock()
         pool.reload_endpoint = AsyncMock()
         with patch("app.main.get_docker_pool", return_value=pool):
             res = await client.post("/api/settings", json={"enable_docker": True})
         assert res.status_code == 200
-        pool.set_pool_enabled.assert_awaited_once_with(True)
-        pool.reload_endpoint.assert_not_awaited()
+        pool.set_primary_enabled.assert_awaited_once_with(True)
+        pool.reload_endpoint.assert_awaited_once()
+        assert pool.reload_endpoint.await_args.args[0] == 1
 
     @pytest.mark.asyncio
     async def test_exclude_change_with_pool_already_enabled_still_reloads_endpoint_one(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-62: a settings change that does not toggle the pool still reloads endpoint 1."""
+        """B-62: a settings change that does not toggle Docker still reloads endpoint 1."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         pool = MagicMock()
-        pool.pool_enabled = True
-        pool.set_pool_enabled = AsyncMock()
+        pool.set_primary_enabled = AsyncMock()
         pool.reload_endpoint = AsyncMock()
         with patch("app.main.get_docker_pool", return_value=pool):
             res = await client.post(
