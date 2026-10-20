@@ -51,7 +51,7 @@ Most devices let you choose UDP or TCP when you add LogShed as a syslog target. 
 
   Then restart the LogShed container. Do not try to set this with a `sysctls:` entry in `docker-compose.yml`: Docker refuses `net.core.rmem_max` there because it is a host-wide setting. If you cannot change the host, set `SYSLOG_UDP_RECEIVE_BUFFER_BYTES` to the size the startup log reports to silence the warning (the buffer then stays small).
 - **What "UDP lost" counts.** It is the kernel's receive-buffer error counter for UDP since the syslog listener started. The counter belongs to the network namespace: in a normal container it counts only LogShed's own sockets, but with `network_mode: host` it counts every UDP socket on the host, including ones that have nothing to do with syslog. It is blank (and the navbar hides it) when LogShed cannot read it, for example on a host that is not Linux.
-- **What was measured.** In a load test on 2026-10-19 with the 8 MiB buffer, 10,000 logs per second sent over UDP arrived with no loss on the maintainer's test setup. Results depend on message size, CPU and the host's kernel limit, so check **UDP lost** on your own setup.
+- **What was measured.** In a load test on 2026-10-19 with a raised receive buffer, 10,000 logs per second sent over UDP arrived with no loss on the maintainer's test setup. Results depend on message size, CPU and the host's kernel limit, so check **UDP lost** on your own setup.
 
 ---
 
