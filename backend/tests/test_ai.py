@@ -3401,3 +3401,69 @@ class TestNoLegacyDispatchAliases:
         sentinel = object()
         with patch(f"app.services.ai_engine.{function}", sentinel):
             assert ai_engine._analysis_dispatcher(provider) is sentinel
+
+
+class TestDiagnosisContextRedactionOffLoop:
+    """N08-R: build_diagnosis_context redacts its formatted rows in one worker-thread call."""
+
+    @staticmethod
+    def _slow_redact(observed: dict, started, release):
+        import threading
+
+        from app.core.redactor import redact as real_redact
+
+        def slow_redact(text):
+            if not isinstance(text, list):
+                return real_redact(text)
+            observed["calls"] = observed.get("calls", 0) + 1
+            observed["batch_size"] = len(text)
+            observed["on_event_loop_thread"] = threading.current_thread() is threading.main_thread()
+            started.set()
+            # Bounded wait: only released if the event loop keeps running while we are in here.
+            observed["loop_stayed_responsive"] = release.wait(timeout=0.3)
+            return real_redact(text)
+
+        return slow_redact
+
+    @pytest.mark.asyncio
+    async def test_event_loop_stays_responsive_while_rows_are_redacted(self, populated_db):
+        import threading
+
+        from app.services import ai_service
+
+        observed: dict = {}
+        started = threading.Event()
+        release = threading.Event()
+        slow = self._slow_redact(observed, started, release)
+
+        with patch.object(ai_service, "redact", slow):
+            task = asyncio.create_task(ai_service.build_diagnosis_context([1, 2, 3]))
+            await asyncio.to_thread(started.wait, 2)
+            release.set()  # only reachable in time when the loop is free to run this line
+            await task
+
+        assert observed["loop_stayed_responsive"] is True
+
+    @pytest.mark.asyncio
+    async def test_rows_are_redacted_in_one_call_with_unchanged_output(self, populated_db):
+        import threading
+
+        from app.services import ai_service
+
+        baseline = await ai_service.build_diagnosis_context([1, 2, 3])
+
+        observed: dict = {}
+        started = threading.Event()
+        release = threading.Event()
+        release.set()
+        slow = self._slow_redact(observed, started, release)
+        with patch.object(ai_service, "redact", slow):
+            ctx = await ai_service.build_diagnosis_context([1, 2, 3])
+
+        assert observed["calls"] == 1
+        assert observed["batch_size"] == 3
+        assert observed["on_event_loop_thread"] is False
+        assert ctx["redacted_logs"] == baseline["redacted_logs"]
+        assert ctx["full_prompt"] == baseline["full_prompt"]
+        assert "do_not_leak_this_token" not in ctx["redacted_logs"]
+        assert "supersecret12345" not in ctx["redacted_logs"]

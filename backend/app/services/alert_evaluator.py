@@ -722,7 +722,7 @@ class AlertEvaluator:
                         )
                         for l in triggering_logs[-50:]  # Cap at recent 50 logs
                     ]
-                    redacted_lines = redact(raw_lines)
+                    redacted_lines = await asyncio.to_thread(redact, raw_lines)
                     redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
 
                     if rule.rule_type == "rate":

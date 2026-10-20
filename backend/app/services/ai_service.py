@@ -6,6 +6,7 @@ shared diagnosis context preparation, model cache management, audit log persiste
 and AI follow-up conversation threads.
 """
 
+import asyncio
 import datetime
 import json
 import logging
@@ -254,7 +255,7 @@ async def build_diagnosis_context(
         )
         for r in rows
     ]
-    redacted_lines = redact(raw_lines)
+    redacted_lines = await asyncio.to_thread(redact, raw_lines)
     redacted_logs_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
     redacted_logs_text = truncate_logs_to_budget(redacted_logs_text)
 

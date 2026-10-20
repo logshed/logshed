@@ -2181,3 +2181,133 @@ class TestAlertRuleTimeoutAutoDisable:
         assert setup["slow_id"] not in [r.id for r in ev._rules]
         await ev.stop()
         assert written == [setup["slow_id"]]
+
+
+class TestAlertAiContextRedactionOffLoop:
+    """N08-R: the log window sent to AI enrichment is redacted in one worker-thread call."""
+
+    @pytest.fixture
+    def test_db(self, tmp_path: Path):
+        db_file = tmp_path / "test_alerts_redaction_thread.db"
+        run_migrations(db_file)
+        return db_file
+
+    @staticmethod
+    def _insert_ai_rule(db_file: Path) -> None:
+        conn = get_connection(db_file)
+        conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, filter_app, match_pattern, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES ('SSH Threat', 'threshold', 'sshd', 'Failed password', 2, 60, 0, 1, 1, ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def _patch_ai_and_notifier(monkeypatch, captured: dict) -> None:
+        async def mock_execute_ai_analysis(**kwargs):
+            captured.update(kwargs)
+            return ("Summary.", "Cause.", "Fix.", "raw", "prompt", 1, 1, 0, 2, "gemini-2.5-flash", [])
+
+        import app.services.ai_engine as ai_engine
+        from app.services.notifier import NotifierService
+
+        async def mock_send(self, title, body, channel_id=None):
+            return True
+
+        monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_execute_ai_analysis)
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+    @staticmethod
+    def _logs(now: str):
+        return [
+            {
+                "id": 1,
+                "app_name": "sshd",
+                "message": "Failed password for admin api_key=supersecret12345 from 10.0.0.5",
+                "timestamp": now,
+            },
+            {
+                "id": 2,
+                "app_name": "sshd",
+                "message": "Failed password for root from 10.0.0.6",
+                "timestamp": now,
+            },
+        ]
+
+    @staticmethod
+    def _slow_redact(observed: dict, started, release):
+        import threading
+
+        from app.core.redactor import redact as real_redact
+
+        def slow_redact(text):
+            if not isinstance(text, list):
+                return real_redact(text)
+            observed["calls"] = observed.get("calls", 0) + 1
+            observed["batch_size"] = len(text)
+            observed["on_event_loop_thread"] = threading.current_thread() is threading.main_thread()
+            started.set()
+            observed["loop_stayed_responsive"] = release.wait(timeout=0.3)
+            return real_redact(text)
+
+        return slow_redact
+
+    @pytest.mark.asyncio
+    async def test_event_loop_stays_responsive_while_the_log_window_is_redacted(self, test_db: Path, monkeypatch):
+        import threading
+
+        import app.services.alert_evaluator as evaluator_mod
+
+        self._insert_ai_rule(test_db)
+        stamp = datetime.now(timezone.utc).isoformat()
+        self._patch_ai_and_notifier(monkeypatch, {})
+        observed: dict = {}
+        started = threading.Event()
+        release = threading.Event()
+        monkeypatch.setattr(evaluator_mod, "redact", self._slow_redact(observed, started, release))
+
+        evaluator = AlertEvaluator(test_db)
+        task = asyncio.create_task(evaluator.evaluate_batch(self._logs(stamp)))
+        await asyncio.to_thread(started.wait, 2)
+        release.set()  # only reachable in time when the loop is free to run this line
+        await task
+        await evaluator.stop()
+
+        assert observed["loop_stayed_responsive"] is True
+
+    @pytest.mark.asyncio
+    async def test_log_window_is_redacted_in_one_call_with_unchanged_output(self, test_db: Path, monkeypatch):
+        import threading
+
+        import app.services.alert_evaluator as evaluator_mod
+
+        self._insert_ai_rule(test_db)
+        stamp = datetime.now(timezone.utc).isoformat()
+        captured: dict = {}
+        self._patch_ai_and_notifier(monkeypatch, captured)
+
+        evaluator = AlertEvaluator(test_db)
+        await evaluator.evaluate_batch(self._logs(stamp))
+        await evaluator.stop()
+        baseline_prompt = captured["prompt_override"]
+        assert "supersecret12345" not in baseline_prompt
+        assert "[REDACTED]" in baseline_prompt
+
+        captured.clear()
+        observed: dict = {}
+        started = threading.Event()
+        release = threading.Event()
+        release.set()
+        monkeypatch.setattr(evaluator_mod, "redact", self._slow_redact(observed, started, release))
+        evaluator = AlertEvaluator(test_db)
+        await evaluator.evaluate_batch(self._logs(stamp))
+        await evaluator.stop()
+
+        assert observed["calls"] == 1
+        assert observed["batch_size"] == 2
+        assert observed["on_event_loop_thread"] is False
+        assert captured["prompt_override"] == baseline_prompt
