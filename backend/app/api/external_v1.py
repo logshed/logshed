@@ -46,6 +46,7 @@ from app.models import (
     LogFacetsResponse,
     ExternalLogListResponse,
     PruneResponse,
+    SeverityCounts24h,
     StorageMetricItem,
     SystemAlertState,
     SystemMaintenanceMetrics,
@@ -213,6 +214,13 @@ async def get_maintenance_status_v1(
 
 _error_refresh_task: Optional["asyncio.Future[dict[str, Any]]"] = None
 
+# Alert state counts only alert rule firings: maintenance windows, daily digests and on-demand
+# analyses also live in alert_history but are not alerts (digest and on-demand rows have no rule_id)
+_ALERT_FIRING_FILTER = (
+    "maintenance_session_id IS NULL "
+    "AND NOT (rule_id IS NULL AND rule_name IN ('Daily Digest', 'On-Demand Analysis'))"
+)
+
 
 def _fetch_error_aggregates(conn) -> dict[str, Any]:
     """Compute the rolling error counts and top offenders in as few passes as possible."""
@@ -221,13 +229,19 @@ def _fetch_error_aggregates(conn) -> dict[str, Any]:
     since_1h = (now_utc - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
     cur = conn.cursor()
 
-    # 24-hour and 1-hour error counts share one predicate, so use conditional aggregation
+    # The error totals and per-severity counts (warning included) share one pass over the
+    # 24-hour range of idx_logs_time_sev, so use conditional aggregation
     cur.execute(
         """
-        SELECT COUNT(*) AS count_24h,
-               COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END), 0) AS count_1h
+        SELECT COALESCE(SUM(CASE WHEN severity <= 3 THEN 1 ELSE 0 END), 0) AS count_24h,
+               COALESCE(SUM(CASE WHEN severity <= 3 AND timestamp >= ? THEN 1 ELSE 0 END), 0) AS count_1h,
+               COALESCE(SUM(CASE WHEN severity = 0 THEN 1 ELSE 0 END), 0) AS count_emergency,
+               COALESCE(SUM(CASE WHEN severity = 1 THEN 1 ELSE 0 END), 0) AS count_alert,
+               COALESCE(SUM(CASE WHEN severity = 2 THEN 1 ELSE 0 END), 0) AS count_critical,
+               COALESCE(SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END), 0) AS count_error,
+               COALESCE(SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END), 0) AS count_warning
         FROM logs
-        WHERE severity <= 3 AND timestamp >= ?
+        WHERE severity <= 4 AND timestamp >= ?
         """,
         (since_1h, since_24h),
     )
@@ -262,8 +276,15 @@ def _fetch_error_aggregates(conn) -> dict[str, Any]:
     top_hosts = [TopErrorEntity(name=r["host_val"] or "unknown", count=r["cnt"]) for r in cur.fetchall()]
 
     return {
-        "count_24h": counts[0],
-        "count_1h": counts[1],
+        "count_24h": counts["count_24h"],
+        "count_1h": counts["count_1h"],
+        "severity_counts_24h": SeverityCounts24h(
+            emergency=counts["count_emergency"],
+            alert=counts["count_alert"],
+            critical=counts["count_critical"],
+            error=counts["count_error"],
+            warning=counts["count_warning"],
+        ),
         "top_apps": top_apps,
         "top_hosts": top_hosts,
     }
@@ -327,14 +348,15 @@ async def get_system_metrics(
 
         # Alert state sliding 15-minute window
         cur.execute(
-            "SELECT COUNT(*) FROM alert_history WHERE triggered_at >= ? AND maintenance_session_id IS NULL",
+            f"SELECT COUNT(*) FROM alert_history WHERE triggered_at >= ? AND {_ALERT_FIRING_FILTER}",
             (since_15m,),
         )
         recent_count = cur.fetchone()[0]
         recent_active = recent_count > 0
 
         cur.execute(
-            "SELECT triggered_at, rule_name FROM alert_history WHERE maintenance_session_id IS NULL ORDER BY triggered_at DESC, id DESC LIMIT 1"
+            f"SELECT triggered_at, rule_name FROM alert_history WHERE {_ALERT_FIRING_FILTER} "
+            "ORDER BY triggered_at DESC, id DESC LIMIT 1"
         )
         last_row = cur.fetchone()
         last_trig = last_row["triggered_at"] if last_row else None
@@ -374,6 +396,7 @@ async def get_system_metrics(
         ingest_rate=get_ingest_rate(),
         error_count_24h=error_stats["count_24h"],
         error_count_1h=error_stats["count_1h"],
+        severity_counts_24h=error_stats["severity_counts_24h"],
         top_error_breakdown=TopErrorBreakdown(
             top_apps=error_stats["top_apps"],
             top_hosts=error_stats["top_hosts"],

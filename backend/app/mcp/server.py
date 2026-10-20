@@ -196,7 +196,8 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
     @server.tool(
         name="get_system_metrics",
         description=(
-            "Inspect homelab log rates, error counts (1h/24h), top error apps/hosts, "
+            "Inspect homelab log rates, error counts (1h/24h), 24h counts per severity (emergency to warning), "
+            "top error apps/hosts, "
             "active alert states, disk usage, and maintenance status. Requires the system:read scope."
         ),
     )

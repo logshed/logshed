@@ -1252,6 +1252,15 @@ class TopErrorBreakdown(BaseModel):
     top_hosts: list[TopErrorEntity] = Field(default_factory=list)
 
 
+class SeverityCounts24h(BaseModel):
+    """Rolling 24-hour log counts for each RFC 5424 severity from emergency (0) to warning (4)."""
+    emergency: int = 0
+    alert: int = 0
+    critical: int = 0
+    error: int = 0
+    warning: int = 0
+
+
 class SystemAlertState(BaseModel):
     active: bool
     recent_firing_count: int = 0
@@ -1276,6 +1285,7 @@ class SystemMetricsResponse(BaseModel):
     ingest_rate: float
     error_count_24h: int
     error_count_1h: int
+    severity_counts_24h: SeverityCounts24h
     top_error_breakdown: TopErrorBreakdown
     alert_state: SystemAlertState
     queue_depth: int

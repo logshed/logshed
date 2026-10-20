@@ -206,6 +206,123 @@ class TestSystemMetricsApi:
         assert state2["last_rule_name"] == "Latest Rule"
 
     @pytest.mark.asyncio
+    async def test_severity_counts_24h_breakdown(
+        self, client: AsyncClient, full_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        # (severity, timestamp, how many)
+        seed = [
+            (0, now_iso, 1),
+            (1, two_hours_ago, 2),
+            (2, now_iso, 3),
+            (3, now_iso, 4),
+            (3, two_hours_ago, 1),
+            (4, now_iso, 6),
+            (4, two_hours_ago, 1),
+            (5, now_iso, 7),
+            (6, now_iso, 8),
+            (3, two_days_ago, 9),
+            (4, two_days_ago, 9),
+        ]
+        with get_connection(db_path) as conn:
+            for severity, ts, count in seed:
+                for _ in range(count):
+                    conn.execute(
+                        """
+                        INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                        VALUES (?, ?, '192.168.1.50', 'compute-01', 'nginx', 1, ?, 'msg', 'raw')
+                        """,
+                        (ts, ts, severity),
+                    )
+            conn.commit()
+
+        res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        assert res.status_code == 200
+        data = res.json()
+
+        assert data["severity_counts_24h"] == {
+            "emergency": 1,
+            "alert": 2,
+            "critical": 3,
+            "error": 5,
+            "warning": 7,
+        }
+        # The combined error totals still cover severities 0 to 3 only, not warnings
+        assert data["error_count_24h"] == 11
+        assert data["error_count_1h"] == 8
+        assert data["top_error_breakdown"]["top_apps"] == [{"name": "nginx", "count": 11}]
+
+    @pytest.mark.asyncio
+    async def test_severity_counts_24h_empty(
+        self, client: AsyncClient, full_token_headers: dict
+    ):
+        res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["severity_counts_24h"] == {
+            "emergency": 0,
+            "alert": 0,
+            "critical": 0,
+            "error": 0,
+            "warning": 0,
+        }
+        assert data["error_count_24h"] == 0
+        assert data["error_count_1h"] == 0
+
+    @pytest.mark.asyncio
+    async def test_alert_state_ignores_digest_and_on_demand_rows(
+        self, client: AsyncClient, full_token_headers: dict, tmp_path: Path
+    ):
+        db_path = tmp_path / "logs.db"
+        ten_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        one_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        with get_connection(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
+                VALUES ('Real Rule', 1, 'error msg', 'real alert', 0, ?)
+                """,
+                (ten_min_ago,),
+            )
+            conn.execute(
+                """
+                INSERT INTO alert_history (rule_id, rule_name, trigger_count, incident_summary, ai_enrichment, triggered_at)
+                VALUES (NULL, 'Daily Digest', 0, 'digest', 0, ?)
+                """,
+                (one_min_ago,),
+            )
+            conn.execute(
+                """
+                INSERT INTO alert_history (rule_id, rule_name, trigger_count, incident_summary, ai_enrichment, triggered_at)
+                VALUES (NULL, 'On-Demand Analysis', 5, 'diagnosis', 1, ?)
+                """,
+                (one_min_ago,),
+            )
+            conn.commit()
+
+        res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        assert res.status_code == 200
+        state = res.json()["alert_state"]
+        assert state["active"] is True
+        assert state["recent_firing_count"] == 1
+        assert state["last_rule_name"] == "Real Rule"
+
+        # With no alert firing at all, the newer digest and analysis rows still do not count
+        with get_connection(db_path) as conn:
+            conn.execute("DELETE FROM alert_history WHERE rule_name = 'Real Rule'")
+            conn.commit()
+
+        res2 = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+        state2 = res2.json()["alert_state"]
+        assert state2["active"] is False
+        assert state2["recent_firing_count"] == 0
+        assert state2["last_triggered_at"] is None
+        assert state2["last_rule_name"] is None
+
+    @pytest.mark.asyncio
     async def test_operation_cooldown_enforcement(
         self, client: AsyncClient, full_token_headers: dict
     ):
