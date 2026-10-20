@@ -54,6 +54,7 @@ from app.models import (
     TopErrorBreakdown,
     TopErrorEntity,
     VacuumResponse,
+    VersionResponse,
 )
 from app.services.maintenance_service import (
     MaintenanceSessionLimitError,
@@ -82,6 +83,7 @@ from app.services.log_query import (
     to_utc_bound,
 )
 from app.services.storage_metrics import get_cached_storage_metrics
+from app.services.version_service import check_for_updates
 from app.version import APP_VERSION
 
 from app.api.ingest import router as ingest_router
@@ -425,6 +427,19 @@ async def get_system_metrics(
         ),
         udp_receive_errors=get_udp_receive_errors(),
     )
+
+
+@router.get("/system/version", response_model=VersionResponse)
+async def get_version_v1(
+    token: dict[str, Any] = Depends(require_api_token(["system:read"])),
+) -> VersionResponse:
+    """
+    Return the running version and the latest stable release on GHCR.
+    Serves the shared 1-hour update check cache and has no refresh option, so a token
+    cannot force registry requests. Respects the check_for_updates setting.
+    """
+    info = await check_for_updates()
+    return VersionResponse(**info)
 
 
 # ---------------------------------------------------------------------------

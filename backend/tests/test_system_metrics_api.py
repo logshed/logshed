@@ -1,10 +1,11 @@
 """
 Integration tests for LogShed Telemetry API and system operations:
-GET /api/v1/system/metrics, error caching, alert_state sliding window, and operation cooldowns.
+GET /api/v1/system/metrics, GET /api/v1/system/version, error caching, alert_state sliding window, and operation cooldowns.
 """
 
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -21,6 +22,8 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.services.operation_guard import reset_operation_state
+from app.services.version_service import clear_version_cache
+from app.version import APP_VERSION
 from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
@@ -372,3 +375,92 @@ class TestSystemMetricsUdpReceiveErrors:
         with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
             metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
         assert metrics["udp_receive_errors"] == 7
+
+
+class TestSystemVersionApi:
+    """Tests for GET /api/v1/system/version."""
+
+    @pytest.fixture(autouse=True)
+    def reset_version_cache(self):
+        clear_version_cache()
+        yield
+        clear_version_cache()
+
+    @pytest.mark.asyncio
+    async def test_update_available(self, client: AsyncClient, full_token_headers: dict):
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = ["latest", "1.0.0", "99.0.0", "100.0.0-beta.1"]
+            res = await client.get("/api/v1/system/version", headers=full_token_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["current_version"] == APP_VERSION
+        assert data["latest_version"] == "99.0.0"
+        assert data["update_available"] is True
+        assert data["check_enabled"] is True
+        assert isinstance(data["checked_at"], float)
+
+    @pytest.mark.asyncio
+    async def test_no_update(self, client: AsyncClient, full_token_headers: dict):
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = ["0.0.1"]
+            res = await client.get("/api/v1/system/version", headers=full_token_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["latest_version"] == "0.0.1"
+        assert data["update_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_check_disabled(self, client: AsyncClient, full_token_headers: dict, tmp_path: Path):
+        with get_connection(tmp_path / "logs.db") as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO system_settings (key, value, updated_at) "
+                "VALUES ('check_for_updates', 'false', datetime('now'))"
+            )
+            conn.commit()
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            res = await client.get("/api/v1/system/version", headers=full_token_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["current_version"] == APP_VERSION
+        assert data["check_enabled"] is False
+        assert data["latest_version"] is None
+        assert data["update_available"] is False
+        mock_fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ghcr_failure(self, client: AsyncClient, full_token_headers: dict):
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = Exception("GHCR unreachable")
+            res = await client.get("/api/v1/system/version", headers=full_token_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["current_version"] == APP_VERSION
+        assert data["check_enabled"] is True
+        assert data["latest_version"] is None
+        assert data["update_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_refresh_parameter_does_not_force_a_query(self, client: AsyncClient, full_token_headers: dict):
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = ["99.0.0"]
+            await client.get("/api/v1/system/version", headers=full_token_headers)
+            await client.get("/api/v1/system/version?refresh=true", headers=full_token_headers)
+        assert mock_fetch.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_requires_system_read(self, client: AsyncClient, auth_headers: dict):
+        created = await client.post(
+            "/api/tokens",
+            json={"name": "Logs Only", "scopes": ["logs:read"]},
+            headers=auth_headers,
+        )
+        headers = {"Authorization": f"Bearer {created.json()['raw_token']}"}
+        with patch("app.services.version_service.fetch_ghcr_tags", new_callable=AsyncMock) as mock_fetch:
+            res = await client.get("/api/v1/system/version", headers=headers)
+        assert res.status_code == 403
+        mock_fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_requires_token(self, client: AsyncClient):
+        res = await client.get("/api/v1/system/version")
+        assert res.status_code == 401
