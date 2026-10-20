@@ -242,6 +242,7 @@ export interface AiFollowUpRequest {
   message: string;
   provider?: string;
   model?: string;
+  fallback_models?: string[];
 }
 
 export interface AiFollowUpResponse {

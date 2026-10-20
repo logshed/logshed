@@ -278,10 +278,10 @@ describe('Navbar Component', () => {
       expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: /Clear/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/rules/maintenance');
   });
 
-  it('clears maintenance window when Clear button in banner is clicked', async () => {
+  it('opens the maintenance page from the Manage link without ending the window', async () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
       status: 'ok',
       db: 'ok',
@@ -294,29 +294,24 @@ describe('Navbar Component', () => {
       until: '2026-09-26T14:30:00Z',
       on_demand_until: '2026-09-26T14:30:00Z',
     });
-    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
-      active: false,
-      until: null,
-    });
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow');
+    const onTabChange = vi.fn();
 
     render(
       <Navbar
         activeTab="stream"
-        onTabChange={vi.fn()}
+        onTabChange={onTabChange}
       />
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
-    });
+    const link = await screen.findByRole('link', { name: 'Manage' });
+    fireEvent.click(link);
 
-    const clearBtn = screen.getByRole('button', { name: /Clear/i });
-    fireEvent.click(clearBtn);
-
-    await waitFor(() => {
-      expect(setMaintSpy).toHaveBeenCalledWith(null);
-      expect(screen.queryByText(/Maintenance window active - alerts silenced until/i)).not.toBeInTheDocument();
-    });
+    expect(onTabChange).toHaveBeenCalledWith('rules');
+    expect(window.location.pathname).toBe('/rules/maintenance');
+    expect(setMaintSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(/Maintenance window active - alerts silenced until/i)).toBeInTheDocument();
+    window.history.replaceState(null, '', '/');
   });
 
   it('does not render maintenance banner when maintenance window is inactive', async () => {
@@ -426,7 +421,7 @@ describe('Navbar maintenance and health handling (B11)', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows a Scheduled window link instead of Clear for schedule-only windows', async () => {
+  it('shows a Scheduled window link instead of Manage for schedule-only windows', async () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(okHealth);
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
       active: true,
@@ -438,7 +433,7 @@ describe('Navbar maintenance and health handling (B11)', () => {
     await waitFor(() => {
       expect(screen.getByText(/Maintenance window active/i)).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /Clear/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Manage' })).toBeNull();
     const onTabChange = vi.fn();
     cleanup();
     render(<Navbar activeTab="stream" onTabChange={onTabChange} />);
@@ -453,24 +448,6 @@ describe('Navbar maintenance and health handling (B11)', () => {
     expect(window.location.pathname).toBe('/rules/maintenance');
     expect(popSpy).toHaveBeenCalled();
     window.history.replaceState(null, '', '/');
-  });
-
-  it('makes exactly one request when Clear is clicked', async () => {
-    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(okHealth);
-    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
-      active: true,
-      until: '2026-09-26T14:30:00Z',
-      on_demand_until: '2026-09-26T14:30:00Z',
-    });
-    const setSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({ active: false, until: null });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
-    const btn = await screen.findByRole('button', { name: /Clear/i });
-    fetchSpy.mockClear();
-    fireEvent.click(btn);
-    await waitFor(() => expect(setSpy).toHaveBeenCalledTimes(1));
-    const disableCalls = fetchSpy.mock.calls.filter((c) => String(c[0]).includes('/maintenance/disable'));
-    expect(disableCalls).toHaveLength(0);
   });
 
   it.each([

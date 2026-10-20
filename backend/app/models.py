@@ -680,6 +680,7 @@ class AiFollowUpRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     provider: Optional[str] = Field(None, max_length=64)
     model: Optional[str] = Field(None, max_length=255)
+    fallback_models: Optional[list[str]] = Field(None, max_length=20)
 
     @field_validator("message", mode="before")
     @classmethod
@@ -692,6 +693,17 @@ class AiFollowUpRequest(BaseModel):
         if isinstance(v, str):
             return v.strip() or None
         return v
+
+    @field_validator("fallback_models")
+    @classmethod
+    def clean_fallback_models(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        """Trim names and drop blanks; an empty list means no fallback models for this question."""
+        if v is None:
+            return None
+        cleaned = [m.strip() for m in v if m.strip()]
+        if any(len(m) > 255 for m in cleaned):
+            raise ValueError("Fallback model names must be at most 255 characters.")
+        return cleaned
 
 
 class AiFollowUpResponse(BaseModel):

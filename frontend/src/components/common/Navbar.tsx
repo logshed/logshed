@@ -3,7 +3,7 @@ import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell, AlertTriangle, 
 import { LogShedLogo } from './LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
-import { fetchMaintenanceWindow, setMaintenanceWindow } from '../../api/alerts.ts';
+import { fetchMaintenanceWindow } from '../../api/alerts.ts';
 import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '../../types.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
@@ -115,16 +115,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
   }, []);
 
-  const handleClearMaintenance = async () => {
-    try {
-      const res = await setMaintenanceWindow(null);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-    } catch {
-      // Clear failure handled gracefully
-    }
-  };
-
   const handleLogoClick = () => {
     onTabChange('stream');
   };
@@ -178,7 +168,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span title="Queue Depth" className="hidden sm:inline">
                 Queue: <span className="text-slate-200">{health.queue_depth ?? 0}</span>
               </span>
-              <span title="Dropped Logs Total" className="hidden sm:inline">
+              <span title="Logs LogShed dropped since it started (resets on restart)" className="hidden sm:inline">
                 Dropped:{' '}
                 <span className={(health.dropped_logs ?? 0) > 0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
                   {health.dropped_logs ?? 0}
@@ -186,7 +176,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
               {typeof health.udp_receive_errors === 'number' && health.udp_receive_errors > 0 && (
                 <span
-                  title="Syslog UDP messages the operating system discarded because LogShed's receive buffer was full. Not included in Dropped. TCP syslog avoids this."
+                  title="Syslog UDP messages the operating system discarded because LogShed's receive buffer was full, since LogShed started (resets on restart). Not included in Dropped. TCP syslog avoids this."
                   className="hidden sm:inline"
                   data-testid="udp-lost"
                 >
@@ -314,31 +304,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               {getMaintenanceBannerText(maintenance)}
             </span>
           </div>
-          {maintenance.on_demand_until || (maintenance.sessions?.length ?? 0) > 0 ? (
-            <button
-              type="button"
-              onClick={handleClearMaintenance}
-              className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
-            >
-              Clear
-            </button>
-          ) : (
-            <a
-              href="/rules/maintenance"
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-                e.preventDefault();
-                onTabChange('rules');
-                if (window.location.pathname !== '/rules/maintenance') {
-                  window.history.pushState(null, '', '/rules/maintenance');
-                }
-                window.dispatchEvent(new PopStateEvent('popstate'));
-              }}
-              className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
-            >
-              Scheduled window
-            </a>
-          )}
+          <a
+            href="/rules/maintenance"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              onTabChange('rules');
+              if (window.location.pathname !== '/rules/maintenance') {
+                window.history.pushState(null, '', '/rules/maintenance');
+              }
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
+            className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
+          >
+            {maintenance.on_demand_until || (maintenance.sessions?.length ?? 0) > 0 ? 'Manage' : 'Scheduled window'}
+          </a>
         </div>
       )}
 

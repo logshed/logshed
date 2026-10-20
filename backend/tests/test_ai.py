@@ -2797,6 +2797,44 @@ class TestAiFollowUpApi:
         assert data["message"]["model"] == "gpt-4o-mini"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "requested, expected",
+        [
+            ([" gemini-flash-lite-latest ", "", "gemini-flash-latest"], ["gemini-flash-lite-latest", "gemini-flash-latest"]),
+            ([], []),
+        ],
+    )
+    async def test_follow_up_applies_fallback_models_override(self, audit_id, auth_client, populated_db, requested, expected):
+        conn = sqlite3.connect(populated_db)
+        conn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_fallback_models_gemini', 'gemini-flash-latest, gemini-flash-lite-latest', '2026-08-29T10:00:00Z', 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        with patch(
+            "app.api.ai.execute_ai_follow_up",
+            new_callable=AsyncMock,
+            return_value=_follow_up_result(),
+        ) as mock_exec:
+            res = await auth_client.post(
+                f"/api/ai/audit/{audit_id}/follow-up",
+                json={"message": "q", "fallback_models": requested},
+            )
+
+        assert res.status_code == 200
+        assert mock_exec.call_args.kwargs["fallback_models"] == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fallback_models", [["m"] * 21, ["x" * 256]])
+    async def test_follow_up_rejects_invalid_fallback_models(self, audit_id, auth_client, fallback_models):
+        res = await auth_client.post(
+            f"/api/ai/audit/{audit_id}/follow-up",
+            json={"message": "q", "fallback_models": fallback_models},
+        )
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
     async def test_follow_up_turn_limit(self, audit_id, auth_client, populated_db):
         conn = sqlite3.connect(populated_db)
         for i in range(10):

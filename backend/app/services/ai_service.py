@@ -465,11 +465,13 @@ async def build_follow_up_context(
     question: str,
     provider_override: Optional[str] = None,
     model_override: Optional[str] = None,
+    fallback_models_override: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     Reconstruct the conversation for a follow-up question: the original analysis prompt and
-    diagnosis, previous follow-up turns, then the redacted new question. Provider and model are
-    resolved from the current settings (with optional overrides), never from the audit entry, so
+    diagnosis, previous follow-up turns, then the redacted new question. Provider, model and
+    fallback models are resolved from the current settings (with optional overrides), never from
+    the audit entry, so
     follow-ups keep working after the original model is retired or reconfigured.
     Raises 404 for an unknown audit entry and 400 when the turn limit is reached.
     """
@@ -506,7 +508,12 @@ async def build_follow_up_context(
     ]
 
     return {
-        **resolve_ai_provider_settings(settings, provider_override=provider_override, model_override=model_override),
+        **resolve_ai_provider_settings(
+            settings,
+            provider_override=provider_override,
+            model_override=model_override,
+            fallback_models_override=fallback_models_override,
+        ),
         "messages": messages,
         "question": redacted_question,
     }

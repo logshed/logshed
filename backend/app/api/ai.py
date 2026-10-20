@@ -647,6 +647,7 @@ async def _prepare_follow_up(audit_id: int, req: AiFollowUpRequest) -> dict:
         question=req.message,
         provider_override=req.provider,
         model_override=req.model,
+        fallback_models_override=req.fallback_models,
     )
     _require_ai_enabled(ctx)
     return ctx

@@ -15,11 +15,13 @@ interface AiFollowUpThreadProps {
   provider?: string;
   /** Optional model override; the provider's configured model is used when omitted. */
   model?: string;
+  /** Optional fallback chain override (an empty list means none); the provider's configured fallbacks are used when omitted. */
+  fallbackModels?: string[];
   /** Called with true while a follow-up reply is being sent or streamed, and false once it settles. */
   onSendingChange?: (sending: boolean) => void;
 }
 
-export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, provider, model, onSendingChange }) => {
+export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, provider, model, fallbackModels, onSendingChange }) => {
   const [messages, setMessages] = useState<AiConversationMessage[]>([]);
   const [maxTurns, setMaxTurns] = useState<number>(DEFAULT_MAX_TURNS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -117,7 +119,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
     const aborted = () => controller.signal.aborted;
 
     try {
-      const res = await sendAiFollowUp(auditId, { message: question, provider, model }, (evt) => {
+      const res = await sendAiFollowUp(auditId, { message: question, provider, model, fallback_models: fallbackModels }, (evt) => {
         if (aborted()) return;
         if (evt.stage === 'delta' && evt.content) {
           setStreamText((prev) => prev + evt.content);

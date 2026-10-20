@@ -510,6 +510,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  // Moving the first fallback up swaps it with the primary model.
+  const promoteFirstFallback = () => {
+    const [promoted, ...rest] = fallbackList;
+    if (!promoted) return;
+    const demoted = aiModel.trim();
+    const updated = demoted && !rest.includes(demoted) ? [demoted, ...rest] : rest;
+    setIsCustomModel(availableModels.length > 0 && !availableModels.some((m) => m.id === promoted));
+    setAiModel(promoted);
+    setProviderConfigs((prev) => ({
+      ...prev,
+      [aiProvider]: {
+        ...prev[aiProvider],
+        model: promoted,
+      },
+    }));
+    updateFallbackModels(updated.join(', '));
+  };
+
   // Emptying the key field is a pending change like any other edit: it is sent as an empty
   // key by the normal Save, so leaving the field never saves (or discards) anything by itself.
   const handleApiKeyEnter = async () => {
@@ -1169,11 +1187,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <div className="flex items-center gap-1 shrink-0 ml-2">
                           <button
                             type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveFallback(idx, -1)}
-                            className="p-1 text-slate-400 hover:text-slate-200 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
-                            title="Move up in priority"
-                            aria-label="Move fallback up"
+                            onClick={() => (idx === 0 ? promoteFirstFallback() : moveFallback(idx, -1))}
+                            className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
+                            title={idx === 0 ? 'Swap with primary model' : 'Move up in priority'}
+                            aria-label={idx === 0 ? 'Make primary model' : 'Move fallback up'}
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
                           </button>

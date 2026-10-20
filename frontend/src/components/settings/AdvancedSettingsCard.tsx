@@ -252,7 +252,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-500">
-            Controls timeout and reasoning tokens across Gemini and OpenAI models. Setting budget to 0 disables thinking tokens.
+            The timeout applies to every AI provider. The thinking budget applies to Gemini and Claude models that support thinking (OpenAI reasoning models use a fixed low effort). Set the budget to 0 to turn thinking off.
           </p>
         </div>
 

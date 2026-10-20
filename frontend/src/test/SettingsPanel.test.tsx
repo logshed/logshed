@@ -346,6 +346,41 @@ describe('SettingsPanel Component', () => {
     });
   });
 
+  it('swaps the first fallback with the primary model when its up arrow is clicked', async () => {
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+      ai_provider: 'gemini',
+      ai_model: 'gemini-3.7-flash',
+      ai_fallback_models: 'gemini-2.5-flash, gemini-2.5-pro',
+      ai_api_key: '********',
+      ai_base_url: null,
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: true,
+    });
+    const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+
+    render(<SettingsPanel />);
+
+    const promoteBtn = await screen.findByRole('button', { name: 'Make primary model' });
+    expect(screen.getAllByRole('button', { name: 'Move fallback up' })).toHaveLength(1);
+    fireEvent.click(promoteBtn);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/gemini-2.5-flash/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ai_model: 'gemini-2.5-flash',
+          ai_fallback_models: 'gemini-3.7-flash, gemini-2.5-pro',
+        })
+      );
+    });
+  });
+
   it('filters out fallback models from primary model dropdown and auto-prunes fallback if selected as primary', async () => {
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
       ai_provider: 'gemini',

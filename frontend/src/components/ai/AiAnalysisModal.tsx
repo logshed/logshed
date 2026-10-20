@@ -426,6 +426,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     }
   };
 
+  // Moving the first fallback up swaps it with the primary model.
+  const promoteFirstFallback = () => {
+    const [promoted, ...rest] = fallbackList;
+    if (!promoted) return;
+    const demoted = model.trim();
+    const updated = demoted && !rest.includes(demoted) ? [demoted, ...rest] : rest;
+    setIsCustomModel(availableModels.length > 0 && !availableModels.some((m) => m.id === promoted));
+    setModel(promoted);
+    setFallbackModels(updated.join(', '));
+  };
+
 
   const handleUserContextChange = (newContext: string) => {
     const prevDefault = buildCombinedPrompt(preview?.redacted_prompt || '', userContext);
@@ -537,7 +548,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         system_prompt_override: systemPromptOverride,
         provider,
         model,
-        fallback_models: parsedFallbacks.length > 0 ? parsedFallbacks : undefined,
+        fallback_models: parsedFallbacks,
         client_timezone,
         client_utc_offset_minutes,
         onEvent: (evt) => {
@@ -974,11 +985,10 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                             <div className="flex items-center gap-1 shrink-0 ml-2">
                               <button
                                 type="button"
-                                disabled={idx === 0}
-                                onClick={() => moveFallback(idx, -1)}
-                                className="p-0.5 text-slate-400 hover:text-slate-200 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
-                                title="Move up in priority"
-                                aria-label="Move fallback up"
+                                onClick={() => (idx === 0 ? promoteFirstFallback() : moveFallback(idx, -1))}
+                                className="p-0.5 text-slate-400 hover:text-slate-200 cursor-pointer"
+                                title={idx === 0 ? 'Swap with primary model' : 'Move up in priority'}
+                                aria-label={idx === 0 ? 'Make primary model' : 'Move fallback up'}
                               >
                                 <ArrowUp className="w-3.5 h-3.5" />
                               </button>
@@ -1215,9 +1225,9 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
           <div className="space-y-4 animate-in fade-in">
             {/* Header info - 2-row layout */}
             <div className="bg-dark-950 p-3 rounded-lg border border-dark-700 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-emerald-400" />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span className="font-semibold text-slate-200">
                     {selectedLogs.length} Log{selectedLogs.length === 1 ? '' : 's'} Inspected
                   </span>
@@ -1227,11 +1237,11 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
+                <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
                   <span className="text-slate-400 text-[10px] uppercase font-semibold">Model:</span>
-                  <span className="text-accent-400 font-medium">{analysisResult.model_used}</span>
+                  <span className="text-accent-400 font-medium min-w-0 break-all">{analysisResult.model_used}</span>
                   {analysisResult.fallback_used && (
-                    <span className="bg-amber-950/80 border border-amber-700 text-amber-300 px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase">
+                    <span className="shrink-0 bg-amber-950/80 border border-amber-700 text-amber-300 px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase">
                       Fallback
                     </span>
                   )}
@@ -1321,6 +1331,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   auditId={analysisResult.audit_id}
                   provider={provider}
                   model={model}
+                  fallbackModels={fallbackList}
                   onSendingChange={setIsFollowUpSending}
                 />
               </div>

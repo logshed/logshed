@@ -654,6 +654,40 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     });
   });
 
+  it('swaps the first fallback with the primary model when its up arrow is clicked', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+      ...samplePreview,
+      fallback_models: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    });
+
+    render(
+      <AiAnalysisModal
+        isOpen={true}
+        onClose={vi.fn()}
+        selectedLogs={sampleLogs}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Make primary model' }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/gemini-2.5-flash/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+
+    await waitFor(() => {
+      expect(aiApi.diagnoseLogs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'gemini-2.5-flash',
+          fallback_models: ['gemini-3.7-flash', 'gemini-2.5-pro'],
+        }),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    });
+  });
+
   it('filters out fallback models from primary model dropdown and prunes fallback if set as primary', async () => {
     vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
       ...samplePreview,
@@ -960,6 +994,34 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
       await screen.findByLabelText('Follow-up question');
       expect(screen.getByRole('button', { name: /Back to Preview/i })).not.toBeDisabled();
+    });
+
+    it('sends follow-ups with the fallback order chosen for the diagnosis', async () => {
+      vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+        ...samplePreview,
+        fallback_models: ['gemini-flash-latest', 'gemini-flash-lite-latest'],
+      });
+      const followUpSpy = vi.spyOn(aiApi, 'sendAiFollowUp').mockImplementation(() => new Promise(() => {}));
+
+      render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Move fallback up' }));
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+
+      const input = await screen.findByLabelText('Follow-up question');
+      fireEvent.change(input, { target: { value: 'Which port?' } });
+      fireEvent.click(screen.getByTitle('Send (Ctrl+Enter or Cmd+Enter)'));
+
+      await waitFor(() => {
+        expect(followUpSpy).toHaveBeenCalledWith(
+          expect.any(Number),
+          expect.objectContaining({
+            model: 'gemini-3.7-flash',
+            fallback_models: ['gemini-flash-lite-latest', 'gemini-flash-latest'],
+          }),
+          expect.any(Function),
+          expect.any(Object),
+        );
+      });
     });
   });
 });
