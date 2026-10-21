@@ -79,7 +79,7 @@ Read these before updating from 1.2.x. The first start migrates the database to 
 
 ### Fixed
 - **Prune and Vacuum Safety**: Prune and vacuum now share one in-progress lock across the web UI and the daily `PruneWorker`, so a manual prune can no longer overlap with another prune or a vacuum (concurrent attempts return `409`; the worker retries after 60 seconds). The lock stays held until the operation finishes, even if the client disconnects or the worker is stopped mid-prune. Vacuum and prune failures are logged server-side and return a generic message instead of exception text.
-- **Storage Overview**: `GET /api/system/storage` reuses a storage snapshot for up to 15 seconds instead of counting every log row on each request.
+- **Storage Overview**: `GET /api/system/storage` reuses a storage snapshot for up to 15 seconds instead of counting every log row on each request. The 30-day trend chart places snapshots by time, so the extra snapshots that log deletion and compaction record no longer repeat hour labels or squash the time scale, and hours show as 09:00 rather than 9:00.
 - **Internal Error Responses**: A notification test against a channel whose stored URL cannot be decrypted returns a generic `500` message (the error is logged server-side) instead of exception text. An unexpected failure in the alert pattern test (`POST /api/alerts/test`) likewise reports a generic error and logs the details.
 - **Alert Rule Patterns with Backslashes**: Patterns such as `\bKilled`, `error \d+` or `foo\.bar` used to be compared as literal text, including the backslash, so those rules never fired. They now run as regular expressions (see the upgrade notes).
 - **Login and AI Rate Limit Responses**: The `429` responses carry a `Retry-After` header.
