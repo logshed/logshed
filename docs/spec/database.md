@@ -262,6 +262,7 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
      INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted)
      VALUES ('retention_days', '14', datetime('now'), 0);
      ```
+     The digest also uses two settings that are not seeded: `daily_digest_last_run` (UTC ISO 8601, written with the `alert_history` row when a digest runs) and `daily_digest_armed_at` (UTC ISO 8601, `is_encrypted = 0`). `POST /api/settings` writes `daily_digest_armed_at` when `daily_digest_enabled` goes from off or missing to on, or when `daily_digest_schedule_time` changes (compared with the stored values in the same transaction). `DailyDigestWorker` sends no digest on a day whose schedule time is earlier than it. A missing or unparsable value means no restriction. No schema change.
    - Clamps future-dated timestamps defensively to avoid indexing skew:
      ```sql
      UPDATE logs SET timestamp = received_at

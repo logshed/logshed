@@ -480,3 +480,152 @@ async def test_daily_digest_worker_scheduled_trigger(tmp_path: Path):
         await task
 
     assert run_mock.called
+
+
+def _local_now(day_offset: int, hour: int, minute: int, second: int = 0) -> datetime.datetime:
+    """An aware datetime in the container time zone, `day_offset` days from today."""
+    base = datetime.datetime.now().astimezone() + datetime.timedelta(days=day_offset)
+    return base.replace(hour=hour, minute=minute, second=second, microsecond=0)
+
+
+def _should_run_at(db_file: Path, fake_now: datetime.datetime) -> bool:
+    """Evaluate the worker schedule check with the container clock fixed at `fake_now`."""
+
+    class FrozenDatetime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fake_now
+
+    worker = DailyDigestWorker(db_file)
+    with patch("datetime.datetime", FrozenDatetime):
+        return worker._should_run_scheduled()
+
+
+def _arm_digest(db_file: Path, armed_at: datetime.datetime, schedule_time: str = "09:00"):
+    _set_setting(db_file, "daily_digest_enabled", "1")
+    _set_setting(db_file, "daily_digest_schedule_time", schedule_time)
+    _set_setting(db_file, "daily_digest_armed_at", armed_at.astimezone(datetime.timezone.utc).isoformat())
+
+
+def test_scheduled_digest_waits_for_next_occurrence_after_arming(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    _arm_digest(db_file, _local_now(0, 14, 0))
+
+    # Armed at 14:00 for a 09:00 schedule: 14:00:30 today must not send.
+    assert _should_run_at(db_file, _local_now(0, 14, 0, 30)) is False
+    assert _should_run_at(db_file, _local_now(0, 23, 59)) is False
+    # The first digest is tomorrow at the schedule time.
+    assert _should_run_at(db_file, _local_now(1, 8, 59)) is False
+    assert _should_run_at(db_file, _local_now(1, 9, 0)) is True
+
+
+def test_scheduled_digest_catches_up_after_downtime(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    _arm_digest(db_file, _local_now(-1, 14, 0))
+    _set_setting(db_file, "daily_digest_last_run", _local_now(-1, 9, 0).isoformat())
+
+    # The container was down at 09:00 today and starts again at 11:00.
+    assert _should_run_at(db_file, _local_now(0, 11, 0)) is True
+
+
+def test_scheduled_digest_without_armed_at_keeps_sending(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    _set_setting(db_file, "daily_digest_enabled", "1")
+    _set_setting(db_file, "daily_digest_schedule_time", "09:00")
+
+    # An install upgraded from 1.2.x has no daily_digest_armed_at and no last run.
+    assert _should_run_at(db_file, _local_now(0, 14, 0)) is True
+
+
+def test_scheduled_digest_ignores_unparsable_armed_at(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    _set_setting(db_file, "daily_digest_enabled", "1")
+    _set_setting(db_file, "daily_digest_armed_at", "not-a-date")
+
+    assert _should_run_at(db_file, _local_now(0, 14, 0)) is True
+
+
+def test_scheduled_digest_schedule_moved_earlier_than_now_waits_until_tomorrow(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    # Armed at 14:00 when the schedule was moved from 18:00 to 09:00; nothing has run today.
+    _arm_digest(db_file, _local_now(0, 14, 0), schedule_time="09:00")
+
+    assert _should_run_at(db_file, _local_now(0, 14, 1)) is False
+    assert _should_run_at(db_file, _local_now(1, 9, 0)) is True
+
+
+def test_scheduled_digest_schedule_moved_later_today_runs_at_new_time(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    # Armed at 10:00 when the schedule was moved from 09:00 to 12:00; nothing has run today.
+    _arm_digest(db_file, _local_now(0, 10, 0), schedule_time="12:00")
+
+    assert _should_run_at(db_file, _local_now(0, 11, 59)) is False
+    assert _should_run_at(db_file, _local_now(0, 12, 0)) is True
+
+
+def test_scheduled_digest_schedule_moved_later_after_todays_run_sends_nothing_more(tmp_path: Path):
+    db_file = tmp_path / "logs.db"
+    _arm_digest(db_file, _local_now(0, 10, 0), schedule_time="12:00")
+    _set_setting(db_file, "daily_digest_last_run", _local_now(0, 9, 0).isoformat())
+
+    assert _should_run_at(db_file, _local_now(0, 12, 30)) is False
+
+
+def _read_setting(db_file: Path, key: str):
+    with get_connection(db_file) as conn:
+        row = conn.execute("SELECT value, is_encrypted FROM system_settings WHERE key = ?", (key,)).fetchone()
+    return None if row is None else (row[0], row[1])
+
+
+@pytest.mark.asyncio
+async def test_settings_update_arms_digest_only_when_schedule_changes(tmp_path: Path, auth_headers: dict):
+    db_file = tmp_path / "logs.db"
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        async def save(**fields):
+            res = await client.post("/api/settings", json=fields, headers=auth_headers)
+            assert res.status_code == 200
+
+        # A save that leaves the digest off does not arm it.
+        await save(daily_digest_enabled=False, daily_digest_schedule_time="09:00")
+        assert _read_setting(db_file, "daily_digest_armed_at") is None
+
+        # Off to on arms it.
+        await save(daily_digest_enabled=True, daily_digest_schedule_time="09:00")
+        first = _read_setting(db_file, "daily_digest_armed_at")
+        assert first is not None and first[1] == 0
+        assert datetime.datetime.fromisoformat(first[0]).tzinfo is not None
+
+        # A save that repeats the stored values keeps the marker.
+        await save(daily_digest_enabled=True, daily_digest_channel_id=None, daily_digest_schedule_time=" 09:00 ")
+        assert _read_setting(db_file, "daily_digest_armed_at") == first
+
+        # A changed schedule time arms it again.
+        await save(daily_digest_enabled=True, daily_digest_schedule_time="14:30")
+        changed = _read_setting(db_file, "daily_digest_armed_at")
+        assert changed != first
+        assert datetime.datetime.fromisoformat(changed[0]) > datetime.datetime.fromisoformat(first[0])
+
+        # Turning the digest off leaves the marker alone.
+        await save(daily_digest_enabled=False, daily_digest_schedule_time="14:30")
+        assert _read_setting(db_file, "daily_digest_armed_at") == changed
+
+        # Turning it on again arms it again.
+        await save(daily_digest_enabled=True, daily_digest_schedule_time="14:30")
+        rearmed = _read_setting(db_file, "daily_digest_armed_at")
+        assert datetime.datetime.fromisoformat(rearmed[0]) > datetime.datetime.fromisoformat(changed[0])
+
+
+@pytest.mark.asyncio
+async def test_manual_digest_send_does_not_arm_digest(tmp_path: Path, auth_headers: dict):
+    db_file = tmp_path / "logs.db"
+    _set_setting(db_file, "daily_digest_enabled", "1")
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.post("/api/notifications/digest/send", headers=auth_headers)
+        assert res.status_code == 200
+
+    assert _read_setting(db_file, "daily_digest_armed_at") is None
+    assert _read_setting(db_file, "daily_digest_last_run") is not None

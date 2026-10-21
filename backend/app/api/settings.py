@@ -370,6 +370,25 @@ async def update_settings(
         if req.enable_mcp is not None:
             updates.append(("enable_mcp", "1" if req.enable_mcp else "0", 0))
 
+        # The Application tab sends every digest field on every save, so compare with the stored
+        # values: only a real change restarts the schedule (the first digest is then the next
+        # occurrence of the schedule time) and a repeated save keeps the downtime catch-up.
+        if req.daily_digest_enabled is not None or req.daily_digest_schedule_time is not None:
+            cursor.execute(
+                "SELECT key, value FROM system_settings "
+                "WHERE key IN ('daily_digest_enabled', 'daily_digest_schedule_time')"
+            )
+            stored_digest = {k: v for k, v in cursor.fetchall()}
+            was_enabled = (stored_digest.get("daily_digest_enabled") or "").strip().lower() in ("1", "true", "yes", "on")
+            stored_time = (stored_digest.get("daily_digest_schedule_time") or "09:00").strip()
+            turned_on = bool(req.daily_digest_enabled) and not was_enabled
+            time_changed = (
+                req.daily_digest_schedule_time is not None
+                and req.daily_digest_schedule_time.strip() != stored_time
+            )
+            if turned_on or time_changed:
+                updates.append(("daily_digest_armed_at", now, 0))
+
         if req.daily_digest_enabled is not None:
             updates.append(("daily_digest_enabled", "1" if req.daily_digest_enabled else "0", 0))
 

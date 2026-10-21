@@ -454,6 +454,8 @@ class DailyDigestWorker:
         """
         Synchronously check if daily digest is enabled, targets exist,
         and the configured local schedule time has arrived today without having run yet.
+        A digest missed while LogShed was down is sent when it starts again that day, but a
+        schedule set after today's schedule time (see `daily_digest_armed_at`) waits for tomorrow.
         """
         try:
             conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True, timeout=5.0)
@@ -466,7 +468,7 @@ class DailyDigestWorker:
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT key, value FROM system_settings WHERE key IN ('daily_digest_enabled', 'daily_digest_last_run', 'daily_digest_schedule_time')"
+                "SELECT key, value FROM system_settings WHERE key IN ('daily_digest_enabled', 'daily_digest_last_run', 'daily_digest_schedule_time', 'daily_digest_armed_at')"
             )
             rows = {r[0]: r[1] for r in cur.fetchall()}
 
@@ -489,6 +491,20 @@ class DailyDigestWorker:
             target_time = datetime.time(target_hour, target_minute)
             if now_local.time() < target_time:
                 return False
+
+            # A schedule that was just set (digest turned on, or its time changed) first sends at
+            # the next occurrence of the schedule time, not at once. A missing or unreadable marker
+            # (installs upgraded from 1.2.x) puts no limit on today's run.
+            armed_at_str = rows.get("daily_digest_armed_at")
+            if armed_at_str:
+                try:
+                    armed_at = datetime.datetime.fromisoformat(armed_at_str).astimezone()
+                except ValueError:
+                    armed_at = None
+                if armed_at is not None:
+                    today_target = now_local.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+                    if today_target < armed_at:
+                        return False
 
             last_run_str = rows.get("daily_digest_last_run")
             if not last_run_str:
