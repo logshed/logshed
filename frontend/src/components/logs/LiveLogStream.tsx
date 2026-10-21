@@ -20,7 +20,7 @@ import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
 import { getAuthStatus } from '../../api/auth.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
-import { fetchSettings, getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
+import { fetchSettings, getCachedServerTimezone } from '../../api/settings.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
@@ -328,7 +328,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [deleteSelectedError, setDeleteSelectedError] = useState<string | null>(null);
   const [activeAliasesMap, setActiveAliasesMap] = useState<Record<string, string>>({});
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
-  const [serverTzName, setServerTzName] = useState<string>(() => getCachedServerTzName() || '');
   const { aliasVersion } = useAlias();
   const lastHandledAliasVersionRef = useRef<number>(aliasVersion);
 
@@ -336,7 +335,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     fetchSettings()
       .then((s) => {
         if (s.server_timezone) setServerTimezone(s.server_timezone);
-        if (s.server_tz_name) setServerTzName(s.server_tz_name);
       })
       .catch(() => {});
   }, []);
@@ -1884,7 +1882,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           isOpen={Boolean(activeLogDetail)}
           onClose={() => setActiveLogDetail(null)}
           timeZone={serverTimezone}
-          tzName={serverTzName}
           onExplainWithAi={(log, ctxLogs) => {
             setActiveLogDetail(null);
             const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];

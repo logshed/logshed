@@ -4,8 +4,8 @@ import { LogEntry, DockerEndpoint } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
-import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp } from '../../utils/formatters.ts';
-import { getCachedServerTimezone, getCachedServerTzName } from '../../api/settings.ts';
+import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp, formatUtcOffset } from '../../utils/formatters.ts';
+import { getCachedServerTimezone } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
 
 interface LogDetailModalProps {
@@ -26,7 +26,6 @@ interface LogDetailModalProps {
   hasPreviousLog?: boolean;
   hasNextLog?: boolean;
   timeZone?: string;
-  tzName?: string;
 }
 
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
@@ -47,10 +46,13 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   hasPreviousLog,
   hasNextLog,
   timeZone,
-  tzName,
 }) => {
   const effectiveTimezone = timeZone || getCachedServerTimezone();
-  const effectiveTzName = tzName || getCachedServerTzName();
+  // Each timestamp gets the offset in force at its own moment, so the badge stays right across a clock change
+  const offsetBadge = (ts?: string | null) => {
+    const offset = formatUtcOffset(ts, effectiveTimezone);
+    return offset ? `(${offset})` : '';
+  };
   const hostIsAliased = Boolean(
     isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip)
   );
@@ -366,7 +368,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
           <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
-              Timestamp {effectiveTzName ? `(${effectiveTzName})` : ''}
+              Timestamp {offsetBadge(log.timestamp)}
             </span>
             <span className="font-mono text-slate-200 text-xs break-all select-all block">
               {formatFullTimestamp(log.timestamp, effectiveTimezone)}
@@ -377,7 +379,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           </div>
           <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
-              Received At {effectiveTzName ? `(${effectiveTzName})` : ''}
+              Received At {offsetBadge(log.received_at)}
             </span>
             <span className="font-mono text-slate-200 text-xs break-all select-all block">
               {formatFullTimestamp(log.received_at, effectiveTimezone)}

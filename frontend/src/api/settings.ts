@@ -3,7 +3,7 @@ import { SystemSettings } from '../types.ts';
 
 export interface SettingsResponseData extends SystemSettings {
   has_ai_api_key: boolean;
-  server_timezone?: string;
+  server_timezone?: string | null;
   server_tz_name?: string;
   server_tz_offset_minutes?: number;
 }
@@ -13,10 +13,6 @@ let settingsPromise: Promise<SettingsResponseData> | null = null;
 
 export function getCachedServerTimezone(): string | undefined {
   return cachedSettings?.server_timezone || undefined;
-}
-
-export function getCachedServerTzName(): string | undefined {
-  return cachedSettings?.server_tz_name || undefined;
 }
 
 export function getCachedServerTzOffset(): number | undefined {

@@ -220,7 +220,7 @@ class SettingsResponse(BaseModel):
     daily_digest_last_run: Optional[str] = None
 
     # Timezone Settings
-    server_timezone: str = "UTC"
+    server_timezone: Optional[str] = "UTC"
     server_tz_name: str = "UTC"
     server_tz_offset_minutes: int = 0
 

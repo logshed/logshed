@@ -3,6 +3,7 @@ Tests for AI engine, prompt construction, token estimation, Gemini/OpenAI dispat
 """
 
 import asyncio
+import datetime
 import json
 import sqlite3
 from pathlib import Path
@@ -2284,6 +2285,92 @@ class TestPromptFormattingAndStructuredData:
         assert 'code.file.path="components/wled/coordinator.py"' in prompt_text
         assert 'code.line.number="117"' in prompt_text
         assert "No PONG received after 15.0 seconds" in prompt_text
+
+    def test_format_prompt_log_line_zone_follows_clock_change(self):
+        """With a zone, each line gets the offset in force at its own moment (UK clocks went back at 01:00 UTC on 25 Oct 2026)."""
+        from zoneinfo import ZoneInfo
+
+        london = ZoneInfo("Europe/London")
+        before = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-25T00:30:00+00:00", source="nas", app_name="cron", message="first",
+            tz_name="Europe/London", tz=london,
+        )
+        after = ai_engine.format_prompt_log_line(
+            timestamp="2026-10-25T01:30:00+00:00", source="nas", app_name="cron", message="second",
+            tz_name="Europe/London", tz=london,
+        )
+        assert before == "[00:30:00 UTC (01:30:00 Europe/London)] [nas] [cron] first"
+        assert after == "[01:30:00 UTC (01:30:00 Europe/London)] [nas] [cron] second"
+
+    def test_build_analysis_prompt_timeline_reference_offsets(self):
+        single = ai_engine.build_analysis_prompt(
+            source_alias="nas", app_name="cron", redacted_logs="x", log_count=1,
+            tz_name="Europe/London", tz_offset_minutes=[0],
+        )
+        assert "Homelab Local Time: Europe/London (UTC+00:00)\n" in single
+
+        legacy_int = ai_engine.build_analysis_prompt(
+            source_alias="nas", app_name="cron", redacted_logs="x", log_count=1,
+            tz_name="Europe/London", tz_offset_minutes=60,
+        )
+        assert "Homelab Local Time: Europe/London (UTC+01:00)\n" in legacy_int
+
+        spanning = ai_engine.build_analysis_prompt(
+            source_alias="nas", app_name="cron", redacted_logs="x", log_count=2,
+            tz_name="Europe/London", tz_offset_minutes=[60, 0],
+        )
+        assert (
+            "Homelab Local Time: Europe/London (UTC+01:00, then UTC+00:00, the clocks changed during these logs)"
+            in spanning
+        )
+
+    def test_resolve_prompt_zone_prefers_zone_name_over_offset(self):
+        from app.services.ai_service import _resolve_prompt_zone
+
+        # A stale offset (BST, from a tab opened before the change) must not override the zone rules
+        zone, label = _resolve_prompt_zone("Europe/London", 60)
+        assert label == "Europe/London"
+        assert getattr(zone, "key", None) == "Europe/London"
+
+        zone, label = _resolve_prompt_zone(":Europe/London", None)
+        assert label == "Europe/London"
+
+        # No usable zone name: the offset is used as given
+        zone, label = _resolve_prompt_zone("BST", 60)
+        assert label == "BST"
+        assert zone.utcoffset(None) == datetime.timedelta(minutes=60)
+
+        zone, label = _resolve_prompt_zone(None, -300)
+        assert label == "UTC-05:00"
+
+    @pytest.mark.asyncio
+    async def test_preview_prompt_local_times_across_clock_change(self, populated_db, auth_client):
+        """Logs on both sides of the UK change get their own offsets, even when the client sends a stale one."""
+        conn = sqlite3.connect(populated_db)
+        cur = conn.cursor()
+        ids = []
+        for ts, msg in (("2026-10-24T14:00:00+00:00", "Saturday backup"), ("2026-10-26T14:00:00+00:00", "Monday backup")):
+            cur.execute(
+                """
+                INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+                VALUES (?, ?, '192.168.1.10', 'nas', 'backup', 1, 6, ?, ?)
+                """,
+                (ts, ts, msg, msg),
+            )
+            ids.append(cur.lastrowid)
+        conn.commit()
+        conn.close()
+
+        res = await auth_client.post(
+            "/api/ai/preview",
+            json={"log_ids": ids, "client_timezone": "Europe/London", "client_utc_offset_minutes": 60},
+        )
+        assert res.status_code == 200
+        prompt_text = res.json()["redacted_prompt"]
+
+        assert "[14:00:00 UTC (15:00:00 Europe/London)] [nas] [backup] [INFO] Saturday backup" in prompt_text
+        assert "[14:00:00 UTC (14:00:00 Europe/London)] [nas] [backup] [INFO] Monday backup" in prompt_text
+        assert "Europe/London (UTC+01:00, then UTC+00:00, the clocks changed during these logs)" in prompt_text
 
 
 class TestAiProviderStateAndKeyManagement:

@@ -6,7 +6,6 @@ Provides secure storage with encryption at rest for API keys.
 import asyncio
 import datetime
 import logging
-import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -24,7 +23,7 @@ from app.core.config import (
     get_cached_setting,
 )
 from app.core.security import decrypt_value, encrypt_value, mask_secret
-from app.core.utils import parse_iso_to_utc_datetime
+from app.core.utils import get_server_timezone_name, parse_iso_to_utc_datetime
 
 from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest, AiProviderConfig
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
@@ -184,7 +183,9 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     daily_digest_last_run = stored.get("daily_digest_last_run") or None
 
     now_local = datetime.datetime.now().astimezone()
-    server_timezone = os.environ.get("TZ") or now_local.tzname() or "UTC"
+    # An IANA name, or None when the server zone has none (the UI then shows browser time).
+    # Never an abbreviation such as BST: the UI formats with it, and its offset depends on the date.
+    server_timezone = get_server_timezone_name()
     server_tz_name = now_local.tzname() or "UTC"
     server_tz_offset_minutes = int(now_local.utcoffset().total_seconds() // 60) if now_local.utcoffset() else 0
 

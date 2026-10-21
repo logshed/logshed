@@ -10,7 +10,6 @@ import asyncio
 import datetime
 import json
 import logging
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
@@ -27,7 +26,13 @@ from app.core.config import (
 )
 from app.core.redactor import redact
 from app.core.security import decrypt_value
-from app.core.utils import parse_iso_to_utc_datetime
+from app.core.utils import (
+    format_utc_offset,
+    get_server_timezone_name,
+    get_server_tzinfo,
+    parse_iso_to_utc_datetime,
+    zone_from_name,
+)
 from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
     build_analysis_prompt,
@@ -189,6 +194,43 @@ def resolve_ai_provider_settings(
     }
 
 
+def _resolve_prompt_zone(
+    client_timezone: Optional[str],
+    client_utc_offset_minutes: Optional[int],
+) -> tuple[datetime.tzinfo, str]:
+    """
+    The time zone and label for local times in an analysis prompt.
+
+    A zone name (the UI sends the server zone, or the browser zone) wins, because it carries the
+    daylight saving rules: a log from before a clock change gets the offset it had then. A bare
+    offset is only used when no zone name resolves, and the server zone when neither is given.
+    """
+    zone = zone_from_name(client_timezone)
+    if zone is not None:
+        return zone, (client_timezone or "").strip().lstrip(":")
+    if client_utc_offset_minutes is not None and abs(client_utc_offset_minutes) < 24 * 60:
+        fixed = datetime.timezone(datetime.timedelta(minutes=client_utc_offset_minutes))
+        label = (client_timezone or "").strip() or format_utc_offset(client_utc_offset_minutes)
+        return fixed, label
+    server_tz = get_server_tzinfo()
+    label = get_server_timezone_name() or datetime.datetime.now(server_tz).tzname() or "UTC"
+    return server_tz, label
+
+
+def _offsets_in_force(rows: list[Any], tz: datetime.tzinfo) -> list[int]:
+    """The distinct UTC offsets (in minutes) of `tz` across the rows' timestamps, in time order."""
+    offsets: list[int] = []
+    for r in rows:
+        dt = parse_iso_to_utc_datetime(r["timestamp"])
+        offset = dt.astimezone(tz).utcoffset() if dt else None
+        if offset is None:
+            continue
+        minutes = int(offset.total_seconds() // 60)
+        if minutes not in offsets:
+            offsets.append(minutes)
+    return offsets
+
+
 async def build_diagnosis_context(
     log_ids: list[int],
     user_context: Optional[str] = None,
@@ -230,11 +272,8 @@ async def build_diagnosis_context(
 
     rows, settings, host_notes = result
 
-    now_local = datetime.datetime.now().astimezone()
-    eff_tz_name = client_timezone or os.environ.get("TZ") or now_local.tzname() or "UTC"
-    eff_tz_offset = client_utc_offset_minutes
-    if eff_tz_offset is None and now_local.utcoffset():
-        eff_tz_offset = int(now_local.utcoffset().total_seconds() // 60)
+    prompt_tz, eff_tz_name = _resolve_prompt_zone(client_timezone, client_utc_offset_minutes)
+    tz_offsets = _offsets_in_force(rows, prompt_tz)
 
     unique_aliases = sorted(list({r["source_alias"] for r in rows if r["source_alias"]}))
     source_alias = ", ".join(unique_aliases) if unique_aliases else (rows[0]["source_ip"] or "unknown")
@@ -251,7 +290,7 @@ async def build_diagnosis_context(
             severity=r["severity"],
             raw=r["raw"] if "raw" in r.keys() else None,
             tz_name=eff_tz_name,
-            tz_offset_minutes=eff_tz_offset,
+            tz=prompt_tz,
         )
         for r in rows
     ]
@@ -287,7 +326,7 @@ async def build_diagnosis_context(
             user_context=redacted_user_context,
             host_notes=redacted_host_notes,
             tz_name=eff_tz_name,
-            tz_offset_minutes=eff_tz_offset,
+            tz_offset_minutes=tz_offsets,
         )
         redacted_prompt_override = None
 

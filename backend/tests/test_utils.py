@@ -286,3 +286,75 @@ class TestParseRelativeLocalMidnight:
         before = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
         got = datetime.datetime.fromisoformat(parse_relative_or_iso_time("1h"))
         assert abs((got - before).total_seconds()) < 5
+
+
+class TestServerTimezoneName:
+    """get_server_timezone_name reports an IANA name the UI can format with, never an abbreviation."""
+
+    def test_tz_name_is_reported(self, server_tz):
+        from app.core.utils import get_server_timezone_name
+
+        server_tz("Europe/London")
+        assert get_server_timezone_name() == "Europe/London"
+
+    def test_leading_colon_is_dropped(self, server_tz):
+        from app.core.utils import get_server_timezone_name
+
+        server_tz(":Europe/London")
+        assert get_server_timezone_name() == "Europe/London"
+
+    def test_abbreviation_is_not_a_zone_name(self, server_tz):
+        from app.core.utils import get_server_timezone_name
+
+        server_tz("BST")
+        assert get_server_timezone_name() is None
+
+    def test_unnamed_zone_file_with_daylight_saving_has_no_name(self, monkeypatch):
+        import os
+        import zoneinfo
+        from app.core import utils as utils_mod
+
+        path = "/usr/share/zoneinfo/Europe/London"
+        if not os.path.exists(path):
+            pytest.skip("system zone files are not installed")
+        with open(path, "rb") as fh:
+            unnamed_london = zoneinfo.ZoneInfo.from_file(fh)
+        monkeypatch.delenv("TZ", raising=False)
+        monkeypatch.setattr(utils_mod, "_load_zone", lambda tz_env: unnamed_london)
+        assert utils_mod.get_server_timezone_name() is None
+
+    def test_unnamed_utc_zone_file_is_utc(self, monkeypatch):
+        import os
+        import zoneinfo
+        from app.core import utils as utils_mod
+
+        path = "/usr/share/zoneinfo/Etc/UTC"
+        if not os.path.exists(path):
+            pytest.skip("system zone files are not installed")
+        with open(path, "rb") as fh:
+            unnamed_utc = zoneinfo.ZoneInfo.from_file(fh)
+        monkeypatch.delenv("TZ", raising=False)
+        monkeypatch.setattr(utils_mod, "_load_zone", lambda tz_env: unnamed_utc)
+        assert utils_mod.get_server_timezone_name() == "UTC"
+
+
+class TestZoneHelpers:
+    """zone_from_name and format_utc_offset."""
+
+    def test_zone_from_name(self):
+        from app.core.utils import zone_from_name
+
+        assert zone_from_name("Europe/London").key == "Europe/London"
+        assert zone_from_name(":Europe/London").key == "Europe/London"
+        assert zone_from_name("BST") is None
+        assert zone_from_name("../../etc/passwd") is None
+        assert zone_from_name("") is None
+        assert zone_from_name(None) is None
+
+    def test_format_utc_offset(self):
+        from app.core.utils import format_utc_offset
+
+        assert format_utc_offset(60) == "UTC+01:00"
+        assert format_utc_offset(0) == "UTC+00:00"
+        assert format_utc_offset(330) == "UTC+05:30"
+        assert format_utc_offset(-150) == "UTC-02:30"

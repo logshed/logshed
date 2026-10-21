@@ -83,6 +83,29 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(handleAddAlias).toHaveBeenCalledWith('192.168.1.50');
   });
 
+  it('labels each timestamp with the UTC offset in force at that moment', () => {
+    // Logged at 00:59:59 UTC (still BST), received at 01:00:01 UTC (after UK clocks went back)
+    const acrossChange: LogEntry = {
+      ...sampleLog,
+      timestamp: '2026-10-25T00:59:59.000Z',
+      received_at: '2026-10-25T01:00:01.000Z',
+    };
+    render(
+      <LogDetailModal
+        log={acrossChange}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        timeZone="Europe/London"
+      />
+    );
+
+    expect(screen.getByText('Timestamp (UTC+01:00)')).toBeInTheDocument();
+    expect(screen.getByText('2026-10-25 01:59:59.000')).toBeInTheDocument();
+    expect(screen.getByText('Received At (UTC+00:00)')).toBeInTheDocument();
+    expect(screen.getByText('2026-10-25 01:00:01.000')).toBeInTheDocument();
+  });
+
   it('renders "Add Host Alias" when isHostAliased is false', () => {
     const unaliasedLog: LogEntry = {
       ...sampleLog,

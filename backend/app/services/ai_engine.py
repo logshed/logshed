@@ -11,7 +11,7 @@ import asyncio
 import datetime
 import logging
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import httpx
 from anthropic import (
@@ -25,6 +25,7 @@ from openai import AsyncOpenAI, APITimeoutError
 
 from app.core.config import DEFAULT_AI_MODEL, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET, is_debug_or_dev
 from app.core.redactor import redact
+from app.core.utils import format_utc_offset
 
 logger = logging.getLogger(__name__)
 
@@ -429,19 +430,22 @@ def format_prompt_log_line(
     raw: Optional[str] = None,
     tz_name: Optional[str] = None,
     tz_offset_minutes: Optional[int] = None,
+    tz: Optional[datetime.tzinfo] = None,
 ) -> str:
     """
     Format a single log record for inclusion in AI analysis prompt streams.
     Combines chronological timestamp, resolved source host/alias, application name,
     explicit severity code, and diagnostic structured data payload.
-    When tz_offset_minutes is provided, formats dual timestamps with both UTC and local homelab time.
+    When tz or tz_offset_minutes is provided, formats dual timestamps with both UTC and local homelab time.
+    A tz (such as a ZoneInfo) gives each line the offset in force at its own moment, so lines on
+    either side of a daylight saving change are both correct; tz_offset_minutes is one fixed offset.
     """
     ts_str = str(timestamp) if timestamp else "unknown"
     source_str = source or "unknown"
     app_str = app_name or "unknown"
 
     ts_display = ts_str
-    if tz_offset_minutes is not None and timestamp:
+    if (tz is not None or tz_offset_minutes is not None) and timestamp:
         try:
             clean_ts = str(timestamp).strip()
             if clean_ts.endswith("Z"):
@@ -451,7 +455,10 @@ def format_prompt_log_line(
                 dt_utc = dt_utc.replace(tzinfo=datetime.timezone.utc)
             else:
                 dt_utc = dt_utc.astimezone(datetime.timezone.utc)
-            dt_local = dt_utc + datetime.timedelta(minutes=tz_offset_minutes)
+            if tz is not None:
+                dt_local = dt_utc.astimezone(tz)
+            else:
+                dt_local = dt_utc + datetime.timedelta(minutes=tz_offset_minutes)
             tz_label = tz_name or "local"
             utc_time = dt_utc.strftime("%H:%M:%S")
             local_time = dt_local.strftime("%H:%M:%S")
@@ -489,11 +496,13 @@ def build_analysis_prompt(
     user_context: Optional[str] = None,
     host_notes: Optional[str] = None,
     tz_name: Optional[str] = None,
-    tz_offset_minutes: Optional[int] = None,
+    tz_offset_minutes: Optional[int | Sequence[int]] = None,
 ) -> str:
     """
     Construct the full prompt payload sent to the LLM.
     Combines host/container metadata, optional host notes, chronological redacted logs, and optional operator notes.
+    tz_offset_minutes is one UTC offset, or the offsets in force across the logs in time order
+    (two when a daylight saving change falls inside the selection).
     """
     parts = [
         "### System Metadata",
@@ -502,13 +511,18 @@ def build_analysis_prompt(
         f"- Total Selected Logs: {log_count}",
     ]
 
-    if tz_name or tz_offset_minutes is not None:
+    if isinstance(tz_offset_minutes, int):
+        offsets = [tz_offset_minutes]
+    else:
+        offsets = list(tz_offset_minutes or [])
+
+    if tz_name or offsets:
         tz_label = tz_name or "local"
-        if tz_offset_minutes is not None:
-            sign = "+" if tz_offset_minutes >= 0 else "-"
-            hours = abs(tz_offset_minutes) // 60
-            mins = abs(tz_offset_minutes) % 60
-            tz_label += f" (UTC{sign}{hours:02d}:{mins:02d})"
+        if len(offsets) == 1:
+            tz_label += f" ({format_utc_offset(offsets[0])})"
+        elif offsets:
+            joined = ", then ".join(format_utc_offset(o) for o in offsets)
+            tz_label += f" ({joined}, the clocks changed during these logs)"
         parts.append(f"- Timeline Reference: UTC (+00:00) with Homelab Local Time: {tz_label}")
 
     if host_notes and host_notes.strip():

@@ -72,11 +72,12 @@ Constructed by `build_analysis_prompt` in [backend/app/services/ai_engine.py](..
 - **System Role Prompt:** Establishes the LLM role as an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator. Directs the model to cite both UTC and local homelab timestamps when referencing event timelines.
 - **Context Blocks:**
   1. **System Metadata:** Originating host alias, container/app name, and total selected log line count.
-  2. **Timeline Reference:** UTC baseline (`+00:00`) alongside operator local timezone offset.
+  2. **Timeline Reference:** UTC baseline (`+00:00`) alongside the operator local time zone and the UTC offsets in force across the selected logs, in time order (two, such as `UTC+01:00, then UTC+00:00`, when a daylight saving change falls inside them).
   3. **Host Notes:** Optional operator notes associated with the matching IP or alias from `host_aliases` (passed through credential redaction).
   4. **Situational Context:** Optional operator notes entered in the UI or alert incident parameters (passed through credential redaction).
   5. **Chronological Log Stream:** Sequenced log block enclosed in code blocks with passive data instructions directing the model never to interpret log contents as executable instructions.
 - **Dual Timestamp Citation:** Each log line is formatted as `[{time_display}] [{source}] [{app_name}] [{severity}] {message}` where `time_display` includes UTC time and corresponding local time (e.g. `01:05:00 UTC (02:05:00 local)`).
+  The local time uses the offset in force at that log's own moment, from the zone named by `client_timezone` (an IANA name such as `Europe/London`). `client_utc_offset_minutes` is a fixed offset used only when `client_timezone` is not a known zone, and the server zone is used when neither is sent.
 
 ### 3.2 Structured Output Parsing (Summary, Explanation, Suggestion)
 

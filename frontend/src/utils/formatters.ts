@@ -305,6 +305,33 @@ export function formatFullTimestamp(
 }
 
 /**
+ * The UTC offset in force at a timestamp, as 'UTC+01:00', in the given time zone (browser time
+ * when none, or an invalid one, is given). Worked out per timestamp, so a log from before a
+ * daylight saving change shows the offset it had then. Returns '' for an unparseable value.
+ */
+export function formatUtcOffset(isoString?: string | null, timeZone?: string): string {
+  if (!isoString) return '';
+  const date = new Date(cleanIsoString(isoString));
+  if (isNaN(date.getTime())) return '';
+
+  // The zone's wall-clock fields read as if they were UTC, minus the real instant, is the offset
+  const parts = getDateParts(date, timeZone);
+  const wallMs = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    Number(parts.hours),
+    Number(parts.minutes),
+    Number(parts.seconds),
+  );
+  const instantMs = Math.floor(date.getTime() / 1000) * 1000;
+  const offsetMinutes = Math.round((wallMs - instantMs) / 60000);
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMinutes);
+  return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
+}
+
+/**
  * Slugifies text into an alphanumeric kebab-cased string suitable for filenames.
  */
 export function slugify(text: string): string {

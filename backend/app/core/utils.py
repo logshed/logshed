@@ -37,6 +37,43 @@ def get_server_tzinfo() -> datetime.tzinfo:
     return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
 
 
+def get_server_timezone_name() -> Optional[str]:
+    """
+    The IANA name of the server time zone (such as Europe/London), or None when it has none.
+
+    The name comes from TZ (a leading ':' is dropped). A zone read from /etc/localtime carries no
+    name, so it is reported as UTC only when it never moves off UTC, and otherwise as None.
+    Abbreviations such as BST are never returned: they are not zone names, and their offset
+    depends on the date.
+    """
+    zone = _load_zone(os.environ.get("TZ", "").strip())
+    if zone is None:
+        return None
+    key = getattr(zone, "key", None)
+    if key:
+        return key
+    january = datetime.datetime(2026, 1, 15, tzinfo=zone)
+    july = datetime.datetime(2026, 7, 15, tzinfo=zone)
+    if not january.utcoffset() and not july.utcoffset():
+        return "UTC"
+    return None
+
+
+def zone_from_name(name: Optional[str]) -> Optional[datetime.tzinfo]:
+    """The IANA time zone for a name such as Europe/London (a leading ':' is allowed), or None."""
+    clean = (name or "").strip().lstrip(":")
+    if not clean:
+        return None
+    return _load_zone(clean)
+
+
+def format_utc_offset(minutes: int) -> str:
+    """A UTC offset in minutes as 'UTC+01:00' or 'UTC-05:30'."""
+    sign = "+" if minutes >= 0 else "-"
+    hours, mins = divmod(abs(minutes), 60)
+    return f"UTC{sign}{hours:02d}:{mins:02d}"
+
+
 def match_wildcard(pattern: Optional[str], text: Optional[str]) -> bool:
     """
     Case-insensitive wildcard matching supporting '*' and '?'.

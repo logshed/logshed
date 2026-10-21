@@ -92,7 +92,7 @@ export interface SystemSettings {
   daily_digest_last_run?: string | null;
 
   // Timezone Settings
-  server_timezone?: string;
+  server_timezone?: string | null;
   server_tz_name?: string;
   server_tz_offset_minutes?: number;
 }

@@ -26,7 +26,7 @@ LogShed separates configuration into **bootstrap primitives** (required before t
 #### Bootstrap Primitives (Container Environment Only)
 The following environment variables are supplied at container start and are strictly container-level primitives:
 - `PUID` and `PGID` - User and group IDs for the application to run as via `gosu` privilege reduction (defaults to `1000:1000`).
-- `TZ` - Container runtime timezone (defaults to `UTC`). Resolved at runtime and exposed through `/api/settings` to align UI presentation and AI timeline analysis with the homelab host or container clock.
+- `TZ` - Container runtime timezone (defaults to `UTC`). Resolved at runtime and exposed through `/api/settings` to align UI presentation and AI timeline analysis with the homelab host or container clock. `server_timezone` is always an IANA zone name (a leading `:` in `TZ` is dropped), or `null` when the server zone has none (an unknown `TZ`, or `TZ` unset with a non-UTC `/etc/localtime`); the UI then shows browser time. It is never an abbreviation such as `BST`, which browsers can read as a different zone.
 - `PORT` - Web/API HTTP port (defaults to `8080`).
 - `SYSLOG_PORT` - Syslog listening port for UDP and TCP (defaults to `1514`).
 - `DATA_DIR` - Mount path for persistent SQLite database, master key, and presets (defaults to `/data`).

@@ -11,6 +11,7 @@ import {
   formatFullTimestamp,
   formatStreamTimestamp,
   getTodayKey,
+  formatUtcOffset,
 } from '../utils/formatters.ts';
 
 describe('stripAnsi', () => {
@@ -373,5 +374,42 @@ describe('formatStreamTimestamp (live stream rows)', () => {
   it('falls back to browser time when the time zone is invalid', () => {
     const d = new Date(2026, 8, 3, 14, 22, 1, 0);
     expect(formatStreamTimestamp(d.toISOString(), undefined, 'Not/AZone', '1999-01-01')).toBe('03 Sep 14:22:01');
+  });
+});
+
+describe('formatUtcOffset', () => {
+  it('gives each timestamp the offset in force at that moment across a clock change', () => {
+    // UK clocks went back at 01:00 UTC on 25 Oct 2026
+    expect(formatUtcOffset('2026-10-25T00:30:00Z', 'Europe/London')).toBe('UTC+01:00');
+    expect(formatUtcOffset('2026-10-25T01:30:00Z', 'Europe/London')).toBe('UTC+00:00');
+    expect(formatUtcOffset('2026-10-24T14:00:00+00:00', 'Europe/London')).toBe('UTC+01:00');
+    expect(formatUtcOffset('2026-10-26T14:00:00+00:00', 'Europe/London')).toBe('UTC+00:00');
+  });
+
+  it('handles half-hour and negative offsets', () => {
+    expect(formatUtcOffset('2026-10-25T12:00:00Z', 'Asia/Kolkata')).toBe('UTC+05:30');
+    expect(formatUtcOffset('2026-10-25T12:00:00Z', 'America/New_York')).toBe('UTC-04:00');
+    expect(formatUtcOffset('2026-11-02T12:00:00Z', 'America/New_York')).toBe('UTC-05:00');
+    expect(formatUtcOffset('2026-10-25T12:00:00Z', 'America/St_Johns')).toBe('UTC-02:30');
+  });
+
+  it('treats a timestamp without a zone suffix as UTC and keeps sub-second values', () => {
+    expect(formatUtcOffset('2026-10-25 00:30:00.999', 'Europe/London')).toBe('UTC+01:00');
+  });
+
+  it('falls back to browser time for a missing or invalid zone', () => {
+    const date = new Date('2026-10-25T12:00:00Z');
+    const browser = -date.getTimezoneOffset();
+    const sign = browser >= 0 ? '+' : '-';
+    const abs = Math.abs(browser);
+    const expected = `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
+    expect(formatUtcOffset('2026-10-25T12:00:00Z')).toBe(expected);
+    expect(formatUtcOffset('2026-10-25T12:00:00Z', 'Not/AZone')).toBe(expected);
+  });
+
+  it('returns an empty string for an empty or unparseable value', () => {
+    expect(formatUtcOffset('', 'Europe/London')).toBe('');
+    expect(formatUtcOffset(null, 'Europe/London')).toBe('');
+    expect(formatUtcOffset('not a date', 'Europe/London')).toBe('');
   });
 });

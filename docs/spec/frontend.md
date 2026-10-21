@@ -38,7 +38,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * Persist current query parameters with custom display names.
   * Pin frequently accessed views directly to the filter bar.
 * **Log Detail & Context Inspector:**
-  * Slide-over inspection drawer presenting parsed metadata, source IP, facility, formatted homelab timestamp (with timezone abbreviation badge), secondary database UTC reference line, and raw unparsed syslog payload.
+  * Slide-over inspection drawer presenting parsed metadata, source IP, facility, formatted homelab timestamp (with a UTC offset badge such as `UTC+01:00`, worked out for each timestamp so logs from either side of a daylight saving change show the offset they had), secondary database UTC reference line, and raw unparsed syslog payload.
   * Protocol-aware host actions: For Docker records (`facility === 1`), links directly to "Edit Docker Host" or "Configure Docker Host" in `/settings/sources`. For records matching a deleted Docker endpoint, displays a recovery notice modal with endpoint configuration details. For Syslog records (`facility !== 1`), provides quick-add and edit actions for host IP aliases.
   * One-click action to fetch surrounding context lines formatted in the configured homelab timezone (symmetric 10 entries around selected record).
 * **Targeted Log Deletion Modal:**

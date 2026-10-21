@@ -281,8 +281,21 @@ class TestSettingsCache:
         assert "server_timezone" in data
         assert "server_tz_name" in data
         assert "server_tz_offset_minutes" in data
-        assert isinstance(data["server_timezone"], str)
+        assert data["server_timezone"] is None or isinstance(data["server_timezone"], str)
         assert isinstance(data["server_tz_offset_minutes"], int)
+
+    @pytest.mark.asyncio
+    async def test_server_timezone_is_an_iana_name_or_null(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        """server_timezone is what the UI formats with, so it is a zone name, never an abbreviation like BST."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        monkeypatch.setenv("TZ", ":Europe/London")
+        res = await client.get("/api/settings")
+        assert res.json()["server_timezone"] == "Europe/London"
+
+        monkeypatch.setenv("TZ", "BST")
+        res = await client.get("/api/settings")
+        assert res.json()["server_timezone"] is None
 
 
 
