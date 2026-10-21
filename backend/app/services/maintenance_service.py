@@ -15,7 +15,7 @@ import uuid
 import threading
 from typing import Any, Optional
 
-from app.core.utils import match_wildcard, parse_iso_to_utc_datetime
+from app.core.utils import get_server_tzinfo, match_wildcard, parse_iso_to_utc_datetime
 from app.models import MaintenanceSchedule, MaintenanceSessionDetail, MaintenanceWindowResponse
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,8 @@ DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "
 
 
 def _get_server_time_info() -> tuple[datetime.datetime, str]:
-    """Get current local server datetime and timezone abbreviation."""
-    now_local = datetime.datetime.now().astimezone()
+    """Get current local server datetime (in the server zone, with its DST rules) and zone abbreviation."""
+    now_local = datetime.datetime.now(get_server_tzinfo())
     tz_name = now_local.tzname() or "UTC"
     return now_local, tz_name
 
@@ -36,6 +36,21 @@ def _clamp_day_of_month(year: int, month: int, day: int) -> int:
     return min(max(1, day), max_days)
 
 
+def _local_instant(
+    day: datetime.date, hour: int, minute: int, tz: datetime.tzinfo
+) -> datetime.datetime:
+    """
+    The real moment (as a UTC datetime) of the wall-clock time `hour:minute` on `day` in `tz`.
+
+    The offset is looked up for that date, so a time after a daylight saving change carries the
+    new offset. A time inside the hour skipped by a spring-forward change does not exist, and is
+    moved forward by the length of the gap (01:30 becomes 02:30 when 01:00 jumps to 02:00). A time
+    inside the hour repeated by an autumn change means its first occurrence.
+    """
+    wall = datetime.datetime.combine(day, datetime.time(hour, minute))
+    return wall.replace(tzinfo=tz).astimezone(datetime.timezone.utc)
+
+
 def evaluate_schedule(
     schedule: MaintenanceSchedule,
     now_local: datetime.datetime,
@@ -44,8 +59,14 @@ def evaluate_schedule(
     Evaluate whether a maintenance schedule is currently active, and compute
     its active end time (if active) and next occurrence start time.
 
+    Schedule times are wall-clock times in `now_local`'s time zone. Pass a datetime in a real
+    zone (a ZoneInfo, see get_server_tzinfo) so days with a clock change stay correct: each start
+    time gets the offset in force on its own date, and a window lasts `duration_minutes` of real
+    time even when a clock change falls inside it. Comparisons run on UTC instants because aware
+    datetimes sharing one tzinfo are compared by wall-clock fields, which breaks across a change.
+
     Returns:
-        (is_active, active_end_dt, next_start_dt)
+        (is_active, active_end_dt, next_start_dt), the datetimes in `now_local`'s time zone.
     """
     if not schedule.enabled:
         return False, None, None
@@ -61,32 +82,35 @@ def evaluate_schedule(
     duration = datetime.timedelta(minutes=max(1, schedule.duration_minutes))
     recurrence = (schedule.recurrence or "weekly").lower()
 
+    tz = now_local.tzinfo or datetime.timezone.utc
+    now = now_local.astimezone(datetime.timezone.utc)
+    today = now_local.date()
+    one_day = datetime.timedelta(days=1)
+
+    def at(day: datetime.date) -> datetime.datetime:
+        return _local_instant(day, start_hour, start_minute, tz)
+
     is_active = False
-    active_end_dt: Optional[datetime.datetime] = None
-    next_start_dt: Optional[datetime.datetime] = None
+    active_end: Optional[datetime.datetime] = None
+    next_start: Optional[datetime.datetime] = None
 
     if recurrence == "daily":
         # Today's window
-        start_today = now_local.replace(
-            hour=start_hour, minute=start_minute, second=0, microsecond=0
-        )
+        start_today = at(today)
         end_today = start_today + duration
 
         # Yesterday's window (in case it crossed midnight into today)
-        start_yesterday = start_today - datetime.timedelta(days=1)
+        start_yesterday = at(today - one_day)
         end_yesterday = start_yesterday + duration
 
-        if start_yesterday <= now_local < end_yesterday:
+        if start_yesterday <= now < end_yesterday:
             is_active = True
-            active_end_dt = end_yesterday
-        elif start_today <= now_local < end_today:
+            active_end = end_yesterday
+        elif start_today <= now < end_today:
             is_active = True
-            active_end_dt = end_today
+            active_end = end_today
 
-        if now_local < start_today:
-            next_start_dt = start_today
-        else:
-            next_start_dt = start_today + datetime.timedelta(days=1)
+        next_start = start_today if now < start_today else at(today + one_day)
 
     elif recurrence == "weekly":
         # Target day of week: 0=Sunday, 1=Monday, ..., 6=Saturday
@@ -95,82 +119,67 @@ def evaluate_schedule(
         current_dow = (now_local.weekday() + 1) % 7
 
         days_since = (current_dow - target_dow) % 7
-        start_this_week = (now_local - datetime.timedelta(days=days_since)).replace(
-            hour=start_hour, minute=start_minute, second=0, microsecond=0
-        )
+        day_this_week = today - datetime.timedelta(days=days_since)
+        start_this_week = at(day_this_week)
         end_this_week = start_this_week + duration
 
         # Check previous week in case window crossed week boundary
-        start_prev_week = start_this_week - datetime.timedelta(days=7)
+        start_prev_week = at(day_this_week - datetime.timedelta(days=7))
         end_prev_week = start_prev_week + duration
 
-        if start_prev_week <= now_local < end_prev_week:
+        if start_prev_week <= now < end_prev_week:
             is_active = True
-            active_end_dt = end_prev_week
-        elif start_this_week <= now_local < end_this_week:
+            active_end = end_prev_week
+        elif start_this_week <= now < end_this_week:
             is_active = True
-            active_end_dt = end_this_week
+            active_end = end_this_week
 
         days_until = (target_dow - current_dow) % 7
         if days_until == 0:
-            if now_local < start_this_week:
-                next_start_dt = start_this_week
+            if now < start_this_week:
+                next_start = start_this_week
             else:
-                next_start_dt = start_this_week + datetime.timedelta(days=7)
+                next_start = at(day_this_week + datetime.timedelta(days=7))
         else:
-            next_start_dt = (now_local + datetime.timedelta(days=days_until)).replace(
-                hour=start_hour, minute=start_minute, second=0, microsecond=0
-            )
+            next_start = at(today + datetime.timedelta(days=days_until))
 
     elif recurrence == "monthly":
         target_dom = schedule.day_of_month if schedule.day_of_month is not None else 1
 
         # Check current month
         day_curr = _clamp_day_of_month(now_local.year, now_local.month, target_dom)
-        start_curr = now_local.replace(
-            day=day_curr, hour=start_hour, minute=start_minute, second=0, microsecond=0
-        )
+        start_curr = at(datetime.date(now_local.year, now_local.month, day_curr))
         end_curr = start_curr + duration
 
         # Check previous month in case window crossed month boundary
         prev_year = now_local.year if now_local.month > 1 else now_local.year - 1
         prev_month = now_local.month - 1 if now_local.month > 1 else 12
         day_prev = _clamp_day_of_month(prev_year, prev_month, target_dom)
-        start_prev = now_local.replace(
-            year=prev_year,
-            month=prev_month,
-            day=day_prev,
-            hour=start_hour,
-            minute=start_minute,
-            second=0,
-            microsecond=0,
-        )
+        start_prev = at(datetime.date(prev_year, prev_month, day_prev))
         end_prev = start_prev + duration
 
-        if start_prev <= now_local < end_prev:
+        if start_prev <= now < end_prev:
             is_active = True
-            active_end_dt = end_prev
-        elif start_curr <= now_local < end_curr:
+            active_end = end_prev
+        elif start_curr <= now < end_curr:
             is_active = True
-            active_end_dt = end_curr
+            active_end = end_curr
 
-        if now_local < start_curr:
-            next_start_dt = start_curr
+        if now < start_curr:
+            next_start = start_curr
         else:
             next_year = now_local.year if now_local.month < 12 else now_local.year + 1
             next_month = now_local.month + 1 if now_local.month < 12 else 1
             day_next = _clamp_day_of_month(next_year, next_month, target_dom)
-            next_start_dt = now_local.replace(
-                year=next_year,
-                month=next_month,
-                day=day_next,
-                hour=start_hour,
-                minute=start_minute,
-                second=0,
-                microsecond=0,
-            )
+            next_start = at(datetime.date(next_year, next_month, day_next))
 
-    return is_active, active_end_dt, next_start_dt
+    # Instants are computed in UTC (so adding a duration is real elapsed time); show them in
+    # the caller's zone, which gives each the offset in force at that moment.
+    return (
+        is_active,
+        active_end.astimezone(tz) if active_end else None,
+        next_start.astimezone(tz) if next_start else None,
+    )
 
 
 def load_schedules(conn: sqlite3.Connection) -> list[MaintenanceSchedule]:
@@ -591,8 +600,10 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
 
         if sched_active and sched_end_dt:
             scheduled_active = True
-            if active_schedule_end_dt is None or sched_end_dt > active_schedule_end_dt:
-                active_schedule_end_dt = sched_end_dt
+            # Compare as UTC instants: datetimes sharing one tzinfo compare by wall clock
+            sched_end_utc = sched_end_dt.astimezone(datetime.timezone.utc)
+            if active_schedule_end_dt is None or sched_end_utc > active_schedule_end_dt:
+                active_schedule_end_dt = sched_end_utc
                 active_schedule_name = sched.name
 
     # Determine latest expiration timestamp across all active sources
@@ -600,7 +611,7 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
     if on_demand_active and on_demand_until_dt:
         all_end_times.append(on_demand_until_dt)
     if scheduled_active and active_schedule_end_dt:
-        all_end_times.append(active_schedule_end_dt.astimezone(datetime.timezone.utc))
+        all_end_times.append(active_schedule_end_dt)
 
     session_details: list[MaintenanceSessionDetail] = []
     has_drop_errors = False

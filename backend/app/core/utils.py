@@ -4,7 +4,37 @@ Shared core utility functions for string matching, normalization, and timestamp 
 
 import datetime
 import fnmatch
+import functools
+import os
+import zoneinfo
 from typing import Any, Optional
+
+
+@functools.lru_cache(maxsize=8)
+def _load_zone(tz_env: str) -> Optional[datetime.tzinfo]:
+    """Resolve the process time zone rules from the TZ value ('' means unset), or None."""
+    try:
+        if tz_env:
+            # Accept the POSIX ':Europe/London' spelling as well as 'Europe/London'.
+            return zoneinfo.ZoneInfo(tz_env.lstrip(":"))
+        with open("/etc/localtime", "rb") as fh:
+            return zoneinfo.ZoneInfo.from_file(fh)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+
+
+def get_server_tzinfo() -> datetime.tzinfo:
+    """
+    Return the server's local time zone with its daylight saving rules.
+
+    The zone comes from the TZ environment variable (an IANA name such as Europe/London),
+    or from /etc/localtime when TZ is unset. If neither can be read, it falls back to
+    today's fixed UTC offset, which is correct today but not across a clock change.
+    """
+    zone = _load_zone(os.environ.get("TZ", "").strip())
+    if zone is not None:
+        return zone
+    return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
 
 
 def match_wildcard(pattern: Optional[str], text: Optional[str]) -> bool:
