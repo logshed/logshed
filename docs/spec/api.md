@@ -119,7 +119,8 @@ Midnight is built from the local date, so days with a daylight saving change sta
 | `GET` | `/api/system/version` | Read installed version and check GHCR for stable release updates (no session needed unless `refresh` is true) | Query params: `refresh: bool` | `VersionResponse` | `200`, `401` (`refresh=true` without a session) |
 | **API Token Management (Web UI)** | | | | | |
 | `GET` | `/api/tokens` | List all created API tokens with masked identifiers, scopes, and expiration | None | `list[ApiTokenListItem]` | `200`, `401` |
-| `POST` | `/api/tokens` | Create a new API token and receive one-time raw Bearer secret | `{"name": "...", "scopes": [...], "expires_days": 90}` | `ApiTokenCreateResponse` | `200`, `401`, `422` (1 to 20 scopes from the allow-list in `docs/spec/security.md`) |
+| `POST` | `/api/tokens` | Create a new API token and receive one-time raw Bearer secret | `{"name": "...", "scopes": [...], "expires_days": 90}` | `ApiTokenCreateResponse` | `200`, `401`, `422` (blank name, or not 1 to 20 scopes from the allow-list in `docs/spec/security.md`) |
+| `PATCH` | `/api/tokens/{id}` | Rename an API token, change its scopes, or both, keeping its secret, expiry and usage history (session only; the change applies to the token's next request, and a payload that changes nothing writes nothing) | `{"name": "..."}`, `{"scopes": [...]}` or both | `ApiTokenListItem` | `200`, `401`, `404`, `422` (blank or longer than 100 characters name, scopes as on create, `{}` or a field sent as `null`) |
 | `DELETE` | `/api/tokens/{id}` | Revoke an API token immediately | None | `MessageResponse` (`{"status": "ok"}`) | `200`, `401`, `404` |
 | **Docker Hosts Management** | | | | | |
 | `GET` | `/api/docker/hosts` | List configured Docker hosts with live connection health and container metrics | None | `list[DockerEndpointResponse]` | `200`, `401` |

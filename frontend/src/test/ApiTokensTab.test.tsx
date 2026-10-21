@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ApiTokensTab, getPresetName } from '../components/settings/ApiTokensTab.tsx';
 import * as tokensApi from '../api/tokens.ts';
@@ -187,7 +187,13 @@ describe('ApiTokensTab Component', () => {
     expect(getPresetName(['logs:read', 'alerts:read', 'system:read'])).toBe('Read Only');
     expect(getPresetName(['maintenance:write', 'maintenance:read'])).toBe('Maintenance Only');
     expect(getPresetName(['logs:write'])).toBe('Edge Shipper / Ingest');
-    expect(getPresetName(['custom:read'])).toBe('custom:read');
+    // Presets match by exact scope set; anything else is Custom
+    expect(getPresetName(['system:read', 'logs:read', 'alerts:read'])).toBe('Read Only');
+    expect(getPresetName(['logs:read', 'alerts:read', 'system:read', 'logs:write'])).toBe('Custom');
+    expect(getPresetName(['maintenance:write', 'maintenance:read', 'logs:read'])).toBe('Custom');
+    expect(getPresetName(['logs:*'])).toBe('Custom');
+    expect(getPresetName(['system:write', 'system:read', 'maintenance:write'])).toBe('Home Assistant');
+    expect(getPresetName(['system:read'])).toBe('Custom');
   });
 
   it('offers a read-only AI assistant preset by default and a separate preset with maintenance:write', async () => {
@@ -419,5 +425,337 @@ describe('ApiTokensTab Component', () => {
     const alert = await screen.findByText('Revoke failed upstream');
     expect(alert.closest('[data-testid="revoke-token-modal"]')).not.toBeNull();
     expect(screen.getByText(/Are you sure you want to revoke/i)).toBeInTheDocument();
+  });
+
+  describe('custom scope picker in the generate modal', () => {
+    const createdToken = {
+      token: {
+        id: 9,
+        name: 'Picker',
+        token_prefix: 'ls_live_9999...9999',
+        scopes: ['logs:*'],
+        created_at: '2026-10-09T12:00:00Z',
+        expires_at: null,
+        last_used_at: null,
+      },
+      raw_token: 'ls_live_9999999999999999999999999999999999999999',
+    };
+
+    // Opens the generate modal on Custom with nothing ticked
+    const openEmptyCustomPicker = async () => {
+      vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+      const createSpy = vi.spyOn(tokensApi, 'createApiToken').mockResolvedValue(createdToken);
+      render(<ApiTokensTab />);
+      await waitFor(() => {
+        expect(screen.getByText('No API tokens generated yet')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Generate Token/i }));
+      fireEvent.change(screen.getByPlaceholderText('e.g. Home Assistant or Claude Desktop'), {
+        target: { value: 'Picker' },
+      });
+      fireEvent.click(screen.getByRole('radio', { name: /^Custom/ }));
+      const root = screen.getByRole('checkbox', { name: /Full Access/ });
+      fireEvent.click(root);
+      fireEvent.click(root);
+      expect(screen.getByText('Choose at least one scope')).toBeInTheDocument();
+      return createSpy;
+    };
+
+    const submit = () => fireEvent.click(screen.getByRole('button', { name: /Create Token/i }));
+
+    it('starts Custom as a copy of the selected preset', async () => {
+      vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+      render(<ApiTokensTab />);
+      await waitFor(() => {
+        expect(screen.getByText('No API tokens generated yet')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Generate Token/i }));
+      fireEvent.click(screen.getByRole('radio', { name: /AI Assistant \/ MCP \+ Maintenance/ }));
+      fireEvent.click(screen.getByRole('radio', { name: /^Custom/ }));
+
+      expect(screen.getByRole('group', { name: 'Custom scopes' })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: 'maintenance:write' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'maintenance:read' })).not.toBeChecked();
+      expect(screen.getByTestId('create-token-saved-scopes')).toHaveTextContent(
+        'logs:read, alerts:read, system:read, maintenance:write'
+      );
+    });
+
+    it('disables submit while nothing is ticked', async () => {
+      await openEmptyCustomPicker();
+      expect(screen.getByRole('button', { name: /Create Token/i })).toBeDisabled();
+    });
+
+    it('ticking a category ticks its actions and saves the wildcard', async () => {
+      const createSpy = await openEmptyCustomPicker();
+      fireEvent.click(screen.getByRole('checkbox', { name: /logs:\*/ }));
+      expect(screen.getByRole('checkbox', { name: 'logs:read' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'logs:write' })).toBeChecked();
+      expect(screen.getByTestId('create-token-saved-scopes')).toHaveTextContent(/^logs:\*$/);
+
+      submit();
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenLastCalledWith({ name: 'Picker', scopes: ['logs:*'], expires_days: 90 });
+      });
+    });
+
+    it('unticking an action of a ticked category keeps its siblings', async () => {
+      const createSpy = await openEmptyCustomPicker();
+      fireEvent.click(screen.getByRole('checkbox', { name: /logs:\*/ }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'logs:write' }));
+      expect(screen.getByRole('checkbox', { name: /logs:\*/ })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'logs:read' })).toBeChecked();
+
+      submit();
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenLastCalledWith({ name: 'Picker', scopes: ['logs:read'], expires_days: 90 });
+      });
+    });
+
+    it('unticking an action under Full Access keeps every other category as a wildcard', async () => {
+      const createSpy = await openEmptyCustomPicker();
+      fireEvent.click(screen.getByRole('checkbox', { name: /Full Access/ }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'logs:write' }));
+      expect(screen.getByTestId('create-token-saved-scopes')).toHaveTextContent(
+        'logs:read, alerts:*, system:*, maintenance:*'
+      );
+
+      submit();
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenLastCalledWith({
+          name: 'Picker',
+          scopes: ['logs:read', 'alerts:*', 'system:*', 'maintenance:*'],
+          expires_days: 90,
+        });
+      });
+    });
+
+    it('ticking every action one by one leaves the category indeterminate', async () => {
+      const createSpy = await openEmptyCustomPicker();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'logs:read' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'logs:write' }));
+      const category = screen.getByRole('checkbox', { name: /logs:\*/ }) as HTMLInputElement;
+      expect(category).not.toBeChecked();
+      expect(category.indeterminate).toBe(true);
+      expect((screen.getByRole('checkbox', { name: /Full Access/ }) as HTMLInputElement).indeterminate).toBe(true);
+
+      submit();
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenLastCalledWith({
+          name: 'Picker',
+          scopes: ['logs:read', 'logs:write'],
+          expires_days: 90,
+        });
+      });
+    });
+  });
+
+  describe('edit token modal', () => {
+    const readOnlyToken: ApiToken = {
+      id: 3,
+      name: 'Claude Read-Only',
+      token_prefix: 'ls_live_3333...3333',
+      scopes: ['logs:read', 'alerts:read', 'system:read'],
+      created_at: '2026-10-09T10:00:00Z',
+      expires_at: null,
+      last_used_at: null,
+      created_by: 'admin',
+    };
+    const customToken: ApiToken = {
+      ...readOnlyToken,
+      id: 4,
+      name: 'Hand Built',
+      token_prefix: 'ls_live_4444...4444',
+      scopes: ['logs:read', 'alerts:read', 'system:read', 'logs:write'],
+    };
+    const logsActionsToken: ApiToken = {
+      ...readOnlyToken,
+      id: 5,
+      name: 'Logs Both',
+      token_prefix: 'ls_live_5555...5555',
+      scopes: ['logs:read', 'logs:write'],
+    };
+
+    const openEdit = async (token: ApiToken) => {
+      const fetchSpy = vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([token]);
+      const updateSpy = vi.spyOn(tokensApi, 'updateApiToken').mockResolvedValue(token);
+      render(<ApiTokensTab />);
+      await waitFor(() => {
+        expect(screen.getByText('Active Tokens (1)')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTitle('Edit Token'));
+      const modal = within(screen.getByTestId('edit-token-modal'));
+      return { fetchSpy, updateSpy, modal };
+    };
+
+    it('preselects the matching preset and the current name, and keeps Save disabled until something changes', async () => {
+      const { modal } = await openEdit(readOnlyToken);
+      expect(modal.getByRole('heading', { name: 'Edit API token' })).toBeInTheDocument();
+      expect(modal.getByLabelText('Name')).toHaveValue('Claude Read-Only');
+      // Read Only and AI Assistant / MCP (Read Only) share these scopes: the first one is selected
+      expect(modal.getByRole('radio', { name: /^Read Only/ })).toBeChecked();
+      expect(modal.getByRole('radio', { name: /AI Assistant \/ MCP \(Read Only\)/ })).not.toBeChecked();
+      expect(modal.getByText(/stays the same, so clients need no update/)).toBeInTheDocument();
+
+      const save = modal.getByRole('button', { name: 'Save' });
+      expect(save).toBeDisabled();
+      // The other preset with the same scopes is not a change
+      fireEvent.click(modal.getByRole('radio', { name: /AI Assistant \/ MCP \(Read Only\)/ }));
+      expect(save).toBeDisabled();
+
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: 'Claude' } });
+      expect(save).toBeEnabled();
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: '   ' } });
+      expect(save).toBeDisabled();
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: ' Claude Read-Only ' } });
+      expect(save).toBeDisabled();
+    });
+
+    it('a rename sends only the name, saves and refreshes the list', async () => {
+      const { modal, updateSpy, fetchSpy } = await openEdit(readOnlyToken);
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: ' Claude Maintenance ' } });
+      expect(screen.queryByTestId('scope-gain-warning')).not.toBeInTheDocument();
+      fireEvent.click(modal.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(3, { name: 'Claude Maintenance' });
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
+      expect(screen.queryByTestId('edit-token-modal')).not.toBeInTheDocument();
+    });
+
+    it('a scope change sends only the scopes and warns about added access', async () => {
+      const { modal, updateSpy } = await openEdit(readOnlyToken);
+      fireEvent.click(modal.getByRole('radio', { name: /AI Assistant \/ MCP \+ Maintenance/ }));
+
+      const warning = screen.getByTestId('scope-gain-warning');
+      expect(warning).toHaveTextContent('This token gains: maintenance:write.');
+      expect(warning).toHaveTextContent(/straight away/);
+      expect(warning).toHaveTextContent(/untrusted and can try to steer an assistant/);
+
+      fireEvent.click(modal.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(3, {
+          scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
+        });
+      });
+    });
+
+    it('moves a sensors-only Home Assistant token to the Home Assistant preset without the assistant warning', async () => {
+      const sensorsOnly: ApiToken = { ...readOnlyToken, id: 6, name: 'Home Assistant', scopes: ['system:read'] };
+      const { modal, updateSpy } = await openEdit(sensorsOnly);
+      expect(modal.getByRole('radio', { name: /^Custom/ })).toBeChecked();
+      fireEvent.click(modal.getByRole('radio', { name: /^Home Assistant/ }));
+
+      const warning = screen.getByTestId('scope-gain-warning');
+      expect(warning).toHaveTextContent('This token gains: system:write, maintenance:write.');
+      expect(warning).not.toHaveTextContent(/steer an assistant/);
+      // The name still fits, but the hint is shown for any scope change
+      expect(modal.getByText(/The name still says 'Home Assistant'/)).toBeInTheDocument();
+
+      fireEvent.click(modal.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(6, { scopes: ['system:read', 'maintenance:write', 'system:write'] });
+      });
+    });
+
+    it('warns prominently about gaining full access', async () => {
+      const { modal } = await openEdit(readOnlyToken);
+      fireEvent.click(modal.getByRole('radio', { name: /^Full Access/ }));
+      const warning = screen.getByTestId('scope-gain-warning');
+      expect(warning).toHaveTextContent('This token gains: *.');
+      expect(warning).toHaveTextContent(/any action added in later versions/);
+    });
+
+    it('does not warn when access is only removed', async () => {
+      const { modal, updateSpy } = await openEdit(customToken);
+      expect(modal.getByRole('radio', { name: /^Custom/ })).toBeChecked();
+      fireEvent.click(modal.getByRole('checkbox', { name: 'logs:write' }));
+      expect(screen.queryByTestId('scope-gain-warning')).not.toBeInTheDocument();
+
+      fireEvent.click(modal.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(4, { scopes: ['logs:read', 'alerts:read', 'system:read'] });
+      });
+    });
+
+    it('warns when a category wildcard replaces all of its actions', async () => {
+      const { modal } = await openEdit(logsActionsToken);
+      expect(modal.getByRole('radio', { name: /^Custom/ })).toBeChecked();
+      expect(modal.getByRole('button', { name: 'Save' })).toBeDisabled();
+      fireEvent.click(modal.getByRole('checkbox', { name: /logs:\*/ }));
+      expect(screen.getByTestId('scope-gain-warning')).toHaveTextContent('This token gains: logs:*.');
+      expect(modal.getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+
+    it('lists a token that matches no preset as Custom without its scopes', async () => {
+      vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([customToken]);
+      render(<ApiTokensTab />);
+      await waitFor(() => {
+        expect(screen.getByText('Active Tokens (1)')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Custom')).toBeInTheDocument();
+      expect(screen.queryByText('logs:write')).not.toBeInTheDocument();
+    });
+
+    it('links the scope guide from the scope chooser', async () => {
+      const { modal } = await openEdit(readOnlyToken);
+      expect(modal.getByRole('link', { name: /Scope Guide/ })).toHaveAttribute(
+        'href',
+        'https://github.com/logshed/logshed/blob/main/docs/API_SCOPES.md'
+      );
+    });
+
+    it('opens a token that matches no preset on Custom with its scopes ticked', async () => {
+      const { modal } = await openEdit(customToken);
+      expect(screen.getByText('Custom', { selector: 'span' })).toBeInTheDocument();
+      expect(modal.getByRole('radio', { name: /^Custom/ })).toBeChecked();
+      for (const scope of customToken.scopes) {
+        expect(modal.getByRole('checkbox', { name: scope })).toBeChecked();
+      }
+      expect(modal.getByRole('checkbox', { name: 'system:write' })).not.toBeChecked();
+      expect(modal.getByRole('checkbox', { name: /logs:\*/ })).not.toBeChecked();
+      expect(modal.getByTestId('edit-token-saved-scopes')).toHaveTextContent(
+        'logs:read, logs:write, alerts:read, system:read'
+      );
+    });
+
+    it('hints at a rename after a scope change until the name is edited', async () => {
+      const { modal } = await openEdit(readOnlyToken);
+      expect(modal.queryByText(/The name still says/)).not.toBeInTheDocument();
+
+      fireEvent.click(modal.getByRole('radio', { name: /^Maintenance Only/ }));
+      expect(modal.getByText("The name still says 'Claude Read-Only'. Rename it if it no longer fits.")).toBeInTheDocument();
+
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: 'Backup Hook' } });
+      expect(modal.queryByText(/The name still says/)).not.toBeInTheDocument();
+    });
+
+    it('starts Custom from the token scopes and sends both fields when both change', async () => {
+      const { modal, updateSpy } = await openEdit(readOnlyToken);
+      fireEvent.click(modal.getByRole('radio', { name: /^Full Access/ }));
+      fireEvent.click(modal.getByRole('radio', { name: /^Custom/ }));
+      expect(modal.getByTestId('edit-token-saved-scopes')).toHaveTextContent('logs:read, alerts:read, system:read');
+
+      fireEvent.click(modal.getByRole('checkbox', { name: /maintenance:\*/ }));
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: 'Claude Maintenance' } });
+      fireEvent.click(modal.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith(3, {
+          name: 'Claude Maintenance',
+          scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:*'],
+        });
+      });
+    });
+
+    it('shows a save error inside the edit modal', async () => {
+      const { modal, updateSpy } = await openEdit(readOnlyToken);
+      updateSpy.mockRejectedValue(new Error('API token 3 not found.'));
+      fireEvent.change(modal.getByLabelText('Name'), { target: { value: 'Gone' } });
+      fireEvent.click(modal.getByRole('button', { name: 'Save' }));
+
+      const alert = await screen.findByText('API token 3 not found.');
+      expect(alert.closest('[data-testid="edit-token-modal"]')).not.toBeNull();
+    });
   });
 });

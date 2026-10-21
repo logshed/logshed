@@ -6,92 +6,44 @@ import {
   Copy,
   Check,
   AlertCircle,
+  AlertTriangle,
   X,
-  ExternalLink,
   Bot,
   Shield,
   ChevronDown,
   ChevronRight,
+  Edit2,
 } from 'lucide-react';
-import { ApiToken, ApiTokenCreateRequest, SystemSettings } from '../../types.ts';
-import { fetchApiTokens, createApiToken, revokeApiToken } from '../../api/tokens.ts';
+import { ApiToken, ApiTokenCreateRequest, ApiTokenUpdateRequest, SystemSettings } from '../../types.ts';
+import { fetchApiTokens, createApiToken, revokeApiToken, updateApiToken } from '../../api/tokens.ts';
 import { updateSettings } from '../../api/settings.ts';
 import { formatDate } from '../../utils/formatters.ts';
 
 import { useClipboard, useMediaQuery } from '../../utils/hooks.ts';
+import { TokenScopeChooser } from './TokenScopeChooser.tsx';
+import {
+  CUSTOM_PRESET_ID,
+  FULL_ACCESS_SCOPE,
+  SCOPE_PRESETS,
+  addedAccess,
+  collapseScopes,
+  expandScopes,
+  findMatchingPreset,
+  sameScopeSet,
+  scopeGrants,
+} from './tokenScopes.ts';
 
-interface ScopePreset {
-  id: string;
-  name: string;
-  description: string;
-  scopes: string[];
-}
+const DEFAULT_PRESET_ID = 'ai_mcp';
 
-const SCOPE_PRESETS: ScopePreset[] = [
-  {
-    id: 'maintenance',
-    name: 'Maintenance Only',
-    description: 'Recommended for standalone backup scripts and automation hooks.',
-    scopes: ['maintenance:write', 'maintenance:read'],
-  },
-  {
-    id: 'ingest',
-    name: 'Edge Shipper / Ingest',
-    description: 'Recommended for Vector, Fluent Bit, and external HTTP log shippers.',
-    scopes: ['logs:write'],
-  },
-  {
-    id: 'readonly',
-    name: 'Read Only',
-    description: 'Recommended for external dashboards and read-only telemetry.',
-    scopes: ['logs:read', 'alerts:read', 'system:read'],
-  },
-  {
-    // Default preset of the token dialog: least privilege for AI assistants
-    id: 'ai_mcp',
-    name: 'AI Assistant / MCP (Read Only)',
-    description:
-      'Recommended for Claude Desktop, Cursor, and other MCP clients. The assistant can search logs, alerts, and metrics but cannot start or end maintenance windows.',
-    scopes: ['logs:read', 'alerts:read', 'system:read'],
-  },
-  {
-    id: 'ai_mcp_maintenance',
-    name: 'AI Assistant / MCP + Maintenance',
-    description:
-      'Adds maintenance:write so the assistant can start and end maintenance windows. Choose it only when needed: log text is untrusted and can try to steer an assistant.',
-    scopes: ['logs:read', 'alerts:read', 'system:read', 'maintenance:write'],
-  },
-  {
-    id: 'full',
-    name: 'Full Access',
-    description: 'Recommended for administrative integrations with full system capabilities.',
-    scopes: ['*'],
-  },
-];
+/** The scopes a modal would save: the chosen preset's list, or the collapsed custom selection. */
+const chosenScopes = (presetId: string, selection: ReadonlySet<string>): string[] =>
+  presetId === CUSTOM_PRESET_ID
+    ? collapseScopes(selection)
+    : (SCOPE_PRESETS.find((p) => p.id === presetId)?.scopes ?? []);
 
-export const getPresetName = (scopes: string[]): string => {
-  if (scopes.includes('*')) return 'Full Access';
-  const hasMaintWrite = scopes.includes('maintenance:write');
-  const hasLogsRead = scopes.includes('logs:read');
-  const hasAlertsRead = scopes.includes('alerts:read');
-  const hasSystemRead = scopes.includes('system:read');
-  const hasLogsWrite = scopes.includes('logs:write');
-
-  if (hasMaintWrite && hasLogsRead && hasAlertsRead && hasSystemRead) {
-    return 'AI Assistant / MCP + Maintenance';
-  }
-  // Shared by the Read Only and AI Assistant / MCP (Read Only) presets, which grant the same scopes
-  if (hasLogsRead && hasAlertsRead && hasSystemRead && !hasMaintWrite) {
-    return 'Read Only';
-  }
-  if (hasMaintWrite && scopes.includes('maintenance:read') && !hasLogsRead) {
-    return 'Maintenance Only';
-  }
-  if (hasLogsWrite && scopes.length === 1) {
-    return 'Edge Shipper / Ingest';
-  }
-  return scopes.join(', ');
-};
+// Exact match against SCOPE_PRESETS: the Read Only and AI Assistant / MCP (Read Only) presets grant the
+// same scopes and show as "Read Only"; any other combination is "Custom".
+export const getPresetName = (scopes: string[]): string => findMatchingPreset(scopes)?.name ?? 'Custom';
 
 export interface ApiTokensTabProps {
   settings?: Partial<SystemSettings> | null;
@@ -112,9 +64,17 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   // Modals
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState<boolean>(false);
   const [newTokenName, setNewTokenName] = useState<string>('');
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('ai_mcp');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [newTokenSelection, setNewTokenSelection] = useState<Set<string>>(new Set());
   const [expiresDays, setExpiresDays] = useState<number | null>(90);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Edit modal (name and scopes)
+  const [tokenToEdit, setTokenToEdit] = useState<ApiToken | null>(null);
+  const [editName, setEditName] = useState<string>('');
+  const [editPresetId, setEditPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [editSelection, setEditSelection] = useState<Set<string>>(new Set());
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // One-time created token modal
   const [createdRawToken, setCreatedRawToken] = useState<string | null>(null);
@@ -234,16 +194,26 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   const handleOpenGenerateModal = () => {
     setModalError(null);
     setNewTokenName('');
-    setSelectedPresetId('ai_mcp');
+    setSelectedPresetId(DEFAULT_PRESET_ID);
+    setNewTokenSelection(new Set());
     setExpiresDays(90);
     setIsGenerateModalOpen(true);
   };
 
+  // Custom starts as a copy of the preset that was selected
+  const handleGeneratePresetSelect = (id: string) => {
+    if (id === CUSTOM_PRESET_ID && selectedPresetId !== CUSTOM_PRESET_ID) {
+      setNewTokenSelection(expandScopes(chosenScopes(selectedPresetId, newTokenSelection)));
+    }
+    setSelectedPresetId(id);
+  };
+
+  const newTokenScopes = chosenScopes(selectedPresetId, newTokenSelection);
+
   const handleGenerateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTokenName.trim()) return;
+    if (!newTokenName.trim() || newTokenScopes.length === 0) return;
 
-    const preset = SCOPE_PRESETS.find((p) => p.id === selectedPresetId) || SCOPE_PRESETS.find((p) => p.id === 'ai_mcp') || SCOPE_PRESETS[0];
     setIsSubmitting(true);
     setErrorMsg(null);
     setModalError(null);
@@ -251,7 +221,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
     try {
       const payload: ApiTokenCreateRequest = {
         name: newTokenName.trim(),
-        scopes: preset.scopes,
+        scopes: newTokenScopes,
         expires_days: expiresDays,
       };
       const resp = await createApiToken(payload);
@@ -262,6 +232,59 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
       setModalError(err.message || 'Failed to generate token.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenEditModal = (token: ApiToken) => {
+    setModalError(null);
+    setTokenToEdit(token);
+    setEditName(token.name);
+    setEditPresetId(findMatchingPreset(token.scopes)?.id ?? CUSTOM_PRESET_ID);
+    setEditSelection(expandScopes(token.scopes));
+  };
+
+  // Custom starts as a copy of the token's current scopes
+  const handleEditPresetSelect = (id: string) => {
+    if (id === CUSTOM_PRESET_ID && editPresetId !== CUSTOM_PRESET_ID && tokenToEdit) {
+      setEditSelection(expandScopes(tokenToEdit.scopes));
+    }
+    setEditPresetId(id);
+  };
+
+  const editScopes = chosenScopes(editPresetId, editSelection);
+  const editTrimmedName = editName.trim();
+  const editNameChanged = !!tokenToEdit && editTrimmedName !== tokenToEdit.name;
+  const editScopesChanged =
+    !!tokenToEdit && editScopes.length > 0 && !sameScopeSet(editScopes, collapseScopes(tokenToEdit.scopes));
+  const editGains = tokenToEdit && editScopesChanged ? addedAccess(tokenToEdit.scopes, editScopes) : [];
+  const editGainsFullAccess = editGains.includes(FULL_ACCESS_SCOPE);
+  // A token that can connect over MCP and gains maintenance:write lets an assistant start and end maintenance
+  const editGainsAssistantMaintenance =
+    !!tokenToEdit &&
+    editScopesChanged &&
+    scopeGrants(editScopes, 'logs:read') &&
+    scopeGrants(editScopes, 'maintenance:write') &&
+    !scopeGrants(tokenToEdit.scopes, 'maintenance:write');
+  const canSaveEdit =
+    !isSavingEdit && editTrimmedName !== '' && editScopes.length > 0 && (editNameChanged || editScopesChanged);
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tokenToEdit || !canSaveEdit) return;
+
+    setIsSavingEdit(true);
+    setModalError(null);
+    try {
+      const payload: ApiTokenUpdateRequest = {};
+      if (editNameChanged) payload.name = editTrimmedName;
+      if (editScopesChanged) payload.scopes = editScopes;
+      await updateApiToken(tokenToEdit.id, payload);
+      setTokenToEdit(null);
+      await loadTokens();
+    } catch (err: any) {
+      setModalError(err.message || 'Failed to update token.');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -360,20 +383,31 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           <span className="font-mono text-[11px] text-slate-300 bg-dark-950 px-1.5 py-0.5 rounded border border-dark-750">
                             {token.token_prefix}
                           </span>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-dark-800 text-accent-300 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
                             {presetName}
                           </span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => { setModalError(null); setTokenToRevoke(token); }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-dark-700 hover:border-red-900 rounded-lg transition cursor-pointer shrink-0"
-                        title="Revoke Token"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Revoke</span>
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(token)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-slate-100 hover:bg-dark-800 border border-dark-700 rounded-lg transition cursor-pointer"
+                          title="Edit Token"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setModalError(null); setTokenToRevoke(token); }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-dark-700 hover:border-red-900 rounded-lg transition cursor-pointer"
+                          title="Revoke Token"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Revoke</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
@@ -424,7 +458,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           {token.token_prefix}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 text-accent-300 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
                             {presetName}
                           </span>
                         </td>
@@ -441,7 +475,16 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                             <span className="text-slate-500">Never</span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-right">
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(token)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-slate-100 hover:bg-dark-800 border border-transparent hover:border-dark-700 rounded transition cursor-pointer"
+                            title="Edit Token"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => { setModalError(null); setTokenToRevoke(token); }}
@@ -779,8 +822,8 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
       {/* Generate Token Modal */}
       {isGenerateModalOpen && (
         <div data-testid="generate-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
-          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
+          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain animate-in fade-in zoom-in-95 duration-150">
+            <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                 <Key className="w-4 h-4 text-accent-500" />
                 <span>Generate API Token</span>
@@ -800,7 +843,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </div>
             )}
 
-            <form onSubmit={handleGenerateSubmit} className="p-5 space-y-4">
+            <form onSubmit={handleGenerateSubmit} className="p-5 space-y-4 overflow-y-auto">
               <div>
                 <label htmlFor="token-name" className="block text-xs font-medium text-slate-300 mb-1">
                   Token Name
@@ -816,50 +859,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 />
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-slate-300">
-                    Scope Preset
-                  </label>
-                  <a
-                    href="https://github.com/logshed/logshed/blob/main/docs/spec/security.md#8-external-api-tokens--permissions"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[10px] text-accent-400 hover:underline"
-                    title="Open API Scopes Documentation"
-                  >
-                    <span>Scope Guide &amp; Permissions</span>
-                    <ExternalLink className="w-2.5 h-2.5" />
-                  </a>
-                </div>
-                <div className="space-y-2">
-                  {SCOPE_PRESETS.map((preset) => (
-                    <label
-                      key={preset.id}
-                      className={`block p-2.5 rounded-lg border text-xs cursor-pointer transition ${
-                        selectedPresetId === preset.id
-                          ? 'bg-accent-950/20 border-accent-600/60 text-slate-100'
-                          : 'bg-dark-950/60 border-dark-800 text-slate-300 hover:border-dark-700'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <input
-                          type="radio"
-                          name="preset"
-                          value={preset.id}
-                          checked={selectedPresetId === preset.id}
-                          onChange={() => setSelectedPresetId(preset.id)}
-                          className="mt-0.5 text-accent-500 focus:ring-accent-500"
-                        />
-                        <div>
-                          <div className="font-semibold text-slate-200">{preset.name}</div>
-                          <p className="text-[11px] text-slate-400 mt-0.5">{preset.description}</p>
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              <TokenScopeChooser
+                idPrefix="create-token"
+                selectedId={selectedPresetId}
+                onSelect={handleGeneratePresetSelect}
+                selection={newTokenSelection}
+                onSelectionChange={setNewTokenSelection}
+              />
 
               <div>
                 <label htmlFor="token-expiry" className="block text-xs font-medium text-slate-300 mb-1">
@@ -891,10 +897,128 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting || !newTokenName.trim()}
+                  disabled={isSubmitting || !newTokenName.trim() || newTokenScopes.length === 0}
                   className="px-4 py-1.5 text-xs font-semibold bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
                 >
                   {isSubmitting ? 'Generating...' : 'Create Token'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Token Modal (name and scopes) */}
+      {tokenToEdit && (
+        <div data-testid="edit-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
+          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain animate-in fade-in zoom-in-95 duration-150">
+            <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-accent-500" />
+                <span>Edit API token</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setTokenToEdit(null)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                aria-label="Close dialog"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {modalError && (
+              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleEditSubmit} className="p-5 space-y-4 overflow-y-auto">
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Changes take effect straight away. The token string{' '}
+                <code className="font-mono text-slate-300">{tokenToEdit.token_prefix}</code> stays the same, so
+                clients need no update.
+              </p>
+
+              <div>
+                <label htmlFor="edit-token-name" className="block text-xs font-medium text-slate-300 mb-1">
+                  Name
+                </label>
+                <input
+                  id="edit-token-name"
+                  type="text"
+                  required
+                  maxLength={100}
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  aria-describedby={editScopesChanged && !editNameChanged ? 'edit-token-name-hint' : undefined}
+                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+                />
+                {editScopesChanged && !editNameChanged && (
+                  <p id="edit-token-name-hint" className="mt-1 text-[11px] text-slate-400">
+                    The name still says '{tokenToEdit.name}'. Rename it if it no longer fits.
+                  </p>
+                )}
+              </div>
+
+              <TokenScopeChooser
+                idPrefix="edit-token"
+                selectedId={editPresetId}
+                onSelect={handleEditPresetSelect}
+                selection={editSelection}
+                onSelectionChange={setEditSelection}
+              />
+
+              {editGains.length > 0 && (
+                <div
+                  data-testid="scope-gain-warning"
+                  role="status"
+                  className={`p-3 rounded-lg border text-xs flex items-start gap-2 leading-relaxed ${
+                    editGainsFullAccess || editGainsAssistantMaintenance
+                      ? 'bg-red-950/50 border-red-800 text-red-200'
+                      : 'bg-amber-950/30 border-amber-800/60 text-amber-200'
+                  }`}
+                >
+                  <AlertTriangle
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      editGainsFullAccess || editGainsAssistantMaintenance ? 'text-red-400' : 'text-amber-400'
+                    }`}
+                  />
+                  <div className="space-y-1">
+                    <p>
+                      This token gains: <span className="font-mono font-semibold">{editGains.join(', ')}</span>.
+                      Every app or assistant holding this token gets this access straight away.
+                    </p>
+                    {editGainsFullAccess && (
+                      <p className="font-semibold">
+                        Full access covers every action, including deleting expired logs, compacting the database
+                        and any action added in later versions.
+                      </p>
+                    )}
+                    {editGainsAssistantMaintenance && (
+                      <p className="font-semibold">
+                        An AI assistant holding this token can now start and end maintenance windows. Log text is
+                        untrusted and can try to steer an assistant.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTokenToEdit(null)}
+                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canSaveEdit}
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
+                >
+                  {isSavingEdit ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </form>

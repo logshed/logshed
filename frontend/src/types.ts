@@ -646,6 +646,11 @@ export interface ApiTokenCreateRequest {
   expires_days?: number | null;
 }
 
+export interface ApiTokenUpdateRequest {
+  name?: string;
+  scopes?: string[];
+}
+
 export interface ApiTokenCreateResponse {
   token: ApiToken;
   raw_token: string;

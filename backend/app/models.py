@@ -1219,6 +1219,45 @@ class ApiTokenCreateRequest(BaseModel):
     scopes: list[str] = Field(default_factory=lambda: ["maintenance:write"])
     expires_days: Optional[int] = Field(None, ge=1, le=3650)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        from app.core.api_tokens import validate_token_name
+
+        return validate_token_name(v)
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, v: list[str]) -> list[str]:
+        from app.core.api_tokens import validate_token_scopes
+
+        return validate_token_scopes(v)
+
+
+class ApiTokenUpdateRequest(BaseModel):
+    """Payload to rename an API token, change its scopes, or both. At least one field must be sent."""
+    name: Optional[str] = Field(None, max_length=100)
+    scopes: Optional[list[str]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_a_field(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            sent = [key for key in ("name", "scopes") if key in data]
+            if not sent:
+                raise ValueError("Send name, scopes or both.")
+            null_fields = [key for key in sent if data[key] is None]
+            if null_fields:
+                raise ValueError(f"{' and '.join(null_fields)} may not be null.")
+        return data
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        from app.core.api_tokens import validate_token_name
+
+        return validate_token_name(v)
+
     @field_validator("scopes")
     @classmethod
     def validate_scopes(cls, v: list[str]) -> list[str]:

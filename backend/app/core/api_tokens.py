@@ -67,9 +67,10 @@ def has_scope_permission(token_scopes: list[str], required_scopes: list[str]) ->
     return True
 
 
-# Single source of truth for token scopes accepted at creation time. Derived from the scopes enforced
+# Single source of truth for token scopes accepted at creation and edit time. Derived from the scopes enforced
 # by require_api_token / require_auth_or_token in the API layer and by the MCP server: connecting to MCP
 # needs only logs:read (REQUIRED_MCP_SCOPES in api/mcp.py), and each MCP tool then checks its own scope.
+# Keep in step with SCOPE_CATALOG in frontend/src/components/settings/tokenScopes.ts (the custom scope picker).
 KNOWN_SCOPES: frozenset[str] = frozenset(
     {
         "logs:read",
@@ -105,6 +106,14 @@ def validate_token_scopes(scopes: list[str]) -> list[str]:
         if scope not in result:
             result.append(scope)
     return result
+
+
+def validate_token_name(name: str) -> str:
+    """Strip a token name, raising ValueError when nothing is left."""
+    stripped = name.strip()
+    if not stripped:
+        raise ValueError("Token name must not be blank.")
+    return stripped
 
 
 @dataclass(frozen=True)

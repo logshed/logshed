@@ -59,9 +59,27 @@ def is_ingest_token_revoked(token_id: Any) -> bool:
         return token_id in _revoked_token_ids
 
 
+# Ids of edited tokens (name or scopes), kept for twice the cache TTL: token_id -> monotonic time of the edit.
+# An ingest request whose database lookup finished just before the edit committed must not put the old
+# record back into the cache; until the id expires here, requests for the token look it up in SQLite.
+_EDITED_TOKEN_RETENTION = 2 * _TOKEN_CACHE_TTL
+_edited_token_ids: dict[int, float] = {}
+_edited_token_lock = threading.Lock()
+
+
+def _is_ingest_token_edited(token_id: Any) -> bool:
+    """True if the token id was edited within the last 2x cache TTL."""
+    now = time.monotonic()
+    with _edited_token_lock:
+        for tid in [t for t, edited_at in _edited_token_ids.items() if now - edited_at > _EDITED_TOKEN_RETENTION]:
+            _edited_token_ids.pop(tid, None)
+        return token_id in _edited_token_ids
+
+
 class _RevocationAwareTokenCache(dict):
     """
-    Token cache that ignores and refuses entries for recently revoked tokens.
+    Token cache that ignores and refuses entries for recently revoked tokens, and refuses entries for
+    recently edited ones (their stale entries are purged by refresh_ingest_token).
     verify_api_token reads it with get() and writes it with item assignment, both under _token_cache_lock.
     """
 
@@ -73,7 +91,8 @@ class _RevocationAwareTokenCache(dict):
         return entry
 
     def __setitem__(self, key: Any, value: Any) -> None:
-        if is_ingest_token_revoked(value[1].get("id")):
+        token_id = value[1].get("id")
+        if is_ingest_token_revoked(token_id) or _is_ingest_token_edited(token_id):
             return
         super().__setitem__(key, value)
 
@@ -83,11 +102,13 @@ _token_cache_lock = threading.Lock()
 
 
 def clear_ingest_token_cache() -> None:
-    """Clear in-memory ingestion token cache and revoked token ids (primarily for tests)."""
+    """Clear in-memory ingestion token cache and revoked and edited token ids (primarily for tests)."""
     with _token_cache_lock:
         _token_cache.clear()
     with _revoked_token_lock:
         _revoked_token_ids.clear()
+    with _edited_token_lock:
+        _edited_token_ids.clear()
 
 
 def forget_ingest_token(token_id: int) -> None:
@@ -99,6 +120,19 @@ def forget_ingest_token(token_id: int) -> None:
         for key in [k for k, (_, info) in _token_cache.items() if info.get("id") == token_id]:
             _token_cache.pop(key, None)
     ingest_rate_limiter.forget(f"token_{token_id}")
+
+
+def refresh_ingest_token(token_id: int) -> None:
+    """
+    Drop cached ingestion entries for an edited token, so the next request reads its new name and scopes.
+    Unlike forget_ingest_token, the token stays usable and its rate limit window is kept.
+    """
+    # Record the edit before purging, so a concurrent write of the old record is either purged here or refused.
+    with _edited_token_lock:
+        _edited_token_ids[token_id] = time.monotonic()
+    with _token_cache_lock:
+        for key in [k for k, (_, info) in _token_cache.items() if info.get("id") == token_id]:
+            _token_cache.pop(key, None)
 
 
 def get_ingest_max_body_bytes() -> int:

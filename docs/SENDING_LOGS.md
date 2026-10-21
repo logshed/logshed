@@ -333,7 +333,7 @@ Tools that cannot send syslog (scripts, Vector, Fluent Bit, edge services) can p
 
 ### Token
 
-Create an API token in **Settings > API & MCP Access** with the `logs:write` scope (the "Edge Shipper / Ingest" preset has exactly that). The raw token (`ls_live_...`) is shown once. Send it in the `Authorization: Bearer <token>` header (the word `Bearer` is accepted in any letter case). Each token may send up to 6,000 requests per minute; responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`, and a `429` response also carries `Retry-After`.
+Create an API token in **Settings > API & MCP Access** with the `logs:write` scope (the "Edge Shipper / Ingest" preset has exactly that; choose **Custom** to tick the scopes yourself when no preset fits; see the [API Token Scopes Guide](API_SCOPES.md)). The raw token (`ls_live_...`) is shown once. Send it in the `Authorization: Bearer <token>` header (the word `Bearer` is accepted in any letter case). Each token may send up to 6,000 requests per minute; responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`, and a `429` response also carries `Retry-After`. The name and scopes of a token can be changed later with **Edit** in the token list, without creating a new token: the token string stays the same, so Vector, Fluent Bit or script configurations need no update, and the change applies to the next request.
 
 ### Request
 

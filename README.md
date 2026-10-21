@@ -94,6 +94,7 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 | [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Linux, and Docker, UDP versus TCP guidance, and the HTTP ingest API |
 | [Rules Guide](docs/RULES_GUIDE.md) | In-depth guide to real-time threshold, pattern, and rate spike alert rules, plus ingestion drop rules |
 | [Model Context Protocol (MCP) Guide](docs/MCP_GUIDE.md) | Connect Claude Desktop, Cursor, and AI assistants to investigate homelab issues with conversational prompt examples |
+| [API Token Scopes Guide](docs/API_SCOPES.md) | Every API token scope, the token presets and what each is for, and when to choose Custom scopes |
 | [Technical Specification](docs/SPEC.md) | Architecture, SQLite schema, FTS5 triggers, and system design |
 | [API Specification](docs/spec/api.md) | REST API endpoint catalog covering internal routes and external programmatic v1 endpoints |
 

@@ -6,6 +6,8 @@ Hashing, generation, verification, scoping, throttling, and revocation.
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
+import sqlite3
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -29,6 +31,22 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TOKEN_SCOPES_TS = _REPO_ROOT / "frontend/src/components/settings/tokenScopes.ts"
+
+
+def _ui_scope_presets() -> dict[str, list[str]]:
+    """Preset name -> scopes, read from SCOPE_PRESETS in the web UI's tokenScopes.ts."""
+    source = _TOKEN_SCOPES_TS.read_text(encoding="utf-8")
+    block = source.split("export const SCOPE_PRESETS", 1)[1].split("\n];", 1)[0]
+    names = re.findall(r"^    name: '([^']+)',$", block, re.MULTILINE)
+    scope_lists = re.findall(r"^    scopes: \[([^\]]*)\],$", block, re.MULTILINE)
+    assert names and len(names) == len(scope_lists)
+    return {
+        name: [item.strip().strip("'") if item.strip() != "FULL_ACCESS_SCOPE" else "*" for item in scopes.split(",")]
+        for name, scopes in zip(names, scope_lists)
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -346,15 +364,26 @@ class TestScopeValidation:
     def test_ui_presets_match_backend_allow_list(self):
         from app.core.api_tokens import validate_token_scopes
 
-        presets = [
-            ["maintenance:write", "maintenance:read"],
-            ["logs:write"],
-            ["logs:read", "alerts:read", "system:read"],
-            ["logs:read", "alerts:read", "system:read", "maintenance:write"],
-            ["*"],
-        ]
-        for preset in presets:
-            assert validate_token_scopes(preset) == preset
+        presets = _ui_scope_presets()
+        assert len(presets) == 7
+        for name, scopes in presets.items():
+            assert validate_token_scopes(scopes) == scopes, name
+        assert presets["Home Assistant"] == ["system:read", "maintenance:write", "system:write"]
+
+    def test_ui_scope_catalog_matches_known_scopes(self):
+        from app.core.api_tokens import KNOWN_SCOPES
+
+        catalog = re.findall(r"scope: '([a-z]+:[a-z]+)'", _TOKEN_SCOPES_TS.read_text(encoding="utf-8"))
+        assert sorted(catalog) == sorted(KNOWN_SCOPES)
+
+    def test_scopes_guide_covers_every_scope_and_preset(self):
+        from app.core.api_tokens import KNOWN_SCOPES
+
+        guide = (_REPO_ROOT / "docs/API_SCOPES.md").read_text(encoding="utf-8")
+        for scope in KNOWN_SCOPES:
+            assert f"| `{scope}` |" in guide, scope
+        for name in _ui_scope_presets():
+            assert f"| **{name}** |" in guide, name
 
     @pytest.mark.asyncio
     async def test_create_token_endpoint_validates_scopes(self, client: AsyncClient, auth_headers: dict):
@@ -369,6 +398,294 @@ class TestScopeValidation:
         )
         assert res.status_code == 200
         assert res.json()["token"]["scopes"] == ["logs:read", "alerts:*"]
+
+
+class TestTokenEdit:
+    """PATCH /api/tokens/{id}: rename a token, change its scopes, or both."""
+
+    @staticmethod
+    async def _create(client: AsyncClient, auth_headers: dict, name: str, scopes: list[str]) -> dict:
+        res = await client.post("/api/tokens", json={"name": name, "scopes": scopes}, headers=auth_headers)
+        assert res.status_code == 200
+        return res.json()
+
+    @staticmethod
+    def _row(tmp_path: Path, token_id: int) -> dict:
+        conn = get_connection(tmp_path / "logs.db")
+        try:
+            conn.row_factory = sqlite3.Row
+            return dict(conn.execute("SELECT * FROM api_tokens WHERE id = ?", (token_id,)).fetchone())
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_scopes_change_is_stored_and_returned(self, client: AsyncClient, auth_headers: dict, tmp_path: Path):
+        created = await self._create(client, auth_headers, "Vector", ["logs:read"])
+        token_id = created["token"]["id"]
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["logs:write"]}, headers=auth_headers)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["id"] == token_id
+        assert body["name"] == "Vector"
+        assert body["scopes"] == ["logs:write"]
+        assert body["token_prefix"] == created["token"]["token_prefix"]
+        assert body["created_at"] == created["token"]["created_at"]
+        assert self._row(tmp_path, token_id)["scopes"] == '["logs:write"]'
+
+    @pytest.mark.asyncio
+    async def test_rename_only_keeps_scopes_secret_and_last_used(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        created = await self._create(client, auth_headers, "Claude Read-Only", ["logs:read", "system:read"])
+        token_id = created["token"]["id"]
+        bearer = {"Authorization": f"Bearer {created['raw_token']}"}
+        assert (await client.get("/api/v1/auth/verify", headers=bearer)).status_code == 200
+        await asyncio.sleep(0.05)
+        before = self._row(tmp_path, token_id)
+        assert before["last_used_at"] is not None
+
+        res = await client.patch(
+            f"/api/tokens/{token_id}", json={"name": "  Claude Maintenance  "}, headers=auth_headers
+        )
+        assert res.status_code == 200
+        assert res.json()["name"] == "Claude Maintenance"
+        assert res.json()["scopes"] == ["logs:read", "system:read"]
+
+        after = self._row(tmp_path, token_id)
+        assert after["name"] == "Claude Maintenance"
+        for column in ("scopes", "token_hash", "token_prefix", "last_used_at", "expires_at", "created_at", "created_by"):
+            assert after[column] == before[column]
+
+        # The same raw token still authenticates, now under its new name
+        verify = await client.get("/api/v1/auth/verify", headers=bearer)
+        assert verify.status_code == 200
+        assert verify.json()["name"] == "Claude Maintenance"
+
+    @pytest.mark.asyncio
+    async def test_name_and_scopes_together(self, client: AsyncClient, auth_headers: dict):
+        token_id = (await self._create(client, auth_headers, "Old", ["logs:read"]))["token"]["id"]
+        res = await client.patch(
+            f"/api/tokens/{token_id}",
+            json={"name": "New", "scopes": ["logs:read", "maintenance:write"]},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["name"] == "New"
+        assert res.json()["scopes"] == ["logs:read", "maintenance:write"]
+        listed = (await client.get("/api/tokens", headers=auth_headers)).json()
+        assert listed[0]["name"] == "New"
+        assert listed[0]["scopes"] == ["logs:read", "maintenance:write"]
+
+    @pytest.mark.asyncio
+    async def test_custom_list_is_stored_as_sent(self, client: AsyncClient, auth_headers: dict):
+        token_id = (await self._create(client, auth_headers, "Custom", ["logs:read"]))["token"]["id"]
+        res = await client.patch(
+            f"/api/tokens/{token_id}", json={"scopes": ["logs:*", "alerts:read"]}, headers=auth_headers
+        )
+        assert res.status_code == 200
+        assert res.json()["scopes"] == ["logs:*", "alerts:read"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"scopes": []},
+            {"scopes": ["logs:delete"]},
+            {"scopes": ["logs:read"] * 21},
+            {"scopes": ["foo:*"]},
+            {"name": "   "},
+            {"name": "x" * 101},
+            {},
+            {"name": None},
+            {"scopes": None},
+            {"name": "ok", "scopes": None},
+        ],
+    )
+    async def test_invalid_payloads_are_rejected(self, client: AsyncClient, auth_headers: dict, payload: dict):
+        token_id = (await self._create(client, auth_headers, "Target", ["logs:read"]))["token"]["id"]
+        res = await client.patch(f"/api/tokens/{token_id}", json=payload, headers=auth_headers)
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_create_refuses_a_blank_name(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post("/api/tokens", json={"name": "   ", "scopes": ["logs:read"]}, headers=auth_headers)
+        assert res.status_code == 422
+        res = await client.post("/api/tokens", json={"name": "  Padded  ", "scopes": ["logs:read"]}, headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["token"]["name"] == "Padded"
+
+    @pytest.mark.asyncio
+    async def test_missing_token_returns_404(self, client: AsyncClient, auth_headers: dict):
+        res = await client.patch("/api/tokens/9999", json={"name": "Nobody"}, headers=auth_headers)
+        assert res.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_needs_the_session_cookie(self, client: AsyncClient, auth_headers: dict):
+        created = await self._create(client, auth_headers, "Full", ["*"])
+        token_id = created["token"]["id"]
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"name": "Anon"})
+        assert res.status_code == 401
+        # An API token cannot edit tokens, not even its own and not even with full access
+        res = await client.patch(
+            f"/api/tokens/{token_id}",
+            json={"scopes": ["logs:read"]},
+            headers={"Authorization": f"Bearer {created['raw_token']}"},
+        )
+        assert res.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_needs_the_csrf_header(self, client: AsyncClient, auth_headers: dict):
+        token_id = (await self._create(client, auth_headers, "Target", ["logs:read"]))["token"]["id"]
+        cookie_only = {"Cookie": auth_headers["Cookie"]}
+        async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://testserver") as bare:
+            res = await bare.patch(f"/api/tokens/{token_id}", json={"name": "Forged"}, headers=cookie_only)
+        assert res.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_unchanged_payload_writes_nothing(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        from app.api import tokens as tokens_api
+
+        created = await self._create(client, auth_headers, "Same", ["logs:read", "alerts:*"])
+        token_id = created["token"]["id"]
+        assert (
+            await client.get("/api/v1/auth/verify", headers={"Authorization": f"Bearer {created['raw_token']}"})
+        ).status_code == 200
+        await asyncio.sleep(0.05)
+        before = self._row(tmp_path, token_id)
+
+        refresh_ingest = MagicMock()
+        refresh_mcp = MagicMock()
+        monkeypatch.setattr(tokens_api, "refresh_ingest_token", refresh_ingest)
+        monkeypatch.setattr(tokens_api, "refresh_mcp_sessions_for_token", refresh_mcp)
+
+        # Duplicates are removed by validation, so this is the stored list
+        res = await client.patch(
+            f"/api/tokens/{token_id}",
+            json={"name": " Same ", "scopes": ["logs:read", "alerts:*", "logs:read"]},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["name"] == "Same"
+        assert res.json()["scopes"] == ["logs:read", "alerts:*"]
+        assert self._row(tmp_path, token_id) == before
+        refresh_ingest.assert_not_called()
+        refresh_mcp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_changes_refresh_caches_without_resetting_rate_limits(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        from app.api import tokens as tokens_api
+
+        created = await self._create(client, auth_headers, "Watcher", ["logs:read"])
+        token_id = created["token"]["id"]
+        assert (
+            await client.get("/api/v1/auth/verify", headers={"Authorization": f"Bearer {created['raw_token']}"})
+        ).status_code == 200
+        assert f"token_{token_id}" in api_token_rate_limiter
+        assert token_id in _last_used_timestamps
+
+        refresh_ingest = MagicMock()
+        refresh_mcp = MagicMock()
+        monkeypatch.setattr(tokens_api, "refresh_ingest_token", refresh_ingest)
+        monkeypatch.setattr(tokens_api, "refresh_mcp_sessions_for_token", refresh_mcp)
+
+        assert (await client.patch(f"/api/tokens/{token_id}", json={"name": "Renamed"}, headers=auth_headers)).status_code == 200
+        refresh_ingest.assert_called_once_with(token_id)
+        refresh_mcp.assert_called_once_with(token_id, None)
+
+        assert (
+            await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["system:read"]}, headers=auth_headers)
+        ).status_code == 200
+        refresh_mcp.assert_called_with(token_id, ["system:read"])
+
+        assert f"token_{token_id}" in api_token_rate_limiter
+        assert token_id in _last_used_timestamps
+
+    @pytest.mark.asyncio
+    async def test_changes_are_logged_without_secrets(self, client: AsyncClient, auth_headers: dict, caplog):
+        created = await self._create(client, auth_headers, "Vector", ["logs:read"])
+        token_id = created["token"]["id"]
+        with caplog.at_level("INFO", logger="app.api.tokens"):
+            res = await client.patch(
+                f"/api/tokens/{token_id}",
+                json={"name": "Vector Shipper", "scopes": ["logs:write"]},
+                headers=auth_headers,
+            )
+        assert res.status_code == 200
+        assert f"API token {token_id} renamed from 'Vector' to 'Vector Shipper'" in caplog.text
+        assert (
+            f"API token {token_id} ('Vector Shipper') scopes changed from ['logs:read'] to ['logs:write']"
+            in caplog.text
+        )
+        assert created["raw_token"] not in caplog.text
+        assert hash_token(created["raw_token"]) not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_expired_token_can_be_edited_and_stays_expired(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        raw_token = "ls_live_expirededitsecret123456789"
+        expired_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        with get_connection(tmp_path / "logs.db") as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO api_tokens (name, token_hash, token_prefix, scopes, created_at, expires_at)
+                VALUES ('Expired', ?, 'ls_live_expi...6789', '["logs:read"]', datetime('now', '-3 days'), ?)
+                """,
+                (hash_token(raw_token), expired_ts),
+            )
+            token_id = cur.lastrowid
+            conn.commit()
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["*"]}, headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["expires_at"] == expired_ts
+        verify = await client.get("/api/v1/auth/verify", headers={"Authorization": f"Bearer {raw_token}"})
+        assert verify.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_narrowing_applies_to_the_next_rest_request(self, client: AsyncClient, auth_headers: dict):
+        created = await self._create(client, auth_headers, "Dashboard", ["logs:read"])
+        token_id = created["token"]["id"]
+        bearer = {"Authorization": f"Bearer {created['raw_token']}"}
+        assert (await client.get("/api/v1/logs", headers=bearer)).status_code == 200
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["logs:write"]}, headers=auth_headers)
+        assert res.status_code == 200
+        assert (await client.get("/api/v1/logs", headers=bearer)).status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_rename_labels_later_rest_maintenance_sessions(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path, monkeypatch
+    ):
+        from app.services import maintenance_service
+
+        # Starting a session updates the in-memory session list; keep that out of other tests
+        monkeypatch.setattr(maintenance_service, "_active_maintenance_sessions", [])
+        created = await self._create(client, auth_headers, "Old Runner", ["maintenance:write"])
+        token_id = created["token"]["id"]
+        bearer = {"Authorization": f"Bearer {created['raw_token']}"}
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"name": "New Runner"}, headers=auth_headers)
+        assert res.status_code == 200
+
+        started = await client.post("/api/v1/maintenance/enable", json={"duration_minutes": 5}, headers=bearer)
+        assert started.status_code == 200
+        with get_connection(tmp_path / "logs.db") as conn:
+            label = conn.execute(
+                "SELECT trigger_label FROM maintenance_sessions WHERE session_id = ?",
+                (started.json()["session_id"],),
+            ).fetchone()[0]
+        assert label == "API - New Runner"
 
 
 class TestTokenRevocationCleanup:

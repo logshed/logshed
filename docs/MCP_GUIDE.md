@@ -113,13 +113,16 @@ Connecting your AI assistant takes less than a minute:
 ### Step 2: Generate an API Token
 1. In the same tab, click **Generate API Token** (or **Generate Token** in the External API card).
 2. Enter a descriptive token name (for example, `Claude Desktop Laptop` or `Cursor IDE`).
-3. Select a scope preset:
+3. Select a scope preset (the [API Token Scopes Guide](API_SCOPES.md) lists every scope and preset):
    - **AI Assistant / MCP (Read Only)** (`logs:read`, `alerts:read`, `system:read`), the default: the assistant can search logs, read alerts and check metrics, but cannot start or end maintenance windows.
    - **AI Assistant / MCP + Maintenance** (adds `maintenance:write`): choose this only if the assistant should also start and end maintenance windows. Log text can try to steer an assistant, so leave `maintenance:write` off unless you need it.
+   - **Custom**: tick the scopes yourself when no preset fits. Ticking a whole category (such as `alerts:*`) also covers actions added to it in later versions; ticking its actions one by one does not.
 
    Connecting needs only `logs:read`. Each tool then checks its own scope (see [Security & Access Guardrails](#security--access-guardrails)), so a tool the token is not allowed to use returns a tool error instead of running.
 4. Set an expiration period (or select Never).
 5. Click **Generate Token** and copy the raw secret (`ls_live_...`).
+
+The name and scopes can be changed later with **Edit** in the token list, without creating a new token. The token string stays the same, so the client configuration needs no update, and the change applies to the assistant's next request. Rename the token too if its name no longer fits (for example a "Claude Read-Only" token that gains `maintenance:write`).
 
 ### Step 3: Add Configuration to Your Client
 Expand the matching client configuration card in the LogShed web dashboard, copy the configuration JSON snippet, and paste it into your client settings.
@@ -133,7 +136,7 @@ Depending on where your AI assistant runs relative to your LogShed server, choos
 LogShed serves MCP over three transports:
 
 - **Streamable HTTP** at `/mcp` (also `/api/v1/mcp`): the API token is checked on every request.
-- **Legacy SSE**: `GET /api/v1/mcp/sse` opens the event stream and `POST /api/v1/mcp/messages?session_id=...` sends messages. The session is bound to the token that opened it. A message posted without a token is accepted only while that token still exists, has not expired, still has `logs:read` and is within its rate limit; a message posted with a different token is refused. Revoking the token closes its open SSE streams.
+- **Legacy SSE**: `GET /api/v1/mcp/sse` opens the event stream and `POST /api/v1/mcp/messages?session_id=...` sends messages. The session is bound to the token that opened it. A message posted without a token is accepted only while that token still exists, has not expired, still has `logs:read` and is within its rate limit; a message posted with a different token is refused. Revoking the token closes its open SSE streams, and so does an edit that removes `logs:read`; other edits (a rename or a scope change) apply to the next message.
 - **stdio** (`python -m app.cli mcp`, see [Claude Desktop (Same-Machine Docker)](#claude-desktop-same-machine-docker)): runs inside the container and needs no token.
 
 Network clients must send the token in the `Authorization: Bearer <token>` header (a raw token as the whole `Authorization` value also works). Tokens in the URL query string (`?token=`) are refused, because URLs are written to reverse proxy access logs, which LogShed may then ingest. If your MCP client cannot send custom headers and can only be given a URL, set the environment variable `MCP_ALLOW_QUERY_TOKEN=true` to accept `?token=` on the MCP routes. It is off by default, and LogShed logs a warning whenever a token arrives in the URL.

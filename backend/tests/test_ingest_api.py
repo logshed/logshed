@@ -609,6 +609,127 @@ class TestIngestTokenRevocationRace:
 
 
 @pytest.mark.usefixtures("isolated_filters")
+class TestIngestTokenEdit:
+    """Editing a token's scopes applies to the next ingest request, without the revocation lockout."""
+
+    @staticmethod
+    async def _token_id(client: AsyncClient, auth_headers: dict) -> int:
+        list_resp = await client.get("/api/tokens", headers=auth_headers)
+        return next(t["id"] for t in list_resp.json() if t["name"] == "Edge Shipper")
+
+    @staticmethod
+    def _is_cached(token_id: int) -> bool:
+        from app.api.ingest import _token_cache
+
+        return any(info["id"] == token_id for _, info in _token_cache.values())
+
+    @pytest.mark.asyncio
+    async def test_narrowed_token_is_refused_at_once_and_widened_again_is_accepted(
+        self, client: AsyncClient, write_token: str, auth_headers: dict
+    ):
+        headers = {"Authorization": f"Bearer {write_token}"}
+        token_id = await self._token_id(client, auth_headers)
+        assert (await client.post("/api/v1/ingest", json=[{"message": "a"}], headers=headers)).status_code == 200
+        assert self._is_cached(token_id)
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["logs:read"]}, headers=auth_headers)
+        assert res.status_code == 200
+        assert not self._is_cached(token_id)
+        # Refused on the next request, well inside the 60 s cache TTL
+        refused = await client.post("/api/v1/ingest", json=[{"message": "b"}], headers=headers)
+        assert refused.status_code == 403
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["logs:write"]}, headers=auth_headers)
+        assert res.status_code == 200
+        # No 120 s lockout as after a revocation: the token works again straight away
+        assert (await client.post("/api/v1/ingest", json=[{"message": "c"}], headers=headers)).status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_edit_keeps_the_ingest_rate_limit_window(
+        self, client: AsyncClient, write_token: str, auth_headers: dict, monkeypatch
+    ):
+        headers = {"Authorization": f"Bearer {write_token}"}
+        token_id = await self._token_id(client, auth_headers)
+        monkeypatch.setattr(ingest_rate_limiter, "max_requests", 2)
+        for _ in range(2):
+            assert (await client.post("/api/v1/ingest", json=[{"message": "a"}], headers=headers)).status_code == 200
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["logs:*"]}, headers=auth_headers)
+        assert res.status_code == 200
+        limited = await client.post("/api/v1/ingest", json=[{"message": "b"}], headers=headers)
+        assert limited.status_code == 429
+
+    @pytest.mark.asyncio
+    async def test_cached_token_edited_to_category_wildcard_is_accepted(
+        self, client: AsyncClient, write_token: str, auth_headers: dict
+    ):
+        headers = {"Authorization": f"Bearer {write_token}"}
+        token_id = await self._token_id(client, auth_headers)
+        assert (await client.post("/api/v1/ingest", json=[{"message": "a"}], headers=headers)).status_code == 200
+        assert self._is_cached(token_id)
+
+        res = await client.patch(f"/api/tokens/{token_id}", json={"scopes": ["logs:*"]}, headers=auth_headers)
+        assert res.status_code == 200
+        assert (await client.post("/api/v1/ingest", json=[{"message": "b"}], headers=headers)).status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_edit_between_lookup_and_cache_write_is_not_undone(
+        self, client: AsyncClient, write_token: str, auth_headers: dict, monkeypatch
+    ):
+        import sqlite3
+
+        from app.api import deps as deps_mod
+        from app.api.ingest import refresh_ingest_token
+        from app.core.config import get_db_path
+
+        token_id = await self._token_id(client, auth_headers)
+        original_run_db_query = deps_mod.run_db_query
+        raced = {"done": False}
+
+        async def racing_run_db_query(fn, *args, **kwargs):
+            result = await original_run_db_query(fn, *args, **kwargs)
+            if not raced["done"] and getattr(fn, "__name__", "") == "_lookup":
+                raced["done"] = True
+                # PATCH /api/tokens/{id} commits and refreshes the cache after the lookup has read
+                # the old row, but before the request writes it to the token cache.
+                conn = sqlite3.connect(str(get_db_path()))
+                try:
+                    conn.execute("UPDATE api_tokens SET scopes = ? WHERE id = ?", ('["logs:read"]', token_id))
+                    conn.commit()
+                finally:
+                    conn.close()
+                refresh_ingest_token(token_id)
+            return result
+
+        monkeypatch.setattr(deps_mod, "run_db_query", racing_run_db_query)
+        headers = {"Authorization": f"Bearer {write_token}"}
+
+        first = await client.post("/api/v1/ingest", json=[{"message": "in flight"}], headers=headers)
+        assert raced["done"] is True
+        assert first.status_code == 200
+        assert not self._is_cached(token_id)
+
+        second = await client.post("/api/v1/ingest", json=[{"message": "after edit"}], headers=headers)
+        assert second.status_code == 403
+
+    def test_edited_ids_expire_after_twice_the_cache_ttl(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from app.api import ingest as ingest_mod
+
+        clock = {"now": 1000.0}
+        monkeypatch.setattr(ingest_mod, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        ingest_mod.refresh_ingest_token(4243)
+        assert ingest_mod._is_ingest_token_edited(4243)
+        # An edit is not a revocation
+        assert not ingest_mod.is_ingest_token_revoked(4243)
+        clock["now"] += 2 * ingest_mod._TOKEN_CACHE_TTL - 1
+        assert ingest_mod._is_ingest_token_edited(4243)
+        clock["now"] += 2
+        assert not ingest_mod._is_ingest_token_edited(4243)
+
+
+@pytest.mark.usefixtures("isolated_filters")
 class TestIngestBearerSchemeCase:
     """The Bearer scheme name is case-insensitive (RFC 7235) on the ingest endpoint."""
 

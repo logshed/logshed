@@ -300,6 +300,25 @@ def on_token_revoked(token_id: int) -> None:
         logger.info("Closed %d MCP SSE session(s) for revoked API token %d", closed, token_id)
 
 
+def on_token_updated(token_id: int, new_scopes: Optional[list[str]]) -> None:
+    """
+    Called after an API token's name or scopes change (new_scopes is None for a rename only).
+    Its cached record is dropped so the next session-only message reads the change, and its live SSE
+    streams are closed straight away when the new scopes no longer allow connecting to MCP.
+    """
+    if new_scopes is not None and not has_scope_permission(new_scopes, REQUIRED_MCP_SCOPES):
+        closed = _close_token_sse_sessions(token_id)
+        if closed:
+            logger.info(
+                "Closed %d MCP SSE session(s) for API token %d, whose scopes no longer include %s",
+                closed,
+                token_id,
+                ", ".join(REQUIRED_MCP_SCOPES),
+            )
+        return
+    _sse_token_cache.pop(token_id, None)
+
+
 async def _load_token_record(token_id: int) -> Optional[dict[str, Any]]:
     now = time.monotonic()
     cached = _sse_token_cache.get(token_id)

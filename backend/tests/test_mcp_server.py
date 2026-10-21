@@ -466,6 +466,75 @@ class TestLegacySseSessionAuth:
         assert res.status_code == 401
 
 
+class TestTokenEditOverLegacySse:
+    """Editing a token's name or scopes reaches its live legacy SSE sessions without waiting for the recheck."""
+
+    @pytest.mark.asyncio
+    async def test_session_closes_when_the_token_loses_logs_read(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            res = await client.patch(
+                f"/api/tokens/{token['id']}", json={"scopes": ["alerts:read", "system:read"]}, headers=auth_headers
+            )
+            assert res.status_code == 200
+            await asyncio.wait_for(sse.ended.wait(), timeout=5.0)
+            assert mcp_api_mod._sse_sessions == {}
+            assert token["id"] not in mcp_api_mod._sse_token_cache
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_tool_works_once_the_token_gains_its_scope(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            assert "maintenance:write" in tool_error_text(
+                await sse_call_tool(client, sse, 2, "enable_maintenance", {"duration_minutes": 5})
+            )
+            # The session's token record is cached for SSE_TOKEN_RECHECK_SECONDS; the edit drops it
+            assert token["id"] in mcp_api_mod._sse_token_cache
+
+            res = await client.patch(
+                f"/api/tokens/{token['id']}", json={"scopes": ["logs:read", "maintenance:write"]}, headers=auth_headers
+            )
+            assert res.status_code == 200
+            assert not sse.ended.is_set()
+            result = await sse_call_tool(client, sse, 3, "enable_maintenance", {"duration_minutes": 5})
+            assert result["isError"] is False
+        finally:
+            await sse.close()
+
+    @pytest.mark.asyncio
+    async def test_rename_keeps_the_session_and_labels_later_maintenance(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES, name="Claude Read-Only")
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            await sse_initialize(client, sse)
+            assert (await sse_call_tool(client, sse, 2, "list_services"))["isError"] is False
+
+            res = await client.patch(
+                f"/api/tokens/{token['id']}", json={"name": "Claude Maintenance"}, headers=auth_headers
+            )
+            assert res.status_code == 200
+            assert not sse.ended.is_set()
+            assert len(mcp_api_mod._sse_sessions) == 1
+
+            result = await sse_call_tool(client, sse, 3, "enable_maintenance", {"duration_minutes": 5})
+            assert result["isError"] is False
+        finally:
+            await sse.close()
+        row = _maintenance_row(tmp_path / "logs.db", result["structuredContent"]["session_id"])
+        assert row["trigger_label"] == "MCP - Claude Maintenance"
+
+
 class TestPerToolScopes:
     """S-07: connecting needs only logs:read; every tool and resource checks its own scope."""
 
