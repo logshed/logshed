@@ -144,17 +144,16 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     return /^<\d{1,3}>/.test(log.raw);
   }, [log]);
 
+  // Docker rows share source_ip with syslog and HTTP-ingested rows from the same machine, so
+  // they are told apart by source_alias (matched exactly, as the backend does) or by the
+  // reserved source_ip "docker" - never by facility, which HTTP ingest also defaults to 1
   const matchedDockerEndpoint = useMemo(() => {
     if (!log || isSyslogRaw) return null;
     const endpoints = dockerEndpoints || [];
 
-    // 1. Match on source_alias or name
+    // 1. Match on source_alias
     if (log.source_alias) {
-      const match = endpoints.find(
-        (ep) =>
-          ep.source_alias.toLowerCase() === log.source_alias.toLowerCase() ||
-          ep.name.toLowerCase() === log.source_alias.toLowerCase()
-      );
+      const match = endpoints.find((ep) => ep.source_alias === log.source_alias);
       if (match) return match;
     }
 
@@ -166,32 +165,19 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
       if (localMatch) return localMatch;
     }
 
-    // 3. Match remote host URL hostname
-    if (log.source_ip && log.source_ip !== 'docker') {
-      const remoteMatch = endpoints.find((ep) => {
-        try {
-          const urlStr = ep.url.replace(/^tcp:\/\//, 'http://');
-          const parsed = new URL(urlStr);
-          return parsed.hostname === log.source_ip;
-        } catch {
-          return false;
-        }
-      });
-      if (remoteMatch) return remoteMatch;
-    }
-
     return null;
   }, [log, isSyslogRaw, dockerEndpoints]);
 
+  // Only the reserved source_ip "docker" marks a Docker host that is no longer configured:
+  // remote hosts log under their address, which syslog and HTTP senders there share
   const isDeletedDockerHost = useMemo(() => {
     if (!log || isSyslogRaw || matchedDockerEndpoint) return false;
-    if (log.source_ip === 'docker') return true;
-    if (log.facility === 1 && log.source_alias) return true;
-    if (log.source_alias?.toLowerCase().includes('docker')) return true;
-    return false;
+    return log.source_ip === 'docker';
   }, [log, isSyslogRaw, matchedDockerEndpoint]);
 
   const isDockerSource = Boolean(matchedDockerEndpoint || isDeletedDockerHost);
+  // HTTP-ingested logs have neither a syslog packet nor container output as their raw text
+  const rawLabel = isDockerSource ? 'Raw Container Output' : isSyslogRaw ? 'Raw Syslog Packet' : 'Raw Log Record';
   const cleanedPayload = cleanLogMessageForDisplay(log?.message || '');
 
   const handleCopyRaw = async () => {
@@ -437,7 +423,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-              {isDockerSource ? 'Raw Container Output' : 'Raw Syslog Packet'}
+              {rawLabel}
             </span>
             <button
               type="button"

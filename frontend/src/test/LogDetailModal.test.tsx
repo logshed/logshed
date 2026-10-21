@@ -441,12 +441,12 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(handleEditDocker).toHaveBeenCalledWith(2);
   });
 
-  it('renders "Configure Docker Host" for deleted Docker host and calls onManageDeletedDockerHost', () => {
+  it('renders "Configure Docker Host" for a log from the deleted local Docker host and calls onManageDeletedDockerHost', () => {
     const deletedDockerLog: LogEntry = {
       id: 202,
       timestamp: '2026-10-12T10:00:00Z',
       received_at: '2026-10-12T10:00:00Z',
-      source_ip: '192.168.1.50',
+      source_ip: 'docker',
       source_alias: 'old-docker',
       app_name: 'plex',
       facility: 1,
@@ -470,12 +470,174 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     const configBtn = screen.getByRole('button', { name: /Configure Docker Host/i });
     expect(configBtn).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Modify Host Alias/i })).toBeNull();
+    expect(screen.getByText('Raw Container Output')).toBeInTheDocument();
 
     fireEvent.click(configBtn);
     expect(handleManageDeleted).toHaveBeenCalledWith({
       name: 'old-docker',
-      ip: '192.168.1.50',
+      ip: 'docker',
     });
+  });
+
+  it('treats a facility 1 log sent over HTTP ingest as a host alias log, not a Docker log', () => {
+    const httpLog: LogEntry = {
+      id: 203,
+      timestamp: '2026-10-21T02:00:00Z',
+      received_at: '2026-10-21T02:00:00Z',
+      source_ip: '192.168.10.12',
+      source_alias: 'pve-node2',
+      app_name: 'vzdump',
+      facility: 1,
+      severity: 6,
+      message: 'INFO: Finished Backup of VM 100',
+      raw: 'INFO: Finished Backup of VM 100',
+    };
+
+    const handleAddAlias = vi.fn();
+    render(
+      <LogDetailModal
+        log={httpLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onAddAlias={handleAddAlias}
+        onEditDockerHost={vi.fn()}
+        onManageDeletedDockerHost={vi.fn()}
+        dockerEndpoints={[]}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /Configure Docker Host/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Edit Docker Host/i })).toBeNull();
+    expect(screen.getByText('Raw Log Record')).toBeInTheDocument();
+    expect(screen.queryByText('Raw Container Output')).toBeNull();
+    expect(screen.queryByText('Raw Syslog Packet')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Modify Host Alias/i }));
+    expect(handleAddAlias).toHaveBeenCalledWith('192.168.10.12');
+  });
+
+  it('keeps an HTTP-ingested log from a Docker host machine out of that Docker host unless the alias matches', () => {
+    const httpLog: LogEntry = {
+      id: 204,
+      timestamp: '2026-10-21T02:00:00Z',
+      received_at: '2026-10-21T02:00:00Z',
+      source_ip: '192.168.1.50',
+      source_alias: 'unraid',
+      app_name: 'backup-script',
+      facility: 1,
+      severity: 6,
+      message: 'done',
+      raw: 'done',
+    };
+    const mockEndpoints = [
+      {
+        id: 2,
+        name: 'Unraid Docker',
+        url: 'tcp://192.168.1.50:2375',
+        source_alias: 'unraid-docker',
+        enabled: true,
+        tls_enabled: false,
+        ca_cert: null,
+        client_cert: null,
+        has_client_key: false,
+        exclude_containers: '',
+        created_at: '2026-10-12T00:00:00Z',
+        updated_at: '2026-10-12T00:00:00Z',
+        is_connected: true,
+        active_containers: 5,
+      },
+    ];
+
+    render(
+      <LogDetailModal
+        log={httpLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onAddAlias={vi.fn()}
+        onEditDockerHost={vi.fn()}
+        dockerEndpoints={mockEndpoints}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /Edit Docker Host/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Modify Host Alias/i })).toBeInTheDocument();
+    expect(screen.getByText('Raw Log Record')).toBeInTheDocument();
+  });
+
+  it('treats a facility 1 syslog packet from a configured Docker host machine as a syslog log', () => {
+    const syslogLog: LogEntry = {
+      ...sampleLog,
+      id: 205,
+      source_ip: '192.168.1.50',
+      source_alias: 'unraid',
+    };
+    const mockEndpoints = [
+      {
+        id: 2,
+        name: 'Unraid Docker',
+        url: 'tcp://192.168.1.50:2375',
+        source_alias: 'unraid',
+        enabled: true,
+        tls_enabled: false,
+        ca_cert: null,
+        client_cert: null,
+        has_client_key: false,
+        exclude_containers: '',
+        created_at: '2026-10-12T00:00:00Z',
+        updated_at: '2026-10-12T00:00:00Z',
+        is_connected: true,
+        active_containers: 5,
+      },
+    ];
+
+    render(
+      <LogDetailModal
+        log={syslogLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onAddAlias={vi.fn()}
+        onEditDockerHost={vi.fn()}
+        onManageDeletedDockerHost={vi.fn()}
+        dockerEndpoints={mockEndpoints}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /Docker Host/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Modify Host Alias/i })).toBeInTheDocument();
+    expect(screen.getByText('Raw Syslog Packet')).toBeInTheDocument();
+  });
+
+  it('does not offer a Docker action for a log from an unknown host whose alias merely contains "docker"', () => {
+    const log: LogEntry = {
+      id: 206,
+      timestamp: '2026-10-21T02:00:00Z',
+      received_at: '2026-10-21T02:00:00Z',
+      source_ip: '10.0.0.9',
+      source_alias: 'docker-build-box',
+      app_name: 'ci',
+      facility: 1,
+      severity: 6,
+      message: 'build ok',
+      raw: 'build ok',
+    };
+
+    render(
+      <LogDetailModal
+        log={log}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onAddAlias={vi.fn()}
+        onManageDeletedDockerHost={vi.fn()}
+        dockerEndpoints={[]}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /Configure Docker Host/i })).toBeNull();
+    expect(screen.getByText('Raw Log Record')).toBeInTheDocument();
   });
 });
 
