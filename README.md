@@ -126,7 +126,7 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 
 ### Software Dependencies
 
-- **Docker Engine**: 20.10+
+- **Docker Engine**: 24.0+
 - **Docker Compose**: v2.0+ (or Unraid OS 6.9+)
 - **Supported Architectures**:
   - `linux/amd64` (Standard x86_64 servers and PCs)
