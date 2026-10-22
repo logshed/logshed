@@ -243,7 +243,7 @@ async def update_settings(
         max_days = get_max_retention_days()
         if req.retention_days < 1 or req.retention_days > max_days:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Retention days must be between 1 and {max_days}",
             )
 
@@ -407,7 +407,7 @@ async def update_settings(
                 dt = parse_iso_to_utc_datetime(req.maintenance_until)
                 if dt is None:
                     raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                         detail=f"Invalid ISO 8601 datetime format for maintenance_until: {req.maintenance_until}",
                     )
                 stored_iso = dt.isoformat()

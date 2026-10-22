@@ -122,7 +122,7 @@ async def set_maintenance_window(
         dt = parse_iso_to_utc_datetime(payload.until)
         if dt is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid ISO 8601 datetime format for maintenance_until: {payload.until}",
             )
         # A past (or nearly past) end would start a window the sweep closes at once, leaving an empty audit row

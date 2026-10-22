@@ -102,7 +102,7 @@ async def preview_prune(
     max_days = get_max_retention_days()
     if retention_days is not None and not (1 <= retention_days <= max_days):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"retention_days must be between 1 and {max_days}.",
         )
 
