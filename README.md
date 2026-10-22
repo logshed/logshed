@@ -41,7 +41,7 @@
 
 ## Overview
 
-Most logging stacks (such as Grafana Loki or the ELK stack) target large production clusters. Running them on a home server often takes several gigabytes of RAM and significant setup time just to collect logs from a router, a couple of virtual machines, and a handful of containers.
+Most logging stacks (such as Grafana Loki, Graylog or the ELK stack) are built for large production clusters. Each runs several services: Loki needs Grafana and a collector beside it, and Graylog and ELK need a search cluster such as OpenSearch or Elasticsearch, each with its own configuration. That is a lot to run just to collect logs from a router, a couple of virtual machines, and a handful of containers.
 
 LogShed is a compact, self-hosted log hub designed for home labs and personal servers. It ingests standard syslog traffic and Docker container output into a single local SQLite database with full-text search (FTS5), providing a quick search interface and optional AI error diagnosis when you need help reading a stack trace.
 
