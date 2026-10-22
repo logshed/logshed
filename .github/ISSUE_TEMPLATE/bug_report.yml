@@ -1,0 +1,103 @@
+name: Bug Report
+description: Report a bug or an unexpected result in LogShed
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Before submitting, please redact any passwords, API keys, or sensitive hostnames from your logs and configuration snippets.
+
+  - type: input
+    id: version
+    attributes:
+      label: LogShed Version
+      description: What version or container image tag are you running? (Shown in Settings > Application)
+      placeholder: "e.g. v1.3.0, latest"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Method
+      options:
+        - Docker Compose
+        - Docker Run
+        - Unraid (Community Applications / Template)
+        - Proxmox LXC / VM with Docker
+        - Local Source / Development
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: CPU Architecture
+      options:
+        - linux/amd64 (x86_64)
+        - linux/arm64 (aarch64 / Raspberry Pi / Apple Silicon)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: filesystem
+    attributes:
+      label: Storage Filesystem for /data
+      description: SQLite WAL mode requires a local filesystem with POSIX locking.
+      options:
+        - Local disk (ext4 / xfs / btrfs / zfs)
+        - Unraid direct cache pool (/mnt/cache/...)
+        - Unraid user share (/mnt/user/...)
+        - Network mount (NFS / SMB / CIFS)
+        - Other / Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Area
+      options:
+        - Web Console / Search UI
+        - Syslog Ingestion (UDP / TCP)
+        - Docker Container Tailing (Local or Remote Hosts)
+        - HTTP Ingest API
+        - Alert Rules & Notifications (Apprise)
+        - Ingestion Drop Rules
+        - Maintenance Windows
+        - AI Diagnosis & Redaction
+        - MCP Server
+        - REST API / Scoped Tokens
+        - Database / Retention / Pruning
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem and what you expected to happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we trigger this issue?
+      placeholder: |
+        1. Go to '...'
+        2. Configure '...'
+        3. Observe error '...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: LogShed Logs & Compose Config
+      description: Paste relevant LogShed warnings from the console (filter Host to `logshed`; the level is set under Internal Application Logging in Settings > Application), the output of `docker logs logshed` if it fails to start, and your `docker-compose.yml`. Redact secrets first.
+      render: shell

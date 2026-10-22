@@ -1,0 +1,48 @@
+name: Feature Request
+description: Suggest an improvement or new capability for LogShed
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        LogShed is designed as a compact, single-container log hub for homelabs and personal servers. Please keep this scope in mind when proposing new features.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      options:
+        - Web Console & Search
+        - Log Sources (Syslog / Docker / HTTP)
+        - Alerting & Drop Rules
+        - Maintenance Windows & Digest
+        - AI Diagnosis & MCP Server
+        - REST API & Integrations
+        - Storage & Performance
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use Case / Problem Statement
+      description: What homelab scenario or workflow are you trying to solve?
+      placeholder: "e.g. When my NAS runs its nightly scrub, I want to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this feature to work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you tried working around this using existing drop rules, alert rules, API endpoints, or maintenance windows?

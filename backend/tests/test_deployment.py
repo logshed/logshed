@@ -273,6 +273,22 @@ class TestGitHubWorkflow:
         assert "linux/amd64" in content
         assert "linux/arm64" in content
 
+    def test_ci_workflow_and_issue_templates_valid_yaml(self):
+        ci_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        assert ci_path.exists(), ".github/workflows/ci.yml must exist"
+        ci_parsed = yaml.safe_load(ci_path.read_text())
+        assert ci_parsed is not None
+        assert "jobs" in ci_parsed
+        triggers = ci_parsed.get("on") or ci_parsed.get(True) or {}
+        assert "pull_request" in triggers
+
+        issue_dir = REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
+        for filename in ("config.yml", "bug_report.yml", "feature_request.yml"):
+            template_path = issue_dir / filename
+            assert template_path.exists(), f"{filename} must exist"
+            parsed = yaml.safe_load(template_path.read_text())
+            assert isinstance(parsed, dict)
+
 
 # ===================================================================
 # 6. Live Container Execution (Requires Docker Daemon)

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation & Setup Guides
+    url: https://github.com/logshed/logshed/tree/main/docs
+    about: Read guides on syslog forwarding, rules, API tokens, and MCP setup before opening an issue.
+  - name: Home Assistant Integration Issues
+    url: https://github.com/logshed/homeassistant-logshed/issues
+    about: Report bugs specific to the Home Assistant custom integration in its dedicated repository.

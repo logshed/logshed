@@ -277,7 +277,7 @@ cd logshed
 # 2. Setup Python virtual environment & install backend dependencies
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r backend/requirements.txt
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt   # app and test dependencies
 
 # 3. Install frontend dependencies & run frontend tests
 cd frontend
@@ -299,9 +299,9 @@ python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --re
 
 ### Updating Pinned Dependencies
 
-Backend dependencies are pinned to exact versions in `backend/requirements.txt` for reproducible builds. Transitive dependencies are not pinned. To update one:
+Backend dependencies are pinned to exact versions in `backend/requirements.txt` for reproducible builds, and the test tools in `backend/requirements-dev.txt`. Transitive dependencies are not pinned. To update one:
 
-1. Change its version in `backend/requirements.txt` and reinstall it (`pip install -r backend/requirements.txt`).
+1. Change its version in `backend/requirements.txt` (or `backend/requirements-dev.txt`) and reinstall (`pip install -r backend/requirements.txt -r backend/requirements-dev.txt`).
 2. Run the full backend test suite (`.venv/bin/pytest backend/tests/ -q`) and the frontend tests (`cd frontend && npm test`).
 3. Build the Docker image and run the end-to-end suite (`.venv/bin/pytest backend/tests/ -m e2e -v`) before releasing. It builds the image from `Dockerfile`, so it confirms the new versions install on the Python 3.12 base image.
 
