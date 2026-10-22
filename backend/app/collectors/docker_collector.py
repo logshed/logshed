@@ -368,6 +368,22 @@ def _iso_to_unix_timestamp(ts_str: str) -> str:
         return ts_str
 
 
+def _event_since(event: dict) -> Optional[str]:
+    """
+    Build a /containers/{id}/logs 'since' value from a Docker event's own time.
+    Prefers 'timeNano' as seconds.nanoseconds (the daemon parses fractional Unix timestamps),
+    so a restarted container does not replay the last second of its previous run.
+    Falls back to the integer 'time' in seconds.
+    """
+    time_nano = event.get("timeNano")
+    if isinstance(time_nano, int) and time_nano > 0:
+        return f"{time_nano // 1_000_000_000}.{time_nano % 1_000_000_000:09d}"
+    time_s = event.get("time")
+    if isinstance(time_s, int) and time_s > 0:
+        return str(time_s)
+    return None
+
+
 def _parse_docker_message_content(message: str, default_severity: int) -> tuple[str, int]:
     """
     Parse container message content to extract message payload and explicit severity
@@ -628,12 +644,16 @@ async def _tail_container_logs(
     endpoint_id: int = 1,
     source_ip: str = "docker",
     source_alias: Optional[str] = None,
+    initial_since: Optional[str] = None,
 ) -> None:
     """
     Stream logs for a single container, feeding lines through the assembler.
 
     Requests logs with timestamps=true.
     Tracks latest seen log timestamp and resumes via since=<timestamp> on reconnect.
+    A container that was already running when LogShed attached has no history to resume from,
+    so it opens with tail=0. A container started while LogShed is running passes initial_since
+    (its start event time) so the lines it wrote before the stream opened are read too.
     Uses proper Docker multiplexed stream frame parsing when tty=false,
     and newline-delimited raw text when tty=true.
     """
@@ -715,6 +735,8 @@ async def _tail_container_logs(
         }
         if last_seen_timestamp:
             params["since"] = _iso_to_unix_timestamp(last_seen_timestamp)
+        elif initial_since:
+            params["since"] = initial_since
         else:
             params["tail"] = "0"
 
@@ -731,6 +753,7 @@ async def _tail_container_logs(
                         f"Resetting last seen timestamp and falling back to tail='0'."
                     )
                     last_seen_timestamp = None
+                    initial_since = None
                     if container_last_seen is not None:
                         container_last_seen.pop(container_id, None)
                     continue
@@ -1013,6 +1036,8 @@ class DockerTailer:
         self._container_last_seen: dict[str, str] = {}
         # container_id -> set of message contents seen at the latest timestamp (for deduplication on reconnect)
         self._container_last_messages: dict[str, set[str]] = {}
+        # container_id -> 'since' value from its latest start event (cleared on die)
+        self._container_started_since: dict[str, str] = {}
         self._socket_poll_interval = (
             socket_poll_interval
             if socket_poll_interval is not None
@@ -1368,6 +1393,10 @@ class DockerTailer:
             if cid not in active_ids:
                 self._container_last_messages.pop(cid, None)
 
+        for cid in list(self._container_started_since.keys()):
+            if cid not in active_ids:
+                self._container_started_since.pop(cid, None)
+
         for cid in list(self._tailers.keys()):
             if cid not in active_ids:
                 await self._stop_tailer(cid)
@@ -1396,8 +1425,14 @@ class DockerTailer:
         client: httpx.AsyncClient,
         container_id: str,
         container_name: str,
+        since: Optional[str] = None,
     ) -> None:
-        """Start a log tailer task for a container if not already active and not excluded."""
+        """
+        Start a log tailer task for a container if not already active and not excluded.
+
+        since is the Docker logs 'since' value for a container started while LogShed is running;
+        without it the tailer opens at the end of the log (tail=0).
+        """
         if _should_ignore_container(container_id, container_name, exclude_containers=self.exclude_containers):
             return
 
@@ -1418,6 +1453,7 @@ class DockerTailer:
                 endpoint_id=self.endpoint_id,
                 source_ip=self._effective_source_ip(),
                 source_alias=self.source_alias,
+                initial_since=since,
             ),
             name=f"docker-tail-{container_name}",
         )
@@ -1492,11 +1528,18 @@ class DockerTailer:
                             continue
                         self._schedule_app_alias_update(raw_name, display_name, source_ip=self._effective_source_ip())
                         logger.info(f"Container {action}: {display_name} ({cid[:12]}) on {self.name}")
+                        since = _event_since(event)
                         if action == "restart":
                             await self._stop_tailer(cid)
-                        self._start_tailer(client, cid, display_name)
+                            # Docker emits 'start' just before 'restart'; keep its earlier time so lines
+                            # written between the two events are not skipped
+                            since = self._container_started_since.get(cid, since)
+                        if since:
+                            self._container_started_since[cid] = since
+                        self._start_tailer(client, cid, display_name, since=since)
                     elif action == "die":
                         logger.info(f"Container died: {display_name} ({cid[:12]})")
+                        self._container_started_since.pop(cid, None)
                         await self._stop_tailer(cid)
 
             events_task = asyncio.create_task(_consume_events())

@@ -4,6 +4,7 @@ Tests for Docker collector, framing, container filtering, and socket fallback.
 
 import asyncio
 import datetime
+import json
 import logging
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.collectors.docker_collector import (
     _build_client,
     _demux_stream,
     _detect_severity,
+    _event_since,
     _extract_docker_timestamp,
     _make_log_entry,
     _parse_docker_host,
@@ -943,6 +945,325 @@ class TestDockerTimestampAndAccurateResume:
             # Timestamp prefix should NOT be present in the message
             assert ts1 not in entry["message"]
             assert ts2 not in entry["message"]
+
+
+class TestDockerNewContainerFirstLines:
+    """A container started while LogShed runs is read from its start; ones already running open at the end."""
+
+    CID = "c" * 64
+
+    @staticmethod
+    def _event(action: str, time_nano: int, with_nano: bool = True) -> str:
+        event = {
+            "Type": "container",
+            "Action": action,
+            "Actor": {"ID": TestDockerNewContainerFirstLines.CID, "Attributes": {"name": "web"}},
+            "time": time_nano // 1_000_000_000,
+        }
+        if with_nano:
+            event["timeNano"] = time_nano
+        return json.dumps(event)
+
+    async def _run_events(self, monkeypatch, event_lines, expected_log_requests):
+        """
+        Feed events through _watch_events and return the params of each /logs request.
+        An item may be (line, n): the next event is held back until n /logs requests were opened.
+        """
+        monkeypatch.setenv("DOCKER_HEARTBEAT_INTERVAL", "0")
+        tailer = DockerTailer(KeyedMultilineAssembler(), discovery_interval=0)
+        captured = []
+        all_opened = asyncio.Event()
+
+        class MockEventsResp:
+            def raise_for_status(self):
+                pass
+            async def aiter_lines(self):
+                for item in event_lines:
+                    line, wait_for = item if isinstance(item, tuple) else (item, 0)
+                    yield line
+                    while len(captured) < wait_for:
+                        await asyncio.sleep(0)
+                await all_opened.wait()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockLogsResp:
+            status_code = 200
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                await asyncio.Event().wait()
+                yield b""
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                if url == "/events":
+                    return MockEventsResp()
+                captured.append(kwargs.get("params", {}))
+                if len(captured) >= expected_log_requests:
+                    all_opened.set()
+                return MockLogsResp()
+
+        try:
+            await asyncio.wait_for(tailer._watch_events(MockClient()), timeout=5.0)
+        finally:
+            await tailer._cleanup_tailers()
+        return tailer, captured
+
+    def test_event_since_prefers_nanosecond_precision(self):
+        """timeNano becomes seconds.nanoseconds with zero padding; time is the integer fallback."""
+        assert _event_since({"time": 1790000000, "timeNano": 1790000000123456789}) == "1790000000.123456789"
+        assert _event_since({"timeNano": 1790000000000000042}) == "1790000000.000000042"
+        assert _event_since({"time": 1790000000}) == "1790000000"
+        assert _event_since({}) is None
+        assert _event_since({"time": 0, "timeNano": 0}) is None
+
+    @pytest.mark.asyncio
+    async def test_start_event_reads_logs_since_event_time_without_tail(self, monkeypatch):
+        """A tailer started from a start event asks for logs since the event time, with no tail."""
+        start_ns = 1790000000123456789
+        tailer, captured = await self._run_events(monkeypatch, [self._event("start", start_ns)], 1)
+
+        assert len(captured) == 1
+        assert captured[0]["since"] == "1790000000.123456789"
+        assert "tail" not in captured[0]
+        assert captured[0]["timestamps"] == "true"
+        assert captured[0]["follow"] == "true"
+
+    @pytest.mark.asyncio
+    async def test_start_event_without_time_nano_uses_integer_time(self, monkeypatch):
+        """Older daemons that send only 'time' still give a since value."""
+        start_ns = 1790000005000000000
+        tailer, captured = await self._run_events(
+            monkeypatch, [self._event("start", start_ns, with_nano=False)], 1
+        )
+
+        assert captured[0]["since"] == "1790000005"
+        assert "tail" not in captured[0]
+
+    @pytest.mark.asyncio
+    async def test_restart_event_alone_reads_logs_since_event_time(self, monkeypatch):
+        """A restart event with no earlier start event uses its own time, never tail=all."""
+        restart_ns = 1790000010500000000
+        tailer, captured = await self._run_events(monkeypatch, [self._event("restart", restart_ns)], 1)
+
+        assert captured[0]["since"] == "1790000010.500000000"
+        assert "tail" not in captured[0]
+
+    @pytest.mark.asyncio
+    async def test_restart_keeps_start_event_time_of_the_same_restart(self, monkeypatch):
+        """Docker sends start just before restart; the new tailer keeps the earlier time so no line is skipped."""
+        start_ns = 1790000020000000000
+        restart_ns = 1790000020004000000
+        tailer, captured = await self._run_events(
+            monkeypatch,
+            [(self._event("start", start_ns), 1), (self._event("restart", restart_ns), 2)],
+            2,
+        )
+
+        assert [p["since"] for p in captured] == ["1790000020.000000000", "1790000020.000000000"]
+        assert all("tail" not in p for p in captured)
+
+    @pytest.mark.asyncio
+    async def test_restart_right_after_start_keeps_start_event_time(self, monkeypatch):
+        """If restart arrives before the start tailer opened its stream, the only request uses the start time."""
+        tailer, captured = await self._run_events(
+            monkeypatch,
+            [self._event("start", 1790000025000000000), self._event("restart", 1790000025004000000)],
+            1,
+        )
+
+        assert [p["since"] for p in captured] == ["1790000025.000000000"]
+        assert "tail" not in captured[0]
+
+    @pytest.mark.asyncio
+    async def test_die_clears_remembered_start_time(self, monkeypatch):
+        """After a die event a later restart event is not tied to the previous run's start time."""
+        tailer, captured = await self._run_events(
+            monkeypatch,
+            [
+                (self._event("start", 1790000030000000000), 1),
+                (self._event("die", 1790000031000000000), 1),
+                (self._event("restart", 1790000040000000000), 2),
+            ],
+            2,
+        )
+
+        assert [p["since"] for p in captured] == ["1790000030.000000000", "1790000040.000000000"]
+        assert tailer._container_started_since == {self.CID: "1790000040.000000000"}
+
+    @pytest.mark.asyncio
+    async def test_initial_enumeration_still_uses_tail_0(self):
+        """Containers already running when LogShed starts open at the end of the log, with no since."""
+        tailer = DockerTailer(KeyedMultilineAssembler(), discovery_interval=0)
+        captured = []
+        opened = asyncio.Event()
+
+        class MockLogsResp:
+            status_code = 200
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                await asyncio.Event().wait()
+                yield b""
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class Resp:
+                    status_code = 200
+                    def raise_for_status(self):
+                        pass
+                    def json(self):
+                        if url == "/containers/json":
+                            return [{"Id": "r" * 64, "Names": ["/running"], "Labels": {}}]
+                        return {"Config": {"Tty": False}}
+                return Resp()
+            def stream(self, method, url, **kwargs):
+                captured.append(kwargs.get("params", {}))
+                opened.set()
+                return MockLogsResp()
+
+        try:
+            await tailer._attach_running_containers(MockClient())
+            await asyncio.wait_for(opened.wait(), timeout=5.0)
+        finally:
+            await tailer._cleanup_tailers()
+
+        assert len(captured) == 1
+        assert captured[0]["tail"] == "0"
+        assert "since" not in captured[0]
+
+    @pytest.mark.asyncio
+    async def test_initial_since_is_kept_on_reconnect_until_a_line_is_seen(self, monkeypatch):
+        """If the stream drops before any line, the retry still asks since the start time, not tail=0."""
+        monkeypatch.setattr("app.collectors.docker_collector._CONTAINER_INITIAL_BACKOFF", 0.01)
+        cancel_event = asyncio.Event()
+        captured_params = []
+
+        class MockResp:
+            status_code = 200
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                if len(captured_params) >= 2:
+                    cancel_event.set()
+                if False:
+                    yield b""
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                captured_params.append(kwargs.get("params", {}))
+                return MockResp()
+
+        await _tail_container_logs(
+            MockClient(), "cid_early", "app_early", KeyedMultilineAssembler(), cancel_event,
+            heartbeat_interval=0, initial_since="1790000050.250000000",
+        )
+
+        assert len(captured_params) >= 2
+        for params in captured_params:
+            assert params["since"] == "1790000050.250000000"
+            assert "tail" not in params
+
+    @pytest.mark.asyncio
+    async def test_first_line_is_delivered_once_and_last_seen_wins_on_reconnect(self, monkeypatch):
+        """The line written before the stream opened is queued once; a reconnect resumes from it, not initial_since."""
+        monkeypatch.setattr("app.collectors.docker_collector._CONTAINER_INITIAL_BACKOFF", 0.01)
+        assembler = KeyedMultilineAssembler()
+        entries = []
+
+        async def capture_feed(key, entry):
+            entries.append(entry)
+
+        assembler.feed = capture_feed
+        cancel_event = asyncio.Event()
+        captured_params = []
+
+        ts1 = "2026-09-07T10:15:30.100000000Z"
+        msg1 = f"{ts1} hello from proxy test 1\n".encode("utf-8")
+        frame1 = bytes([1, 0, 0, 0]) + len(msg1).to_bytes(4, "big") + msg1
+
+        ts2 = "2026-09-07T10:15:32.200000000Z"
+        msg2 = f"{ts2} hello from proxy test 2\n".encode("utf-8")
+        frame2 = bytes([1, 0, 0, 0]) + len(msg2).to_bytes(4, "big") + msg2
+
+        class MockResp1:
+            status_code = 200
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                yield frame1
+                raise httpx.RemoteProtocolError("Connection dropped")
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockResp2:
+            status_code = 200
+            def raise_for_status(self):
+                pass
+            async def aiter_bytes(self):
+                # Inclusive 'since' makes the daemon replay line 1 on the reconnect
+                yield frame1
+                yield frame2
+                cancel_event.set()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def get(self, url, **kwargs):
+                class InspectResp:
+                    status_code = 200
+                    def json(self):
+                        return {"Config": {"Tty": False}}
+                return InspectResp()
+            def stream(self, method, url, **kwargs):
+                captured_params.append(kwargs.get("params", {}))
+                return MockResp1() if len(captured_params) == 1 else MockResp2()
+
+        last_seen = {}
+        last_msgs = {}
+        await _tail_container_logs(
+            MockClient(), "cid_once", "app_once", assembler, cancel_event,
+            container_last_seen=last_seen, container_last_messages=last_msgs,
+            heartbeat_interval=0, initial_since="1757240129.900000000",
+        )
+
+        assert captured_params[0]["since"] == "1757240129.900000000"
+        assert "tail" not in captured_params[0]
+        # Reconnect resumes from the last seen line (Unix seconds), not from initial_since
+        assert captured_params[1]["since"] == str(int(datetime.datetime.fromisoformat("2026-09-07T10:15:30+00:00").timestamp()))
+        assert [e["message"] for e in entries] == ["hello from proxy test 1", "hello from proxy test 2"]
+
 
 
 # ===================================================================
