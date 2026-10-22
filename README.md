@@ -153,6 +153,8 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      # Set TZ to your own time zone (for example Europe/London or America/New_York).
+      # LogShed uses it for syslog timestamps that carry no zone, maintenance schedules and the daily digest.
       - TZ=UTC
       - PORT=8080
       - SYSLOG_PORT=1514
