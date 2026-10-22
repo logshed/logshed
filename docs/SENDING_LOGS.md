@@ -315,7 +315,7 @@ LogShed includes a built-in Docker tailing engine (`DockerTailer`) that connects
 ### How Container Logs Are Tagged
 
 LogShed automatically structures container log records as follows:
-- **Application (`app_name`)**: The container name (stripped of the leading slash) becomes the application name.
+- **Application (`app_name`)**: The first of these that is set: the `logshed.alias` or `logshed.name` container label, the Compose service name (`com.docker.compose.service`), the Swarm service name (`com.docker.swarm.service.name`), the container name (without the leading slash), or the first 12 characters of the container ID.
 - **Source (`source` / `source_alias`)**: The Docker host name or the value configured in `DOCKER_SOURCE_ALIAS` (defaults to `docker`) becomes the log source.
 - **Severity**: Output written to `stderr` is assigned severity level `3 - Error` or `4 - Warning`, while output to `stdout` is assigned severity level `6 - Info`.
 

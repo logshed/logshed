@@ -30,7 +30,7 @@ When troubleshooting homelab issues, traditional workflows require multiple manu
 
 With LogShed's built-in Model Context Protocol (MCP) server, your AI assistant connects directly to your homelab logs through a secure, scoped interface. The assistant can autonomously:
 
-- **Search Logs with SQLite FTS5**: Run sub-second full-text searches across syslog and container outputs.
+- **Search Logs with SQLite FTS5**: Run full-text searches across syslog and container output.
 - **Inspect Context & Stack Traces**: Fetch surrounding lines before and after an error to trace the complete failure sequence.
 - **Review Alert History**: Inspect recent alert firings and automated rule incident summaries.
 - **Track System Telemetry**: Check ingestion volume, error distributions (1-hour and 24-hour), and noisy services.
