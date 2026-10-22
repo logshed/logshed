@@ -19,6 +19,10 @@
   <a href="#built-with"><img src="https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite FTS5"></a>
 </p>
 
+<p align="center">
+  <img src="assets/logshed-demo.gif" width="960" alt="The LogShed console streaming syslog and Docker logs from opnsense, truenas, pve-node1 and docker-vm, then a search for smartd sdc narrowing them to one critical disk warning">
+</p>
+
 ---
 
 ## Table of Contents
