@@ -5,7 +5,7 @@
 <h1 align="center">LogShed</h1>
 
 <p align="center">
-  <strong>A lightweight, self-hosted homelab log aggregator and syslog server featuring real-time streaming, fast SQLite FTS5 search, and user-directed AI incident analysis.</strong>
+  <strong>A self-hosted log aggregator and syslog server for homelabs. One container collects Docker and syslog logs, streams them live, searches them with SQLite FTS5, alerts you, and can explain errors with an AI model you choose.</strong>
 </p>
 
 <p align="center">
@@ -25,9 +25,12 @@
 
 - [Overview](#overview)
 - [Features](#features)
+- [Home Assistant Integration](#home-assistant-integration)
 - [Screenshots](#screenshots)
 - [Documentation](#documentation)
 - [Prerequisites & System Requirements](#prerequisites--system-requirements)
+  - [Software Requirements](#software-requirements)
+  - [Resource Use](#resource-use)
 - [Quick Start](#quick-start)
   - [Docker Compose (Recommended)](#docker-compose-recommended)
   - [Docker Run](#docker-run)
@@ -43,7 +46,9 @@
 
 Most logging stacks (such as Grafana Loki, Graylog or the ELK stack) are built for large production clusters. Each runs several services: Loki needs Grafana and a collector beside it, and Graylog and ELK need a search cluster such as OpenSearch or Elasticsearch, each with its own configuration. That is a lot to run just to collect logs from a router, a couple of virtual machines, and a handful of containers.
 
-LogShed is a compact, self-hosted log hub designed for home labs and personal servers. It ingests standard syslog traffic and Docker container output into a single local SQLite database with full-text search (FTS5), providing a quick search interface and optional AI error diagnosis when you need help reading a stack trace.
+LogShed is a compact, self-hosted log hub for home labs and personal servers. It receives syslog and Docker container output into one local SQLite database with full-text search (FTS5), and shows it all in a live web console. It runs as a single container. If you want help reading a stack trace, you can ask an AI model of your choice; AI is optional and stays off until you add a provider.
+
+Version 1.3.0 adds several Docker hosts, a Sources hub, HTTP log ingest, scoped API tokens, an MCP server, a Home Assistant integration, AI follow-up questions and maintenance windows you can start from many places. See the [changelog](CHANGELOG.md) for everything that changed.
 
 > [!NOTE]
 > LogShed is intended for home networks and personal self-hosted environments. It is not built for multi-tenant companies or high-throughput enterprise infrastructure.
@@ -52,17 +57,31 @@ LogShed is a compact, self-hosted log hub designed for home labs and personal se
 
 ## Features
 
-- **Live Streaming & Fast Search**: Stream incoming logs in real time without lag, and jump back through history using sub-second SQLite FTS5 search. Step chronologically through filtered results directly within the inspection modal.
-- **Noise Control at the Door**: Discard repetitive cron chatter, container health checks, and debug spam in memory with ingestion drop rules before anything touches disk. Create rules with one click from log inspection or start from built-in presets.
-- **Intelligent Alerting & Rate Spike Protection**: Catch critical error bursts, security patterns, or sudden runaway log storms. Real-time in-memory velocity tracking identifies top culprit containers and repeat patterns during storms and sends notifications straight to Discord, Telegram, Pushover, Gotify, or custom webhooks.
-- **On-Demand & Alert AI Diagnosis**: Get human-readable root-cause explanations and practical fix commands when deciphering a cryptic stack trace. All passwords, tokens, and sensitive network addresses are automatically masked before reaching your chosen model (Gemini, OpenAI, or local Ollama).
-- **Daily Digest Summaries**: Receive an automated 24-hour analytical rollup delivered to your notification channels, detailing recurring error counts, top logging containers, and storage trends.
-- **Maintenance Windows & Automation**: Silence notification channels or drop error chatter during planned package updates, homelab restarts, or scheduled backups. Trigger on-demand windows programmatically via external scripts.
-- **Programmatic External API**: Generate scoped Bearer tokens for external automation, Home Assistant integrations, backup runners (Proxmox VE, cron), and AI agents with fine-grained permissions and sliding rate limits. Edge shippers and scripts can also push logs over HTTP (`POST /api/v1/ingest`), and the interactive API docs at `/docs` open behind your web login.
-- **Model Context Protocol (MCP) Server**: Connect external AI assistants (Claude Desktop, Cursor, Windsurf) directly to your homelab. Assistants can run full-text log searches, inspect surrounding context, review incident history, and manage maintenance mode.
-- **Unified Incident & AI History**: Review past alert triggers alongside full AI diagnostic logs, token usage statistics, and prompt history in a single chronological timeline.
-- **Targeted Deletion & Database Compaction**: Prune specific noisy records on demand and compact your SQLite database to reclaim disk space immediately.
-- **Homelab Ready**: Assign friendly host aliases to router and switch IP addresses, save custom filter views with bidirectional URL sync, and run comfortably on modest hardware (~150 to 250 MB RAM).
+- **Syslog, Docker and HTTP in one place**: A built-in syslog server (UDP and TCP on port 1514, RFC 3164 and RFC 5424) takes logs from routers, firewalls, NAS boxes and hypervisors. LogShed also tails Docker containers on the local host and on other Docker hosts you add under Settings > Sources (local socket, a Docker socket proxy over TCP, or mutual TLS). Vector, Fluent Bit and scripts can push logs over HTTP with `POST /api/v1/ingest`. If the kernel drops UDP syslog datagrams in a burst, the console shows "UDP lost"; TCP syslog avoids that loss.
+- **Readable source names**: Containers are named from their `logshed.alias` or `logshed.name` label, then the Compose service name, then the Swarm service name. Syslog devices get friendly aliases and notes in the Sources hub.
+- **Live stream and full-text search**: Watch logs arrive in real time, then search the history with SQLite FTS5 (a search returning 100 results from about 814,000 logs took a median of 46 ms; see [Resource Use](#resource-use)). Shorthand filters such as `15m`, `24h`, `7d`, `today` and named severities (`error`, `warning`) work in the console, the REST API and MCP. Save filter views, and read the lines before and after any record.
+- **Noise control at the door**: Discard repetitive cron chatter, container health checks and debug spam in memory with ingestion drop rules, before anything is written to disk. Create a rule in one click from a log line or start from a built-in preset, and drag rules into the order you want.
+- **Alerts and rate spike detection**: Threshold, pattern and rate spike rules catch error bursts, security patterns and runaway log storms, and name the top service, host and repeated message behind a spike. Notifications go to 100+ services through Apprise, such as Discord, Telegram, Pushover, Gotify, ntfy, Slack, email and custom webhooks. Rule patterns are limited to 50 ms per match so a bad pattern cannot freeze ingestion.
+- **Maintenance windows**: Silence alert notifications, or drop incoming error logs, during planned upgrades and backups. Start a window from the web console, a recurring schedule, Home Assistant, the REST API or MCP. Several windows can overlap, and each one is recorded in incident history.
+- **Optional AI diagnosis**: Off until you add a provider, and every other feature works without it. Choose Google Gemini, OpenAI, Anthropic Claude, or an OpenAI-compatible server such as Ollama, vLLM or LocalAI on your own network. Ask for a root-cause explanation and fix commands when you request an analysis of selected logs or when an alert with AI enrichment fires, then ask follow-up questions on the same logs. As a safety net, LogShed masks common secret patterns (passwords, tokens, API keys, private keys and similar, as listed in the [changelog](CHANGELOG.md)) before a prompt leaves the server. This is best-effort and cannot catch every secret. On-demand requests show you the exact prompt first, so review it before you send; an alert with AI enrichment sends its prompt without a preview.
+- **Incident history and daily digest**: Review alert firings, AI diagnoses with their follow-up threads and token usage, and maintenance windows in one timeline. An optional daily digest sends a 24-hour summary of error counts, noisy services and storage change to your notification channels.
+- **REST API and scoped tokens**: Create Bearer tokens with only the scopes a script needs, such as a Home Assistant or edge shipper preset, and change a token's scopes later without issuing a new one. The interactive API docs (Swagger UI and ReDoc) are served by LogShed at `/docs` and `/redoc`, behind your web login.
+- **MCP server for AI assistants**: Connect Claude Desktop, Cursor, Windsurf or Antigravity so an assistant can search logs, count errors, read the context around an incident, check alerts and metrics, and start or end maintenance windows. It is off by default, and tool output is masked with the same best-effort redaction.
+- **Storage you control**: Retention is 14 days by default and up to 30 days unless you raise the limit. Lowering retention shows what would be deleted before you confirm. You can also delete specific noisy records and compact the database to reclaim disk space.
+- **Home Assistant**: An integration for sensors, alert state and a maintenance switch. See [Home Assistant Integration](#home-assistant-integration).
+- **No telemetry**: LogShed sends no telemetry. Its only built-in outbound call is an optional release check against ghcr.io that tells the console when a newer stable release exists (turn it off with "Check for new versions" in Settings > Application). AI providers, notification targets and extra Docker hosts are contacted only if you configure them.
+
+---
+
+## Home Assistant Integration
+
+The [LogShed integration for Home Assistant](https://github.com/logshed/homeassistant-logshed) connects Home Assistant to your LogShed server. Install it through HACS as a custom repository. It provides:
+
+- Sensors for the ingestion rate, error counts (1 hour, 24 hours, and 24 hours per severity) and database and disk use, plus an Alert State problem sensor and a Maintenance Active sensor.
+- A Quick Maintenance switch and the `logshed.enable_maintenance` and `logshed.disable_maintenance` actions, so a backup automation can silence alerts or drop errors while it runs.
+- Prune and Vacuum buttons, and an update entity that shows new LogShed releases.
+
+It needs Home Assistant 2024.12.0 or later and LogShed 1.3.0 or later, and it connects with an API token made from the **Home Assistant** preset in Settings > API & MCP Access. See the integration's README for installation, entities and example automations, and the [API Token Scopes Guide](docs/API_SCOPES.md#home-assistant) for the scopes involved.
 
 ---
 
@@ -94,47 +113,46 @@ Detailed documentation and step-by-step setup guides are available in the [`docs
 | Guide | Description |
 |---|---|
 | [Configuration Reference](docs/CONFIGURATION.md) | Complete environment variable reference, settings hierarchy, and storage paths |
-| [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Linux, and Docker, UDP versus TCP guidance, and the HTTP ingest API |
+| [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Step-by-step syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Home Assistant, Linux, and Docker, UDP versus TCP guidance, and the [HTTP ingest API](docs/SENDING_LOGS.md#http-ingest-api) for Vector, Fluent Bit and scripts |
 | [Rules Guide](docs/RULES_GUIDE.md) | In-depth guide to real-time threshold, pattern, and rate spike alert rules, plus ingestion drop rules |
-| [Model Context Protocol (MCP) Guide](docs/MCP_GUIDE.md) | Connect Claude Desktop, Cursor, and AI assistants to investigate homelab issues with conversational prompt examples |
+| [Model Context Protocol (MCP) Guide](docs/MCP_GUIDE.md) | Connect Claude Desktop, Cursor, Windsurf, Antigravity and other AI assistants to investigate homelab issues, with conversational prompt examples |
 | [API Token Scopes Guide](docs/API_SCOPES.md) | Every API token scope, the token presets and what each is for, and when to choose Custom scopes |
+| [Home Assistant Integration](https://github.com/logshed/homeassistant-logshed) | Installation through HACS, entities, service actions, and example automations (separate repository) |
+| [Changelog](CHANGELOG.md) | What changed in each release, with [upgrade notes](CHANGELOG.md#upgrade-notes) for moving from 1.2.x to 1.3.0 |
 | [Technical Specification](docs/SPEC.md) | Architecture, SQLite schema, FTS5 triggers, and system design |
-| [API Specification](docs/spec/api.md) | REST API endpoint catalog covering internal routes and external programmatic v1 endpoints |
+| [API Specification](docs/spec/api.md) | REST API endpoint list covering internal routes and external programmatic v1 endpoints |
 
 ---
 
 ## Prerequisites & System Requirements
 
-### Hardware Requirements
+### Software Requirements
 
-| Resource | Minimum | Recommended |
-|---|---|---|
-| **RAM** | 256 MB | 512 MB - 1 GB (handles burst ingestion and large browser buffers) |
-| **CPU** | 1 vCPU / core | 1 - 2 cores (handles continuous FTS5 indexing and log stream parsing) |
-| **Storage** | 1 GB free space | Direct SSD / NVMe cache pool (high IOPS for SQLite WAL checkpoints) |
-
-### Performance & Storage Profile
-
-- **Memory Footprint**: ~150 to 250 MB RAM under normal operation.
-- **Search Speed**: A full-text search returning 100 results from 813,975 logs took 40 to 54 ms (median 46 ms over 5 runs, timed over the LAN) with LogShed pinned to one core (two threads) of an Intel Core i3-12100.
-- **Storage Ratio**: ~650 to 750 bytes per record on disk (includes raw text, relational indexes, and FTS5 full-text search segments). 100,000 logs occupy roughly 67 MB, and 1,000,000 logs occupy roughly 670 MB.
-- **Burst Tolerance**: Built with an in-memory staging queue and batching SQLite WAL writer. While normal homelab traffic is typically 10 to 100 logs/second, on direct SSD storage the pipeline can absorb brief bursts of several thousand logs/second during container restart loops or service incidents. UDP syslog can still lose messages in a burst when the kernel receive buffer fills; LogShed shows these as "UDP lost", and TCP syslog avoids that loss (see the [Forwarding Logs Guide](docs/SENDING_LOGS.md#udp-or-tcp-syslog)).
+- **Docker Engine**: 24.0+ (LogShed talks to the Docker Engine API v1.43)
+- **Docker Compose**: v2 for the Compose example below (the `docker run` command and the Unraid template do not need it)
+- **Architectures**: `linux/amd64` and `linux/arm64`. The container image is published for both.
+- **Storage for `/data`**: a local filesystem, as described in the notice below.
 
 > [!WARNING]
 > **Storage & Filesystem Notice for SQLite WAL Mode:**
 > Always host the `/data` directory on a local filesystem (ext4, btrfs, zfs) or a direct SSD cache pool. **Do not place `/data` on network mounts (NFS, SMB) or Unraid user shares (`/mnt/user/`)**, as these do not reliably support POSIX file locking or shared memory (`mmap`) required for concurrent SQLite WAL checkpoints.
 
-### Software Dependencies
+### Resource Use
 
-- **Docker Engine**: 24.0+
-- **Docker Compose**: v2.0+ (or Unraid OS 6.9+)
-- **Supported Architectures**:
-  - `linux/amd64` (Standard x86_64 servers and PCs)
-  - `linux/arm64` (Raspberry Pi 4/5, Apple Silicon VMs, ARM64 homelab boards)
+No minimum hardware has been tested. These figures were measured on one test setup, an Intel Core i3-12100 server with LogShed pinned to one core (two threads), so your numbers will differ:
+
+- **Memory**: About 240 MB of RAM for the container (236 MB idle and 238 MB while receiving 20 logs/second, with about 814,000 logs stored). If you set a container memory limit, leave headroom above this figure.
+- **CPU**: 0.04% when idle.
+- **Search Speed**: A full-text search returning 100 results from 813,975 logs took 40 to 54 ms (median 46 ms over 5 runs, timed over the LAN).
+- **Storage Ratio**: About 650 to 750 bytes per record on disk (includes raw text, relational indexes, and FTS5 full-text search segments). 100,000 logs occupy roughly 67 MB, and 1,000,000 logs occupy roughly 670 MB. Retention is 14 days by default.
+- **Bursts**: Incoming logs wait in a 10,000-entry in-memory queue and are written to SQLite in batches. If the queue fills, new logs are dropped and counted as "Dropped" in the console. In a load test on 2026-10-20 with the full 8 MiB UDP receive buffer granted, 10,000 logs per second sent over UDP arrived with no "UDP lost" and no "Dropped" increase on the maintainer's test setup. At 20,000 logs per second some messages were lost. UDP syslog can lose messages in a burst when the kernel receive buffer fills, and TCP syslog avoids that loss (see [UDP or TCP syslog](docs/SENDING_LOGS.md#udp-or-tcp-syslog)).
 
 ---
 
 ## Quick Start
+
+> [!IMPORTANT]
+> **Updating from 1.2.x?** The first start of 1.3.0 migrates the database, so back up `/data` first if you may want to return to 1.2.x. Read the [upgrade notes](CHANGELOG.md#upgrade-notes) too: among other changes, the API docs now need a login and `PUID` or `PGID` set to `0` will stop working in a later release.
 
 ### Docker Compose (Recommended)
 
@@ -169,6 +187,10 @@ Deploy and start the service:
 ```bash
 docker compose up -d
 ```
+
+To upgrade on your own schedule, replace `latest` with a version tag such as `1.3.0`.
+
+If you would rather not mount the Docker socket into LogShed, run a Docker socket proxy such as `tecnativa/docker-socket-proxy` with `CONTAINERS=1` and set `DOCKER_HOST=tcp://<proxy host>:2375` instead. LogShed only reads container lists, details, events and logs. See [Docker Log Tailing](docs/CONFIGURATION.md#docker-log-tailing) in the Configuration Reference. You can add more Docker hosts later under Settings > Sources.
 
 ---
 
@@ -207,8 +229,9 @@ LogShed provides an official Unraid Community Applications template in [`unraid-
 ### Initial Setup & Authentication
 
 1. Open your browser and navigate to `http://<YOUR_SERVER_IP>:8080`.
-2. On first run, choose an administrator password to complete initial setup.
-3. Log in with your new password to access the dashboard.
+2. On first run, the "First-Run Admin Setup" screen asks for an administrator password only (8 to 128 characters, entered twice). There is no user name. Click **Set Up Admin & Log In**.
+3. You are signed in to the console. Containers on the Docker host appear in the live stream on their own. Later visits ask for the same password on the login page.
+4. Next steps: point a router, NAS or Proxmox host at `<YOUR_SERVER_IP>:1514` (see the [Forwarding Logs Guide](docs/SENDING_LOGS.md)), add other Docker hosts and syslog host aliases under Settings > Sources, and optionally add an alert rule, a notification target, or an AI provider.
 
 *(For detailed architectural and security specifications, see [docs/SPEC.md](docs/SPEC.md).)*
 
@@ -230,10 +253,11 @@ The tool prompts twice for the new password (8 to 128 characters). The `--passwo
 |---|---|
 | **Backend Runtime** | Python 3.12 (`asyncio`), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/) (single-worker process model) |
 | **Storage & Search** | Standard Library `sqlite3` + `asyncio.to_thread()`, WAL mode, FTS5 external content virtual table |
-| **Frontend UI** | [React 19](https://react.dev/), [Vite](https://vitejs.dev/), [Tailwind CSS](https://tailwindcss.com/), [@tanstack/react-virtual](https://tanstack.com/virtual), [Recharts](https://recharts.org/), [Lucide React](https://lucide.dev/) |
+| **Frontend UI** | [React 19](https://react.dev/), [Vite](https://vitejs.dev/), [Tailwind CSS](https://tailwindcss.com/), [@tanstack/react-virtual](https://tanstack.com/virtual), [Recharts](https://recharts.org/), [Lucide React](https://lucide.dev/); [Swagger UI](https://github.com/swagger-api/swagger-ui) and [ReDoc](https://github.com/Redocly/redoc) bundles for the built-in API docs |
 | **Collector Integrations** | [HTTPX](https://www.python-httpx.org/) (Docker Engine API over UDS and TCP), Async UDP/TCP Syslog server |
-| **Alerting & Notifications** | [Apprise](https://github.com/caronc/apprise) (multi-channel alerts and webhooks) |
-| **AI Integrations** | Google GenAI SDK (`google-genai`), OpenAI SDK (`openai` compatible with Ollama/vLLM/LocalAI) |
+| **Alerting & Notifications** | [Apprise](https://github.com/caronc/apprise) (100+ notification services and webhooks), [`regex`](https://pypi.org/project/regex/) (time-limited matching for user-written rule patterns) |
+| **AI Integrations** | Google GenAI SDK (`google-genai`), OpenAI SDK (`openai`, also used for OpenAI-compatible servers such as Ollama, vLLM and LocalAI), Anthropic SDK (`anthropic`) |
+| **Model Context Protocol** | MCP Python SDK (`mcp`): Streamable HTTP, SSE and stdio transports |
 | **Security & Cryptography** | `argon2-cffi` (password hashing), `cryptography.fernet` (runtime settings encryption) |
 | **Packaging & Base** | Multi-stage Docker build, `python:3.12-slim`, `tini` init, `gosu` privilege dropping |
 
