@@ -16,7 +16,7 @@
   * **Python Execution Scope:** Python execution is strictly reserved for running existing project test suites (`.venv/bin/pytest`) and starting the project application.
 
 ## Backend Test Suite Conventions
-`backend/tests/conftest.py` keeps the backend suite fast (about 60s). Know these before writing or debugging tests:
+`backend/tests/conftest.py` keeps the backend suite fast (about 70s). Know these before writing or debugging tests:
 - **Shared FastAPI app:** In tests, `create_app()` returns a cached instance (one per CORS origin set and built-frontend presence), because building the app costs about 0.12s and over 300 tests use one. Never mutate the returned app (adding routes, middleware, mounts or `app.state`); call `create_app.uncached()` when a test needs its own instance. `app.dependency_overrides` is cleared automatically after each test.
 - **Low-cost Argon2id:** `hash_password()` uses minimal Argon2id cost parameters in tests. Production-cost hashes still verify, but tests must not assert the production cost parameters on hashes produced by `hash_password()`.
 - **`e2e` marker:** Tests needing a live Docker build or external services (including live AI provider calls) must be marked `@pytest.mark.e2e` so the default run stays offline and deterministic.
@@ -26,7 +26,7 @@
 ## Architecture & Code Standards
 - **Runtime:** Python 3.12 (`asyncio`) + FastAPI + SQLite (WAL mode + FTS5).
 - **Frontend:** React + Vite + Tailwind CSS (bundled to `backend/app/static`).
-- **Process Model:** Single container, **single OS process**, running multiple concurrent `asyncio` tasks (`SyslogServer`, `DockerTailer`, `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`) under supervisor isolation. Never run multiple uvicorn/gunicorn worker processes (`--workers 1` only) - the in-memory ingestion queue, rate limiter, and drop counters are process-local and would silently desync across separate OS processes.
+- **Process Model:** Single container, **single OS process**, running multiple concurrent `asyncio` tasks under supervisor isolation: `SyslogServer`, `DockerCollectorPool` (one `DockerTailer` per configured Docker host), `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`, `DropFilterWorker`, `MaintenanceSweepWorker` and `DailyDigestWorker` (started in `backend/app/main.py`). Never run multiple uvicorn/gunicorn worker processes (`--workers 1` only) - the in-memory ingestion queue, rate limiter, and drop counters are process-local and would silently desync across separate OS processes.
 - **Docker Access:** Respect `DOCKER_HOST` (supports socket or `tecnativa/docker-socket-proxy`).
 - **Security Baseline:**
   * App drops privileges via `gosu` to run as a non-root user defined by `PUID` and `PGID` environment variables (defaults to 1000:1000).
@@ -39,7 +39,7 @@
 2. At the end of every phase, run the phase verification test suite.
 
 ## Dependency & Performance Guardrails
-- **Zero Unapproved Dependencies:** Any package explicitly required by the core backend/frontend specs (`fastapi`, `uvicorn`, `httpx`, `argon2-cffi`, `cryptography`, `google-genai`, `openai`, `anthropic`, `pydantic`, `@tanstack/react-virtual`, `recharts`, `apprise`, `regex`, `swagger-ui-dist`, `redoc`) is pre-approved. `regex` is only for user-written alert and drop rule patterns, because it supports a per-match timeout; LogShed's own patterns stay on `re`. `swagger-ui-dist` and `redoc` are frontend dev dependencies only: the build copies their bundles to `/docs-assets/` for the self-hosted `/docs` and `/redoc` pages. Do not add `aiosqlite`. Do not add the `docker` or `aiodocker` SDKs - talk to the Docker Engine API (both `unix:///var/run/docker.sock` and `tcp://proxy:2375`) using `httpx`, with `httpx.HTTPTransport(uds=...)` for the Unix socket case.
+- **Zero Unapproved Dependencies:** Any package explicitly required by the core backend/frontend specs (`fastapi`, `uvicorn`, `httpx`, `argon2-cffi`, `cryptography`, `google-genai`, `openai`, `anthropic`, `mcp`, `pydantic`, `@tanstack/react-virtual`, `recharts`, `lucide-react`, `apprise`, `regex`, `swagger-ui-dist`, `redoc`) is pre-approved. `regex` is only for user-written alert and drop rule patterns, because it supports a per-match timeout; LogShed's own patterns stay on `re`. `swagger-ui-dist` and `redoc` are frontend dev dependencies only: the build copies their bundles to `/docs-assets/` for the self-hosted `/docs` and `/redoc` pages. Do not add `aiosqlite`. Do not add the `docker` or `aiodocker` SDKs - talk to the Docker Engine API (both `unix:///var/run/docker.sock` and `tcp://proxy:2375`) using `httpx`, with `httpx.HTTPTransport(uds=...)` for the Unix socket case.
 - **Standard Library First:** For anything not already dictated by `docs/SPEC.md`, default to Python standard library modules (`sqlite3`, `json`, `dataclasses`, `pathlib`, `logging`, `typing`) before reaching for external packages. Use stdlib `sqlite3` + `asyncio.to_thread()` for all database operations.
 - **No Heavyweight Tooling:** Strictly forbid data-science or heavy ORM libraries (e.g., `pandas`, `numpy`, `scipy`, `sqlalchemy`) - these are never approved, regardless of `docs/SPEC.md`.
 
