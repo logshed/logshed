@@ -145,7 +145,7 @@ No minimum hardware has been tested. These figures were measured on one test set
 - **CPU**: 0.04% when idle.
 - **Search Speed**: A full-text search returning 100 results from 813,975 logs took 40 to 54 ms (median 46 ms over 5 runs, timed over the LAN).
 - **Storage Ratio**: About 650 to 750 bytes per record on disk (includes raw text, relational indexes, and FTS5 full-text search segments). 100,000 logs occupy roughly 67 MB, and 1,000,000 logs occupy roughly 670 MB. Retention is 14 days by default.
-- **Bursts**: Incoming logs wait in a 10,000-entry in-memory queue and are written to SQLite in batches. If the queue fills, new logs are dropped and counted as "Dropped" in the console. In a load test on 2026-10-20 with the full 8 MiB UDP receive buffer granted, 10,000 logs per second sent over UDP arrived with no "UDP lost" and no "Dropped" increase on the maintainer's test setup. At 20,000 logs per second some messages were lost. UDP syslog can lose messages in a burst when the kernel receive buffer fills, and TCP syslog avoids that loss (see [UDP or TCP syslog](docs/SENDING_LOGS.md#udp-or-tcp-syslog)).
+- **Bursts**: Incoming logs wait in a 10,000-entry in-memory queue and are written to SQLite in batches. If the queue fills, new logs are dropped and counted as "Dropped" in the console. UDP syslog can lose messages in a burst when the kernel receive buffer fills, and TCP syslog avoids that loss (see [UDP or TCP syslog](docs/SENDING_LOGS.md#udp-or-tcp-syslog)).
 
 ---
 
