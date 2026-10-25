@@ -838,11 +838,26 @@ class DropRuleImportResponse(BaseModel):
 # Saved Views Models
 # ---------------------------------------------------------------------------
 
+def _strip_saved_view_name(v: Any) -> Any:
+    """Trim a saved view name before its 1 to 100 character limit is checked."""
+    return v.strip() if isinstance(v, str) else v
+
+
 class SavedViewCreate(BaseModel):
     """Payload for creating a saved search/filter view."""
-    name: str = Field(..., min_length=1, max_length=100, description="Human-readable view name")
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Human-readable view name, unique ignoring case (trimmed before the length check)",
+    )
     query_params: dict[str, Any] = Field(..., description="JSON search and filter parameter dictionary")
     is_pinned: bool = Field(False, description="Whether the view is pinned as a quick chip")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, v: Any) -> Any:
+        return _strip_saved_view_name(v)
 
 
 class SavedViewUpdate(BaseModel):
@@ -850,6 +865,11 @@ class SavedViewUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     query_params: Optional[dict[str, Any]] = None
     is_pinned: Optional[bool] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, v: Any) -> Any:
+        return _strip_saved_view_name(v)
 
 
 class SavedViewResponse(BaseModel):

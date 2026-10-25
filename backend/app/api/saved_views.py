@@ -6,7 +6,8 @@ Allows creating, listing, updating, pinning, and deleting custom search/filter v
 
 import datetime
 import json
-from typing import Any
+import sqlite3
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
@@ -27,6 +28,29 @@ def _parse_query_params(raw: str) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _name_taken(name: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f'A saved view named "{name}" already exists.',
+    )
+
+
+def _raise_if_name_taken(conn: sqlite3.Connection, name: str, exclude_id: Optional[int] = None) -> None:
+    """409 when another saved view already uses this name, ignoring case (the COLLATE NOCASE rule of
+    idx_saved_views_name_nocase)."""
+    if exclude_id is None:
+        row = conn.execute(
+            "SELECT 1 FROM saved_views WHERE name = ? COLLATE NOCASE LIMIT 1", (name,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM saved_views WHERE name = ? COLLATE NOCASE AND id <> ? LIMIT 1",
+            (name, exclude_id),
+        ).fetchone()
+    if row:
+        raise _name_taken(name)
 
 
 @router.get("", response_model=list[SavedViewResponse])
@@ -58,24 +82,30 @@ async def create_saved_view(
     payload: SavedViewCreate,
     user: dict = Depends(get_current_user),
 ) -> SavedViewResponse:
-    """Create a new saved filter view."""
+    """Create a new saved filter view. 409 when another view has the same name, ignoring case."""
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     serialized_params = json.dumps(payload.query_params)
+    name = payload.name
 
     def _insert(conn):
+        _raise_if_name_taken(conn, name)
         cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO saved_views (name, query_params, is_pinned, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (payload.name.strip(), serialized_params, 1 if payload.is_pinned else 0, now_iso),
-        )
+        try:
+            cur.execute(
+                """
+                INSERT INTO saved_views (name, query_params, is_pinned, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, serialized_params, 1 if payload.is_pinned else 0, now_iso),
+            )
+        except sqlite3.IntegrityError:
+            # Another request created the same name between the check and the insert
+            raise _name_taken(name) from None
         conn.commit()
         view_id = cur.lastrowid
         return SavedViewResponse(
             id=view_id,
-            name=payload.name.strip(),
+            name=name,
             query_params=payload.query_params,
             is_pinned=payload.is_pinned,
             created_at=now_iso,
@@ -90,7 +120,8 @@ async def update_saved_view(
     payload: SavedViewUpdate,
     user: dict = Depends(get_current_user),
 ) -> SavedViewResponse:
-    """Update name, filter parameters, or pinned status of a saved view."""
+    """Update name, filter parameters, or pinned status of a saved view. A new name must not match
+    another view's name, ignoring case (409); a view may change the case of its own name."""
     def _update(conn):
         cur = conn.cursor()
         cur.execute(
@@ -101,7 +132,9 @@ async def update_saved_view(
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved view not found.")
 
-        new_name = payload.name.strip() if payload.name is not None else existing["name"]
+        if payload.name is not None:
+            _raise_if_name_taken(conn, payload.name, exclude_id=view_id)
+        new_name = payload.name if payload.name is not None else existing["name"]
         new_params = (
             json.dumps(payload.query_params)
             if payload.query_params is not None
@@ -113,16 +146,20 @@ async def update_saved_view(
             else bool(existing["is_pinned"])
         )
 
-        cur.execute(
-            """
-            UPDATE saved_views SET
-                name = ?,
-                query_params = ?,
-                is_pinned = ?
-            WHERE id = ?
-            """,
-            (new_name, new_params, 1 if new_is_pinned else 0, view_id),
-        )
+        try:
+            cur.execute(
+                """
+                UPDATE saved_views SET
+                    name = ?,
+                    query_params = ?,
+                    is_pinned = ?
+                WHERE id = ?
+                """,
+                (new_name, new_params, 1 if new_is_pinned else 0, view_id),
+            )
+        except sqlite3.IntegrityError:
+            # Another request took the same name between the check and the update
+            raise _name_taken(new_name) from None
         conn.commit()
 
         return SavedViewResponse(

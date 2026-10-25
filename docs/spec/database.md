@@ -184,6 +184,7 @@ Migration v2 constitutes the complete schema upgrade from LogShed v1.1.0 to v1.2
 
    CREATE INDEX IF NOT EXISTS idx_saved_views_pinned ON saved_views(is_pinned, name);
    ```
+   Since migration v3, names are unique ignoring case (`idx_saved_views_name_nocase`, see 2.3).
 
 4. **Notification Channels (`notification_channels`):**
    Stores Apprise notification targets for dispatching alert notifications and analytical rollups:
@@ -335,10 +336,15 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
   CREATE INDEX IF NOT EXISTS idx_ai_conversation_audit_id ON ai_conversation_messages(audit_id, created_at ASC);
   ```
   Each follow-up question and its reply are written in one `BEGIN IMMEDIATE` transaction that re-checks the 10-question limit, so concurrent requests cannot exceed it. Deleting an `ai_audit_log` row (single history delete, clear all history, or retention pruning) removes its thread through `ON DELETE CASCADE` (every connection enables `PRAGMA foreign_keys=ON`).
+- **Unique Saved View Names:** `dedupe_saved_view_names` runs at the end of `migrate_v3` and again in `repair_v3`, inside their transaction. It trims every `saved_views.name` (an empty name becomes `Untitled view`), then groups names with the `COLLATE NOCASE` rule (ASCII letters only). In each group the lowest `id` keeps its name and each later view, in `id` order, becomes `<its name> (2)`, `<its name> (3)` and so on, taking the next number that does not match any other name ignoring case; the base name is shortened when needed so the result stays within 100 characters. It logs `Renamed N saved views whose names were duplicates` at INFO when it changed anything, and nothing otherwise. It then creates the index that keeps names unique:
+  ```sql
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_views_name_nocase ON saved_views(name COLLATE NOCASE);
+  ```
+  A second run changes nothing. The API applies the same rule (see the saved views routes in [api.md](api.md)).
 - **Atomic Migrations:** Each migration step and its `user_version` bump run in one `BEGIN IMMEDIATE` transaction, so a crash during an upgrade rolls back instead of leaving rules without an order or a database that cannot start.
 - **Removed Redundant Indexes:** `idx_api_tokens_hash` (the `UNIQUE` constraint on `token_hash` already indexes it), `idx_alert_history_rule_id` (covered by `idx_alert_history_rule_time`), `idx_drop_rules_enabled` and `idx_alert_rules_enabled` (covered by the `idx_*_rules_order` indexes) are no longer created and are dropped from existing databases.
 - **Docker Endpoints Table:** `docker_endpoints` holds `id`, `name` (unique), `url`, `source_alias`, `enabled`, `tls_enabled`, `ca_cert`, `client_cert`, `client_key` (encrypted), `exclude_containers`, `created_at`, `updated_at` and `verify_hostname INTEGER NOT NULL DEFAULT 1`. `verify_hostname` makes the TLS handshake check the daemon certificate against the host name; existing rows get `1`.
-- **Startup Repair (`repair_v3`):** Runs on every start and is idempotent. It re-runs `migrate_v3` when `docker_endpoints` or `ai_conversation_messages` is missing (a version 3 database left incomplete by an interrupted upgrade), adds `docker_endpoints.verify_hostname` when absent, adds missing `display_order` columns, numbers rules by id when a table holds more than one rule and none was ever ordered, creates the `idx_*_rules_order` indexes, and drops the redundant indexes above.
+- **Startup Repair (`repair_v3`):** Runs on every start and is idempotent. It re-runs `migrate_v3` when `docker_endpoints` or `ai_conversation_messages` is missing (a version 3 database left incomplete by an interrupted upgrade), adds `docker_endpoints.verify_hostname` when absent, adds missing `display_order` columns, numbers rules by id when a table holds more than one rule and none was ever ordered, creates the `idx_*_rules_order` indexes, drops the redundant indexes above, and makes saved view names unique (`dedupe_saved_view_names`, above).
 - **System Identity Setup:**
   - `server_name` defaults to `'LogShed'` in `system_settings` table.
   - `instance_id` set to persistent UUID4 if not already present.

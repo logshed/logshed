@@ -1272,3 +1272,112 @@ class TestDropRuleTimeoutAutoDisable:
         flt.flush_counts()
         assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
         assert len([r for r in caplog.records if "disabled automatically" in r.getMessage()]) == 1
+
+
+# ===================================================================
+# WP8. Saved view names are unique, ignoring case
+# ===================================================================
+
+class TestSavedViewUniqueNames:
+
+    @staticmethod
+    async def _create(client: AsyncClient, name: str, **extra):
+        return await client.post(
+            "/api/saved-views",
+            json={"name": name, "query_params": {"q": "error"}, **extra},
+        )
+
+    @pytest.mark.asyncio
+    async def test_duplicate_create_is_refused_ignoring_case(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        assert (await self._create(client, "Errors")).status_code == 201
+
+        for name, shown in (("Errors", "Errors"), ("ERRORS", "ERRORS"), ("  errors  ", "errors")):
+            res = await self._create(client, name)
+            assert res.status_code == 409
+            assert res.json()["detail"] == f'A saved view named "{shown}" already exists.'
+
+        names = [v["name"] for v in (await client.get("/api/saved-views")).json()]
+        assert names == ["Errors"]
+
+    @pytest.mark.asyncio
+    async def test_create_stores_the_trimmed_name(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await self._create(client, "  Disk warnings  ")
+        assert res.status_code == 201
+        assert res.json()["name"] == "Disk warnings"
+
+    @pytest.mark.asyncio
+    async def test_rename_to_another_views_name_is_refused(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        await self._create(client, "Errors")
+        other_id = (await self._create(client, "Warnings")).json()["id"]
+
+        res = await client.put(f"/api/saved-views/{other_id}", json={"name": "errors"})
+        assert res.status_code == 409
+        assert res.json()["detail"] == 'A saved view named "errors" already exists.'
+        names = sorted(v["name"] for v in (await client.get("/api/saved-views")).json())
+        assert names == ["Errors", "Warnings"]
+
+    @pytest.mark.asyncio
+    async def test_rename_to_own_name_in_another_case_works(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        view_id = (await self._create(client, "errors")).json()["id"]
+
+        res = await client.put(f"/api/saved-views/{view_id}", json={"name": " Errors "})
+        assert res.status_code == 200
+        assert res.json()["name"] == "Errors"
+
+    @pytest.mark.asyncio
+    async def test_pin_and_filter_updates_do_not_check_the_name(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        first_id = (await self._create(client, "Errors")).json()["id"]
+        second_id = (await self._create(client, "Warnings", is_pinned=True)).json()["id"]
+
+        for view_id, pinned in ((first_id, True), (second_id, False)):
+            res = await client.put(f"/api/saved-views/{view_id}", json={"is_pinned": pinned})
+            assert res.status_code == 200
+            assert res.json()["is_pinned"] is pinned
+        res = await client.put(f"/api/saved-views/{first_id}", json={"query_params": {"app": "nginx"}})
+        assert res.status_code == 200
+        assert res.json()["name"] == "Errors"
+        assert res.json()["query_params"] == {"app": "nginx"}
+
+    @pytest.mark.asyncio
+    async def test_blank_names_are_refused(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        for name in ("", "   ", "\t\n"):
+            assert (await self._create(client, name)).status_code == 422
+
+        view_id = (await self._create(client, "Errors")).json()["id"]
+        res = await client.put(f"/api/saved-views/{view_id}", json={"name": "   "})
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_length_limit_is_checked_after_trimming(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await self._create(client, "  " + "x" * 100 + "  ")
+        assert res.status_code == 201
+        assert res.json()["name"] == "x" * 100
+        assert (await self._create(client, "y" * 101)).status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_unique_index_race_gives_409(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        """If two requests pass the name check together, the unique index still turns the second into a 409."""
+        from app.api import saved_views as saved_views_mod
+
+        client.cookies = auth_cookie
+        await self._create(client, "Errors")
+        other_id = (await self._create(client, "Warnings")).json()["id"]
+        monkeypatch.setattr(saved_views_mod, "_raise_if_name_taken", lambda *args, **kwargs: None)
+
+        res = await self._create(client, "errors")
+        assert res.status_code == 409
+        assert res.json()["detail"] == 'A saved view named "errors" already exists.'
+
+        res = await client.put(f"/api/saved-views/{other_id}", json={"name": "ERRORS"})
+        assert res.status_code == 409
+        assert res.json()["detail"] == 'A saved view named "ERRORS" already exists.'
+
+        names = sorted(v["name"] for v in (await client.get("/api/saved-views")).json())
+        assert names == ["Errors", "Warnings"]

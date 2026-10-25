@@ -357,6 +357,72 @@ CREATE INDEX IF NOT EXISTS idx_logs_source_app_ip ON logs(source_alias, app_name
     """)
 
 
+SAVED_VIEW_NAME_MAX_LENGTH = 100
+UNTITLED_SAVED_VIEW_NAME = "Untitled view"
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _nocase_key(name: str) -> str:
+    """Fold a name the way SQLite COLLATE NOCASE compares it (ASCII letters only)."""
+    return name.translate(_ASCII_LOWER)
+
+
+def _numbered_name(base: str, number: int) -> str:
+    """`<base> (<number>)`, shortening the base so the result fits the saved view name limit."""
+    suffix = f" ({number})"
+    if len(base) + len(suffix) > SAVED_VIEW_NAME_MAX_LENGTH:
+        base = base[: SAVED_VIEW_NAME_MAX_LENGTH - len(suffix)].rstrip()
+    return f"{base}{suffix}"
+
+
+def dedupe_saved_view_names(conn: sqlite3.Connection) -> None:
+    """
+    Make saved view names unique ignoring case, then add the unique index that keeps them so.
+    Idempotent and cheap, so it runs from both migrate_v3 and repair_v3 inside their transaction.
+    - Trim every name; an empty name becomes "Untitled view".
+    - Group names with the COLLATE NOCASE rule. In each group the lowest id keeps its name and
+      each later view, in id order, becomes "<its name> (2)", "(3)" and so on, taking the next
+      number that no other name uses.
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_views';"
+    ).fetchone()
+    if not exists:
+        return
+
+    rows = [(row[0], row[1] or "") for row in conn.execute("SELECT id, name FROM saved_views ORDER BY id;")]
+    trimmed = [(view_id, name.strip() or UNTITLED_SAVED_VIEW_NAME) for view_id, name in rows]
+
+    # The first (lowest id) view of each group keeps its name; every kept name is reserved.
+    taken: set[str] = set()
+    later: list[tuple[int, str]] = []
+    for view_id, name in trimmed:
+        key = _nocase_key(name)
+        if key in taken:
+            later.append((view_id, name))
+        else:
+            taken.add(key)
+
+    new_names = dict(trimmed)
+    for view_id, base in later:
+        number = 2
+        while _nocase_key(candidate := _numbered_name(base, number)) in taken:
+            number += 1
+        taken.add(_nocase_key(candidate))
+        new_names[view_id] = candidate
+
+    changes = [(new_names[view_id], view_id) for view_id, name in rows if new_names[view_id] != name]
+    if changes:
+        # Drop the index while renaming: rows are updated one at a time, so a repair of names
+        # that collide only after trimming could otherwise clash before every rename has landed.
+        conn.execute("DROP INDEX IF EXISTS idx_saved_views_name_nocase;")
+        conn.executemany("UPDATE saved_views SET name = ? WHERE id = ?;", changes)
+        logger.info(f"Renamed {len(changes)} saved views whose names were duplicates")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_views_name_nocase ON saved_views(name COLLATE NOCASE);"
+    )
+
+
 def migrate_v3(conn: sqlite3.Connection) -> None:
     """
     Execute Migration 3: Configurable rule ordering, external API tokens,
@@ -372,6 +438,8 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
     - Create ai_conversation_messages table for AI follow-up conversation threads
       (cascade-deleted with their ai_audit_log entry).
     - Ensure persistent server_name and instance_id in system_settings.
+    - Make saved view names unique ignoring case and add idx_saved_views_name_nocase
+      (dedupe_saved_view_names).
     """
     logger.info("Running migration v3...")
     cur = conn.execute("PRAGMA table_info(drop_rules);")
@@ -494,6 +562,8 @@ VALUES ('server_name', 'LogShed', datetime('now'), 0);
             (inst_id,),
         )
 
+    dedupe_saved_view_names(conn)
+
 
 MIGRATIONS = [
     (1, migrate_v1),
@@ -518,7 +588,8 @@ def repair_v3(conn: sqlite3.Connection) -> None:
     - re-run migrate_v3 when its tables are missing (pre-release databases);
     - add docker_endpoints.verify_hostname (on by default, including existing endpoints);
     - number rules by id when a table holds more than one rule and none was ever ordered;
-    - create the rule order indexes and drop the redundant ones.
+    - create the rule order indexes and drop the redundant ones;
+    - make saved view names unique ignoring case and add their unique index (dedupe_saved_view_names).
     """
     cur = conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
@@ -549,6 +620,8 @@ def repair_v3(conn: sqlite3.Connection) -> None:
 
     for index_name in REDUNDANT_INDEXES:
         conn.execute(f"DROP INDEX IF EXISTS {index_name};")
+
+    dedupe_saved_view_names(conn)
 
 
 def _run_in_transaction(conn: sqlite3.Connection, step: Callable[[sqlite3.Connection], None]) -> None:

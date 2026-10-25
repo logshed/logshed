@@ -3,6 +3,7 @@ Tests for database schema, WAL pragmas, FTS5 sync triggers, and migration runner
 """
 
 import datetime
+import logging
 from pathlib import Path
 import sqlite3
 import pytest
@@ -1267,3 +1268,146 @@ class TestFTS5Sync:
         assert "idx_logs_time_sev" in plan_str
         assert "SEARCH l USING INDEX" in plan_str
         assert "SCAN logs" not in plan_str
+
+
+# ===================================================================
+# WP8. Unique saved view names (ignoring case)
+# ===================================================================
+
+_RENAMED_LOG = "saved views whose names were duplicates"
+
+
+def _insert_saved_views(path: Path, views: list[tuple[int, str]]) -> None:
+    conn = get_connection(path)
+    conn.executemany(
+        "INSERT INTO saved_views (id, name, query_params, is_pinned, created_at) VALUES (?, ?, '{}', 0, datetime('now'))",
+        views,
+    )
+    conn.commit()
+    conn.close()
+
+
+def _saved_view_names(path: Path) -> dict[int, str]:
+    conn = get_connection(path)
+    try:
+        return dict(conn.execute("SELECT id, name FROM saved_views ORDER BY id").fetchall())
+    finally:
+        conn.close()
+
+
+def _renamed_log_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if _RENAMED_LOG in r.getMessage()]
+
+
+# Views "Errors", "errors", " Errors ", "Errors (2)" and a blank name, as 1.2.1 could store them
+_DUPLICATE_VIEWS = [(1, "Errors"), (2, "errors"), (3, " Errors "), (4, "Errors (2)"), (5, "   ")]
+_DEDUPED_NAMES = {1: "Errors", 2: "errors (3)", 3: "Errors (4)", 4: "Errors (2)", 5: "Untitled view"}
+
+
+class TestSavedViewNameDedupe:
+
+    def test_upgrade_from_v2_renames_duplicates_and_adds_unique_index(self, tmp_path: Path, monkeypatch, caplog):
+        """Later duplicates get the next free number (ignoring case), blank names become "Untitled view"."""
+        p = tmp_path / "v2_views.db"
+        _migrate_to(p, 2, monkeypatch)
+        _insert_saved_views(p, _DUPLICATE_VIEWS)
+        caplog.set_level(logging.INFO, logger="app.core.migrations")
+
+        run_migrations(p)
+
+        assert _saved_view_names(p) == _DEDUPED_NAMES
+        assert _renamed_log_lines(caplog) == ["Renamed 3 saved views whose names were duplicates"]
+        conn = get_connection(p)
+        index = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_saved_views_name_nocase'"
+        ).fetchone()
+        conn.close()
+        assert index is not None
+        assert "UNIQUE" in index[0].upper() and "COLLATE NOCASE" in index[0].upper()
+
+    def test_repair_v3_renames_duplicates_and_second_run_changes_nothing(self, tmp_path: Path, caplog):
+        """A v3 database from a 1.3.0 development build is cleaned up on start; the next start is a no-op."""
+        p = tmp_path / "beta_views.db"
+        run_migrations(p)
+        conn = get_connection(p)
+        conn.execute("DROP INDEX idx_saved_views_name_nocase")
+        conn.commit()
+        conn.close()
+        _insert_saved_views(p, _DUPLICATE_VIEWS)
+        caplog.set_level(logging.INFO, logger="app.core.migrations")
+
+        run_migrations(p)
+
+        assert _saved_view_names(p) == _DEDUPED_NAMES
+        assert _renamed_log_lines(caplog) == ["Renamed 3 saved views whose names were duplicates"]
+
+        snapshot = _schema_snapshot(p)
+        caplog.clear()
+        run_migrations(p)
+        assert _saved_view_names(p) == _DEDUPED_NAMES
+        assert _schema_snapshot(p) == snapshot
+        assert _renamed_log_lines(caplog) == []
+
+    def test_names_that_clash_only_after_trimming_are_renamed_with_the_index_present(self, tmp_path: Path):
+        """The repair also works when the unique index already exists and two names differ only by spaces."""
+        p = tmp_path / "trim_clash.db"
+        run_migrations(p)
+        _insert_saved_views(p, [(1, " Disk "), (2, "disk")])
+
+        run_migrations(p)
+
+        assert _saved_view_names(p) == {1: "Disk", 2: "disk (2)"}
+
+    def test_several_blank_names(self, tmp_path: Path, monkeypatch):
+        p = tmp_path / "blanks.db"
+        _migrate_to(p, 2, monkeypatch)
+        _insert_saved_views(p, [(1, ""), (2, "UNTITLED VIEW"), (3, "  "), (4, "Untitled view (2)")])
+
+        run_migrations(p)
+
+        assert _saved_view_names(p) == {
+            1: "Untitled view",
+            2: "UNTITLED VIEW (3)",
+            3: "Untitled view (4)",
+            4: "Untitled view (2)",
+        }
+
+    def test_suffix_fits_the_100_character_limit(self, tmp_path: Path, monkeypatch):
+        """A long base name is shortened so the numbered name stays within 100 characters."""
+        long_a = "a" * 100
+        spaced = "b" * 95 + " " + "c" * 4  # cut at 96 characters leaves a trailing space
+        p = tmp_path / "long_names.db"
+        _migrate_to(p, 2, monkeypatch)
+        _insert_saved_views(p, [(1, long_a), (2, long_a.upper()), (3, long_a), (4, spaced), (5, spaced)])
+
+        run_migrations(p)
+
+        names = _saved_view_names(p)
+        assert names[1] == long_a
+        assert names[2] == "A" * 96 + " (2)"
+        assert names[3] == "a" * 96 + " (3)"
+        assert names[4] == spaced
+        assert names[5] == "b" * 95 + " (2)"
+        assert all(len(name) <= 100 for name in names.values())
+
+    def test_unique_names_are_left_alone(self, tmp_path: Path, monkeypatch, caplog):
+        p = tmp_path / "unique.db"
+        _migrate_to(p, 2, monkeypatch)
+        _insert_saved_views(p, [(1, "Errors"), (2, "Warnings"), (3, "Errors (2)")])
+        caplog.set_level(logging.INFO, logger="app.core.migrations")
+
+        run_migrations(p)
+
+        assert _saved_view_names(p) == {1: "Errors", 2: "Warnings", 3: "Errors (2)"}
+        assert _renamed_log_lines(caplog) == []
+
+    def test_index_refuses_a_name_that_differs_only_in_case(self, db_path: Path):
+        conn = get_connection(db_path)
+        conn.execute(
+            "INSERT INTO saved_views (name, query_params, created_at) VALUES ('Errors', '{}', datetime('now'))"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO saved_views (name, query_params, created_at) VALUES ('ERRORS', '{}', datetime('now'))"
+            )
+        conn.close()
