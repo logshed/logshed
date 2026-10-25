@@ -208,3 +208,45 @@ describe('HostAliasManager Component', () => {
     expect(onAliasSaved).not.toHaveBeenCalled();
   });
 });
+
+describe('HostAliasManager View logs action (WP3)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.history.pushState(null, '', '/settings/sources');
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([
+      { ip: '192.168.1.1', alias: 'router.local', notes: 'Main router', created_at: '2026-09-01T10:00:00Z' },
+      { ip: '192.168.1.50', alias: 'proxmox 01', notes: null, created_at: '2026-09-02T11:00:00Z' },
+    ]);
+  });
+
+  const renderManager = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <HostAliasManager />
+      </AliasContext.Provider>
+    );
+
+  it('opens the Console filtered to the alias', async () => {
+    const popstate = vi.fn();
+    window.addEventListener('popstate', popstate);
+    renderManager();
+    fireEvent.click(await screen.findByRole('button', { name: 'View logs for proxmox 01' }));
+
+    expect(window.location.pathname).toBe('/');
+    expect(new URLSearchParams(window.location.search).get('source')).toBe('proxmox 01');
+    expect(popstate).toHaveBeenCalled();
+    window.removeEventListener('popstate', popstate);
+  });
+
+  it('has a View logs button on every row and touch-sized edit and delete buttons', async () => {
+    renderManager();
+    await screen.findByText('router.local');
+    expect(screen.getAllByRole('button', { name: /^View logs for / })).toHaveLength(2);
+    for (const btn of screen.getAllByTitle('Edit Alias')) {
+      expect(btn.className).toContain('w-8 h-8');
+    }
+    for (const btn of screen.getAllByTitle('Delete Alias')) {
+      expect(btn.className).toContain('w-8 h-8');
+    }
+  });
+});

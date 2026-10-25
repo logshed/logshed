@@ -356,3 +356,29 @@ describe('NotificationsCard Component', () => {
     });
   });
 });
+
+describe('NotificationsCard action buttons (WP3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('gives the row icon buttons the touch-target pattern with a gap between them', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValueOnce([
+      {
+        id: 1,
+        name: 'Homelab Discord',
+        url: 'discord://1...9/a...f',
+        is_enabled: true,
+        created_at: '2026-09-18T12:00:00Z',
+        updated_at: '2026-09-18T12:00:00Z',
+      },
+    ]);
+    render(<NotificationsCard />);
+    const edit = await screen.findByRole('button', { name: 'Edit Homelab Discord' });
+    for (const name of ['Test Homelab Discord', 'Edit Homelab Discord', 'Delete Homelab Discord']) {
+      const btn = screen.getByRole('button', { name });
+      expect(btn.className).toContain('w-8 h-8 sm:w-auto sm:h-auto sm:p-1');
+    }
+    expect(edit.parentElement!.className).toContain('gap-1.5');
+  });
+});

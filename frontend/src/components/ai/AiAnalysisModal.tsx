@@ -141,6 +141,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     return buildCombinedPrompt(preview.redacted_prompt, userContext);
   }, [preview, userContext]);
 
+  // Counted on the server's redacted prompt, not on the editable text, so edits cannot change it
+  const maskedValueCount = useMemo(
+    () => (preview ? preview.redacted_prompt.split('[REDACTED]').length - 1 : 0),
+    [preview]
+  );
+
   const defaultFullPrompt = useMemo(() => {
     if (!preview) return '';
     return buildFullEnvelope(preview.system_prompt || DEFAULT_SYSTEM_PROMPT, defaultPrompt);
@@ -716,6 +722,23 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       (modified)
                     </span>
                   )}
+                  {preview && (
+                    maskedValueCount > 0 ? (
+                      <span
+                        data-testid="masked-count-badge"
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-emerald-950/50 text-emerald-400 border-emerald-800 whitespace-nowrap"
+                      >
+                        {maskedValueCount === 1 ? '1 value masked' : `${maskedValueCount} values masked`}
+                      </span>
+                    ) : (
+                      <span
+                        data-testid="masked-count-badge"
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-dark-800 text-slate-400 border-dark-700 whitespace-nowrap"
+                      >
+                        No values masked - review before sending
+                      </span>
+                    )
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2.5">
@@ -792,7 +815,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               <div className="mt-2 p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg flex items-start gap-2 text-amber-200/90 text-[11px] leading-relaxed">
                 <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong className="font-semibold text-amber-300">Redaction Notice:</strong> Automated credential scrubbing operates on a best-effort basis and may not catch every sensitive token or secret. Please review the prompt above before sending - you are responsible for the contents and sensitive data you transmit to external AI providers.
+                  <strong className="font-semibold text-amber-300">Redaction Notice:</strong> Best-effort masking: common API keys, passwords and tokens are replaced with [REDACTED], but pattern matching cannot catch every secret, and IP addresses and host names are not masked. Review and edit the prompt before sending. You are responsible for what you send to external AI providers.
                 </span>
               </div>
             </div>

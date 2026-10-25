@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Server, Plus, Trash2, Edit2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Server, Plus, Trash2, Edit2, AlertCircle, AlertTriangle, Loader2, ScrollText } from 'lucide-react';
 import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
@@ -93,6 +93,12 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
     setNotes(item.notes || '');
     setModalError(null);
     setIsModalOpen(true);
+  };
+
+  /** Opens the Console filtered to this alias (same URL hand-off the Navbar uses). */
+  const handleViewLogs = (item: HostAlias) => {
+    window.history.pushState(null, '', `/?source=${encodeURIComponent(item.alias)}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
   const handleCloseModal = () => {
@@ -204,12 +210,22 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
               <div key={item.ip} className="p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-accent-400 font-semibold text-xs sm:text-sm">{item.ip}</span>
-                  <div className="flex items-center gap-1 font-sans">
+                  <div className="flex items-center gap-1.5 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => handleViewLogs(item)}
+                      title={`View logs for ${item.alias}`}
+                      aria-label={`View logs for ${item.alias}`}
+                      className="inline-flex items-center gap-1 h-8 px-2 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-800 rounded transition cursor-pointer"
+                    >
+                      <ScrollText className="w-4 h-4" />
+                      <span>View logs</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => openEditModal(item)}
                       title="Edit Alias"
-                      className="p-2 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -218,7 +234,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       disabled={isDeletingIp === item.ip}
                       onClick={() => setDeleteTargetIp(item.ip)}
                       title="Delete Alias"
-                      className="p-2 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -236,7 +252,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
         ) : (
           /* Desktop Table View */
           <div className="divide-y divide-dark-800 font-mono text-xs">
-            <div className="grid grid-cols-[160px_200px_1fr_100px] px-4 py-2 text-slate-400 font-semibold text-[11px] bg-dark-950/60 select-none">
+            <div className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2 text-slate-400 font-semibold text-[11px] bg-dark-950/60 select-none">
               <div>SOURCE IP</div>
               <div>FRIENDLY ALIAS</div>
               <div>NOTES</div>
@@ -246,19 +262,29 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
             {aliases.map((item) => (
               <div
                 key={item.ip}
-                className="grid grid-cols-[160px_200px_1fr_100px] px-4 py-2.5 items-center hover:bg-dark-800/50 transition"
+                className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2.5 items-center hover:bg-dark-800/50 transition"
               >
                 <div className="text-accent-400 font-semibold">{item.ip}</div>
                 <div className="text-slate-200">{item.alias}</div>
                 <div className="text-slate-400 font-sans text-xs truncate pr-2">
                   {item.notes || '-'}
                 </div>
-                <div className="flex items-center justify-end gap-1 font-sans">
+                <div className="flex items-center justify-end gap-1.5 font-sans">
+                  <button
+                    type="button"
+                    onClick={() => handleViewLogs(item)}
+                    title={`View logs for ${item.alias}`}
+                    aria-label={`View logs for ${item.alias}`}
+                    className="inline-flex items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-700 rounded transition cursor-pointer whitespace-nowrap"
+                  >
+                    <ScrollText className="w-3.5 h-3.5" />
+                    <span>View logs</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => openEditModal(item)}
                     title="Edit Alias"
-                    className="p-1 text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
+                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
@@ -267,7 +293,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     disabled={isDeletingIp === item.ip}
                     onClick={() => setDeleteTargetIp(item.ip)}
                     title="Delete Alias"
-                    className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

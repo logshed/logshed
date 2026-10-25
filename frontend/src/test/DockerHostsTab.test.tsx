@@ -399,7 +399,7 @@ describe('DockerHostsTab row enable toggle', () => {
     });
 
     const row = screen.getByText('Remote Worker').closest('tr') as HTMLElement;
-    const toggle = row.querySelector('button[title="Disable Host"]') as HTMLButtonElement;
+    const toggle = row.querySelector('button[aria-label="Disable host Remote Worker"]') as HTMLButtonElement;
     fireEvent.click(toggle);
     fireEvent.click(toggle);
 
@@ -411,5 +411,49 @@ describe('DockerHostsTab row enable toggle', () => {
     await waitFor(() => {
       expect(toggle).not.toBeDisabled();
     });
+  });
+});
+
+describe('DockerHostsTab row controls (WP3)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses a labelled Power button that names the host and the action', async () => {
+    const disabledHost = { ...mockEndpoints[1], enabled: false };
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([mockEndpoints[0], disabledHost]);
+    render(<DockerHostsTab />);
+    await waitFor(() => expect(screen.getByText('Remote Worker')).toBeInTheDocument());
+
+    const disable = screen.getByRole('button', { name: 'Disable host Primary Docker' });
+    expect(disable).toHaveAttribute('title', 'Disable host Primary Docker');
+    const enable = screen.getByRole('button', { name: 'Enable host Remote Worker' });
+    expect(enable).toHaveAttribute('title', 'Enable host Remote Worker');
+    // Disabled hosts are muted
+    expect(enable.className).toContain('text-slate-600');
+    expect(disable.className).not.toContain('text-slate-600');
+  });
+
+  it('shows a visible Test label on the row test button', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue(mockEndpoints);
+    render(<DockerHostsTab />);
+    await waitFor(() => expect(screen.getByText('Remote Worker')).toBeInTheDocument());
+
+    const row = screen.getByText('Remote Worker').closest('tr') as HTMLElement;
+    const testBtn = row.querySelector('button[title="Test Connection"]') as HTMLButtonElement;
+    expect(testBtn).toHaveTextContent('Test');
+  });
+
+  it('gives the icon actions the touch-target pattern with a gap between them', async () => {
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue(mockEndpoints);
+    render(<DockerHostsTab />);
+    await waitFor(() => expect(screen.getByText('Remote Worker')).toBeInTheDocument());
+
+    const row = screen.getByText('Remote Worker').closest('tr') as HTMLElement;
+    for (const title of ['Edit Host', 'Delete Host']) {
+      const btn = row.querySelector(`button[title="${title}"]`) as HTMLButtonElement;
+      expect(btn.className).toContain('w-8 h-8 sm:w-auto sm:h-auto sm:p-1');
+    }
+    expect(row.querySelector('button[title="Edit Host"]')!.parentElement!.className).toContain('gap-1.5');
   });
 });

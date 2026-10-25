@@ -934,7 +934,7 @@ describe('AlertsPanel Component', () => {
     });
 
     // Click +1h preset
-    const preset1hBtn = screen.getByRole('button', { name: '+1 Hour' });
+    const preset1hBtn = screen.getByRole('button', { name: '1 Hour' });
     fireEvent.click(preset1hBtn);
 
     await waitFor(() => {
@@ -1259,3 +1259,66 @@ describe('AlertsPanel Component', () => {
 
 
 
+
+describe('AlertsPanel maintenance end-time presets (WP3)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    window.history.pushState(null, '', '/rules');
+    vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(mockRules);
+    vi.spyOn(alertsApi, 'fetchAlertPresets').mockResolvedValue(mockPresets);
+    vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
+    vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue(mockChannels);
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
+  });
+
+  it('labels the presets as an end time from now and hides Extend while no window is active', async () => {
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+
+    expect(await screen.findByText('Set end time from now')).toBeInTheDocument();
+    for (const label of ['1 Hour', '4 Hours', '8 Hours', '24 Hours']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: 'Extend +1h' })).toBeNull();
+  });
+
+  it('sets the preset end time from now', async () => {
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+    const setSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2099-01-01T00:00:00Z',
+      on_demand_until: '2099-01-01T00:00:00Z',
+    });
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+    const before = Date.now();
+    fireEvent.click(await screen.findByRole('button', { name: '4 Hours' }));
+
+    await waitFor(() => expect(setSpy).toHaveBeenCalledTimes(1));
+    const sent = new Date(setSpy.mock.calls[0][0] as string).getTime();
+    expect(sent).toBeGreaterThanOrEqual(before + 4 * 3600 * 1000);
+    expect(sent).toBeLessThan(Date.now() + 4 * 3600 * 1000 + 1000);
+  });
+
+  it('extends the current end time by one hour, not now plus one hour', async () => {
+    const currentEnd = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: currentEnd,
+      on_demand_until: currentEnd,
+    });
+    const setSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: currentEnd,
+      on_demand_until: currentEnd,
+    });
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Extend +1h' }));
+
+    await waitFor(() => expect(setSpy).toHaveBeenCalledTimes(1));
+    expect(setSpy).toHaveBeenCalledWith(new Date(new Date(currentEnd).getTime() + 3600 * 1000).toISOString());
+  });
+});

@@ -437,12 +437,12 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                       {channel.url}
                     </td>
                     <td className="py-2 text-right pr-2">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() => handleRowTest(channel)}
                           disabled={testingChannelId === channel.id}
-                          className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-700 rounded transition cursor-pointer disabled:opacity-50"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-accent-400 hover:bg-dark-700 rounded transition cursor-pointer disabled:opacity-50"
                           title="Send test notification"
                           aria-label={`Test ${channel.name}`}
                         >
@@ -455,7 +455,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(channel)}
-                          className="p-1 text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
                           title="Edit target"
                           aria-label={`Edit ${channel.name}`}
                         >
@@ -464,7 +464,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                         <button
                           type="button"
                           onClick={() => setChannelToDelete(channel)}
-                          className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition cursor-pointer"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition cursor-pointer"
                           title="Delete target"
                           aria-label={`Delete ${channel.name}`}
                         >

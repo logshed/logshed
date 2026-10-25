@@ -45,6 +45,7 @@ export interface MaintenanceWindowTabProps {
   setCustomUntil: (val: string) => void;
   onClearMaintenance: () => void;
   onSetPreset: (hours: number) => void;
+  onExtendWindow: () => void;
   onApplyCustomWindow: () => void;
   onOpenAddScheduleModal: () => void;
   onOpenEditScheduleModal: (sched: MaintenanceSchedule) => void;
@@ -61,6 +62,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   setCustomUntil,
   onClearMaintenance,
   onSetPreset,
+  onExtendWindow,
   appUrl,
   onApplyCustomWindow,
   onOpenAddScheduleModal,
@@ -155,36 +157,28 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
             {/* Quick Presets */}
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Quick Duration Presets:</span>
+              <span className="text-xs font-medium text-slate-400">Set end time from now</span>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onSetPreset(1)}
-                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                >
-                  +1 Hour
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSetPreset(4)}
-                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                >
-                  +4 Hours
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSetPreset(8)}
-                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                >
-                  +8 Hours
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSetPreset(24)}
-                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
-                >
-                  +24 Hours
-                </button>
+                {[1, 4, 8, 24].map((hours) => (
+                  <button
+                    key={hours}
+                    type="button"
+                    onClick={() => onSetPreset(hours)}
+                    className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
+                  >
+                    {hours} {hours === 1 ? 'Hour' : 'Hours'}
+                  </button>
+                ))}
+                {isOnDemandActiveNow && (
+                  <button
+                    type="button"
+                    onClick={onExtendWindow}
+                    title="Move the current end time one hour later"
+                    className="px-3 py-1.5 text-xs font-medium bg-amber-950/30 hover:bg-amber-950/50 text-amber-200 hover:text-white border border-amber-800/60 rounded-lg transition cursor-pointer"
+                  >
+                    Extend +1h
+                  </button>
+                )}
               </div>
             </div>
 

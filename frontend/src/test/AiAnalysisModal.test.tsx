@@ -183,13 +183,13 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
 
     expect(screen.getByText('Redaction Notice:')).toBeInTheDocument();
     expect(
-      screen.getByText(/Automated credential scrubbing operates on a best-effort basis/i)
+      screen.getByText(/Best-effort masking: common API keys/i)
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Please review the prompt above before sending/i)
+      screen.getByText(/Review and edit the prompt before sending/i)
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/you are responsible for the contents and sensitive data you transmit to external AI providers/i)
+      screen.getByText(/You are responsible for what you send to external AI providers/i)
     ).toBeInTheDocument();
   });
 
@@ -1085,5 +1085,75 @@ describe('AiAnalysisModal N07 model list run guard', () => {
 
     expect(screen.queryAllByRole('option', { name: /stale-model/ })).toHaveLength(0);
     expect(screen.getAllByRole('option', { name: /fresh-model/ }).length).toBeGreaterThan(0);
+  });
+});
+
+describe('AiAnalysisModal masked-values badge (WP3)', () => {
+  const logs: LogEntry[] = [
+    {
+      id: 1,
+      timestamp: '2026-09-04T08:00:00.000Z',
+      received_at: '2026-09-04T08:00:00.100Z',
+      source_ip: '192.168.1.1',
+      source_alias: 'router',
+      app_name: 'app',
+      facility: 1,
+      severity: 3,
+      message: 'hello',
+      raw: 'raw',
+    },
+  ];
+
+  const previewWith = (redacted_prompt: string) => ({
+    redacted_prompt,
+    estimated_tokens: 10,
+    provider: 'gemini',
+    model: 'gemini-3.7-flash',
+    log_count: 1,
+    source_alias: 'router',
+    app_name: 'app',
+    system_prompt: 'sys',
+  });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+      provider: 'gemini',
+      models: [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+      has_api_key: true,
+      cached_at: null,
+      is_live: true,
+    });
+  });
+
+  it('counts [REDACTED] in the server prompt, singular', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue(previewWith('password=[REDACTED] ok'));
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logs} />);
+    expect(await screen.findByText('1 value masked')).toBeInTheDocument();
+  });
+
+  it('counts [REDACTED] in the server prompt, plural, and ignores edits', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue(
+      previewWith('a=[REDACTED] b=[REDACTED] c=[REDACTED]')
+    );
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logs} />);
+    expect(await screen.findByText('3 values masked')).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByPlaceholderText('Redacted prompt...'), {
+      target: { value: 'edited with no markers' },
+    });
+    expect(screen.getByText('3 values masked')).toBeInTheDocument();
+  });
+
+  it('warns when nothing was masked', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue(previewWith('nothing secret here'));
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logs} />);
+    expect(await screen.findByText('No values masked - review before sending')).toBeInTheDocument();
+  });
+
+  it('says IP addresses and host names are not masked', async () => {
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue(previewWith('x'));
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logs} />);
+    expect(await screen.findByText(/IP addresses and host names are not masked/)).toBeInTheDocument();
   });
 });

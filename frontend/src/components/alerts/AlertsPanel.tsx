@@ -389,6 +389,13 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     await handleSetWindow(targetDate.toISOString());
   };
 
+  /** Moves the current on-demand end one hour later (not now plus one hour). */
+  const handleExtendWindow = async () => {
+    const currentEnd = new Date(maintenance.on_demand_until || maintenance.until || '');
+    const base = Number.isNaN(currentEnd.getTime()) ? Date.now() : Math.max(currentEnd.getTime(), Date.now());
+    await handleSetWindow(new Date(base + 3600 * 1000).toISOString());
+  };
+
   const handleApplyCustomWindow = async () => {
     if (!customUntil) return;
     const iso = fromLocalDatetimeInputString(customUntil);
@@ -918,6 +925,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           setCustomUntil={setCustomUntil}
           onClearMaintenance={handleClearMaintenance}
           onSetPreset={handleSetPreset}
+          onExtendWindow={handleExtendWindow}
           onApplyCustomWindow={handleApplyCustomWindow}
           onOpenAddScheduleModal={handleOpenAddScheduleModal}
           onOpenEditScheduleModal={handleOpenEditScheduleModal}

@@ -168,16 +168,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span title="Queue Depth" className="hidden sm:inline">
                 Queue: <span className="text-slate-200">{health.queue_depth ?? 0}</span>
               </span>
-              <span title="Logs LogShed dropped since it started (resets on restart)" className="hidden sm:inline">
-                Dropped:{' '}
-                <span className={(health.dropped_logs ?? 0) > 0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
-                  {health.dropped_logs ?? 0}
+              {(health.dropped_logs ?? 0) > 0 && (
+                <span
+                  title="Logs LogShed could not queue because its ingestion queue was full, since it started (resets on restart). Drop rules are counted separately."
+                  className="text-[11px] sm:text-xs whitespace-nowrap"
+                  data-testid="queue-lost"
+                >
+                  Lost: <span className="text-amber-400 font-bold">{health.dropped_logs}</span>
                 </span>
-              </span>
+              )}
               {typeof health.udp_receive_errors === 'number' && health.udp_receive_errors > 0 && (
                 <span
-                  title="Syslog UDP messages the operating system discarded because LogShed's receive buffer was full, since LogShed started (resets on restart). Not included in Dropped. TCP syslog avoids this."
-                  className="hidden sm:inline"
+                  title="Syslog UDP messages the operating system discarded because LogShed's receive buffer was full, since LogShed started (resets on restart). Not included in Lost. TCP syslog avoids this."
+                  className="text-[11px] sm:text-xs whitespace-nowrap"
                   data-testid="udp-lost"
                 >
                   UDP lost: <span className="text-amber-400 font-bold">{health.udp_receive_errors}</span>

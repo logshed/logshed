@@ -11,7 +11,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Lock,
-  Check,
+  Power,
 } from 'lucide-react';
 import {
   DockerEndpoint,
@@ -433,11 +433,11 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
                         onClick={() => openEditModal(host)}
-                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                        className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
                         title="Edit Host"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
@@ -446,7 +446,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                         <button
                           type="button"
                           onClick={() => setHostToDelete(host)}
-                          className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded transition cursor-pointer"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded transition cursor-pointer"
                           title="Delete Host"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -632,30 +632,33 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             type="button"
                             onClick={() => handleRowTest(host)}
                             disabled={testingRowId === host.id}
-                            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 h-8 sm:h-auto px-2 sm:py-1 text-[11px] font-medium text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition cursor-pointer disabled:opacity-50"
                             title="Test Connection"
+                            aria-label={`Test connection to ${host.name}`}
                           >
                             <Play className={`w-3.5 h-3.5 ${testingRowId === host.id ? 'animate-pulse text-accent-400' : ''}`} />
+                            <span>Test</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleToggleEnabled(host)}
                             disabled={togglingIds.has(host.id)}
-                            className={`p-1 rounded transition cursor-pointer disabled:opacity-50 ${
+                            className={`w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center rounded transition cursor-pointer disabled:opacity-50 ${
                               host.enabled
-                                ? 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
-                                : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40'
+                                ? 'text-accent-400 hover:text-accent-300 hover:bg-dark-800'
+                                : 'text-slate-600 hover:text-slate-400 hover:bg-dark-800'
                             }`}
-                            title={host.enabled ? 'Disable Host' : 'Enable Host'}
+                            title={`${host.enabled ? 'Disable' : 'Enable'} host ${host.name}`}
+                            aria-label={`${host.enabled ? 'Disable' : 'Enable'} host ${host.name}`}
                           >
-                            <Check className={`w-3.5 h-3.5 ${host.enabled ? 'text-accent-400' : 'text-slate-600'}`} />
+                            <Power className="w-3.5 h-3.5" />
                           </button>
 
                           <button
                             type="button"
                             onClick={() => openEditModal(host)}
-                            className="p-1 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                            className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
                             title="Edit Host"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -665,7 +668,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             <button
                               type="button"
                               onClick={() => setHostToDelete(host)}
-                              className="p-1 text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded transition cursor-pointer"
+                              className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded transition cursor-pointer"
                               title="Delete Host"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

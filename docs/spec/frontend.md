@@ -25,7 +25,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * Configurable auto-scroll operation with automatic pause detection when the operator scrolls upward.
 * **Severity Tinting & Badges:**
   * Visual badges reflecting RFC 5424 severity priorities: Emergency / Alert / Critical / Error (Red), Warning (Yellow), Notice / Informational / Debug (Slate / Blue).
-* **Navbar Health Figures:** Ingest rate, and on small screens and up queue depth and **Dropped** (logs LogShed itself dropped). **UDP lost: N** appears after Dropped only when `udp_receive_errors` is above 0: the syslog UDP messages the kernel discarded because the receive buffer was full. It is separate from Dropped, hidden when 0 or unknown, and counts per network namespace (with `network_mode: host` every UDP socket on the host). TCP syslog avoids this loss.
+* **Navbar Health Figures:** Ingest rate, and on small screens and up queue depth. **Lost: N** (logs LogShed could not queue because its ingestion queue was full; separate from drop rules) appears only when above 0, on every screen size. **UDP lost: N** appears after it only when `udp_receive_errors` is above 0: the syslog UDP messages the kernel discarded because the receive buffer was full. It is separate from Lost, hidden when 0 or unknown, and counts per network namespace (with `network_mode: host` every UDP socket on the host). TCP syslog avoids this loss.
 * **Selection & Batch Action Bar:**
   * Checkbox multi-select mode with a floating action bar: `"Run Analysis (N)"` or `"Delete Selected (N)"`.
 * **Search & Filter Bar (Query Builder & Facet Bars):**

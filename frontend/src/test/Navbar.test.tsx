@@ -502,15 +502,15 @@ describe('Navbar UDP lost figure (N07)', () => {
     });
     render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
     await waitFor(() => expect(systemApi.fetchHealth).toHaveBeenCalled());
-    await screen.findByText(/Dropped:/);
+    await screen.findByText(/Lost:/);
   };
 
-  it('shows the UDP lost figure, separate from Dropped, when it is above 0', async () => {
+  it('shows the UDP lost figure, separate from Lost, when it is above 0', async () => {
     await renderWithHealth(1234);
     const udp = screen.getByTestId('udp-lost');
     expect(udp).toHaveTextContent('UDP lost: 1234');
-    expect(udp.getAttribute('title')).toContain('Not included in Dropped');
-    expect(screen.getByText(/Dropped:/)).toHaveTextContent('Dropped: 7');
+    expect(udp.getAttribute('title')).toContain('Not included in Lost');
+    expect(screen.getByTestId('queue-lost')).toHaveTextContent('Lost: 7');
   });
 
   it('shows nothing for a null UDP figure', async () => {
@@ -526,5 +526,47 @@ describe('Navbar UDP lost figure (N07)', () => {
   it('shows nothing when the field is missing', async () => {
     await renderWithHealth(undefined);
     expect(screen.queryByTestId('udp-lost')).toBeNull();
+  });
+});
+
+describe('Navbar Lost counter (WP3)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const renderWith = async (dropped: number, udp: number | undefined) => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: dropped,
+      ingest_rate: 1.0,
+      ...(udp === undefined ? {} : { udp_receive_errors: udp }),
+    });
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    await waitFor(() => expect(systemApi.fetchHealth).toHaveBeenCalled());
+    await screen.findByText('1.0 logs/s');
+  };
+
+  it('shows Lost with the queue-full tooltip when above 0, and no Dropped label', async () => {
+    await renderWith(7, undefined);
+    const lost = await screen.findByTestId('queue-lost');
+    expect(lost).toHaveTextContent('Lost: 7');
+    expect(lost.getAttribute('title')).toContain('ingestion queue was full');
+    expect(lost.getAttribute('title')).toContain('Drop rules are counted separately');
+    expect(screen.queryByText(/Dropped/)).toBeNull();
+  });
+
+  it('hides Lost when it is 0', async () => {
+    await renderWith(0, undefined);
+    expect(screen.queryByTestId('queue-lost')).toBeNull();
+  });
+
+  it('shows Lost and UDP lost on every screen size (no desktop-only class)', async () => {
+    await renderWith(3, 9);
+    const lost = await screen.findByTestId('queue-lost');
+    const udp = screen.getByTestId('udp-lost');
+    expect(lost.className).not.toContain('hidden');
+    expect(udp.className).not.toContain('hidden');
   });
 });
