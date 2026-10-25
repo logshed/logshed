@@ -308,3 +308,24 @@ describe('LogSearchBar N07 fixes', () => {
     expect(select.value).toBe('since_midnight');
   });
 });
+
+describe('LogSearchBar severity wording (WP2)', () => {
+  it('desktop select uses compact labels and a long title', () => {
+    render(
+      <LogSearchBar filters={{ severity_max: 4 }} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
+    );
+    const option = screen.getByRole('option', { name: 'Warn+ (0-4)' });
+    const select = option.closest('select') as HTMLSelectElement;
+    expect(select.title).toBe('Warning (4) and more severe');
+    expect(screen.getByRole('option', { name: 'Debug+ (0-7)' })).toBeInTheDocument();
+  });
+
+  it('mobile drawer select uses the long "and more severe" labels', () => {
+    render(
+      <LogSearchBar filters={{}} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
+    );
+    fireEvent.click(screen.getByLabelText('Open filters drawer'));
+    expect(screen.getByRole('option', { name: 'Warning (4) and more severe' })).toBeInTheDocument();
+    expect(screen.queryByText(/Maximum Severity/)).toBeNull();
+  });
+});

@@ -16,7 +16,7 @@ This guide explains how to configure real-time alert rules and ingestion drop ru
 - [Ingestion Drop Rules](#drop-rules)
   - [Purpose & Architecture](#purpose--architecture)
   - [Drop Rule Fields & Filtering](#drop-rule-fields--filtering)
-  - [Severity Threshold Handling](#severity-threshold-handling)
+  - [Severity Range Handling](#severity-range-handling)
   - [1-Click Creation & Testing](#1-click-creation--testing)
   - [Practical Drop Rule Examples](#practical-drop-rule-examples)
   - [Preset Bundles & Sharing](#preset-bundles--sharing)
@@ -69,8 +69,8 @@ A multi-select dropdown listing known applications and daemons discovered across
 - You can also enter custom expressions or wildcards if needed.
 - If left empty, all ingested logs from any application or service are evaluated.
 
-#### 5. Max Severity Filter (Optional)
-Restricts rule evaluation to logs at or above a specific syslog severity level (syslog levels 0 to 7):
+#### 5. Severity Filter (Optional)
+Restricts rule evaluation to logs at the chosen syslog severity level or more severe (syslog levels 0 to 7, where a lower number is more severe). The dropdown shows each level as, for example, `Warning (4) and more severe`:
 - `0 - Emergency`: System unusable
 - `1 - Alert`: Action must be taken immediately
 - `2 - Critical`: Critical conditions
@@ -80,7 +80,7 @@ Restricts rule evaluation to logs at or above a specific syslog severity level (
 - `6 - Info`: Informational messages
 - `7 - Debug`: Debug-level messages
 
-Choosing `3 - Error` matches Emergency (0), Alert (1), Critical (2), and Error (3). If left empty, all severity levels are permitted.
+Choosing `Error (3) and more severe` matches Emergency (0), Alert (1), Critical (2), and Error (3). If left empty, all severity levels are permitted.
 
 #### 6. Match Pattern (Regex or Substring)
 A case-insensitive keyword substring or regular expression pattern matched against the log message text and raw payload.
@@ -160,7 +160,7 @@ LogShed includes a built-in canary alert preset based on `alert_log_storm.json`:
 
 #### Example 3: Kernel Panic or Hardware Failure
 - **Rule Type**: `Pattern (Immediate Match)`
-- **Max Severity Filter**: `2 - Critical`
+- **Severity Filter**: `Critical (2) and more severe`
 - **Match Pattern**: `Kernel panic|Out of memory|Hardware Error|machine check`
 - **Cooldown**: `60` seconds
 - **AI Enrichment**: Enabled
@@ -205,16 +205,16 @@ When creating or editing a drop rule, you configure:
 | **App / Container Pattern** | Filter by application or container name | Supports wildcards (for example, `CRON`, `systemd*`, or `traefik`). Optional if Host or Message is set |
 | **Message Pattern** | Keyword substring or regular expression | Matches log payload. Can be a case-insensitive substring or regex. Enter `*` to match all messages |
 | **Regex Toggle** | Regular expression parsing toggle | Enables safe regex evaluation when checked (with a 50 ms limit per match; a rule that times out 20 times in 5 minutes is disabled automatically, see the alert rule notes above), or fast case-insensitive substring matching when unchecked. With the toggle on, write `\\` for a literal backslash |
-| **Severity Threshold** | Minimum syslog severity level to drop | Preserves critical entries while discarding routine chatter (detailed below) |
+| **Severity Range** | Drop only logs at this level or less severe | Preserves critical entries while discarding routine chatter (detailed below) |
 
-### Severity Threshold Handling
+### Severity Range Handling
 
-The **Severity Threshold** allows conditional filtering based on standard syslog severity levels (0 = Emergency to 7 = Debug).
+The **Severity Range** allows conditional filtering based on standard syslog severity levels (0 = Emergency to 7 = Debug).
 
-LogShed drops matching logs only if their severity is at or below the selected severity value (where higher numerical values represent lower severity):
-- If Severity Threshold is set to `6 - Info`, LogShed will drop logs matching the criteria if they are `6 - Info` or `7 - Debug`.
+LogShed drops matching logs only if their severity is the selected level or less severe (a higher number is less severe). The dropdown shows each level as, for example, `Info (6) and less severe`:
+- If Severity Range is set to `Info (6) and less severe`, LogShed will drop logs matching the criteria if they are `6 - Info` or `7 - Debug`.
 - If an application generates an unexpected `3 - Error` or `4 - Warning` matching the same pattern, LogShed **preserves** the log and writes it to SQLite, ensuring critical failures are never missed.
-- If Severity Threshold is left unset, all logs matching the pattern are dropped regardless of severity.
+- If Severity Range is left unset, all logs matching the pattern are dropped regardless of severity.
 
 ### 1-Click Creation & Testing
 
@@ -236,7 +236,7 @@ LogShed makes rule creation effortless:
 - **App Pattern**: `*` (or leave empty)
 - **Message Pattern**: `healthcheck|health_status`
 - **Regex**: Enabled
-- **Severity Threshold**: None
+- **Severity Range**: None
 - **Use Case**: Eliminates repetitive internal healthcheck pings from containers like Pi-hole, Vaultwarden, or custom web services that pollute logs every few seconds.
 
 #### Example 2: Routine CRON Chatter
@@ -244,7 +244,7 @@ LogShed makes rule creation effortless:
 - **App Pattern**: `CRON`
 - **Message Pattern**: `CMD|RELOAD|STARTUP`
 - **Regex**: Enabled
-- **Severity Threshold**: `6 - Info`
+- **Severity Range**: `Info (6) and less severe`
 - **Use Case**: Silences routine minute-by-minute cron job execution records while preserving any cron error outputs (`3 - Error`).
 
 #### Example 3: Systemd User Session Chatter
@@ -252,7 +252,7 @@ LogShed makes rule creation effortless:
 - **App Pattern**: `systemd*`
 - **Message Pattern**: `pam_unix(systemd-user:session): session opened|session closed`
 - **Regex**: Enabled
-- **Severity Threshold**: None
+- **Severity Range**: None
 - **Use Case**: Strips out Linux PAM session open and close messages triggered by monitoring scripts and automated background jobs.
 
 #### Example 4: Web Crawler 404 Probes
@@ -260,7 +260,7 @@ LogShed makes rule creation effortless:
 - **App Pattern**: `nginx` (or `traefik`, `caddy`)
 - **Message Pattern**: `"(GET|POST) /(wp-admin|\.env|xmlrpc\.php|phpmyadmin).* 404`
 - **Regex**: Enabled
-- **Severity Threshold**: None
+- **Severity Range**: None
 - **Use Case**: Prevents public-facing reverse proxy search indexes from being inundated by automated bot vulnerability scans.
 
 ### Preset Bundles & Sharing

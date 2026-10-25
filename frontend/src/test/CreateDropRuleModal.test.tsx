@@ -139,3 +139,46 @@ describe('CreateDropRuleModal Component', () => {
     expect(link.getAttribute('href')).toMatch(/RULES_GUIDE\.md#ingestion-drop-rules$/);
   });
 });
+
+describe('CreateDropRuleModal severity range and whole-line hint (WP2)', () => {
+  const HINT = /remove numbers, times or IDs that change between lines/i;
+
+  it('uses "less severe" wording and help text for the severity range', () => {
+    render(<CreateDropRuleModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} ruleToEdit={null} />);
+    expect(screen.getByLabelText('Severity Range (Optional)')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Warning (4) and less severe' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Debug (7) and less severe' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Only logs at this level or less severe are dropped. More severe logs are always kept. Leave blank to match every level.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('shows the hint when the pattern is the whole sample line and hides it once edited', () => {
+    render(
+      <CreateDropRuleModal
+        isOpen={true}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        ruleToEdit={null}
+        initialMessage="DHCPACK(eth0) 10.0.0.5 aa:bb"
+      />
+    );
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. DHCPACK, query/), {
+      target: { value: 'DHCPACK' },
+    });
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('does not show the hint without a pattern or when editing', () => {
+    const { unmount } = render(
+      <CreateDropRuleModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} ruleToEdit={null} />
+    );
+    expect(screen.queryByText(HINT)).toBeNull();
+    unmount();
+    render(<CreateDropRuleModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} ruleToEdit={mockRule} />);
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+});

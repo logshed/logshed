@@ -354,9 +354,27 @@ describe('AlertRuleModal Component', () => {
       />
     );
     expect(screen.getByRole('option', { name: 'Any Severity' })).toBeInTheDocument();
-    const texts = ['0 - Emergency', '1 - Alert', '2 - Critical', '3 - Error', '4 - Warning', '5 - Notice', '6 - Info', '7 - Debug'];
+    const texts = ['Emergency (0) and more severe', 'Alert (1) and more severe', 'Critical (2) and more severe', 'Error (3) and more severe', 'Warning (4) and more severe', 'Notice (5) and more severe', 'Info (6) and more severe', 'Debug (7) and more severe'];
     for (const t of texts) {
       expect(screen.getByRole('option', { name: t })).toBeInTheDocument();
     }
+  });
+});
+
+describe('AlertRuleModal severity wording (WP2)', () => {
+  it('labels the field and explains the direction', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Severity Filter (Optional)')).toBeInTheDocument();
+    expect(screen.queryByText(/Max Severity/)).toBeNull();
+    expect(screen.getByText('Only logs at this level or more severe are checked.')).toBeInTheDocument();
   });
 });

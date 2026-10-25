@@ -5,6 +5,7 @@ import { createAlertRule, updateAlertRule } from '../../api/alerts.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
+import { moreSevereLabel } from '../../utils/severityLabels.ts';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 
 export interface AlertRuleModalProps {
@@ -388,7 +389,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
         )}
 
-        {/* App Filter (Multi-Select) & Max Severity Filter */}
+        {/* App Filter (Multi-Select) & Severity Filter */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="text-slate-300 font-medium">App Filter (Optional)</label>
@@ -404,7 +405,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label className="text-slate-300 font-medium">Max Severity Filter (Optional)</label>
+            <label className="text-slate-300 font-medium">Severity Filter (Optional)</label>
             <select
               value={formFilterSeverity}
               onChange={(e) => setFormFilterSeverity(e.target.value === '' ? '' : Number(e.target.value))}
@@ -413,10 +414,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               <option value="">Any Severity</option>
               {SEVERITIES.map((s) => (
                 <option key={s.value} value={s.value}>
-                  {s.value} - {s.name}
+                  {moreSevereLabel(s.value)}
                 </option>
               ))}
             </select>
+            <span className="text-[11px] text-slate-400 block">
+              Only logs at this level or more severe are checked.
+            </span>
           </div>
         </div>
 

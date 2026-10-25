@@ -2,7 +2,7 @@ import React from 'react';
 import { Plus, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
 import { DropPreset, DropRule } from '../../types.ts';
-import { getSeverityInfo } from '../common/SeverityBadge.tsx';
+import { lessSevereLabel } from '../../utils/severityLabels.ts';
 
 export interface DropPresetsModalProps {
   isOpen: boolean;
@@ -88,7 +88,7 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
                       </span>
                       {preset.severity_threshold != null && (
                         <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
-                          {getSeverityInfo(preset.severity_threshold).label} and below
+                          {lessSevereLabel(preset.severity_threshold)}
                         </span>
                       )}
                     </div>

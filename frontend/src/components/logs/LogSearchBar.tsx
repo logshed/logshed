@@ -3,6 +3,8 @@ import { Search, RotateCcw, Filter, Clock, X, SlidersHorizontal } from 'lucide-r
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
+import { SEVERITIES } from '../common/SeverityBadge.tsx';
+import { moreSevereLabel, compactMoreSevereLabel } from '../../utils/severityLabels.ts';
 import { toLocalDatetimeInputString, fromLocalDatetimeInputString } from '../../utils/formatters.ts';
 import { fetchSavedViews, createSavedView, updateSavedView, deleteSavedView } from '../../api/savedViews.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
@@ -340,17 +342,19 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
               onFilterChange({ ...filters, severity_max: val });
             }}
+            title={
+              filters.severity_max !== undefined && filters.severity_max !== null
+                ? moreSevereLabel(filters.severity_max)
+                : 'Choose a level to show it and everything more severe'
+            }
             className="bg-transparent text-[11px] text-slate-200 focus:outline-hidden font-mono"
           >
             <option value="" className="bg-dark-900">All Severities</option>
-            <option value="0" className="bg-dark-900">≤ Emerg (0)</option>
-            <option value="1" className="bg-dark-900">≤ Alert (1)</option>
-            <option value="2" className="bg-dark-900">≤ Crit (2)</option>
-            <option value="3" className="bg-dark-900">≤ Error (3)</option>
-            <option value="4" className="bg-dark-900">≤ Warn (4)</option>
-            <option value="5" className="bg-dark-900">≤ Notice (5)</option>
-            <option value="6" className="bg-dark-900">≤ Info (6)</option>
-            <option value="7" className="bg-dark-900">≤ Debug (7)</option>
+            {SEVERITIES.map((s) => (
+              <option key={s.value} value={s.value} className="bg-dark-900">
+                {compactMoreSevereLabel(s.value)}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -503,7 +507,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Severity Filter */}
           <div>
-            <label className="block text-slate-400 font-medium mb-1.5">Maximum Severity</label>
+            <label className="block text-slate-400 font-medium mb-1.5">Severity</label>
             <select
               value={filters.severity_max !== undefined ? filters.severity_max : ''}
               onChange={(e) => {
@@ -513,14 +517,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden font-mono"
             >
               <option value="">All Severities</option>
-              <option value="0">≤ Emerg (0)</option>
-              <option value="1">≤ Alert (1)</option>
-              <option value="2">≤ Crit (2)</option>
-              <option value="3">≤ Error (3)</option>
-              <option value="4">≤ Warn (4)</option>
-              <option value="5">≤ Notice (5)</option>
-              <option value="6">≤ Info (6)</option>
-              <option value="7">≤ Debug (7)</option>
+              {SEVERITIES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {moreSevereLabel(s.value)}
+                </option>
+              ))}
             </select>
           </div>
 

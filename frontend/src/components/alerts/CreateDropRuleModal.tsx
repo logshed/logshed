@@ -4,6 +4,7 @@ import { DropRule } from '../../types.ts';
 import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } from '../../api/dropRules.ts';
 import { Modal } from '../common/Modal.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
+import { lessSevereLabel } from '../../utils/severityLabels.ts';
 
 interface CreateDropRuleModalProps {
   isOpen: boolean;
@@ -464,7 +465,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
 
         <div>
           <label htmlFor="modal-severity-select" className="block text-slate-300 font-medium mb-1">
-            Drop if severity is...
+            Severity Range (Optional)
           </label>
           <select
             id="modal-severity-select"
@@ -473,14 +474,14 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
           >
             <option value="">Any severity</option>
-            <option value="7">Debug (7) and below</option>
-            <option value="6">Info (6) and below</option>
-            <option value="5">Notice (5) and below</option>
-            <option value="4">Warning (4) and below</option>
-            <option value="3">Error (3) and below</option>
+            <option value="7">{lessSevereLabel(7)}</option>
+            <option value="6">{lessSevereLabel(6)}</option>
+            <option value="5">{lessSevereLabel(5)}</option>
+            <option value="4">{lessSevereLabel(4)}</option>
+            <option value="3">{lessSevereLabel(3)}</option>
           </select>
           <span className="text-[11px] text-slate-400 mt-1 block">
-            Logs at or below this severity level will be dropped. Leave blank to match all severity levels.
+            Only logs at this level or less severe are dropped. More severe logs are always kept. Leave blank to match every level.
           </span>
         </div>
 
@@ -564,6 +565,15 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               </select>
             </div>
           </div>
+
+          {!ruleToEdit && messagePattern.trim() !== '' && messagePattern.trim() === sampleMessage.trim() && (
+            <div
+              data-testid="whole-line-pattern-hint"
+              className="p-2 rounded border text-[11px] bg-amber-950/40 border-amber-800/60 text-amber-300"
+            >
+              Tip: remove numbers, times or IDs that change between lines from the Message Pattern, so later logs match too.
+            </div>
+          )}
 
           {testResult && (
             <div

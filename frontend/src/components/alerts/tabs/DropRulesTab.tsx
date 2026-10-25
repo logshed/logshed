@@ -29,7 +29,7 @@ import { fetchLogFacets } from '../../../api/logs.ts';
 import { downloadBlob, slugify } from '../../../utils/formatters.ts';
 import { Modal } from '../../common/Modal.tsx';
 import { useSerialReorder } from '../../../utils/useSerialReorder.ts';
-import { getSeverityInfo } from '../../common/SeverityBadge.tsx';
+import { lessSevereLabel } from '../../../utils/severityLabels.ts';
 import { CreateDropRuleModal } from '../CreateDropRuleModal.tsx';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
 
@@ -437,11 +437,24 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                           <span className="text-slate-400 italic">Any</span>
                         )}
                       </span>
+                      <span className="flex items-baseline gap-1 min-w-0 max-w-full">
+                        <span className="shrink-0">Pattern:</span>
+                        {rule.message_pattern && rule.message_pattern !== '*' ? (
+                          <span
+                            className="font-mono text-slate-300 truncate max-w-[16rem] sm:max-w-xs"
+                            title={rule.message_pattern}
+                          >
+                            {rule.message_pattern}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic">Any</span>
+                        )}
+                      </span>
                       <span>
                         Severity:{' '}
                         <span className="text-slate-300">
                           {rule.severity_threshold != null
-                            ? `${getSeverityInfo(rule.severity_threshold).label} and below`
+                            ? lessSevereLabel(rule.severity_threshold)
                             : 'Any'}
                         </span>
                       </span>
@@ -535,7 +548,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                     <div><span className="text-slate-500">Pattern:</span> {ruleToDelete.message_pattern}</div>
                   )}
                   {ruleToDelete.severity_threshold != null && (
-                    <div><span className="text-slate-500">Severity:</span> {getSeverityInfo(ruleToDelete.severity_threshold).label} and below</div>
+                    <div><span className="text-slate-500">Severity:</span> {lessSevereLabel(ruleToDelete.severity_threshold)}</div>
                   )}
                   {ruleToDelete.dropped_count > 0 && (
                     <div className="text-slate-400 text-[10px] pt-1 border-t border-dark-800">

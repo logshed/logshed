@@ -46,7 +46,7 @@ describe('DropRulesCard Component', () => {
       expect(screen.getByText('Drop Probe Requests')).toBeInTheDocument();
       expect(screen.getByText('192.168.1.*')).toBeInTheDocument();
       expect(screen.getByText('dnsmasq')).toBeInTheDocument();
-      expect(screen.getByText('Info and below')).toBeInTheDocument();
+      expect(screen.getByText('Info (6) and less severe')).toBeInTheDocument();
     });
 
     expect(screen.getByText('42 dropped')).toBeInTheDocument();
@@ -386,8 +386,8 @@ describe('DropRulesCard Component', () => {
     const nameInput = screen.getByPlaceholderText(/e\.g\. CRON Chatter/i);
     fireEvent.change(nameInput, { target: { value: 'Drop Sshd Low Severity' } });
 
-    // Select severity threshold: Info (6) and below
-    const sevSelect = screen.getByLabelText(/Drop if severity is\.\.\./i);
+    // Select severity threshold: Info (6) and less severe
+    const sevSelect = screen.getByLabelText(/Severity Range/i);
     expect(sevSelect).toBeInTheDocument();
     fireEvent.change(sevSelect, { target: { value: '6' } });
 
@@ -620,3 +620,33 @@ describe('DropRulesCard Component', () => {
   });
 });
 
+
+describe('DropRulesCard pattern display (WP2)', () => {
+  const base = {
+    source_pattern: null,
+    app_pattern: null,
+    is_regex: false,
+    is_enabled: true,
+    severity_threshold: null,
+    dropped_count: 0,
+    created_at: '2026-09-18T10:00:00Z',
+  };
+
+  it('shows the message pattern with a title, and Any when empty or *', async () => {
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue([
+      { ...base, id: 1, name: 'Has pattern', message_pattern: 'DHCPACK from 10.0.0.5' },
+      { ...base, id: 2, name: 'Star pattern', message_pattern: '*' },
+      { ...base, id: 3, name: 'Empty pattern', message_pattern: '' },
+    ] as DropRule[]);
+    render(<DropRulesCard />);
+    await waitFor(() => expect(screen.getByText('Has pattern')).toBeInTheDocument());
+
+    const pattern = screen.getByText('DHCPACK from 10.0.0.5');
+    expect(pattern).toHaveAttribute('title', 'DHCPACK from 10.0.0.5');
+    expect(pattern.className).toContain('font-mono');
+    expect(screen.getAllByText('Pattern:')).toHaveLength(3);
+    expect(screen.queryByText('*')).toBeNull();
+    // Host, App and Pattern all read "Any" on the two rules without a pattern (plus Severity).
+    expect(screen.getAllByText('Any').length).toBeGreaterThanOrEqual(6);
+  });
+});
