@@ -224,6 +224,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
         onClose={handleClose}
         onExplainWithAi={vi.fn()}
         onInspectWithContext={handleInspectWithContext}
+        aiEnabled={true}
         isHostAliased={true}
       />
     );
@@ -279,6 +280,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
         onClose={vi.fn()}
         onExplainWithAi={vi.fn()}
         onInspectWithContext={handleInspectWithContext}
+        aiEnabled={true}
         isHostAliased={true}
       />
     );
@@ -318,7 +320,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(handleCreateDropRule).toHaveBeenCalledWith(sampleLog);
   });
 
-  it('renders Previous and Next log buttons and triggers navigation callbacks', () => {
+  it('renders Newer and Older log buttons and triggers navigation callbacks', () => {
     const handlePrevious = vi.fn();
     const handleNext = vi.fn();
 
@@ -328,15 +330,15 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
         isOpen={true}
         onClose={vi.fn()}
         onExplainWithAi={vi.fn()}
-        onNavigatePrevious={handlePrevious}
-        onNavigateNext={handleNext}
-        hasPreviousLog={true}
-        hasNextLog={true}
+        onNavigateNewer={handlePrevious}
+        onNavigateOlder={handleNext}
+        hasNewerLog={true}
+        hasOlderLog={true}
       />
     );
 
-    const prevBtn = screen.getByRole('button', { name: /Previous log/i });
-    const nextBtn = screen.getByRole('button', { name: /Next log/i });
+    const prevBtn = screen.getByRole('button', { name: /Newer log/i });
+    const nextBtn = screen.getByRole('button', { name: /Older log/i });
 
     expect(prevBtn).toBeInTheDocument();
     expect(nextBtn).toBeInTheDocument();
@@ -356,10 +358,10 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
         isOpen={true}
         onClose={vi.fn()}
         onExplainWithAi={vi.fn()}
-        onNavigatePrevious={handlePrevious}
-        onNavigateNext={handleNext}
-        hasPreviousLog={false}
-        hasNextLog={false}
+        onNavigateNewer={handlePrevious}
+        onNavigateOlder={handleNext}
+        hasNewerLog={false}
+        hasOlderLog={false}
       />
     );
 
@@ -711,5 +713,185 @@ describe('LogDetailModal context handling (B-25)', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByText('stale context for one')).toBeNull();
     expect(screen.getByText('context for two')).toBeInTheDocument();
+  });
+});
+
+describe('LogDetailModal AI setting, Newer / Older steps and context app names (WP1)', () => {
+  const log: LogEntry = {
+    id: 500,
+    timestamp: '2026-08-29T14:30:00.000Z',
+    received_at: '2026-08-29T14:30:00.100Z',
+    source_ip: '192.168.1.50',
+    source_alias: 'proxmox-01',
+    app_name: 'pveproxy',
+    facility: 1,
+    severity: 3,
+    message: 'connection failed',
+    raw: 'connection failed',
+  };
+  const ctx: LogEntry[] = [
+    { ...log, id: 499, app_name: 'corosync-cluster-engine-daemon', message: 'token received' },
+    log,
+  ];
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const renderNav = (overrides: Record<string, unknown> = {}) => {
+    const onNewer = vi.fn();
+    const onOlder = vi.fn();
+    const utils = render(
+      <LogDetailModal
+        log={log}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onNavigateNewer={onNewer}
+        onNavigateOlder={onOlder}
+        hasNewerLog={true}
+        hasOlderLog={true}
+        {...overrides}
+      />
+    );
+    return { ...utils, onNewer, onOlder };
+  };
+
+  it('renders a muted "Explain with AI" entry with a hint when AI is off, and still calls the handler', () => {
+    const onExplain = vi.fn();
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={onExplain} aiEnabled={false} />);
+    const btn = screen.getByRole('button', { name: /Explain with AI/i });
+    expect(btn).toHaveAttribute('title', 'AI features are turned off in Settings');
+    expect(btn.className).not.toContain('bg-accent-600');
+    fireEvent.click(btn);
+    expect(onExplain).toHaveBeenCalledWith(log);
+  });
+
+  it('renders the primary "Explain with AI" button without the hint when AI is on', () => {
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} aiEnabled={true} />);
+    const btn = screen.getByRole('button', { name: /Explain with AI/i });
+    expect(btn).not.toHaveAttribute('title');
+    expect(btn.className).toContain('bg-accent-600');
+  });
+
+  it('hides "Inspect Target + Context" when AI is off', async () => {
+    vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({ target_id: log.id, logs: ctx });
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} aiEnabled={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /Load Surrounding Context/i }));
+    await screen.findByText('token received');
+    expect(screen.queryByRole('button', { name: /Inspect Target \+ Context/i })).toBeNull();
+  });
+
+  it('shows "Inspect Target + Context" when AI is on', async () => {
+    vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({ target_id: log.id, logs: ctx });
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} aiEnabled={true} />);
+    fireEvent.click(screen.getByRole('button', { name: /Load Surrounding Context/i }));
+    expect(await screen.findByRole('button', { name: /Inspect Target \+ Context \(2 logs\)/i })).toBeInTheDocument();
+  });
+
+  it('labels the steps Newer and Older with their keyboard hints', () => {
+    renderNav();
+    expect(screen.getByRole('button', { name: 'Newer log' })).toHaveAttribute('title', 'Newer log (Up or K)');
+    expect(screen.getByRole('button', { name: 'Older log' })).toHaveAttribute('title', 'Older log (Down or J)');
+    expect(screen.queryByRole('button', { name: /Previous log/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Next log/i })).toBeNull();
+  });
+
+  it('maps ArrowUp and K to Newer, ArrowDown and J to Older', () => {
+    const { onNewer, onOlder } = renderNav();
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+    fireEvent.keyDown(document.body, { key: 'k' });
+    expect(onNewer).toHaveBeenCalledTimes(2);
+    expect(onOlder).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(onOlder).toHaveBeenCalledTimes(2);
+    expect(onNewer).toHaveBeenCalledTimes(2);
+  });
+
+  it('does nothing at the ends of the list: buttons disabled and keys ignored', () => {
+    const { onNewer, onOlder } = renderNav({ hasNewerLog: false, hasOlderLog: false });
+    expect(screen.getByRole('button', { name: 'Newer log' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Older log' })).toBeDisabled();
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.body, { key: 'k' });
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(onNewer).not.toHaveBeenCalled();
+    expect(onOlder).not.toHaveBeenCalled();
+  });
+
+  it('ignores the keys while typing in a text field, select or editable element', () => {
+    const { onNewer, onOlder } = renderNav();
+    const input = document.createElement('input');
+    const textarea = document.createElement('textarea');
+    const select = document.createElement('select');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    document.body.append(input, textarea, select, editable);
+    try {
+      for (const el of [input, textarea, select, editable]) {
+        fireEvent.keyDown(el, { key: 'k' });
+        fireEvent.keyDown(el, { key: 'j' });
+        fireEvent.keyDown(el, { key: 'ArrowUp' });
+        fireEvent.keyDown(el, { key: 'ArrowDown' });
+      }
+      expect(onNewer).not.toHaveBeenCalled();
+      expect(onOlder).not.toHaveBeenCalled();
+    } finally {
+      input.remove();
+      textarea.remove();
+      select.remove();
+      editable.remove();
+    }
+  });
+
+  it('ignores the keys while another dialog is open on top of the drawer', () => {
+    const { onNewer, onOlder } = renderNav();
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    document.body.append(dialog);
+    try {
+      fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+      fireEvent.keyDown(document.body, { key: 'j' });
+      expect(onNewer).not.toHaveBeenCalled();
+      expect(onOlder).not.toHaveBeenCalled();
+    } finally {
+      dialog.remove();
+    }
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+    expect(onNewer).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores the keys once the drawer is closed', () => {
+    const { onNewer, rerender } = renderNav();
+    rerender(
+      <LogDetailModal log={log} isOpen={false} onClose={vi.fn()} onExplainWithAi={vi.fn()} onNavigateNewer={onNewer} hasNewerLog={true} />
+    );
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+    expect(onNewer).not.toHaveBeenCalled();
+  });
+
+  it('shows each context row app name, truncated with the full name as a tooltip', async () => {
+    vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({ target_id: log.id, logs: ctx });
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Load Surrounding Context/i }));
+    await screen.findByText('token received');
+    const apps = screen.getAllByTestId('context-app-name');
+    expect(apps.map((a) => a.textContent)).toEqual(['corosync-cluster-engine-daemon', 'pveproxy']);
+    expect(apps[0]).toHaveAttribute('title', 'corosync-cluster-engine-daemon');
+    expect(apps[0].className).toContain('truncate');
+  });
+
+  it('hides the context app column when "Same App Only" is checked', async () => {
+    vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({ target_id: log.id, logs: [log] });
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Load Surrounding Context/i }));
+    await waitFor(() => expect(screen.getAllByTestId('context-app-name').length).toBe(1));
+    fireEvent.click(screen.getByRole('checkbox'));
+    await waitFor(() => expect(logsApi.fetchLogContext).toHaveBeenLastCalledWith(log.id, 10, true));
+    await screen.findAllByText('connection failed');
+    expect(screen.queryByTestId('context-app-name')).toBeNull();
   });
 });

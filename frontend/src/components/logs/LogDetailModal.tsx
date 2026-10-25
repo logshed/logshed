@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronUp, ChevronDown } from 'lucide-react';
 import { LogEntry, DockerEndpoint } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
@@ -21,11 +21,25 @@ interface LogDetailModalProps {
   isHostAliased?: boolean;
   onCreateDropRule?: (log: LogEntry) => void;
   onDeleteLog?: (log: LogEntry) => void;
-  onNavigatePrevious?: () => void;
-  onNavigateNext?: () => void;
-  hasPreviousLog?: boolean;
-  hasNextLog?: boolean;
+  /** Opens the newer neighbour (the row above in the newest-first list). */
+  onNavigateNewer?: () => void;
+  /** Opens the older neighbour (the row below in the newest-first list). */
+  onNavigateOlder?: () => void;
+  hasNewerLog?: boolean;
+  hasOlderLog?: boolean;
   timeZone?: string;
+  /** AI on shows the AI actions in full; AI off keeps one muted "Explain with AI" entry. */
+  aiEnabled?: boolean;
+}
+
+const AI_OFF_TITLE = 'AI features are turned off in Settings';
+
+/** True when a key press comes from a text field, where Up, Down, J and K must keep their usual meaning. */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return target.isContentEditable || target.closest('[contenteditable]:not([contenteditable="false"])') !== null;
 }
 
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
@@ -41,11 +55,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   isHostAliased,
   onCreateDropRule,
   onDeleteLog,
-  onNavigatePrevious,
-  onNavigateNext,
-  hasPreviousLog,
-  hasNextLog,
+  onNavigateNewer,
+  onNavigateOlder,
+  hasNewerLog,
+  hasOlderLog,
   timeZone,
+  aiEnabled = false,
 }) => {
   const effectiveTimezone = timeZone || getCachedServerTimezone();
   // Each timestamp gets the offset in force at its own moment, so the badge stays right across a clock change
@@ -73,6 +88,37 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
       setIsDeleting(false);
       setDeleteError(null);
     }
+  }, [isOpen]);
+
+  // Up / K opens the newer log and Down / J the older one, like the list order (newest first).
+  // The latest handlers sit in a ref so the listener is not re-bound on every parent render.
+  const drawerBodyRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef({ onNavigateNewer, onNavigateOlder, hasNewerLog, hasOlderLog });
+  navRef.current = { onNavigateNewer, onNavigateOlder, hasNewerLog, hasOlderLog };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const isNewer = e.key === 'ArrowUp' || e.key === 'k';
+      const isOlder = e.key === 'ArrowDown' || e.key === 'j';
+      if (!isNewer && !isOlder) return;
+      if (isEditableTarget(e.target)) return;
+      // Another dialog opened on top of the drawer (for example Create Drop Rule) owns the keys
+      const body = drawerBodyRef.current;
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'));
+      if (dialogs.some((d) => !body || !d.contains(body))) return;
+      const nav = navRef.current;
+      if (isNewer && nav.hasNewerLog && nav.onNavigateNewer) {
+        e.preventDefault();
+        nav.onNavigateNewer();
+      } else if (isOlder && nav.hasOlderLog && nav.onNavigateOlder) {
+        e.preventDefault();
+        nav.onNavigateOlder();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
   const handleConfirmDelete = async () => {
@@ -199,36 +245,36 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
       onClose={onClose}
       title={`Log Record #${log.id} - ${log.source_alias}`}
       subtitle={
-        (onNavigatePrevious || onNavigateNext) ? (
+        (onNavigateNewer || onNavigateOlder) ? (
           <div className="flex items-center gap-1.5 pt-0.5">
             <button
               type="button"
-              onClick={onNavigatePrevious}
-              disabled={!hasPreviousLog}
+              onClick={onNavigateNewer}
+              disabled={!hasNewerLog}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
-              aria-label="Previous log"
-              title="Previous log in current stream view"
+              aria-label="Newer log"
+              title="Newer log (Up or K)"
             >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span>Previous</span>
+              <ChevronUp className="w-3.5 h-3.5" />
+              <span>Newer</span>
             </button>
             <button
               type="button"
-              onClick={onNavigateNext}
-              disabled={!hasNextLog}
+              onClick={onNavigateOlder}
+              disabled={!hasOlderLog}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
-              aria-label="Next log"
-              title="Next log in current stream view"
+              aria-label="Older log"
+              title="Older log (Down or J)"
             >
-              <span>Next</span>
-              <ChevronRight className="w-3.5 h-3.5" />
+              <ChevronDown className="w-3.5 h-3.5" />
+              <span>Older</span>
             </button>
           </div>
         ) : undefined
       }
       width="max-w-3xl"
     >
-      <div className="space-y-4 text-xs font-sans">
+      <div ref={drawerBodyRef} className="space-y-4 text-xs font-sans">
         {/* Action Header */}
         <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-dark-950 rounded-lg border border-dark-700">
           <div className="flex flex-wrap items-center gap-2">
@@ -317,13 +363,25 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               </button>
             )}
 
-            <button
-              onClick={() => onExplainWithAi(log)}
-              className="flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-600 hover:bg-accent-500 text-white rounded font-medium transition shadow-xs"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Explain with AI</span>
-            </button>
+            {aiEnabled ? (
+              <button
+                onClick={() => onExplainWithAi(log)}
+                className="flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-600 hover:bg-accent-500 text-white rounded font-medium transition shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Explain with AI</span>
+              </button>
+            ) : (
+              // Kept so AI stays discoverable: the AI modal explains how to turn it on
+              <button
+                onClick={() => onExplainWithAi(log)}
+                title={AI_OFF_TITLE}
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-slate-300 border border-dark-600 rounded font-medium transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-slate-500" />
+                <span>Explain with AI</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -465,7 +523,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   <span>Same App Only ({log.app_name})</span>
                 </label>
 
-                {contextLogs.length > 0 && !isLoadingContext && (
+                {aiEnabled && contextLogs.length > 0 && !isLoadingContext && (
                   <button
                     onClick={handleInspectTargetAndContext}
                     title="Add Context to AI Analysis"
@@ -503,6 +561,16 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                           {formatLocalTimestamp(ctxLog.timestamp, true, effectiveTimezone).slice(11, 19)}
                         </span>
                         <SeverityBadge severity={ctxLog.severity} className="shrink-0" />
+                        {/* With "Same App Only" every row shares the app, so the column is left out */}
+                        {!sameAppOnly && (
+                          <span
+                            data-testid="context-app-name"
+                            className="text-slate-400 shrink-0 w-24 truncate"
+                            title={ctxLog.app_name}
+                          >
+                            {ctxLog.app_name}
+                          </span>
+                        )}
                         <span className={`break-all ${isTarget ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>
                           {stripAnsi(ctxLog.message)}
                         </span>

@@ -60,3 +60,49 @@ describe('URL Filter Deep-Linking and Synchronization', () => {
     expect(window.location.search).toBe('');
   });
 });
+
+describe('URL end time (to) for absolute Console ranges (WP1-9)', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('reads to into filters.to alongside time', () => {
+    window.history.replaceState(null, '', '/?time=2026-10-13T10%3A00%3A00.000Z&to=2026-10-13T12%3A00%3A00.000Z');
+    const filters = parseFiltersFromUrl();
+    expect(filters.from).toBe('2026-10-13T10:00:00.000Z');
+    expect(filters.to).toBe('2026-10-13T12:00:00.000Z');
+  });
+
+  it('leaves filters.to unset when the URL has no to', () => {
+    window.history.replaceState(null, '', '/?time=1h');
+    expect(parseFiltersFromUrl().to).toBeUndefined();
+    window.history.replaceState(null, '', '/?to=');
+    expect(parseFiltersFromUrl().to).toBeUndefined();
+  });
+
+  it('writes to in the same format as time', () => {
+    syncFiltersToUrl({ from: '2026-10-13T10:00:00.000Z', to: '2026-10-13T12:00:00.000Z' });
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('time')).toBe('2026-10-13T10:00:00.000Z');
+    expect(params.get('to')).toBe('2026-10-13T12:00:00.000Z');
+  });
+
+  it('clears to when the end time is removed, keeping the other params', () => {
+    window.history.replaceState(null, '', '/?q=disk&time=2026-10-13T10%3A00%3A00.000Z&to=2026-10-13T12%3A00%3A00.000Z');
+    syncFiltersToUrl({ query: 'disk', from: '2026-10-13T10:00:00.000Z' });
+    const params = new URLSearchParams(window.location.search);
+    expect(params.has('to')).toBe(false);
+    expect(params.get('time')).toBe('2026-10-13T10:00:00.000Z');
+    expect(params.get('q')).toBe('disk');
+
+    syncFiltersToUrl({});
+    expect(window.location.search).toBe('');
+  });
+
+  it('round-trips a URL with time and to', () => {
+    window.history.replaceState(null, '', '/?time=2026-10-13T10%3A00%3A00.000Z&to=2026-10-13T12%3A00%3A00.000Z');
+    const before = window.location.search;
+    syncFiltersToUrl(parseFiltersFromUrl());
+    expect(new URLSearchParams(window.location.search).toString()).toBe(new URLSearchParams(before).toString());
+  });
+});

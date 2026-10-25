@@ -11,12 +11,23 @@ export interface ProcessedLogEntry extends LogEntry {
   strippedMessage?: string;
 }
 
+// Desktop column layout, shared by the table header and every row so they stay aligned.
+// Without AI the last (row actions) column is dropped.
+export const LOG_GRID_COLS_WITH_AI = 'grid-cols-[36px_120px_65px_130px_130px_1fr_60px]';
+export const LOG_GRID_COLS_WITHOUT_AI = 'grid-cols-[36px_120px_65px_130px_130px_1fr]';
+
+export function logGridCols(aiEnabled: boolean): string {
+  return aiEnabled ? LOG_GRID_COLS_WITH_AI : LOG_GRID_COLS_WITHOUT_AI;
+}
+
 export interface LogRowProps {
   log: ProcessedLogEntry;
   index: number;
   isSelected: boolean;
   isHovered?: boolean;
   isMobile: boolean;
+  /** Shows the "Explain with AI" row action; off until settings say AI is on. */
+  aiEnabled?: boolean;
   style: React.CSSProperties;
   onSelect: (log: LogEntry, index: number, e: React.MouseEvent) => void;
   onClick: (log: LogEntry) => void;
@@ -29,6 +40,7 @@ export function areLogRowPropsEqual(prevProps: LogRowProps, nextProps: LogRowPro
   if (prevProps.isHovered !== nextProps.isHovered) return false;
   if (prevProps.index !== nextProps.index) return false;
   if (prevProps.isMobile !== nextProps.isMobile) return false;
+  if (Boolean(prevProps.aiEnabled) !== Boolean(nextProps.aiEnabled)) return false;
 
   if (
     prevProps.style.transform !== nextProps.style.transform ||
@@ -65,6 +77,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   isSelected,
   isHovered,
   isMobile,
+  aiEnabled = false,
   style,
   onSelect,
   onClick,
@@ -99,22 +112,25 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
           {displayMessage}
         </div>
 
-        {/* Line 3: Timestamp (left) + AI Action (right) */}
+        {/* Line 3: Timestamp (left) + AI Action (right, only when AI is on) */}
         <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
           <span className="text-[10px] text-slate-400 font-mono shrink-0 select-none">
             {displayTimestamp}
           </span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDiagnoseAi([log]);
-            }}
-            className="text-accent-400 hover:text-accent-300 p-1 flex items-center gap-1 shrink-0"
-            title="Explain with AI"
-          >
-            <Sparkles className="w-3 h-3" />
-            <span className="text-[10px] font-sans font-medium">AI</span>
-          </button>
+          {aiEnabled && (
+            // 32px tall touch target; the negative margin keeps the card's layout height unchanged
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDiagnoseAi([log]);
+              }}
+              className="text-accent-400 hover:text-accent-300 min-h-8 px-2 -my-1.5 flex items-center gap-1 shrink-0"
+              title="Explain with AI"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span className="text-[10px] font-sans font-medium">AI</span>
+            </button>
+          )}
         </div>
       </div>
     );
@@ -125,7 +141,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       data-index={index}
       onClick={() => onClick(log)}
       style={style}
-      className={`log-row grid grid-cols-[36px_120px_65px_130px_130px_1fr_60px] px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
+      className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
         isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
       }${isHovered ? ' bg-dark-900/60' : ''}`}
     >
@@ -172,18 +188,20 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         {displayMessage}
       </div>
 
-      {/* Quick Row Actions */}
-      <div className="flex items-center justify-end gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
-        <button
-          onClick={() => {
-            onDiagnoseAi([log]);
-          }}
-          title="Explain with AI"
-          className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition"
-        >
-          <Sparkles className="w-3 h-3" />
-        </button>
-      </div>
+      {/* Quick Row Actions (AI only, so the column is dropped when AI is off) */}
+      {aiEnabled && (
+        <div className="flex items-center justify-end gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => {
+              onDiagnoseAi([log]);
+            }}
+            title="Explain with AI"
+            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition"
+          >
+            <Sparkles className="w-3 h-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

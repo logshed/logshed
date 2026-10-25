@@ -12,6 +12,12 @@ import {
   Clock,
   Loader2,
   AlertCircle,
+  Server,
+  Box,
+  Copy,
+  Check,
+  FilterX,
+  Inbox,
 } from 'lucide-react';
 import { LogEntry, LogFilterParams, DockerEndpoint } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
@@ -21,10 +27,10 @@ import { getAuthStatus } from '../../api/auth.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { fetchSettings, getCachedServerTimezone } from '../../api/settings.ts';
-import { useMediaQuery } from '../../utils/hooks.ts';
+import { useMediaQuery, useClipboard } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
-import { LogRow, ProcessedLogEntry, areLogRowPropsEqual } from './LogRow.tsx';
+import { LogRow, ProcessedLogEntry, areLogRowPropsEqual, logGridCols } from './LogRow.tsx';
 import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
 import { Modal } from '../common/Modal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
@@ -73,6 +79,12 @@ export function parseFiltersFromUrl(): LogFilterParams {
       initial.from = time;
     }
 
+    // End of an absolute range, same format as `time`; with both set the Console opens in custom-time mode
+    const to = params.get('to');
+    if (to) {
+      initial.to = to;
+    }
+
     return initial;
   } catch {
     return {};
@@ -118,6 +130,12 @@ export function syncFiltersToUrl(filters: LogFilterParams) {
       params.set('time', filters.from);
     } else {
       params.delete('time');
+    }
+
+    if (filters.to) {
+      params.set('to', filters.to);
+    } else {
+      params.delete('to');
     }
 
     const newQuery = params.toString();
@@ -256,8 +274,79 @@ export function matchesSearchQuery(
   return false;
 }
 
+/** Number of host chips and of app chips shown in the Quick Filters bar. */
+export const QUICK_FILTER_CHIP_LIMIT = 6;
+/** While live, the chip ranking is refreshed at most this often, so chips do not jump as logs stream in. */
+export const QUICK_FILTER_RERANK_MS = 30_000;
+
+export interface QuickFilterCounts {
+  hosts: Record<string, number>;
+  apps: Record<string, number>;
+}
+
+/** Counts the buffer's rows per host (as shown in the Host column) and per app. */
+export function countQuickFilterVolumes(logs: LogEntry[]): QuickFilterCounts {
+  // No prototype, so host or app names such as "constructor" count like any other
+  const hosts: Record<string, number> = Object.create(null);
+  const apps: Record<string, number> = Object.create(null);
+  for (const log of logs) {
+    const host = log.source_alias || log.source_ip;
+    if (host) hosts[host] = (hosts[host] || 0) + 1;
+    if (log.app_name) apps[log.app_name] = (apps[log.app_name] || 0) + 1;
+  }
+  return { hosts, apps };
+}
+
+/**
+ * Picks the Quick Filter chips: the `limit` busiest candidates by buffer volume (ties alphabetical),
+ * then any selected value that fell outside them, so a chip in use can always be turned off.
+ */
+export function rankQuickFilterChips(
+  candidates: string[],
+  counts: Record<string, number>,
+  selected: string[],
+  limit: number = QUICK_FILTER_CHIP_LIMIT,
+): string[] {
+  const countOf = (key: string) => (Object.prototype.hasOwnProperty.call(counts, key) ? counts[key] : 0);
+  const ranked = Array.from(new Set(candidates)).sort((a, b) => {
+    const diff = countOf(b) - countOf(a);
+    if (diff !== 0) return diff;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  const shown = ranked.slice(0, limit);
+  const shownSet = new Set(shown);
+  for (const value of selected) {
+    if (!shownSet.has(value)) {
+      shown.push(value);
+      shownSet.add(value);
+    }
+  }
+  return shown;
+}
+
+/** True when any Console filter (search, severity, host, app or time) is set. */
+export function hasActiveLogFilters(filters: LogFilterParams): boolean {
+  const listed = (v?: string | string[]) =>
+    Array.isArray(v) ? v.length > 0 : Boolean(v && v.trim());
+  return Boolean(
+    (filters.query && filters.query.trim()) ||
+      (filters.severity_max !== undefined && filters.severity_max !== null) ||
+      (filters.sources && filters.sources.length > 0) ||
+      listed(filters.source) ||
+      (filters.apps && filters.apps.length > 0) ||
+      listed(filters.app_name) ||
+      filters.from ||
+      filters.to
+  );
+}
+
+/** Example command in the first-run card; the host part is a placeholder the user replaces. */
+export const ONBOARDING_LOGGER_COMMAND = 'logger -n <logshed-host> -P 1514 "Hello from LogShed"';
+
 interface LiveLogStreamProps {
   onDiagnoseAi: (selectedLogs: LogEntry[]) => void;
+  /** Opens Settings on the Sources tab (used by the first-run card). */
+  onOpenSourcesSettings?: () => void;
   onAddAlias?: (ip: string) => void;
   onEditDockerHost?: (endpointId: number) => void;
   onManageDeletedDockerHost?: (info: { name: string; ip: string }) => void;
@@ -277,6 +366,7 @@ const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
 
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onDiagnoseAi,
+  onOpenSourcesSettings,
   onAddAlias,
   onEditDockerHost,
   onManageDeletedDockerHost,
@@ -301,6 +391,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   useEffect(() => {
     logsRef.current = logs;
+    if (logs.length > 0) setDatabaseHasLogs(true);
   }, [logs]);
 
   // Clear selection when signaled from parent (e.g. AI modal closed)
@@ -330,11 +421,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
   const { aliasVersion } = useAlias();
   const lastHandledAliasVersionRef = useRef<number>(aliasVersion);
+  // Off until settings load, so users who never turned AI on do not see AI buttons flash in
+  const [aiEnabled, setAiEnabled] = useState<boolean>(false);
+  const { copied: copiedOnboardingCmd, copy: copyOnboardingCmd } = useClipboard();
 
   useEffect(() => {
     fetchSettings()
       .then((s) => {
         if (s.server_timezone) setServerTimezone(s.server_timezone);
+        setAiEnabled(s.ai_enabled ?? Boolean(s.has_ai_api_key));
       })
       .catch(() => {});
   }, []);
@@ -364,6 +459,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [accumulatedSources, setAccumulatedSources] = useState<string[]>([]);
   const [accumulatedApps, setAccumulatedApps] = useState<string[]>([]);
   const [facetsTruncated, setFacetsTruncated] = useState<boolean>(false);
+  // Whether the database holds any logs: null until the facets arrive, true once any log is seen.
+  // It picks the empty-state text: "Waiting for new logs..." or the first-run card.
+  const [databaseHasLogs, setDatabaseHasLogs] = useState<boolean | null>(null);
+  const chipRankDirtyRef = useRef<boolean>(true);
+  const chipRankedAtRef = useRef<number>(0);
   const [hostToAppsMap, setHostToAppsMap] = useState<Record<string, string[]>>({});
   const [appToHostsMap, setAppToHostsMap] = useState<Record<string, string[]>>({});
 
@@ -913,6 +1013,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
       );
       setLogs(preparedLogs);
+      // New results for new filters: rank the Quick Filter chips again from them
+      chipRankDirtyRef.current = true;
       updateFacetsWithNewLogs(res.logs);
       historicalOffsetRef.current = res.logs.length;
       setTotalCount(res.total);
@@ -1239,6 +1341,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     fetchLogFacets()
       .then((facets) => {
         setFacetsTruncated(Boolean(facets.truncated));
+        const hasFacets = (facets.sources?.length ?? 0) > 0 || (facets.apps?.length ?? 0) > 0;
+        setDatabaseHasLogs((prev) => prev === true || hasFacets);
         if (facets.sources && facets.sources.length > 0) {
           setAccumulatedSources((prev) => Array.from(new Set([...prev, ...facets.sources])).sort());
         }
@@ -1408,6 +1512,35 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     return result.length > 0 ? result : allAvailableSources;
   }, [activeApps, allAvailableSources, appToHostsMap]);
 
+  // Quick Filter chips are ranked by volume in the loaded buffer. The counts are a snapshot taken
+  // when the filters change (once their results load) and at most every QUICK_FILTER_RERANK_MS while
+  // live, so the chips keep their order as logs stream in.
+  const [chipCounts, setChipCounts] = useState<QuickFilterCounts>({ hosts: {}, apps: {} });
+
+  useEffect(() => {
+    chipRankDirtyRef.current = true;
+  }, [filters]);
+
+  useEffect(() => {
+    const now = Date.now();
+    if (!chipRankDirtyRef.current && now - chipRankedAtRef.current < QUICK_FILTER_RERANK_MS) return;
+    chipRankDirtyRef.current = false;
+    chipRankedAtRef.current = now;
+    setChipCounts(countQuickFilterVolumes(logs));
+  }, [logs]);
+
+  const quickHostChips = useMemo(
+    () => rankQuickFilterChips(availableSourcesForSelectedApps, chipCounts.hosts, activeSources),
+    [availableSourcesForSelectedApps, chipCounts.hosts, activeSources],
+  );
+
+  const quickAppChips = useMemo(
+    () => rankQuickFilterChips(availableAppsForSelectedHosts, chipCounts.apps, activeApps),
+    [availableAppsForSelectedHosts, chipCounts.apps, activeApps],
+  );
+
+  const filtersActive = useMemo(() => hasActiveLogFilters(filters), [filters]);
+
   // Multi-select across single or multiple hosts with Shift-click range support
   const toggleSelectLog = useCallback(
     (log: LogEntry, index: number, e: React.MouseEvent) => {
@@ -1490,6 +1623,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     heldLiveRowsRef.current = [];
     pendingScrollAdjustmentRef.current = 0;
     setLogs([]);
+    chipRankDirtyRef.current = true;
     setSelectedLogIds(new Set());
     setLastSelectedLogIndex(null);
     setMissedLogsCount(0);
@@ -1539,13 +1673,21 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
             <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-w-full">
               <span className="text-slate-400 font-medium text-[11px] shrink-0">Quick Filters:</span>
-              {availableSourcesForSelectedApps.slice(0, 6).map((src) => {
+              {/* Pinned saved view chips go here, before the host and app groups */}
+              {quickHostChips.length > 0 && (
+                <span className="flex items-center gap-1 text-slate-500 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none">
+                  <Server className="w-3 h-3" aria-hidden="true" />
+                  <span>Hosts</span>
+                </span>
+              )}
+              {quickHostChips.map((src) => {
                 const isSelected = activeSources.includes(src);
                 return (
                   <button
                     key={src}
+                    data-testid="quick-filter-host"
                     onClick={() => toggleQuickSource(src)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
+                    className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
                       isSelected
                         ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
                         : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
@@ -1555,13 +1697,20 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                   </button>
                 );
               })}
-              {availableAppsForSelectedHosts.slice(0, 6).map((app) => {
+              {quickAppChips.length > 0 && (
+                <span className="flex items-center gap-1 text-slate-500 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ml-1">
+                  <Box className="w-3 h-3" aria-hidden="true" />
+                  <span>Apps</span>
+                </span>
+              )}
+              {quickAppChips.map((app) => {
                 const isSelected = activeApps.includes(app);
                 return (
                   <button
                     key={app}
+                    data-testid="quick-filter-app"
                     onClick={() => toggleQuickApp(app)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
+                    className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
                       isSelected
                         ? 'bg-indigo-950 text-indigo-300 border-indigo-700 font-semibold'
                         : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
@@ -1578,7 +1727,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
           {/* Right: Stream State Controls */}
           <div className="flex items-center gap-2.5 shrink-0 ml-auto bg-dark-900 relative z-20 pl-1">
-            <div className="hidden sm:flex items-center gap-1.5 border-r border-dark-700 pr-3 mr-1">
+            {/* md, not sm: below 768px the table becomes cards, which have no multi-select */}
+            <div data-testid="select-all-group" className="hidden md:flex items-center gap-1.5 border-r border-dark-700 pr-3 mr-1">
             <button
               onClick={selectAllLogs}
               disabled={logs.length === 0}
@@ -1640,7 +1790,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       <div className="flex-1 relative overflow-hidden flex flex-col">
         {/* Table Header (Desktop only) */}
         {!isMobile && (
-          <div className="grid bg-dark-950 border-b border-dark-700 border-l-2 border-l-transparent text-slate-400 text-[11px] font-mono font-semibold grid-cols-[36px_120px_65px_130px_130px_1fr_60px] px-3 py-1.5 select-none items-center">
+          <div
+            data-testid="log-table-header"
+            className={`grid bg-dark-950 border-b border-dark-700 border-l-2 border-l-transparent text-slate-400 text-[11px] font-mono font-semibold ${logGridCols(aiEnabled)} px-3 py-1.5 select-none items-center`}
+          >
             <div className="flex items-center justify-center">
               <button
                 onClick={selectedLogIds.size > 0 ? deselectAllLogs : selectAllLogs}
@@ -1661,7 +1814,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             <div>HOST / IP</div>
             <div>APP / CONTAINER</div>
             <div>MESSAGE</div>
-            <div className="text-right pr-2">ACTIONS</div>
+            {aiEnabled && <div className="text-right pr-2">ACTIONS</div>}
           </div>
         )}
 
@@ -1712,10 +1865,56 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             <div className="flex items-center justify-center h-full text-slate-500 font-mono">
               Loading log history...
             </div>
+          ) : logs.length === 0 && filtersActive ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-500 font-mono space-y-3 px-4 text-center">
+              <FilterX className="w-8 h-8 text-dark-600" />
+              <span>No logs match the current filters.</span>
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="px-3 py-1.5 rounded text-xs font-sans font-medium bg-dark-800 text-slate-200 border border-dark-600 hover:border-slate-500 hover:text-white transition cursor-pointer"
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : logs.length === 0 && databaseHasLogs === false ? (
+            <div className="flex items-center justify-center min-h-full p-4">
+              <div className="max-w-lg w-full bg-dark-900 border border-dark-700 rounded-lg p-5 space-y-3 font-sans text-xs text-slate-300 select-text">
+                <div className="flex items-center gap-2">
+                  <Inbox className="w-5 h-5 text-accent-400 shrink-0" />
+                  <h2 className="text-sm font-semibold text-slate-100">No logs yet</h2>
+                </div>
+                <p className="leading-relaxed">
+                  LogShed listens for syslog on port 1514 (UDP and TCP) inside the container by default. Point your devices at the host port you mapped to it.
+                </p>
+                <div className="flex items-center gap-2 bg-dark-950 border border-dark-700 rounded px-3 py-2">
+                  <code className="flex-1 min-w-0 font-mono text-[11px] text-slate-200 break-all">{ONBOARDING_LOGGER_COMMAND}</code>
+                  <button
+                    type="button"
+                    onClick={() => copyOnboardingCmd(ONBOARDING_LOGGER_COMMAND)}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
+                    title="Copy command"
+                  >
+                    {copiedOnboardingCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedOnboardingCmd ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+                {onOpenSourcesSettings && (
+                  <button
+                    type="button"
+                    onClick={onOpenSourcesSettings}
+                    className="px-3 py-1.5 rounded text-xs font-medium bg-accent-600 hover:bg-accent-500 text-white transition cursor-pointer"
+                  >
+                    Set up Docker hosts
+                  </button>
+                )}
+                <p className="text-slate-400">See Sending Logs in the documentation for device guides.</p>
+              </div>
+            </div>
           ) : logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 font-mono space-y-2">
               <Info className="w-8 h-8 text-dark-600" />
-              <span>No logs in stream. Waiting for incoming syslog or Docker events...</span>
+              <span>Waiting for new logs...</span>
             </div>
           ) : (
             <div
@@ -1737,6 +1936,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                     index={virtualRow.index}
                     isSelected={isSelected}
                     isMobile={isMobile}
+                    aiEnabled={aiEnabled}
                     style={{
                       position: 'absolute',
                       top: 0,
@@ -1835,7 +2035,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {selectedLogs.length > 200 && (
+            {aiEnabled && selectedLogs.length > 200 && (
               <span className="text-xs text-amber-400 flex items-center gap-1 font-mono">
                 <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
                 <span className="hidden sm:inline">Max 200 logs for AI</span>
@@ -1860,17 +2060,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               <span>Delete ({selectedLogs.length})</span>
             </button>
 
-            <button
-              onClick={handleLaunchAiAnalysis}
-              className={`text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer ${
-                selectedLogs.length > 200
-                  ? 'bg-amber-600 hover:bg-amber-500'
-                  : 'bg-accent-600 hover:bg-accent-500'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Run Analysis ({selectedLogs.length})</span>
-            </button>
+            {aiEnabled && (
+              <button
+                onClick={handleLaunchAiAnalysis}
+                className={`text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer ${
+                  selectedLogs.length > 200
+                    ? 'bg-amber-600 hover:bg-amber-500'
+                    : 'bg-accent-600 hover:bg-accent-500'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Run Analysis ({selectedLogs.length})</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1882,6 +2084,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           isOpen={Boolean(activeLogDetail)}
           onClose={() => setActiveLogDetail(null)}
           timeZone={serverTimezone}
+          aiEnabled={aiEnabled}
           onExplainWithAi={(log, ctxLogs) => {
             setActiveLogDetail(null);
             const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
@@ -1948,30 +2151,31 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               return next;
             });
           }}
-          onNavigatePrevious={() => {
-            if (!activeLogDetail) return;
-            const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-            if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
-              setActiveLogDetail(processedLogs[currIdx + 1]);
-            }
-          }}
-          onNavigateNext={() => {
+          // The list is newest first: Newer is the row above (index - 1), Older the row below (index + 1)
+          onNavigateNewer={() => {
             if (!activeLogDetail) return;
             const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
             if (currIdx > 0) {
               setActiveLogDetail(processedLogs[currIdx - 1]);
             }
           }}
-          hasPreviousLog={Boolean(
+          onNavigateOlder={() => {
+            if (!activeLogDetail) return;
+            const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
+            if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
+              setActiveLogDetail(processedLogs[currIdx + 1]);
+            }
+          }}
+          hasNewerLog={Boolean(
+            activeLogDetail &&
+            processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
+          )}
+          hasOlderLog={Boolean(
             activeLogDetail &&
             (() => {
               const idx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
               return idx >= 0 && idx < processedLogs.length - 1;
             })()
-          )}
-          hasNextLog={Boolean(
-            activeLogDetail &&
-            processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
           )}
         />
       )}
@@ -1981,7 +2185,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         <CreateDropRuleModal
           isOpen={Boolean(dropRuleTargetLog)}
           onClose={() => setDropRuleTargetLog(null)}
-          initialSource={dropRuleTargetLog.source_ip}
+          initialSource={dropRuleTargetLog.source_alias || dropRuleTargetLog.source_ip}
           initialApp={dropRuleTargetLog.app_name}
           initialMessage={cleanLogMessageForDisplay(dropRuleTargetLog.message)}
           availableSources={availableSourcesForSelectedApps}

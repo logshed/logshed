@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { LogRow, areLogRowPropsEqual, ProcessedLogEntry } from '../components/logs/LogRow.tsx';
+import { LogRow, areLogRowPropsEqual, ProcessedLogEntry, LOG_GRID_COLS_WITH_AI, LOG_GRID_COLS_WITHOUT_AI } from '../components/logs/LogRow.tsx';
 import { matchesSearchQuery, prepareLogEntry } from '../components/logs/LiveLogStream.tsx';
 
 describe('LogRow Component and Optimization', () => {
@@ -31,6 +31,7 @@ describe('LogRow Component and Optimization', () => {
         index={0}
         isSelected={false}
         isMobile={false}
+        aiEnabled={true}
         style={{ height: '28px', transform: 'translateY(0px)' }}
         onSelect={onSelect}
         onClick={onClick}
@@ -66,6 +67,7 @@ describe('LogRow Component and Optimization', () => {
         index={1}
         isSelected={true}
         isMobile={true}
+        aiEnabled={true}
         style={{ height: '74px', transform: 'translateY(74px)' }}
         onSelect={onSelect}
         onClick={onClick}
@@ -202,5 +204,87 @@ describe('LogRow Component and Optimization', () => {
     expect(matchesSearchQuery(baseLog, 'redis', precompiled)).toBe(true); // precompiled matches 'Upstream timeout error'
     const nonMatching = new RegExp('nonexistent_keyword', 'i');
     expect(matchesSearchQuery(baseLog, 'nonexistent_keyword', nonMatching)).toBe(false);
+  });
+});
+
+describe('LogRow AI controls follow the AI setting (WP1-1)', () => {
+  const log: ProcessedLogEntry = {
+    id: 301,
+    timestamp: '2026-09-03T14:30:15.123Z',
+    received_at: '2026-09-03T14:30:15.150Z',
+    source_ip: '192.168.1.50',
+    source_alias: 'homelab-host',
+    app_name: 'nginx',
+    facility: 1,
+    severity: 3,
+    message: 'Upstream timeout error',
+    raw: 'Upstream timeout error',
+    formattedTimestamp: '14:30:15.123',
+    cleanedMessage: 'Upstream timeout error',
+    strippedMessage: 'Upstream timeout error',
+  };
+
+  const renderRow = (isMobile: boolean, aiEnabled?: boolean) =>
+    render(
+      <LogRow
+        log={log}
+        index={0}
+        isSelected={false}
+        isMobile={isMobile}
+        aiEnabled={aiEnabled}
+        style={{ height: isMobile ? '74px' : '28px' }}
+        onSelect={vi.fn()}
+        onClick={vi.fn()}
+        onDiagnoseAi={vi.fn()}
+      />
+    );
+
+  it('hides the desktop AI button and drops the actions column when AI is off', () => {
+    const { container } = renderRow(false, false);
+    expect(screen.queryByTitle('Explain with AI')).toBeNull();
+    const row = container.querySelector('.log-row')!;
+    expect(row.className).toContain(LOG_GRID_COLS_WITHOUT_AI);
+    expect(row.className).not.toContain(LOG_GRID_COLS_WITH_AI);
+    expect(row.children.length).toBe(6);
+  });
+
+  it('treats a missing aiEnabled prop as AI off', () => {
+    renderRow(false);
+    expect(screen.queryByTitle('Explain with AI')).toBeNull();
+  });
+
+  it('shows the desktop AI button and actions column when AI is on', () => {
+    const { container } = renderRow(false, true);
+    expect(screen.getByTitle('Explain with AI')).toBeInTheDocument();
+    const row = container.querySelector('.log-row')!;
+    expect(row.className).toContain(LOG_GRID_COLS_WITH_AI);
+    expect(row.children.length).toBe(7);
+  });
+
+  it('hides the mobile card AI button when AI is off', () => {
+    renderRow(true, false);
+    expect(screen.queryByTitle('Explain with AI')).toBeNull();
+    expect(screen.queryByText('AI')).toBeNull();
+  });
+
+  it('shows a 32px tall mobile card AI button when AI is on', () => {
+    renderRow(true, true);
+    const btn = screen.getByTitle('Explain with AI');
+    expect(btn.className).toContain('min-h-8');
+  });
+
+  it('re-renders a memoized row when the AI setting changes', () => {
+    const props = {
+      log,
+      index: 0,
+      isSelected: false,
+      isMobile: false,
+      style: { height: '28px' },
+      onSelect: vi.fn(),
+      onClick: vi.fn(),
+      onDiagnoseAi: vi.fn(),
+    };
+    expect(areLogRowPropsEqual({ ...props, aiEnabled: false }, { ...props, aiEnabled: true })).toBe(false);
+    expect(areLogRowPropsEqual({ ...props, aiEnabled: true }, { ...props, aiEnabled: true })).toBe(true);
   });
 });

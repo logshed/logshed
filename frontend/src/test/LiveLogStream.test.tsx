@@ -2,6 +2,13 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LiveLogStream, matchesSearchQuery, compileSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import {
+  rankQuickFilterChips,
+  countQuickFilterVolumes,
+  hasActiveLogFilters,
+  QUICK_FILTER_RERANK_MS,
+  ONBOARDING_LOGGER_COMMAND,
+} from '../components/logs/LiveLogStream.tsx';
 import * as savedViewsApi from '../api/savedViews.ts';
 import { formatStreamTimestamp } from '../utils/formatters.ts';
 import * as settingsApi from '../api/settings.ts';
@@ -12,6 +19,8 @@ import * as dockerHostsApi from '../api/dockerHosts.ts';
 import * as authApi from '../api/auth.ts';
 import { LogEntry } from '../types.ts';
 import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
+import * as clipboardModule from '../utils/clipboard.ts';
+import * as dropRuleModalModule from '../components/alerts/CreateDropRuleModal.tsx';
 
 // Test control for the virtualizer mock: when edgeRows is set, only the first and last
 // edgeRows rows are "visible" (like a real viewport), so large buffers stay cheap to render.
@@ -215,6 +224,7 @@ describe('LiveLogStream Component', () => {
   });
 
   it('does not render the redundant Maximize2 row action button (Item #17)', async () => {
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({ ai_enabled: true } as any);
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
@@ -223,8 +233,8 @@ describe('LiveLogStream Component', () => {
 
     // Ensure Maximize2 "Inspect Detail & Context" button is absent
     expect(screen.queryByTitle('Inspect Detail & Context')).toBeNull();
-    // Verify "Explain with AI" is present
-    expect(screen.getAllByTitle('Explain with AI').length).toBeGreaterThan(0);
+    // Verify "Explain with AI" is present (AI is on)
+    await waitFor(() => expect(screen.getAllByTitle('Explain with AI').length).toBeGreaterThan(0));
   });
 
   it('formats timestamps and renders UTC + received_at tooltip (Item #5)', async () => {
@@ -314,19 +324,19 @@ describe('LiveLogStream Component', () => {
       expect(screen.getByText(/Log Record #101/i)).toBeInTheDocument();
     });
 
-    // Test next/previous navigation in modal adhering to filtered stream (chronological order)
-    const prevBtn = screen.getByRole('button', { name: /Previous log/i });
-    const nextBtn = screen.getByRole('button', { name: /Next log/i });
+    // Test Newer/Older navigation in modal adhering to filtered stream (newest first)
+    const prevBtn = screen.getByRole('button', { name: /Older log/i });
+    const nextBtn = screen.getByRole('button', { name: /Newer log/i });
     expect(nextBtn).toBeDisabled(); // Row 0 is the newest log
     expect(prevBtn).toBeEnabled();
 
-    // Click Previous -> moves back in time to earlier log in row 1 (Log Record #102)
+    // Click Older -> moves back in time to earlier log in row 1 (Log Record #102)
     fireEvent.click(prevBtn);
     await waitFor(() => {
       expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument();
     });
 
-    // Now Next (forward in time) is enabled
+    // Now Newer (forward in time) is enabled
     expect(nextBtn).toBeEnabled();
     fireEvent.click(nextBtn);
     await waitFor(() => {
@@ -703,7 +713,7 @@ describe('LiveLogStream Component', () => {
 
     // Buffer is empty: "0 lines"
     expect(screen.getByText('0')).toBeInTheDocument();
-    expect(screen.getByText(/No logs in stream/i)).toBeInTheDocument();
+    expect(screen.getByText('Waiting for new logs...')).toBeInTheDocument();
 
     // Now open the Host/IP dropdown
     const hostTrigger = screen.getByText('Host / IP:').closest('[role="button"]') as HTMLElement;
@@ -2244,5 +2254,488 @@ describe('LiveLogStream N07 fixes', () => {
       expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }), expect.anything())
     );
     expect(desktopTimeSelect().value).toBe('since_midnight');
+  });
+});
+
+describe('LiveLogStream WP1 console changes', () => {
+  const dbFacets = {
+    sources: ['homelab-host', 'opnsense-router'],
+    apps: ['nginx', 'postgres', 'docker', 'filterlog'],
+    host_to_apps: {
+      'homelab-host': ['docker', 'nginx', 'postgres'],
+      'opnsense-router': ['filterlog'],
+    },
+    app_to_hosts: {
+      docker: ['homelab-host'],
+      nginx: ['homelab-host'],
+      postgres: ['homelab-host'],
+      filterlog: ['opnsense-router'],
+    },
+  };
+  const emptyFacets = { sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} };
+
+  const renderStream = (props: Partial<React.ComponentProps<typeof LiveLogStream>> = {}) =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} {...props} />
+      </AliasContext.Provider>
+    );
+
+  const mockSettings = (settings: Record<string, unknown>) =>
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(settings as any);
+
+  const mockLogs = (logs: LogEntry[]) =>
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs, total: logs.length, limit: 500, offset: 0 });
+
+  const waitForRows = () =>
+    waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+
+  const chipTexts = (testId: string) => screen.queryAllByTestId(testId).map((el) => el.textContent);
+
+  const setMobile = (mobile: boolean) => {
+    window.matchMedia = ((query: string) => ({
+      matches: mobile && query.includes('max-width: 767px'),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as any;
+  };
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
+    setMobile(false);
+    mockLogs([...sampleLogs]);
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(dbFacets as any);
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+  });
+
+  describe('AI controls (WP1-1)', () => {
+    it('hides row AI buttons, the actions column and "Run Analysis" when AI is off', async () => {
+      mockSettings({ ai_enabled: false, has_ai_api_key: true });
+      renderStream();
+      await waitForRows();
+      await act(async () => {});
+      expect(screen.queryAllByTitle('Explain with AI')).toHaveLength(0);
+      const header = screen.getByTestId('log-table-header');
+      expect(within(header).queryByText('ACTIONS')).toBeNull();
+      expect(header.className).toContain('grid-cols-[36px_120px_65px_130px_130px_1fr]');
+      expect(header.className).not.toContain('_60px]');
+
+      fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement);
+      await screen.findByText('1 log selected');
+      expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Run Analysis/i })).toBeNull();
+    });
+
+    it('shows row AI buttons, the actions column and "Run Analysis" when AI is on', async () => {
+      // No ai_enabled field: a stored API key turns AI on, the same rule as Settings
+      mockSettings({ has_ai_api_key: true });
+      const onDiagnoseAi = vi.fn();
+      renderStream({ onDiagnoseAi });
+      await waitForRows();
+      await waitFor(() => expect(screen.getAllByTitle('Explain with AI').length).toBe(sampleLogs.length));
+      const header = screen.getByTestId('log-table-header');
+      expect(within(header).getByText('ACTIONS')).toBeInTheDocument();
+      expect(header.className).toContain('grid-cols-[36px_120px_65px_130px_130px_1fr_60px]');
+
+      fireEvent.click(document.querySelectorAll('.log-row')[0].firstElementChild as HTMLElement);
+      fireEvent.click(await screen.findByRole('button', { name: 'Run Analysis (1)' }));
+      expect(onDiagnoseAi).toHaveBeenCalledWith([expect.objectContaining({ id: 101 })]);
+      expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeInTheDocument();
+    });
+
+    it('treats AI as off until settings have loaded', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockImplementation(() => new Promise(() => {}));
+      renderStream();
+      await waitForRows();
+      expect(screen.queryAllByTitle('Explain with AI')).toHaveLength(0);
+    });
+
+    it('treats AI as off when settings fail to load', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockRejectedValue(new Error('offline'));
+      renderStream();
+      await waitForRows();
+      await act(async () => {});
+      expect(screen.queryAllByTitle('Explain with AI')).toHaveLength(0);
+    });
+
+    it('hides the mobile card AI button when AI is off and shows it when AI is on', async () => {
+      setMobile(true);
+      mockSettings({ ai_enabled: false });
+      const { unmount } = renderStream();
+      await waitForRows();
+      await act(async () => {});
+      expect(screen.queryAllByTitle('Explain with AI')).toHaveLength(0);
+      unmount();
+
+      mockSettings({ ai_enabled: true });
+      renderStream();
+      await waitForRows();
+      await waitFor(() => expect(screen.getAllByTitle('Explain with AI').length).toBe(sampleLogs.length));
+    });
+
+    it('passes the AI setting to the drawer: muted "Explain with AI" and no context AI action when off', async () => {
+      mockSettings({ ai_enabled: false });
+      const onDiagnoseAi = vi.fn();
+      renderStream({ onDiagnoseAi });
+      await waitForRows();
+      await act(async () => {});
+      fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
+      const btn = await screen.findByRole('button', { name: /Explain with AI/i });
+      expect(btn).toHaveAttribute('title', 'AI features are turned off in Settings');
+      // Still opens the AI modal, which explains how to turn AI on
+      fireEvent.click(btn);
+      expect(onDiagnoseAi).toHaveBeenCalledWith([expect.objectContaining({ id: 101 })]);
+    });
+
+    it('passes the AI setting to the drawer: primary "Explain with AI" when on', async () => {
+      mockSettings({ ai_enabled: true });
+      renderStream();
+      await waitForRows();
+      await waitFor(() => expect(screen.getAllByTitle('Explain with AI').length).toBeGreaterThan(0));
+      fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
+      await screen.findByText(/Log Record #101/i);
+      // Row buttons are icon-only; the drawer's button is the one that shows the label
+      const drawerBtns = screen
+        .getAllByRole('button', { name: /^Explain with AI$/ })
+        .filter((b) => b.textContent === 'Explain with AI');
+      expect(drawerBtns).toHaveLength(1);
+      expect(drawerBtns[0]).not.toHaveAttribute('title');
+    });
+  });
+
+  describe('drawer Newer / Older (WP1-2)', () => {
+    it('steps to the row below with Older and the row above with Newer, by button and key', async () => {
+      mockSettings({});
+      renderStream();
+      await waitForRows();
+      fireEvent.click(screen.getByText('Postgres slow query detected'));
+      await screen.findByText(/Log Record #102/i);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Older log' }));
+      await screen.findByText(/Log Record #103/i);
+      fireEvent.click(screen.getByRole('button', { name: 'Newer log' }));
+      await screen.findByText(/Log Record #102/i);
+
+      fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+      await screen.findByText(/Log Record #101/i);
+      expect(screen.getByRole('button', { name: 'Newer log' })).toBeDisabled();
+      fireEvent.keyDown(document.body, { key: 'k' });
+      expect(screen.getByText(/Log Record #101/i)).toBeInTheDocument();
+
+      fireEvent.keyDown(document.body, { key: 'j' });
+      await screen.findByText(/Log Record #102/i);
+      fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+      await screen.findByText(/Log Record #103/i);
+      fireEvent.keyDown(document.body, { key: 'j' });
+      await screen.findByText(/Log Record #104/i);
+      expect(screen.getByRole('button', { name: 'Older log' })).toBeDisabled();
+    });
+
+    it('ignores the keys while typing in the search box', async () => {
+      mockSettings({});
+      renderStream();
+      await waitForRows();
+      fireEvent.click(screen.getByText('Postgres slow query detected'));
+      await screen.findByText(/Log Record #102/i);
+      const search = document.querySelector('input[type="text"], input:not([type])') as HTMLInputElement;
+      expect(search).not.toBeNull();
+      fireEvent.keyDown(search, { key: 'j' });
+      fireEvent.keyDown(search, { key: 'ArrowUp' });
+      expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument();
+    });
+  });
+
+  it('prefills Create Drop Rule with the host alias rather than the IP (WP1-4)', async () => {
+    mockSettings({});
+    const modalSpy = vi.spyOn(dropRuleModalModule, 'CreateDropRuleModal');
+    renderStream();
+    await waitForRows();
+    fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
+    fireEvent.click(await screen.findByRole('button', { name: /Create Drop Rule/i }));
+    await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+    const props = modalSpy.mock.calls[modalSpy.mock.calls.length - 1][0] as any;
+    expect(props.initialSource).toBe('homelab-host');
+  });
+
+  describe('empty states (WP1-5)', () => {
+    it('shows "No logs match the current filters." with a Clear filters button when filters match nothing', async () => {
+      mockSettings({});
+      window.history.replaceState(null, '', '/?q=nothing-matches');
+      const fetchSpy = mockLogs([]);
+      renderStream();
+      expect(await screen.findByText('No logs match the current filters.')).toBeInTheDocument();
+      expect(screen.queryByText('No logs yet')).toBeNull();
+
+      fetchSpy.mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
+      fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+      await waitForRows();
+      expect(window.location.search).toBe('');
+      expect(fetchSpy).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({ query: expect.anything() }),
+        expect.anything()
+      );
+    });
+
+    it('prefers the filters message even when the database has no logs', async () => {
+      mockSettings({});
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(emptyFacets as any);
+      window.history.replaceState(null, '', '/?severity=2');
+      mockLogs([]);
+      renderStream();
+      expect(await screen.findByText('No logs match the current filters.')).toBeInTheDocument();
+      expect(screen.queryByText('No logs yet')).toBeNull();
+    });
+
+    it('shows "Waiting for new logs..." when the buffer is empty but the database has logs', async () => {
+      mockSettings({});
+      mockLogs([]);
+      renderStream();
+      expect(await screen.findByText('Waiting for new logs...')).toBeInTheDocument();
+      await act(async () => {});
+      expect(screen.queryByText('No logs yet')).toBeNull();
+    });
+
+    it('shows "Waiting for new logs..." after Clear buffer', async () => {
+      mockSettings({});
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(emptyFacets as any);
+      renderStream();
+      await waitForRows();
+      fireEvent.click(screen.getByTitle(/Clear screen buffer/i));
+      expect(screen.getByText('Waiting for new logs...')).toBeInTheDocument();
+      expect(screen.queryByText('No logs yet')).toBeNull();
+    });
+
+    it('shows the first-run card when the database has no logs at all', async () => {
+      mockSettings({});
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(emptyFacets as any);
+      mockLogs([]);
+      const copySpy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
+      const onOpenSourcesSettings = vi.fn();
+      renderStream({ onOpenSourcesSettings });
+
+      expect(await screen.findByRole('heading', { name: 'No logs yet' })).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'LogShed listens for syslog on port 1514 (UDP and TCP) inside the container by default. Point your devices at the host port you mapped to it.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByText(ONBOARDING_LOGGER_COMMAND)).toBeInTheDocument();
+      expect(ONBOARDING_LOGGER_COMMAND).toBe('logger -n <logshed-host> -P 1514 "Hello from LogShed"');
+      expect(screen.getByText('See Sending Logs in the documentation for device guides.')).toBeInTheDocument();
+      expect(screen.queryByText('Waiting for new logs...')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: /Copy/ }));
+      await waitFor(() => expect(copySpy).toHaveBeenCalledWith(ONBOARDING_LOGGER_COMMAND));
+      expect(await screen.findByText('Copied')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Docker hosts' }));
+      expect(onOpenSourcesSettings).toHaveBeenCalledTimes(1);
+    });
+
+    it('replaces the first-run card with the stream once a live log arrives', async () => {
+      mockSettings({});
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(emptyFacets as any);
+      mockLogs([]);
+      renderStream();
+      await screen.findByText('No logs yet');
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+      act(() => es.emit('log', { ...sampleLogs[0], id: 900, message: 'First ever log' }));
+      await screen.findByText('First ever log');
+      expect(screen.queryByText('No logs yet')).toBeNull();
+    });
+
+    it('does not show the first-run card before the facets arrive', async () => {
+      mockSettings({});
+      vi.spyOn(logsApi, 'fetchLogFacets').mockImplementation(() => new Promise(() => {}));
+      mockLogs([]);
+      renderStream();
+      expect(await screen.findByText('Waiting for new logs...')).toBeInTheDocument();
+      expect(screen.queryByText('No logs yet')).toBeNull();
+    });
+  });
+
+  describe('Quick Filters (WP1-6, WP1-8)', () => {
+    const mk = (id: number, host: string, app: string): LogEntry => ({
+      id,
+      timestamp: `2026-09-03T14:${String(59 - (id % 60)).padStart(2, '0')}:00.000Z`,
+      received_at: '2026-09-03T15:00:00.000Z',
+      source_ip: host,
+      source_alias: host,
+      app_name: app,
+      facility: 1,
+      severity: 6,
+      message: `msg ${id} from ${app}`,
+      raw: `msg ${id}`,
+    });
+
+    // Volume: hosts zeta 3, alpha 1, mid 2; apps: zz 3, yy 2, the rest 1 or 0
+    const volumeLogs: LogEntry[] = [
+      mk(1, 'zeta', 'zz'),
+      mk(2, 'zeta', 'zz'),
+      mk(3, 'zeta', 'zz'),
+      mk(4, 'mid', 'yy'),
+      mk(5, 'mid', 'yy'),
+      mk(6, 'alpha', 'bb'),
+    ];
+    const volumeFacets = {
+      sources: ['alpha', 'mid', 'zeta', 'idle-host'],
+      apps: ['aa', 'bb', 'cc', 'dd', 'ee', 'ff', 'gg', 'yy', 'zz'],
+      host_to_apps: {},
+      app_to_hosts: {},
+    };
+
+    beforeEach(() => {
+      mockSettings({});
+      mockLogs(volumeLogs);
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(volumeFacets as any);
+    });
+
+    it('ranks host and app chips by buffer volume (ties alphabetical), top 6 each, with group labels', async () => {
+      renderStream();
+      await screen.findByText('msg 1 from zz');
+      await waitFor(() => expect(chipTexts('quick-filter-app')).toContain('aa'));
+      expect(chipTexts('quick-filter-host')).toEqual(['zeta', 'mid', 'alpha', 'idle-host']);
+      expect(chipTexts('quick-filter-app')).toEqual(['zz', 'yy', 'bb', 'aa', 'cc', 'dd']);
+      expect(screen.getByText('Hosts')).toBeInTheDocument();
+      expect(screen.getByText('Apps')).toBeInTheDocument();
+      // The labels come before their group
+      const hostsLabel = screen.getByText('Hosts');
+      const firstHost = screen.getAllByTestId('quick-filter-host')[0];
+      expect(hostsLabel.compareDocumentPosition(firstHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const appsLabel = screen.getByText('Apps');
+      const firstApp = screen.getAllByTestId('quick-filter-app')[0];
+      expect(appsLabel.compareDocumentPosition(firstApp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('keeps a selected chip visible when it falls outside the top 6', async () => {
+      window.history.replaceState(null, '', '/?app=gg');
+      renderStream();
+      await screen.findByText('msg 1 from zz');
+      await waitFor(() => expect(chipTexts('quick-filter-app')).toContain('gg'));
+      const apps = chipTexts('quick-filter-app');
+      expect(apps).toHaveLength(7);
+      expect(apps[apps.length - 1]).toBe('gg');
+    });
+
+    it('keeps the chip order while live and re-ranks after 30 seconds', async () => {
+      let now = 1_000_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => now);
+      renderStream();
+      await screen.findByText('msg 1 from zz');
+      await waitFor(() => expect(chipTexts('quick-filter-host')).toEqual(['zeta', 'mid', 'alpha', 'idle-host']));
+
+      // idle-host becomes the busiest host, but within 30 seconds the order holds
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+      act(() => {
+        for (let i = 0; i < 5; i += 1) es.emit('log', mk(100 + i, 'idle-host', 'zz'));
+      });
+      await screen.findByText('msg 104 from zz');
+      expect(chipTexts('quick-filter-host')).toEqual(['zeta', 'mid', 'alpha', 'idle-host']);
+
+      now += QUICK_FILTER_RERANK_MS;
+      act(() => es.emit('log', mk(110, 'idle-host', 'zz')));
+      await screen.findByText('msg 110 from zz');
+      await waitFor(() => expect(chipTexts('quick-filter-host')).toEqual(['idle-host', 'zeta', 'mid', 'alpha']));
+    });
+
+    it('uses taller chips on touch screens and keeps desktop density', async () => {
+      renderStream();
+      await screen.findByText('msg 1 from zz');
+      const chip = (await screen.findAllByTestId('quick-filter-host'))[0];
+      expect(chip.className).toContain('py-1');
+      expect(chip.className).toContain('md:py-0.5');
+    });
+  });
+
+  it('switches Select All at the same 768px width as the mobile cards (WP1-7)', async () => {
+    mockSettings({});
+    renderStream();
+    await waitForRows();
+    const group = screen.getByTestId('select-all-group');
+    expect(group.className).toContain('hidden md:flex');
+    expect(group.className).not.toContain('sm:flex');
+    expect(within(group).getByRole('button', { name: 'Select All' })).toBeInTheDocument();
+  });
+
+  it('opens on an absolute range from time and to URL params in custom-time mode (WP1-9)', async () => {
+    mockSettings({});
+    const from = '2026-10-13T10:00:00.000Z';
+    const to = '2026-10-13T12:00:00.000Z';
+    window.history.replaceState(null, '', `/?time=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const fetchSpy = mockLogs([...sampleLogs]);
+    renderStream();
+    await waitForRows();
+    expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from, to }), expect.anything());
+    const select = screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
+    expect(select.value).toBe('custom');
+    const pickers = Array.from(document.querySelectorAll('input[type="datetime-local"]')) as HTMLInputElement[];
+    expect(pickers.length).toBeGreaterThanOrEqual(2);
+    expect(pickers.every((p) => p.value !== '')).toBe(true);
+    expect(screen.getByText('Historical Range (Stream Paused)')).toBeInTheDocument();
+    // The URL keeps both bounds
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('time')).toBe(from);
+    expect(params.get('to')).toBe(to);
+  });
+});
+
+describe('Quick Filter and empty-state helpers (WP1-5, WP1-6)', () => {
+  it('rankQuickFilterChips orders by count, then alphabetically, and caps the list', () => {
+    const counts = { b: 5, a: 5, c: 9, d: 1 };
+    expect(rankQuickFilterChips(['d', 'c', 'b', 'a', 'e'], counts, [], 3)).toEqual(['c', 'a', 'b']);
+    expect(rankQuickFilterChips(['x', 'w'], {}, [])).toEqual(['w', 'x']);
+  });
+
+  it('rankQuickFilterChips appends selected values that fell outside the cap, once', () => {
+    expect(rankQuickFilterChips(['a', 'b', 'c'], { a: 3, b: 2, c: 1 }, ['c', 'a', 'c'], 2)).toEqual(['a', 'b', 'c']);
+    expect(rankQuickFilterChips(['a'], {}, ['zz'], 6)).toEqual(['a', 'zz']);
+  });
+
+  it('countQuickFilterVolumes counts hosts by alias (falling back to IP) and apps', () => {
+    const base = sampleLogs[0];
+    const counts = countQuickFilterVolumes([
+      base,
+      { ...base, id: 2 },
+      { ...base, id: 3, source_alias: '', source_ip: '10.0.0.9', app_name: 'sshd' },
+    ]);
+    expect(counts.hosts).toEqual({ 'homelab-host': 2, '10.0.0.9': 1 });
+    expect(counts.apps).toEqual({ nginx: 2, sshd: 1 });
+  });
+
+  it('counts and ranks names that clash with object properties like any other name', () => {
+    const base = sampleLogs[0];
+    const counts = countQuickFilterVolumes([
+      { ...base, id: 1, app_name: 'constructor' },
+      { ...base, id: 2, app_name: 'constructor' },
+      { ...base, id: 3, app_name: 'toString' },
+    ]);
+    expect(counts.apps.constructor).toBe(2);
+    expect(rankQuickFilterChips(['toString', 'constructor', 'valueOf'], counts.apps, [])).toEqual([
+      'constructor',
+      'toString',
+      'valueOf',
+    ]);
+  });
+
+  it('hasActiveLogFilters spots any search, severity, host, app or time filter', () => {
+    expect(hasActiveLogFilters({})).toBe(false);
+    expect(hasActiveLogFilters({ query: '  ', sources: [], apps: [] })).toBe(false);
+    expect(hasActiveLogFilters({ query: 'x' })).toBe(true);
+    expect(hasActiveLogFilters({ severity_max: 0 })).toBe(true);
+    expect(hasActiveLogFilters({ sources: ['h'] })).toBe(true);
+    expect(hasActiveLogFilters({ source: 'h' })).toBe(true);
+    expect(hasActiveLogFilters({ app_name: ['a'] })).toBe(true);
+    expect(hasActiveLogFilters({ from: '1h' })).toBe(true);
+    expect(hasActiveLogFilters({ to: '2026-10-13T12:00:00Z' })).toBe(true);
   });
 });

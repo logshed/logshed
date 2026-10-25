@@ -171,6 +171,15 @@ export const App: React.FC = () => {
     handleTabChange('settings');
   };
 
+  // First-run card in the Console: "Set up Docker hosts" opens Settings on the Sources tab
+  const handleOpenSourcesSettings = () => {
+    setAddAliasIp(null);
+    setEditDockerHostId(null);
+    setDeletedDockerHostInfo(null);
+    setPendingSettingsSubTab('sources');
+    handleTabChange('settings');
+  };
+
   const handleClearSourcesState = () => {
     setAddAliasIp(null);
     setEditDockerHostId(null);
@@ -240,6 +249,7 @@ export const App: React.FC = () => {
         {activeTab === 'stream' && (
           <LiveLogStream
             onDiagnoseAi={handleOpenAiModal}
+            onOpenSourcesSettings={handleOpenSourcesSettings}
             onAddAlias={handleAddAliasFromLog}
             onEditDockerHost={handleEditDockerHostFromLog}
             onManageDeletedDockerHost={handleManageDeletedDockerHost}
