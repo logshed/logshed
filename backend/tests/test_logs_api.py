@@ -1477,3 +1477,93 @@ class TestUiFilterValueCap:
             "GET", "/api/logs/stream", params={param: values, "max_events": 0}
         ) as response:
             assert response.status_code == 200
+
+
+# ===================================================================
+# Search prefixes shared with the live stream
+# ===================================================================
+
+class TestSearchPrefixAliases:
+
+    @staticmethod
+    def _entries() -> list[dict]:
+        def row(minute: int, alias: str, app: str, message: str) -> dict:
+            return {
+                "timestamp": f"2026-10-20T10:0{minute}:00Z",
+                "received_at": f"2026-10-20T10:0{minute}:01Z",
+                "source_ip": "10.0.0.9",
+                "source_alias": alias,
+                "app_name": app,
+                "facility": 1,
+                "severity": 4,
+                "message": message,
+                "raw": message,
+            }
+
+        return [
+            row(0, "pve1", "nginx", "upstream connection refused"),
+            row(1, "pve-node2", "sshd", "session opened for user root"),
+            row(2, "nas", "nginx", "worker started"),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query, expected_messages",
+        [
+            ("host:pve1", {"upstream connection refused"}),
+            ("source:pve1", {"upstream connection refused"}),
+            ("HOST:pve1", {"upstream connection refused"}),
+            ("source_alias:pve1", {"upstream connection refused"}),
+            ("app:sshd", {"session opened for user root"}),
+            ("app:nginx", {"upstream connection refused", "worker started"}),
+            ("msg:refused", {"upstream connection refused"}),
+            ("message:refused", {"upstream connection refused"}),
+            ("app:nginx AND host:nas", {"worker started"}),
+        ],
+    )
+    async def test_prefix_aliases_filter_history(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, query, expected_messages
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        _seed_logs(tmp_path / "logs.db", self._entries())
+
+        res = await client.get("/api/logs", params={"query": query})
+        assert res.status_code == 200
+        assert {log["message"] for log in res.json()["logs"]} == expected_messages
+
+    @pytest.mark.asyncio
+    async def test_host_prefix_returns_that_hosts_rows(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        _seed_logs(tmp_path / "logs.db", self._entries())
+
+        res = await client.get("/api/logs", params={"query": "host:nas"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["total"] == 1
+        assert data["logs"][0]["source_alias"] == "nas"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["pve-node2", "host:pve-node2", "source:pve-node2"])
+    async def test_hyphenated_terms_do_not_error(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, query
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        _seed_logs(tmp_path / "logs.db", self._entries())
+
+        res = await client.get("/api/logs", params={"query": query})
+        assert res.status_code == 200
+        data = res.json()
+        assert [log["source_alias"] for log in data["logs"]] == ["pve-node2"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_prefix_is_still_literal_text(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        _seed_logs(tmp_path / "logs.db", self._entries())
+
+        res = await client.get("/api/logs", params={"query": "hostname:pve1"})
+        assert res.status_code == 200
+        assert res.json()["total"] == 0

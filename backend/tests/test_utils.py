@@ -358,3 +358,72 @@ class TestZoneHelpers:
         assert format_utc_offset(0) == "UTC+00:00"
         assert format_utc_offset(330) == "UTC+05:30"
         assert format_utc_offset(-150) == "UTC-02:30"
+
+
+class TestFormatFtsQueryPrefixAliases:
+    """The history search accepts the same prefixes as the live stream matcher."""
+
+    @pytest.mark.parametrize(
+        "query, expected",
+        [
+            ("app:nginx", "app_name:nginx*"),
+            ("app_name:nginx", "app_name:nginx*"),
+            ("host:pve1", "source_alias:pve1*"),
+            ("source:pve1", "source_alias:pve1*"),
+            ("source_alias:pve1", "source_alias:pve1*"),
+            ("msg:refused", "message:refused*"),
+            ("message:refused", "message:refused*"),
+        ],
+    )
+    def test_alias_maps_to_fts_column(self, query, expected):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query(query) == expected
+
+    @pytest.mark.parametrize(
+        "query, expected",
+        [
+            ("APP:nginx", "app_name:nginx*"),
+            ("Host:pve1", "source_alias:pve1*"),
+            ("SOURCE:pve1", "source_alias:pve1*"),
+            ("Msg:refused", "message:refused*"),
+        ],
+    )
+    def test_alias_is_case_insensitive(self, query, expected):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query(query) == expected
+
+    def test_alias_keeps_value_handling(self):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query('host:"pve node"') == 'source_alias:"pve node"'
+        assert format_fts_query("host:10.0.0.1") == 'source_alias:"10.0.0.1"*'
+        assert format_fts_query("app:ngi*") == "app_name:ngi*"
+        assert format_fts_query("app:nginx AND msg:refused") == "app_name:nginx* AND message:refused*"
+
+    def test_incomplete_alias_falls_back_to_escaped_tokens(self):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query("host:") == '"host:"*'
+        assert format_fts_query("app:*") == '"app:"*'
+
+    def test_unknown_prefix_stays_literal_text(self):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query("foo:bar") == '"foo:bar"*'
+        assert format_fts_query("hostname:pve1") == '"hostname:pve1"*'
+
+
+class TestFormatFtsQueryHyphens:
+    def test_bare_hyphenated_term_is_quoted(self):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query("pve-node2") == '"pve-node2"*'
+        assert format_fts_query("pve-node2 AND error") == '"pve-node2"* AND error*'
+
+    def test_hyphenated_column_value_is_quoted(self):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query("host:pve-node2") == 'source_alias:"pve-node2"*'
+        assert format_fts_query("app_name:my-app*") == 'app_name:"my-app"*'

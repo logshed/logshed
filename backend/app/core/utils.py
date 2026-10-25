@@ -228,6 +228,18 @@ import re
 _FTS_OPERATORS = {"AND", "OR", "NOT", "NEAR"}
 # Strict allowlist of searchable columns in logs_fts virtual table
 _FTS_ALLOWED_COLUMNS = {"app_name", "source_alias", "message"}
+# Shorthand prefixes the live stream matcher also accepts, mapped to their FTS column
+_FTS_COLUMN_ALIASES = {
+    "app": "app_name",
+    "host": "source_alias",
+    "source": "source_alias",
+    "msg": "message",
+}
+
+
+def _needs_fts_quoting(value: str) -> bool:
+    """True when an unquoted FTS5 term would be a syntax error (dots and hyphens split tokens)."""
+    return "." in value or "-" in value
 
 
 def escape_fts_tokens(query_str: str) -> str:
@@ -257,6 +269,9 @@ def format_fts_query(query_str: str) -> str:
     - If terms do not end in '*' and are not boolean operators (AND, OR, NOT, NEAR),
       automatically append '*' for search-as-you-type prefix matching.
     - If column filters are used (e.g. app_name:nginx), apply wildcard to the value.
+    - The shorthand prefixes app:, host:, source: and msg: (any case) map to app_name,
+      source_alias, source_alias and message, matching the live stream filter.
+    - Terms containing '.' or '-' (IP addresses, host names such as pve-node2) are quoted.
     """
     q = query_str.strip()
     if not q:
@@ -304,6 +319,7 @@ def format_fts_query(query_str: str) -> str:
         if ":" in token:
             col, val = token.split(":", 1)
             col_lower = col.lower()
+            col_lower = _FTS_COLUMN_ALIASES.get(col_lower, col_lower)
             if col_lower in _FTS_ALLOWED_COLUMNS:
                 if not val or val == "*":
                     # Incomplete column filter while user is typing (e.g. "app_name:" or "app_name:*")
@@ -317,13 +333,13 @@ def format_fts_query(query_str: str) -> str:
                 elif val.endswith("*"):
                     core = val[:-1]
                     clean_core = core.replace('"', '""')
-                    if "." in clean_core:
+                    if _needs_fts_quoting(clean_core):
                         formatted_tokens.append(f'{col_lower}:"{clean_core}"*')
                     else:
                         formatted_tokens.append(f"{col_lower}:{clean_core}*")
                 else:
                     clean_val = val.replace('"', '""')
-                    if "." in clean_val:
+                    if _needs_fts_quoting(clean_val):
                         formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
                     else:
                         formatted_tokens.append(f"{col_lower}:{clean_val}*")
@@ -343,13 +359,13 @@ def format_fts_query(query_str: str) -> str:
         elif token.endswith("*"):
             core = token[:-1]
             clean_core = core.replace('"', '""')
-            if "." in clean_core:
+            if _needs_fts_quoting(clean_core):
                 formatted_tokens.append(f'"{clean_core}"*')
             else:
                 formatted_tokens.append(f"{clean_core}*")
         else:
             clean_token = token.replace('"', '""')
-            if "." in clean_token:
+            if _needs_fts_quoting(clean_token):
                 formatted_tokens.append(f'"{clean_token}"*')
             else:
                 formatted_tokens.append(f"{clean_token}*")
