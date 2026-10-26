@@ -419,7 +419,7 @@ describe('DockerHostsTab row controls (WP3)', () => {
     vi.restoreAllMocks();
   });
 
-  it('uses a labelled Power button that names the host and the action', async () => {
+  it('uses a Power button whose label names the host and the action', async () => {
     const disabledHost = { ...mockEndpoints[1], enabled: false };
     vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([mockEndpoints[0], disabledHost]);
     render(<DockerHostsTab />);
