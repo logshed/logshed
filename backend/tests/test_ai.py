@@ -3592,3 +3592,39 @@ class TestDiagnosisContextRedactionOffLoop:
         assert ctx["full_prompt"] == baseline["full_prompt"]
         assert "do_not_leak_this_token" not in ctx["redacted_logs"]
         assert "supersecret12345" not in ctx["redacted_logs"]
+
+
+class TestAiRequestTextLimits:
+    """BL-06: the free-text AI request fields have length limits well above real use."""
+
+    @pytest.mark.parametrize(
+        "model_name, field, limit",
+        [
+            ("AiPreviewRequest", "user_context", 20_000),
+            ("AiPreviewRequest", "prompt_override", 200_000),
+            ("AiDiagnosisRequest", "user_context", 20_000),
+            ("AiDiagnosisRequest", "prompt_override", 200_000),
+            ("AiDiagnosisRequest", "system_prompt_override", 200_000),
+        ],
+    )
+    def test_field_accepts_the_limit_and_refuses_more(self, model_name, field, limit):
+        from pydantic import ValidationError
+
+        from app import models
+
+        model = getattr(models, model_name)
+        assert getattr(model(log_ids=[1], **{field: "x" * limit}), field) == "x" * limit
+        with pytest.raises(ValidationError):
+            model(log_ids=[1], **{field: "x" * (limit + 1)})
+
+    def test_prompt_limit_covers_the_largest_generated_prompt(self):
+        # The editable prompt holds at most MAX_LOG_TEXT_CHARS of log text plus the template and context
+        from app.models import AiDiagnosisRequest
+
+        limit = AiDiagnosisRequest.model_fields["prompt_override"].metadata[0].max_length
+        assert limit >= ai_engine.MAX_LOG_TEXT_CHARS + 50_000
+
+    @pytest.mark.asyncio
+    async def test_preview_refuses_an_oversized_context_with_422(self, auth_client):
+        res = await auth_client.post("/api/ai/preview", json={"log_ids": [1], "user_context": "x" * 20_001})
+        assert res.status_code == 422

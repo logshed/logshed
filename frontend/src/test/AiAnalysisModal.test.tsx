@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AiAnalysisModal } from '../components/ai/AiAnalysisModal.tsx';
+import { AiAnalysisModal, MAX_USER_CONTEXT_LENGTH } from '../components/ai/AiAnalysisModal.tsx';
 import { LogEntry } from '../types.ts';
 import * as aiApi from '../api/ai.ts';
 import * as clipboardUtil from '../utils/clipboard.ts';
@@ -1155,5 +1155,50 @@ describe('AiAnalysisModal masked-values badge (WP3)', () => {
     vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue(previewWith('x'));
     render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logs} />);
     expect(await screen.findByText(/IP addresses and host names are not masked/)).toBeInTheDocument();
+  });
+});
+
+describe('AiAnalysisModal situational context limit (BL-06)', () => {
+  const logs: LogEntry[] = [
+    {
+      id: 1,
+      timestamp: '2026-09-04T08:00:00.000Z',
+      received_at: '2026-09-04T08:00:00.100Z',
+      source_ip: '192.168.1.1',
+      source_alias: 'router',
+      app_name: 'app',
+      facility: 1,
+      severity: 3,
+      message: 'hello',
+      raw: 'raw',
+    },
+  ];
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+      provider: 'gemini',
+      models: [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+      has_api_key: true,
+      cached_at: null,
+      is_live: true,
+    });
+    vi.spyOn(aiApi, 'previewAiPrompt').mockResolvedValue({
+      redacted_prompt: 'prompt',
+      estimated_tokens: 10,
+      provider: 'gemini',
+      model: 'gemini-3.7-flash',
+      log_count: 1,
+      source_alias: 'router',
+      app_name: 'app',
+      system_prompt: 'sys',
+    } as any);
+  });
+
+  it('limits the context box to the same length the server accepts', async () => {
+    render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logs} />);
+    const box = await screen.findByPlaceholderText(/Occurred immediately following/);
+    expect(MAX_USER_CONTEXT_LENGTH).toBe(20000);
+    expect(box).toHaveAttribute('maxLength', String(MAX_USER_CONTEXT_LENGTH));
   });
 });

@@ -579,11 +579,17 @@ class VersionResponse(BaseModel):
 # AI Models
 # ---------------------------------------------------------------------------
 
+# Free-text limits well above real use: the editable prompt holds at most 100,000 characters of log
+# text (MAX_LOG_TEXT_CHARS in services/ai_engine.py) plus the template and the user context.
+AI_USER_CONTEXT_MAX_CHARS = 20_000
+AI_PROMPT_OVERRIDE_MAX_CHARS = 200_000
+
+
 class AiPreviewRequest(BaseModel):
     """Payload for generating redacted AI prompt preview."""
     log_ids: list[int] = Field(..., min_length=1, max_length=200)
-    user_context: Optional[str] = None
-    prompt_override: Optional[str] = None
+    user_context: Optional[str] = Field(None, max_length=AI_USER_CONTEXT_MAX_CHARS)
+    prompt_override: Optional[str] = Field(None, max_length=AI_PROMPT_OVERRIDE_MAX_CHARS)
     client_timezone: Optional[str] = None
     client_utc_offset_minutes: Optional[int] = None
 
@@ -606,9 +612,9 @@ class AiPreviewResponse(BaseModel):
 class AiDiagnosisRequest(BaseModel):
     """Payload for triggering on-demand AI diagnosis."""
     log_ids: list[int] = Field(..., min_length=1, max_length=200)
-    user_context: Optional[str] = None
-    prompt_override: Optional[str] = None
-    system_prompt_override: Optional[str] = None
+    user_context: Optional[str] = Field(None, max_length=AI_USER_CONTEXT_MAX_CHARS)
+    prompt_override: Optional[str] = Field(None, max_length=AI_PROMPT_OVERRIDE_MAX_CHARS)
+    system_prompt_override: Optional[str] = Field(None, max_length=AI_PROMPT_OVERRIDE_MAX_CHARS)
     provider: Optional[str] = None
     model: Optional[str] = None
     fallback_models: Optional[list[str]] = None

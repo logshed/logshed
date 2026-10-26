@@ -36,6 +36,9 @@ const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   openai_compatible: 'llama3.2',
 };
 
+// Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
+export const MAX_USER_CONTEXT_LENGTH = 20000;
+
 interface ProviderLocalState {
   hasKey: boolean;
   model: string;
@@ -1128,6 +1131,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               <textarea
                 value={userContext}
                 onChange={(e) => handleUserContextChange(e.target.value)}
+                maxLength={MAX_USER_CONTEXT_LENGTH}
                 placeholder="e.g. Occurred immediately following network switch firmware upgrade, or after container image pull..."
                 rows={2}
                 className="w-full bg-dark-950 border border-dark-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-sans"
