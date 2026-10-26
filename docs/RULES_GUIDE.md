@@ -238,7 +238,7 @@ LogShed makes rule creation effortless:
 1. **1-Click Creation from Log Detail**:
    - While browsing the live stream or search results, click any log entry to open the Log Detail modal.
    - Click the **Create Drop Rule** button in the action bar.
-   - LogShed pre-populates the rule name, originating host, app name, and message snippet automatically, ready for saving with a single click.
+   - LogShed fills in a rule name, the host (its alias, or the IP when the host has no alias), the app name and the whole log message. Shorten the message to the part that repeats: while the pattern is still the whole line, a tip suggests removing the numbers, times or IDs that change between lines.
 
 2. **Dry-Run Test Simulation**:
    - Inside the drop rule creation modal, use the integrated test simulator before saving.
