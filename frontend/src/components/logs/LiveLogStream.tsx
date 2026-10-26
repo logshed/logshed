@@ -34,6 +34,7 @@ import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKe
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { LogRow, ProcessedLogEntry, areLogRowPropsEqual, logGridCols } from './LogRow.tsx';
 import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
+import { setAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { Modal } from '../common/Modal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 
@@ -2168,6 +2169,16 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onCreateDropRule={(targetLog) => {
             setActiveLogDetail(null);
             setDropRuleTargetLog(targetLog);
+          }}
+          // The prefill goes through memory, not the URL: messages are long and may hold sensitive text
+          onCreateAlertRule={(targetLog) => {
+            setActiveLogDetail(null);
+            setAlertRuleHandoff({
+              appName: targetLog.app_name || undefined,
+              message: cleanLogMessageForDisplay(targetLog.message),
+            });
+            window.history.pushState(null, '', '/rules/rules');
+            window.dispatchEvent(new PopStateEvent('popstate'));
           }}
           onDeleteLog={(deletedLog) => {
             setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));

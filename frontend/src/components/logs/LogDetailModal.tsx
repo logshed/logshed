@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronUp, ChevronDown } from 'lucide-react';
+import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronUp, ChevronDown, BellPlus } from 'lucide-react';
 import { LogEntry, DockerEndpoint } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
@@ -20,10 +20,12 @@ interface LogDetailModalProps {
   dockerEndpoints?: DockerEndpoint[];
   isHostAliased?: boolean;
   onCreateDropRule?: (log: LogEntry) => void;
+  /** Opens Rules & History with a new alert rule prefilled from this log. */
+  onCreateAlertRule?: (log: LogEntry) => void;
   onDeleteLog?: (log: LogEntry) => void;
-  /** Opens the newer neighbour (the row above in the newest-first list). */
+  /** Opens the newer log (the row above in the newest-first list). */
   onNavigateNewer?: () => void;
-  /** Opens the older neighbour (the row below in the newest-first list). */
+  /** Opens the older log (the row below in the newest-first list). */
   onNavigateOlder?: () => void;
   hasNewerLog?: boolean;
   hasOlderLog?: boolean;
@@ -54,6 +56,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   dockerEndpoints = [],
   isHostAliased,
   onCreateDropRule,
+  onCreateAlertRule,
   onDeleteLog,
   onNavigateNewer,
   onNavigateOlder,
@@ -349,6 +352,17 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               >
                 <FilterX className="w-3.5 h-3.5 text-accent-400" />
                 <span>Create Drop Rule</span>
+              </button>
+            )}
+
+            {onCreateAlertRule && (
+              <button
+                onClick={() => onCreateAlertRule(log)}
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                title="Create an alert rule for this app, with this log shown for reference"
+              >
+                <BellPlus className="w-3.5 h-3.5 text-accent-400" />
+                <span>Create Alert Rule</span>
               </button>
             )}
 

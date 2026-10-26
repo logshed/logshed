@@ -1,3 +1,4 @@
+import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AlertRuleModal } from '../components/alerts/AlertRuleModal.tsx';
@@ -376,5 +377,81 @@ describe('AlertRuleModal severity wording (WP2)', () => {
     expect(screen.getByText('Severity Filter (Optional)')).toBeInTheDocument();
     expect(screen.queryByText(/Max Severity/)).toBeNull();
     expect(screen.getByText('Only logs at this level or more severe are checked.')).toBeInTheDocument();
+  });
+});
+
+describe('AlertRuleModal prefill from a log (WP6-2)', () => {
+  const onClose = vi.fn();
+  const onSuccess = vi.fn();
+  const message = 'upstream timed out (110: Connection timed out) while reading response header from upstream';
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    onClose.mockReset();
+  });
+
+  const renderPrefilled = (prefill: React.ComponentProps<typeof AlertRuleModal>['prefill']) =>
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={['postgres', 'nginx']}
+        prefill={prefill}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+
+  it('starts with the name and app filter, leaves severity and pattern empty, and saves them', async () => {
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRule, id: 7 });
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: message });
+
+    expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx');
+    expect(screen.getByPlaceholderText('e.g. Failed password|authentication failure')).toHaveValue('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Alert on nginx',
+          filter_app: 'nginx',
+          filter_severity: null,
+          match_pattern: null,
+        })
+      )
+    );
+  });
+
+  it('shows the log message as a read-only reference line with the full text in its title', () => {
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: message });
+    const ref = screen.getByTestId('alert-rule-log-reference');
+    expect(ref).toHaveTextContent(`From log: ${message}`);
+    expect(ref).toHaveAttribute('title', message);
+    expect(ref.className).toContain('truncate');
+    expect(ref.tagName).not.toBe('INPUT');
+  });
+
+  it('treats the prefilled values as the starting point, so closing without edits does not warn', () => {
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: message });
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(screen.queryByText('Unsaved Changes')).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('ignores the prefill when editing an existing rule', () => {
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={mockRule}
+        channels={mockChannels}
+        availableApps={['postgres', 'nginx']}
+        prefill={{ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: message }}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+    expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Database Timeout Spike');
+    expect(screen.queryByTestId('alert-rule-log-reference')).toBeNull();
   });
 });

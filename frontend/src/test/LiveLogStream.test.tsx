@@ -21,6 +21,7 @@ import { LogEntry } from '../types.ts';
 import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 import * as clipboardModule from '../utils/clipboard.ts';
 import * as dropRuleModalModule from '../components/alerts/CreateDropRuleModal.tsx';
+import { takeAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 
 // Test control for the virtualizer mock: when edgeRows is set, only the first and last
 // edgeRows rows are "visible" (like a real viewport), so large buffers stay cheap to render.
@@ -2829,5 +2830,45 @@ describe('Pinned saved views on the Quick Filters bar (WP5-1)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.getAllByTestId('quick-filter-view').map((c) => c.textContent)).toEqual(['Firewall', 'Nginx errors']));
     expect(savedViewsApi.fetchSavedViews).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('LiveLogStream "Create Alert Rule" hand-off (WP6-2)', () => {
+  const renderStream = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/?q=nginx');
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({ sources: [], apps: [], host_to_apps: {}, app_to_hosts: {} } as any);
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({} as any);
+  });
+
+  it('closes the drawer, stores the app and message in memory and switches to Alert Rules without URL params', async () => {
+    const popstate = vi.fn();
+    window.addEventListener('popstate', popstate);
+    renderStream();
+    fireEvent.click(await screen.findByText('Nginx upstream connection timeout'));
+    fireEvent.click(await screen.findByRole('button', { name: /Create Alert Rule/i }));
+    window.removeEventListener('popstate', popstate);
+
+    expect(popstate).toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/rules/rules');
+    expect(window.location.search).toBe('');
+    expect(takeAlertRuleHandoff()).toEqual({ appName: 'nginx', message: 'Nginx upstream connection timeout' });
+    // Read once only
+    expect(takeAlertRuleHandoff()).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Create Alert Rule/i })).toBeNull());
+    window.history.replaceState(null, '', '/');
   });
 });

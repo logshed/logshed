@@ -5,6 +5,8 @@ import { AlertsPanel, pathToAlertSubTab, alertSubTabToPath } from '../components
 import * as alertsApi from '../api/alerts.ts';
 import * as notificationsApi from '../api/notifications.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
+import * as logsApi from '../api/logs.ts';
+import { setAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 
 const mockRules: AlertRule[] = [
   {
@@ -1320,5 +1322,82 @@ describe('AlertsPanel maintenance end-time presets (WP3)', () => {
 
     await waitFor(() => expect(setSpy).toHaveBeenCalledTimes(1));
     expect(setSpy).toHaveBeenCalledWith(new Date(new Date(currentEnd).getTime() + 3600 * 1000).toISOString());
+  });
+});
+
+describe('AlertsPanel hand-offs (WP6)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.history.pushState(null, '', '/rules/rules');
+    vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue([{ ...mockRules[0], window_seconds: 1800 }]);
+    vi.spyOn(alertsApi, 'fetchAlertPresets').mockResolvedValue(mockPresets);
+    vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
+    vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue(mockChannels);
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({ sources: [], apps: ['nginx', 'sshd'], host_to_apps: {}, app_to_hosts: {} } as any);
+  });
+
+  it('opens the new-rule dialog once, prefilled from the log hand-off', async () => {
+    setAlertRuleHandoff({ appName: 'nginx', message: 'Nginx upstream connection timeout' });
+    render(<AlertsPanel />);
+
+    // The dialog fills its fields in an effect right after it opens
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
+    expect(screen.getByRole('heading', { name: 'Create New Alert Rule' })).toBeInTheDocument();
+    expect(screen.getByTestId('alert-rule-log-reference')).toHaveTextContent('From log: Nginx upstream connection timeout');
+
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9, name: 'Alert on nginx' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'Alert on nginx', filter_app: 'nginx' }))
+    );
+  });
+
+  it('leaves the app filter empty when the app is not among the known apps', async () => {
+    setAlertRuleHandoff({ appName: 'mystery-app', message: 'hello' });
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on mystery-app'));
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9 });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() => expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ filter_app: null })));
+  });
+
+  it('stays on Alert Rules after closing, and "New Alert Rule" then opens a blank dialog', async () => {
+    setAlertRuleHandoff({ appName: 'nginx', message: 'Nginx upstream connection timeout' });
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Create New Alert Rule' })).toBeNull());
+    expect(window.location.pathname).toBe('/rules/rules');
+    expect(screen.getByText('SSH Brute-Force Detection')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /New Alert Rule/i }));
+    expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('');
+    expect(screen.queryByTestId('alert-rule-log-reference')).toBeNull();
+  });
+
+  it('does not open the dialog without a hand-off', async () => {
+    render(<AlertsPanel />);
+    await screen.findByText('SSH Brute-Force Detection');
+    expect(screen.queryByRole('heading', { name: 'Create New Alert Rule' })).toBeNull();
+  });
+
+  it('opens the Console from the incident with the loaded rule window', async () => {
+    vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue({
+      ...mockHistory,
+      items: [{ ...mockHistory.items[0], source_alias: 'bastion', app_name: 'sshd' }],
+    });
+    render(<AlertsPanel />);
+    await screen.findByText('SSH Brute-Force Detection');
+    fireEvent.click(screen.getByRole('button', { name: /^History/i }));
+    await screen.findByText('Target / Rule');
+    fireEvent.click(await screen.findByText('SSH Brute-Force Detection'));
+    const link = await screen.findByRole('link', { name: 'Inspect in Console' });
+    const params = new URL(link.getAttribute('href') || '', 'http://localhost').searchParams;
+    // 30-minute rule window is longer than the 5-minute minimum
+    expect(params.get('time')).toBe('2026-09-18T09:30:00.000Z');
+    expect(params.get('to')).toBe('2026-09-18T10:05:00.000Z');
+    expect(params.get('source')).toBe('bastion');
   });
 });

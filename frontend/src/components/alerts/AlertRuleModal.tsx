@@ -8,12 +8,24 @@ import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel } from '../../utils/severityLabels.ts';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 
+/** Starting values for a new rule created from a log ("Create Alert Rule" in the log detail drawer). */
+export interface AlertRulePrefill {
+  name?: string;
+  filterApps?: string[];
+  /** The log message, shown read-only under the pattern field so the user can copy the part to match. */
+  referenceMessage?: string;
+}
+
+const EMPTY_APPS: string[] = [];
+
 export interface AlertRuleModalProps {
   isOpen: boolean;
   ruleToEdit: AlertRule | null;
   channels: NotificationChannel[];
   availableApps: string[];
   isAiConfigured?: boolean;
+  /** Used only when creating a rule (ruleToEdit is null). */
+  prefill?: AlertRulePrefill | null;
   onNavigateToSettings?: () => void;
   onClose: () => void;
   onSuccess: (savedRule: AlertRule) => void;
@@ -25,10 +37,15 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   channels,
   availableApps,
   isAiConfigured = true,
+  prefill,
   onNavigateToSettings,
   onClose,
   onSuccess,
 }) => {
+  const activePrefill = ruleToEdit ? null : prefill || null;
+  const initialName = activePrefill?.name || '';
+  const initialFilterApps = activePrefill?.filterApps || EMPTY_APPS;
+  const referenceMessage = activePrefill?.referenceMessage || '';
   const [formName, setFormName] = useState<string>('');
   const [formRuleType, setFormRuleType] = useState<AlertRuleType>('threshold');
   const [formChannelId, setFormChannelId] = useState<number | null>(null);
@@ -73,10 +90,10 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormIsEnabled(ruleToEdit.is_enabled);
       setFormError(null);
     } else {
-      setFormName('');
+      setFormName(initialName);
       setFormRuleType('threshold');
       setFormChannelId(channels.length > 0 ? channels[0].id : null);
-      setFormFilterApps([]);
+      setFormFilterApps(initialFilterApps);
       setFormFilterSeverity('');
       setFormMatchPattern('');
       setFormThresholdCount(1);
@@ -86,7 +103,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormIsEnabled(true);
       setFormError(null);
     }
-  }, [isOpen, ruleToEdit, channels]);
+  }, [isOpen, ruleToEdit, channels, initialName, initialFilterApps]);
 
   const isDirty = useMemo(() => {
     if (!isOpen) return false;
@@ -116,11 +133,14 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       );
     } else {
       const initialChannel = channels.length > 0 ? channels[0].id : null;
+      const appsChanged =
+        formFilterApps.length !== initialFilterApps.length ||
+        formFilterApps.some((app, i) => app !== initialFilterApps[i]);
       return (
-        formName !== '' ||
+        formName !== initialName ||
         formRuleType !== 'threshold' ||
         formChannelId !== initialChannel ||
-        formFilterApps.length > 0 ||
+        appsChanged ||
         formFilterSeverity !== '' ||
         formMatchPattern !== '' ||
         formThresholdCount !== 1 ||
@@ -134,6 +154,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
     isOpen,
     ruleToEdit,
     channels,
+    initialName,
+    initialFilterApps,
     formName,
     formRuleType,
     formChannelId,
@@ -437,6 +459,15 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           <p className="text-[11px] text-slate-500">
             Matches against log message text using regular expression search or case-insensitive keyword search.
           </p>
+          {referenceMessage && (
+            <p
+              className="text-[11px] text-slate-400 font-mono truncate select-text"
+              title={referenceMessage}
+              data-testid="alert-rule-log-reference"
+            >
+              From log: {referenceMessage}
+            </p>
+          )}
         </div>
 
         {/* Cooldown */}

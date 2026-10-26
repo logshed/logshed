@@ -13,6 +13,7 @@ import {
   Calendar,
   Wrench,
   MessageSquare,
+  Radio,
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../types.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
@@ -26,15 +27,51 @@ import {
   maintenanceTypeLabel,
   MAINTENANCE_RULE_NAME,
 } from '../../utils/maintenanceHistory.ts';
+import { cleanIsoString } from '../../utils/formatters.ts';
+
+const CONSOLE_MARGIN_MS = 5 * 60 * 1000;
+
+/**
+ * Console URL for the logs around a rule alert: from the trigger time minus the larger of 5 minutes and
+ * the rule window, to 5 minutes after it. Times are UTC ISO strings, the format parseFiltersFromUrl reads.
+ * Returns null when the trigger time cannot be read.
+ */
+export function buildIncidentConsoleUrl(
+  item: AlertHistoryItem,
+  ruleWindowSeconds?: number | null,
+  sameAppOnly: boolean = false
+): string | null {
+  if (!item.triggered_at) return null;
+  const triggeredMs = new Date(cleanIsoString(item.triggered_at)).getTime();
+  if (Number.isNaN(triggeredMs)) return null;
+  const windowMs = ruleWindowSeconds && ruleWindowSeconds > 0 ? ruleWindowSeconds * 1000 : 0;
+  const params = new URLSearchParams();
+  if (item.source_alias) params.set('source', item.source_alias);
+  if (sameAppOnly && item.app_name) params.set('app', item.app_name);
+  params.set('time', new Date(triggeredMs - Math.max(CONSOLE_MARGIN_MS, windowMs)).toISOString());
+  params.set('to', new Date(triggeredMs + CONSOLE_MARGIN_MS).toISOString());
+  return `/?${params.toString()}`;
+}
+
+/** A plain click switches to the Console in place; a modified click (new tab or window) is left to the browser. */
+function openInConsole(e: React.MouseEvent<HTMLAnchorElement>, url: string) {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+  e.preventDefault();
+  window.history.pushState(null, '', url);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
 
 interface IncidentHistoryDetailProps {
   item: AlertHistoryItem;
   channelName?: string;
+  /** Window of the rule that fired, when that rule is loaded; widens the Console range for long windows. */
+  ruleWindowSeconds?: number | null;
 }
 
 export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
   item,
   channelName,
+  ruleWindowSeconds,
 }) => {
   const { copied: copiedLog, copy: copyLog } = useClipboard();
   const { copied: copiedPrompt, copy: copyPrompt } = useClipboard();
@@ -66,6 +103,12 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
     : `${item.trigger_count} matching event${item.trigger_count === 1 ? '' : 's'}`;
 
   const canFollowUp = Boolean(item.ai_audit_id) && !isFailed;
+
+  // Rule alerts only: Daily Digest and On-Demand items have no rule window to open
+  const isRuleAlert = !isDigest && !isOnDemand;
+  const consoleUrl = isRuleAlert ? buildIncidentConsoleUrl(item, ruleWindowSeconds) : null;
+  const sameAppConsoleUrl =
+    consoleUrl && item.app_name ? buildIncidentConsoleUrl(item, ruleWindowSeconds, true) : null;
 
   const toggleFollowUp = () => {
     setFollowUpOpened(true);
@@ -228,6 +271,31 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
             />
           </div>
         </div>
+
+        {/* Row: Open the Console around this alert (host-wide, or the same app only) */}
+        {consoleUrl && (
+          <div className="flex flex-wrap items-center gap-3 pt-2.5 border-t border-dark-800 text-[11px]">
+            <a
+              href={consoleUrl}
+              onClick={(e) => openInConsole(e, consoleUrl)}
+              title={`Show logs${item.source_alias ? ` from ${item.source_alias}` : ''} around the time this alert fired`}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+            >
+              <Radio className="w-3.5 h-3.5 text-accent-400" />
+              <span>Inspect in Console</span>
+            </a>
+            {sameAppConsoleUrl && (
+              <a
+                href={sameAppConsoleUrl}
+                onClick={(e) => openInConsole(e, sameAppConsoleUrl)}
+                title={`Show only ${item.app_name} logs around the time this alert fired`}
+                className="text-accent-400 hover:text-accent-300 hover:underline font-medium cursor-pointer"
+              >
+                Same app only
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Row 3: Token Breakdown Pills (when available) */}
         {item.tokens_used !== undefined && item.tokens_used !== null && item.tokens_used > 0 && (
@@ -428,9 +496,21 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
       {!isDigest && item.sample_log && (
         <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
           <div className="flex items-center justify-between p-2.5 px-3 bg-dark-900 border-b border-dark-700 gap-2">
-            <h4 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-              Triggering Log Snippet
-            </h4>
+            <div className="flex items-center gap-3 min-w-0">
+              <h4 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                Triggering Log Snippet
+              </h4>
+              {consoleUrl && (
+                <a
+                  href={consoleUrl}
+                  onClick={(e) => openInConsole(e, consoleUrl)}
+                  title="Show the logs around this alert in the Console"
+                  className="text-[11px] text-accent-400 hover:text-accent-300 hover:underline font-medium cursor-pointer shrink-0"
+                >
+                  View in Console
+                </a>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => copyLog(item.sample_log || '')}

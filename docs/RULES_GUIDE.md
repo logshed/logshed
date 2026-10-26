@@ -13,6 +13,8 @@ This guide explains how to configure real-time alert rules and ingestion drop ru
   - [Rate Spike & Culprit Analysis](#rate-spike--culprit-analysis)
   - [Practical Alert Rule Examples](#practical-alert-rule-examples)
   - [Testing Alert Rules](#testing-alert-rules)
+  - [Creating an Alert Rule from a Log](#creating-an-alert-rule-from-a-log)
+  - [Inspecting an Incident in the Console](#inspecting-an-incident-in-the-console)
 - [Ingestion Drop Rules](#drop-rules)
   - [Purpose & Architecture](#purpose--architecture)
   - [Drop Rule Fields & Filtering](#drop-rule-fields--filtering)
@@ -179,6 +181,19 @@ LogShed includes a built-in canary alert preset based on `alert_log_storm.json`:
 ### Testing Alert Rules
 
 Use the **Test Rule** button on any configured rule to open the dry-run tester. Enter sample log messages to verify that your regular expression or substring matches as expected and confirm that offending IP addresses are parsed correctly before activating rules in production.
+
+### Creating an Alert Rule from a Log
+
+In the Console, click a log entry to open the Log Detail drawer, then click **Create Alert Rule** (next to **Create Drop Rule**). LogShed opens **Rules & History > Alert Rules** with a new rule dialog that starts with:
+- the name `Alert on <app>` and the log's app in the App Filter (when LogShed has seen that app before);
+- an empty Severity Filter and Match Pattern;
+- a read-only "From log:" line under the Match Pattern field, showing the log message (hover it to see the full text), so you can copy the part you want to match.
+
+Alert rules filter by app and severity only, so the host is not carried over. Closing the dialog without saving leaves you on Alert Rules.
+
+### Inspecting an Incident in the Console
+
+In **Rules & History > History**, open an alert raised by a rule and click **Inspect in Console** (or **View in Console** next to the triggering log snippet). The Console opens on the alert's host, from 5 minutes before the alert (or the rule's window, when that is longer and the rule still exists) to 5 minutes after it. **Same app only** also filters to the alert's app. Daily Digest and On-Demand Analysis items have no Console link.
 
 ---
 

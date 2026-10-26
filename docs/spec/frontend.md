@@ -51,6 +51,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * One-click action to fetch surrounding context lines formatted in the configured homelab timezone (symmetric 10 entries around selected record). Each context line shows its severity badge and app name; the app name is left out when "Same App Only" is checked.
   * "Newer" and "Older" buttons step to the row above or below in the newest-first list; Up or K and Down or J do the same while the drawer is open, except in a text field or while another dialog is open on top.
   * "Create Drop Rule" prefills the host field with the host alias (the IP when the host has no alias).
+  * "Create Alert Rule" (next to "Create Drop Rule") switches to Rules & History > Alert Rules and opens the new-rule dialog with the name `Alert on <app>`, the app filter set to the log's app when it is a known app, severity and pattern empty, and a read-only "From log: <message>" line under the pattern field (truncated, full text in the tooltip). The prefill is handed over in memory (`utils/alertRuleHandoff.ts`, read once by `AlertsPanel`), never in the URL. Closing the dialog stays on Alert Rules.
 * **Targeted Log Deletion Modal:**
   * Supports deletion of selected records, filtered ranges, or all historical logs with confirmation guards and dry-run count preview.
 
@@ -67,6 +68,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Alert History Tab:**
   * Unified incident history covering triggered alert rules, automated AI rule enrichments, and scheduled daily analytical digest dispatches.
   * Detail inspection drawer (rendered via `IncidentHistoryDetail.tsx`) presents full prompt envelopes, model badges, incident summaries, and token consumption breakdowns (input, output, reasoning/thought, and total).
+  * Rule alerts (not Daily Digest or On-Demand items) show an "Inspect in Console" button in the detail header and a smaller "View in Console" link next to "Triggering Log Snippet". Both open the Console with `source=<source_alias>` (when set), `time=<start>` and `to=<triggered_at + 5 minutes>` as UTC ISO strings; the start is `triggered_at` minus the larger of 5 minutes and the rule's `window_seconds` (5 minutes when the rule is not loaded). The range is host-wide; "Same app only" adds `app=<app_name>` when the alert has an app.
   * Analyses with an AI audit record (on-demand analyses and alert enrichments) show an expandable **Follow-up Discussion** section below the diagnosis. Messages load on first expand, and the thread stays mounted when collapsed so a streaming reply is not lost.
   * Supports single-item and bulk history deletion.
 * **Maintenance Window Tab:**

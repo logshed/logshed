@@ -47,7 +47,8 @@ import {
 } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
-import { AlertRuleModal } from './AlertRuleModal.tsx';
+import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
+import { AlertRuleHandoff, takeAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { useMediaQuery } from '../../utils/hooks.ts';
@@ -158,6 +159,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   // Modals state
   const [isRuleModalOpen, setIsRuleModalOpen] = useState<boolean>(false);
   const [ruleToEdit, setRuleToEdit] = useState<AlertRule | null>(null);
+  const [rulePrefill, setRulePrefill] = useState<AlertRulePrefill | null>(null);
+  const pendingRuleHandoffRef = useRef<AlertRuleHandoff | null>(null);
+  const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
   const [ruleToDelete, setRuleToDelete] = useState<AlertRule | null>(null);
   const [historyItemToDelete, setHistoryItemToDelete] = useState<AlertHistoryItem | null>(null);
   const [isTestModalOpen, setIsTestModalOpen] = useState<boolean>(false);
@@ -255,6 +259,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to load alert configuration.', isError: true });
+    } finally {
+      setInitialLoadDone(true);
     }
   }, []);
 
@@ -532,14 +538,39 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   // Open create modal
   const handleOpenCreateModal = () => {
     setRuleToEdit(null);
+    setRulePrefill(null);
     setIsRuleModalOpen(true);
   };
 
   // Open edit modal
   const handleOpenEditModal = (rule: AlertRule) => {
     setRuleToEdit(rule);
+    setRulePrefill(null);
     setIsRuleModalOpen(true);
   };
+
+  // "Create Alert Rule" from a log: take the hand-off once on mount, then open the prefilled dialog
+  // after the first load, so the channels are in and the app can be checked against the known apps.
+  useEffect(() => {
+    const handoff = takeAlertRuleHandoff();
+    if (handoff) pendingRuleHandoffRef.current = handoff;
+  }, []);
+
+  useEffect(() => {
+    if (!initialLoadDone) return;
+    const handoff = pendingRuleHandoffRef.current;
+    if (!handoff) return;
+    pendingRuleHandoffRef.current = null;
+    const appName = handoff.appName?.trim() || '';
+    setRulePrefill({
+      name: appName ? `Alert on ${appName}` : '',
+      filterApps: appName && availableApps.includes(appName) ? [appName] : [],
+      referenceMessage: handoff.message || '',
+    });
+    setRuleToEdit(null);
+    setActiveSubTab('rules');
+    setIsRuleModalOpen(true);
+  }, [initialLoadDone, availableApps]);
 
   // Handle saved rule from AlertRuleModal
   const handleRuleSuccess = (savedRule: AlertRule) => {
@@ -942,8 +973,12 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         channels={channels}
         availableApps={availableApps}
         isAiConfigured={isAiConfigured}
+        prefill={rulePrefill}
         onNavigateToSettings={handleNavigateToSettings}
-        onClose={() => setIsRuleModalOpen(false)}
+        onClose={() => {
+          setIsRuleModalOpen(false);
+          setRulePrefill(null);
+        }}
         onSuccess={handleRuleSuccess}
       />
 
@@ -1004,6 +1039,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           <IncidentHistoryDetail
             item={selectedHistoryItem}
             channelName={selectedHistoryItem.channel_id ? getChannelName(selectedHistoryItem.channel_id) : undefined}
+            ruleWindowSeconds={rules.find((r) => r.id === selectedHistoryItem.rule_id)?.window_seconds}
           />
         </Modal>
       )}

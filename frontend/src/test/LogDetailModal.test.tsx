@@ -895,3 +895,43 @@ describe('LogDetailModal AI setting, Newer / Older steps and context app names (
     expect(screen.queryByTestId('context-app-name')).toBeNull();
   });
 });
+
+describe('LogDetailModal "Create Alert Rule" (WP6-2)', () => {
+  const log: LogEntry = {
+    id: 600,
+    timestamp: '2026-08-29T14:30:00.000Z',
+    received_at: '2026-08-29T14:30:00.100Z',
+    source_ip: '192.168.1.50',
+    source_alias: 'proxmox-01',
+    app_name: 'pveproxy',
+    facility: 1,
+    severity: 3,
+    message: 'connection failed',
+    raw: 'connection failed',
+  };
+
+  it('shows "Create Alert Rule" next to "Create Drop Rule" and passes the log to the handler', () => {
+    const onCreateAlertRule = vi.fn();
+    render(
+      <LogDetailModal
+        log={log}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onCreateDropRule={vi.fn()}
+        onCreateAlertRule={onCreateAlertRule}
+      />
+    );
+    const dropBtn = screen.getByRole('button', { name: /Create Drop Rule/i });
+    const alertBtn = screen.getByRole('button', { name: /Create Alert Rule/i });
+    expect(dropBtn.nextElementSibling).toBe(alertBtn);
+    expect(alertBtn.className).toBe(dropBtn.className);
+    fireEvent.click(alertBtn);
+    expect(onCreateAlertRule).toHaveBeenCalledWith(log);
+  });
+
+  it('hides "Create Alert Rule" without a handler', () => {
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /Create Alert Rule/i })).toBeNull();
+  });
+});
