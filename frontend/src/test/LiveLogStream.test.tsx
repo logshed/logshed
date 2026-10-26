@@ -2872,3 +2872,74 @@ describe('LiveLogStream "Create Alert Rule" hand-off (WP6-2)', () => {
     window.history.replaceState(null, '', '/');
   });
 });
+
+describe('matchesSearchQuery AND, OR and NOT like history search', () => {
+  const MESSAGES = ['alpha', 'bravo', 'charlie', 'alpha charlie', 'bravo charlie', 'alpha bravo', 'alpha bravo charlie'];
+  const makeLog = (message: string, extra: Partial<LogEntry> = {}): LogEntry => ({
+    id: 1,
+    timestamp: '2026-10-20T10:00:00.000Z',
+    received_at: '2026-10-20T10:00:00.010Z',
+    source_ip: '10.0.0.9',
+    source_alias: 'h1',
+    app_name: 'svc',
+    facility: 1,
+    severity: 4,
+    message,
+    raw: message,
+    ...extra,
+  });
+  const matching = (query: string) =>
+    MESSAGES.filter((m) => matchesSearchQuery(makeLog(m), compileSearchQuery(query))).sort();
+  const sorted = (list: string[]) => [...list].sort();
+
+  // Same cases as TestSearchBooleanOperators in backend/tests/test_logs_api.py
+  it.each([
+    ['alpha OR bravo', ['alpha', 'bravo', 'alpha charlie', 'bravo charlie', 'alpha bravo', 'alpha bravo charlie']],
+    ['alpha or bravo', ['alpha', 'bravo', 'alpha charlie', 'bravo charlie', 'alpha bravo', 'alpha bravo charlie']],
+    ['charlie NOT alpha', ['charlie', 'bravo charlie']],
+    ['charlie not alpha', ['charlie', 'bravo charlie']],
+    ['alpha OR bravo charlie', ['alpha', 'alpha charlie', 'alpha bravo', 'alpha bravo charlie', 'bravo charlie']],
+    ['alpha OR bravo AND charlie', ['alpha', 'alpha charlie', 'alpha bravo', 'alpha bravo charlie', 'bravo charlie']],
+    ['alpha NOT bravo AND charlie', ['alpha charlie']],
+    ['alpha NOT bravo charlie', ['alpha', 'alpha charlie', 'alpha bravo']],
+    ['alpha charlie NOT bravo', ['alpha charlie']],
+    ['alpha bravo OR charlie', ['alpha bravo', 'alpha bravo charlie', 'charlie', 'alpha charlie', 'bravo charlie']],
+    ['alpha NOT bravo OR charlie', ['alpha', 'alpha charlie', 'charlie', 'bravo charlie', 'alpha bravo charlie']],
+    ['alpha OR bravo NOT charlie', ['alpha', 'alpha charlie', 'alpha bravo', 'alpha bravo charlie', 'bravo']],
+    ['(alpha OR bravo) AND charlie', ['alpha charlie', 'bravo charlie', 'alpha bravo charlie']],
+    ['"alpha bravo"', ['alpha bravo', 'alpha bravo charlie']],
+    ['"alpha bravo" OR charlie', ['alpha bravo', 'alpha bravo charlie', 'charlie', 'alpha charlie', 'bravo charlie']],
+  ])('%s', (query, expected) => {
+    expect(matching(query)).toEqual(sorted(expected));
+  });
+
+  it('keeps the popover examples right: error OR timeout and auth NOT cron', () => {
+    const q1 = compileSearchQuery('error OR timeout');
+    expect(matchesSearchQuery(makeLog('disk error'), q1)).toBe(true);
+    expect(matchesSearchQuery(makeLog('request timeout'), q1)).toBe(true);
+    expect(matchesSearchQuery(makeLog('all good'), q1)).toBe(false);
+
+    const q2 = compileSearchQuery('auth NOT cron');
+    expect(matchesSearchQuery(makeLog('auth failure for root'), q2)).toBe(true);
+    expect(matchesSearchQuery(makeLog('auth session opened by cron'), q2)).toBe(false);
+    // The whole query appearing as text does not bypass NOT
+    expect(matchesSearchQuery(makeLog('auth not cron'), q2)).toBe(false);
+  });
+
+  it('combines column filters with OR and NOT', () => {
+    const nginxOnNas = makeLog('worker started', { app_name: 'nginx', source_alias: 'nas' });
+    const sshdOnPve = makeLog('session opened', { app_name: 'sshd', source_alias: 'pve-node2' });
+    expect(matchesSearchQuery(nginxOnNas, compileSearchQuery('app:nginx OR app:sshd'))).toBe(true);
+    expect(matchesSearchQuery(sshdOnPve, compileSearchQuery('app:nginx OR app:sshd'))).toBe(true);
+    expect(matchesSearchQuery(sshdOnPve, compileSearchQuery('host:pve-node2 NOT app:sshd'))).toBe(false);
+    expect(matchesSearchQuery(nginxOnNas, compileSearchQuery('msg:"worker started" NOT host:pve-node2'))).toBe(true);
+  });
+
+  it('falls back to requiring every word when the operators are incomplete, as while typing', () => {
+    // Trailing or leading operators and empty brackets are not valid expressions
+    expect(matchesSearchQuery(makeLog('disk error'), compileSearchQuery('error OR'))).toBe(true);
+    expect(matchesSearchQuery(makeLog('cron job ran'), compileSearchQuery('NOT cron'))).toBe(true);
+    expect(matchesSearchQuery(makeLog('disk error'), compileSearchQuery('(error'))).toBe(true);
+    expect(matchesSearchQuery(makeLog('disk error'), compileSearchQuery('error OR OR timeout'))).toBe(false);
+  });
+});

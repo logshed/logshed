@@ -198,20 +198,148 @@ function reformatTimestamps(
 export { LogRow, areLogRowPropsEqual };
 export type { ProcessedLogEntry };
 
+/** A search query as an expression: terms joined by AND, OR and NOT (`a NOT b` is a and not b). */
+export type SearchNode =
+  | { op: 'term'; term: string }
+  | { op: 'and' | 'or' | 'not'; left: SearchNode; right: SearchNode };
+
 export interface CompiledSearchQuery {
   /** Trimmed query, lower-cased */
   lowered: string;
-  /** Space-separated terms with boolean keywords removed */
+  /** Words, phrases and column filters, without boolean keywords or brackets */
   terms: string[];
+  /** The query as an expression, or null when its operators are incomplete (every term must match) */
+  expr: SearchNode | null;
+  /** True when the query uses AND, OR or NOT */
+  hasOperators: boolean;
+}
+
+const SEARCH_OPERATORS = new Set(['and', 'or', 'not']);
+const SEARCH_COLUMNS = new Set(['app_name', 'app', 'source_alias', 'source', 'host', 'message', 'msg']);
+// The same tokens format_fts_query (backend/app/core/utils.py) reads: phrases, column filters, brackets, words
+const SEARCH_TOKEN_RE = /("[^"]*"|'[^']*'|[a-z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)/g;
+
+const isSearchOperator = (token: string | undefined) => token !== undefined && SEARCH_OPERATORS.has(token);
+const stripSearchQuotes = (value: string) => value.replace(/^["'*]+|["'*]+$/g, '');
+
+/**
+ * True when history search would run the query as an expression. Like format_fts_query, it refuses
+ * unbalanced quotes or brackets, an operator at either end, next to another or beside a bracket,
+ * empty brackets, a term touching a bracket without an operator, and an empty column filter.
+ */
+function isValidSearchExpression(lowered: string, tokens: string[]): boolean {
+  if (lowered.startsWith('*')) return false;
+  if ((lowered.split('"').length - 1) % 2 !== 0 || (lowered.split("'").length - 1) % 2 !== 0) return false;
+  let depth = 0;
+  for (const char of lowered) {
+    if (char === '(') depth++;
+    else if (char === ')' && --depth < 0) return false;
+  }
+  if (depth !== 0) return false;
+
+  const words = tokens.filter((t) => t !== '(' && t !== ')');
+  if (words.length === 0 || isSearchOperator(words[0]) || isSearchOperator(words[words.length - 1])) return false;
+  for (const word of words) {
+    const colon = word.indexOf(':');
+    if (colon > 0 && !word.startsWith('"') && !word.startsWith("'") && SEARCH_COLUMNS.has(word.slice(0, colon))) {
+      const val = word.slice(colon + 1);
+      if (!val || val === '*') return false;
+    }
+  }
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const [t1, t2] = [tokens[i], tokens[i + 1]];
+    if (isSearchOperator(t1) && isSearchOperator(t2)) return false;
+    if (t1 === '(' && (isSearchOperator(t2) || t2 === ')')) return false;
+    if (isSearchOperator(t1) && t2 === ')') return false;
+    if (t2 === '(' && !isSearchOperator(t1) && t1 !== '(') return false;
+    if (t1 === ')' && !isSearchOperator(t2) && t2 !== ')') return false;
+  }
+  return true;
+}
+
+/**
+ * Parses validated tokens with the FTS5 precedence history search uses, tightest first: terms side
+ * by side (an implicit AND), then NOT, then AND, then OR, each grouping left to right.
+ */
+function parseSearchTokens(tokens: string[]): SearchNode {
+  let pos = 0;
+  const parsePrimary = (): SearchNode => {
+    if (tokens[pos] === '(') {
+      pos++;
+      const inner = parseOr();
+      pos++; // the closing bracket
+      return inner;
+    }
+    return { op: 'term', term: tokens[pos++] };
+  };
+  const parseAdjacent = (): SearchNode => {
+    let node = parsePrimary();
+    while (pos < tokens.length && tokens[pos] !== ')' && !isSearchOperator(tokens[pos])) {
+      node = { op: 'and', left: node, right: parsePrimary() };
+    }
+    return node;
+  };
+  const parseBinary = (op: 'not' | 'and' | 'or', next: () => SearchNode) => (): SearchNode => {
+    let node = next();
+    while (tokens[pos] === op) {
+      pos++;
+      node = { op, left: node, right: next() };
+    }
+    return node;
+  };
+  const parseNot = parseBinary('not', parseAdjacent);
+  const parseAnd = parseBinary('and', parseNot);
+  const parseOr: () => SearchNode = parseBinary('or', parseAnd);
+  return parseOr();
 }
 
 /** Splits a search query once, so each incoming live log is matched without re-parsing it. */
 export function compileSearchQuery(query?: string): CompiledSearchQuery {
   const lowered = (query || '').trim().toLowerCase();
-  const terms = lowered
-    .split(/\s+/)
-    .filter((t) => t.length > 0 && !['and', 'or', 'not'].includes(t));
-  return { lowered, terms };
+  const tokens = lowered.match(SEARCH_TOKEN_RE) || [];
+  const terms = tokens.filter((t) => t !== '(' && t !== ')' && !isSearchOperator(t));
+  const hasOperators = tokens.some(isSearchOperator);
+  const expr = lowered && isValidSearchExpression(lowered, tokens) ? parseSearchTokens(tokens) : null;
+  return { lowered, terms, expr, hasOperators };
+}
+
+/** One word, "phrase" or column filter (app:, host:, source:, msg: and their long forms) against a log. */
+function matchesSearchTerm(log: LogEntry, term: string, combined: string): boolean {
+  const colon = term.indexOf(':');
+  if (colon > 0 && !term.startsWith('"') && !term.startsWith("'")) {
+    const col = term.slice(0, colon);
+    const cleanVal = stripSearchQuotes(term.slice(colon + 1));
+    if (SEARCH_COLUMNS.has(col) && !cleanVal) return true;
+    if (col === 'app_name' || col === 'app') {
+      return (log.app_name || '').toLowerCase().includes(cleanVal);
+    }
+    if (col === 'source' || col === 'source_alias' || col === 'host') {
+      return (
+        (log.source_alias || '').toLowerCase().includes(cleanVal) ||
+        (log.source_ip || '').toLowerCase().includes(cleanVal)
+      );
+    }
+    if (col === 'message' || col === 'msg') {
+      return (log.message || '').toLowerCase().includes(cleanVal);
+    }
+  }
+
+  const cleanTerm = stripSearchQuotes(term);
+  if (!cleanTerm) return true;
+  return combined.includes(cleanTerm);
+}
+
+function evaluateSearchNode(node: SearchNode, matchTerm: (term: string) => boolean): boolean {
+  switch (node.op) {
+    case 'term':
+      return matchTerm(node.term);
+    case 'and':
+      return evaluateSearchNode(node.left, matchTerm) && evaluateSearchNode(node.right, matchTerm);
+    case 'or':
+      return evaluateSearchNode(node.left, matchTerm) || evaluateSearchNode(node.right, matchTerm);
+    case 'not':
+      return evaluateSearchNode(node.left, matchTerm) && !evaluateSearchNode(node.right, matchTerm);
+  }
 }
 
 export function matchesSearchQuery(
@@ -230,8 +358,8 @@ export function matchesSearchQuery(
   ];
   const combined = fields.join(' ').toLowerCase();
 
-  // 1. Direct case-insensitive substring match
-  if (combined.includes(compiled.lowered)) {
+  // 1. Direct case-insensitive substring match (not with operators, so "auth NOT cron" text cannot bypass NOT)
+  if (!compiled.hasOperators && combined.includes(compiled.lowered)) {
     return true;
   }
 
@@ -240,41 +368,14 @@ export function matchesSearchQuery(
     return true;
   }
 
-  // 3. Multi-term matching (e.g. "nginx error" -> all terms must match)
-  const terms = compiled.terms;
-
-  if (terms.length > 0) {
-    const allTermsMatch = terms.every((term) => {
-      // Check for column-specific search (e.g. app_name:nginx or app:nginx)
-      if (term.includes(':')) {
-        const [col, val] = term.split(':', 2);
-        const cleanVal = val.replace(/^["'*]+|["'*]+$/g, '');
-        if (!cleanVal) return true;
-        if (col === 'app_name' || col === 'app') {
-          return (log.app_name || '').toLowerCase().includes(cleanVal);
-        }
-        if (col === 'source' || col === 'source_alias' || col === 'host') {
-          return (
-            (log.source_alias || '').toLowerCase().includes(cleanVal) ||
-            (log.source_ip || '').toLowerCase().includes(cleanVal)
-          );
-        }
-        if (col === 'message' || col === 'msg') {
-          return (log.message || '').toLowerCase().includes(cleanVal);
-        }
-      }
-
-      const cleanTerm = term.replace(/^["'*]+|["'*]+$/g, '');
-      if (!cleanTerm) return true;
-      return combined.includes(cleanTerm);
-    });
-
-    if (allTermsMatch) {
-      return true;
-    }
+  // 3. The query as an expression (e.g. "error OR timeout", "auth NOT cron"), grouped like history search
+  const matchTerm = (term: string) => matchesSearchTerm(log, term, combined);
+  if (compiled.expr) {
+    return evaluateSearchNode(compiled.expr, matchTerm);
   }
 
-  return false;
+  // 4. Incomplete operators, as while typing ("error OR"): every remaining term must match
+  return compiled.terms.length > 0 && compiled.terms.every(matchTerm);
 }
 
 /** Number of host chips and of app chips shown in the Quick Filters bar. */

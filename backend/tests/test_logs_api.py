@@ -1567,3 +1567,70 @@ class TestSearchPrefixAliases:
         res = await client.get("/api/logs", params={"query": "hostname:pve1"})
         assert res.status_code == 200
         assert res.json()["total"] == 0
+
+
+class TestSearchBooleanOperators:
+    """Pins how history search groups AND, OR and NOT (FTS5 precedence, tightest first: words side
+    by side, NOT, AND, OR). The live stream filter (matchesSearchQuery in LiveLogStream.tsx)
+    mirrors it for incoming rows."""
+
+    MESSAGES = [
+        "alpha",
+        "bravo",
+        "charlie",
+        "alpha charlie",
+        "bravo charlie",
+        "alpha bravo",
+        "alpha bravo charlie",
+    ]
+
+    @classmethod
+    def _entries(cls) -> list[dict]:
+        return [
+            {
+                "timestamp": f"2026-10-20T10:0{i}:00Z",
+                "received_at": f"2026-10-20T10:0{i}:01Z",
+                "source_ip": "10.0.0.9",
+                "source_alias": "h1",
+                "app_name": "svc",
+                "facility": 1,
+                "severity": 4,
+                "message": message,
+                "raw": message,
+            }
+            for i, message in enumerate(cls.MESSAGES)
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query, expected_messages",
+        [
+            ("alpha OR bravo", {"alpha", "bravo", "alpha charlie", "bravo charlie", "alpha bravo", "alpha bravo charlie"}),
+            ("alpha or bravo", {"alpha", "bravo", "alpha charlie", "bravo charlie", "alpha bravo", "alpha bravo charlie"}),
+            ("charlie NOT alpha", {"charlie", "bravo charlie"}),
+            ("charlie not alpha", {"charlie", "bravo charlie"}),
+            # OR binds loosest: alpha OR (bravo AND charlie)
+            ("alpha OR bravo charlie", {"alpha", "alpha charlie", "alpha bravo", "alpha bravo charlie", "bravo charlie"}),
+            ("alpha OR bravo AND charlie", {"alpha", "alpha charlie", "alpha bravo", "alpha bravo charlie", "bravo charlie"}),
+            # NOT binds tighter than AND and OR: (alpha NOT bravo) AND charlie, (alpha NOT bravo) OR charlie
+            ("alpha NOT bravo AND charlie", {"alpha charlie"}),
+            # Words side by side (implicit AND) bind tightest of all: alpha NOT (bravo charlie)
+            ("alpha NOT bravo charlie", {"alpha", "alpha charlie", "alpha bravo"}),
+            ("alpha charlie NOT bravo", {"alpha charlie"}),
+            ("alpha bravo OR charlie", {"alpha bravo", "alpha bravo charlie", "charlie", "alpha charlie", "bravo charlie"}),
+            ("alpha NOT bravo OR charlie", {"alpha", "alpha charlie", "charlie", "bravo charlie", "alpha bravo charlie"}),
+            ("alpha OR bravo NOT charlie", {"alpha", "alpha charlie", "alpha bravo", "alpha bravo charlie", "bravo"}),
+            ("(alpha OR bravo) AND charlie", {"alpha charlie", "bravo charlie", "alpha bravo charlie"}),
+            ('"alpha bravo"', {"alpha bravo", "alpha bravo charlie"}),
+            ('"alpha bravo" OR charlie', {"alpha bravo", "alpha bravo charlie", "charlie", "alpha charlie", "bravo charlie"}),
+        ],
+    )
+    async def test_operators_group_like_fts5(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, query, expected_messages
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        _seed_logs(tmp_path / "logs.db", self._entries())
+
+        res = await client.get("/api/logs", params={"query": query})
+        assert res.status_code == 200
+        assert {log["message"] for log in res.json()["logs"]} == expected_messages
