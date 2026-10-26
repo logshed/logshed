@@ -113,7 +113,8 @@ class LogFacetsResponse(BaseModel):
     host_to_apps: dict[str, list[str]]
     app_to_hosts: dict[str, list[str]]
     source_app_mapping: dict[str, list[str]] = Field(default_factory=dict)
-    truncated: bool = Field(False, description="True when a list or mapping was capped at 500 entries")
+    truncated: bool = Field(False, description="True when a list or mapping was capped at `limit` entries")
+    limit: int = Field(..., description="Most entries each list and mapping holds")
 
 
 class LogDeleteRequest(BaseModel):

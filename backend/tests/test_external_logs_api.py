@@ -201,6 +201,7 @@ class TestExternalLogsApi:
         assert "traefik" in data["apps"]
         assert "source_app_mapping" in data
         assert data["source_app_mapping"].get("compute-01") == ["traefik"]
+        assert data["limit"] == 500
 
     @pytest.mark.asyncio
     async def test_alert_history_query(

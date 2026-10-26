@@ -276,7 +276,7 @@ describe('LogSearchBar N07 fixes', () => {
   };
 
   it('shows a note in the host and app lists when the facets were capped', () => {
-    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated />);
+    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated facetsLimit={500} />);
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.getByText(/Showing the first 500 hosts/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('All Apps'));
@@ -405,5 +405,28 @@ describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', ()
     const clear = screen.getByRole('button', { name: 'Clear search query' });
     expect(help.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(help.parentElement!.className).toContain('right-7');
+  });
+});
+
+describe('LogSearchBar capped-list note follows the server limit (BL-04)', () => {
+  const baseProps = {
+    onSearch: vi.fn(),
+    onReset: vi.fn(),
+    availableSources: ['host-a'],
+    availableApps: ['nginx'],
+  };
+
+  it('names the limit the server reported', () => {
+    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated facetsLimit={250} />);
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.getByText('Showing the first 250 hosts. Type a name to add others.')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('All Apps'));
+    expect(screen.getByText('Showing the first 250 apps. Type a name to add others.')).toBeInTheDocument();
+  });
+
+  it('does not guess a number when the limit is unknown', () => {
+    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated />);
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.getByText('Showing only some hosts. Type a name to add others.')).toBeInTheDocument();
   });
 });

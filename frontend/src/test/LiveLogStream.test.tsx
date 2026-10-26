@@ -2203,6 +2203,7 @@ describe('LiveLogStream N07 fixes', () => {
     host_to_apps: { 'host-a': ['nginx'] },
     app_to_hosts: { nginx: ['host-a'] },
     truncated,
+    limit: 500,
   });
 
   beforeEach(() => {
@@ -2941,5 +2942,39 @@ describe('matchesSearchQuery AND, OR and NOT like history search', () => {
     expect(matchesSearchQuery(makeLog('cron job ran'), compileSearchQuery('NOT cron'))).toBe(true);
     expect(matchesSearchQuery(makeLog('disk error'), compileSearchQuery('(error'))).toBe(true);
     expect(matchesSearchQuery(makeLog('disk error'), compileSearchQuery('error OR OR timeout'))).toBe(false);
+  });
+});
+
+describe('LiveLogStream passes the facets limit to the capped-list note (BL-04)', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({} as any);
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({
+      sources: ['host-a'],
+      apps: ['nginx'],
+      host_to_apps: { 'host-a': ['nginx'] },
+      app_to_hosts: { nginx: ['host-a'] },
+      truncated: true,
+      limit: 300,
+    } as any);
+  });
+
+  it('shows the limit from the facets response', async () => {
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+    await act(async () => {});
+    fireEvent.click(screen.getByText('All Hosts'));
+    expect(screen.getByText(/Showing the first 300 hosts/)).toBeInTheDocument();
   });
 });

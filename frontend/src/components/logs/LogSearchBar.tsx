@@ -19,8 +19,11 @@ const TIME_PRESET_MS: Record<string, number> = {
   '7d': 7 * 24 * 60 * 60 * 1000,
 };
 
-const FACETS_NOTE_HOSTS = 'Showing the first 500 hosts. Type a name to add others.';
-const FACETS_NOTE_APPS = 'Showing the first 500 apps. Type a name to add others.';
+/** Note for a host or app list the facets endpoint capped; the limit comes from the response. */
+function facetsNote(kind: 'hosts' | 'apps', limit?: number): string {
+  const shown = limit ? `the first ${limit}` : 'only some';
+  return `Showing ${shown} ${kind}. Type a name to add others.`;
+}
 
 export const SEARCH_PLACEHOLDER = 'Search logs, e.g. "disk full", error OR timeout, app:nginx';
 
@@ -65,6 +68,8 @@ interface LogSearchBarProps {
   totalCapped?: boolean;
   /** True when the host and app lists were capped by the facets endpoint. */
   facetsTruncated?: boolean;
+  /** Most entries the facets endpoint returns per list (its `limit` field). */
+  facetsLimit?: number;
 }
 
 export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
@@ -79,6 +84,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   totalCount,
   totalCapped = false,
   facetsTruncated = false,
+  facetsLimit,
 }) => {
   // The selected preset follows the filters (saved views, links, Reset); "Custom" chosen before any
   // bounds are entered is the only local choice.
@@ -346,7 +352,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             });
           }}
           placeholder="All Hosts"
-          note={facetsTruncated ? FACETS_NOTE_HOSTS : undefined}
+          note={facetsTruncated ? facetsNote('hosts', facetsLimit) : undefined}
         />
 
         {/* App / Container Multi-Select */}
@@ -362,7 +368,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             });
           }}
           placeholder="All Apps"
-          note={facetsTruncated ? FACETS_NOTE_APPS : undefined}
+          note={facetsTruncated ? facetsNote('apps', facetsLimit) : undefined}
         />
 
         {/* Severity Filter Dropdown */}
@@ -519,7 +525,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 });
               }}
               placeholder="All Hosts"
-              note={facetsTruncated ? FACETS_NOTE_HOSTS : undefined}
+              note={facetsTruncated ? facetsNote('hosts', facetsLimit) : undefined}
             />
           </div>
 
@@ -538,7 +544,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 });
               }}
               placeholder="All Apps"
-              note={facetsTruncated ? FACETS_NOTE_APPS : undefined}
+              note={facetsTruncated ? facetsNote('apps', facetsLimit) : undefined}
             />
           </div>
 

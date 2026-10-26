@@ -474,6 +474,7 @@ async def get_log_facets(
             "source_app_mapping": mapping,
             "app_to_hosts": app_mapping,
             "truncated": truncated,
+            "limit": FACET_LIMIT,
         }
 
     data = await run_db_query(_fetch_facets)

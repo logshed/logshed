@@ -297,6 +297,8 @@ export interface LogFacetsResponse {
   host_to_apps: Record<string, string[]>;
   app_to_hosts: Record<string, string[]>;
   truncated?: boolean;
+  /** Most entries each list holds; truncated is true when more existed */
+  limit?: number;
 }
 
 export interface AiModelInfo {

@@ -563,6 +563,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [accumulatedSources, setAccumulatedSources] = useState<string[]>([]);
   const [accumulatedApps, setAccumulatedApps] = useState<string[]>([]);
   const [facetsTruncated, setFacetsTruncated] = useState<boolean>(false);
+  const [facetsLimit, setFacetsLimit] = useState<number | undefined>(undefined);
   // Whether the database holds any logs: null until the facets arrive, true once any log is seen.
   // It picks the empty-state text: "Waiting for new logs..." or the first-run card.
   const [databaseHasLogs, setDatabaseHasLogs] = useState<boolean | null>(null);
@@ -1445,6 +1446,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     fetchLogFacets()
       .then((facets) => {
         setFacetsTruncated(Boolean(facets.truncated));
+        setFacetsLimit(facets.limit);
         const hasFacets = (facets.sources?.length ?? 0) > 0 || (facets.apps?.length ?? 0) > 0;
         setDatabaseHasLogs((prev) => prev === true || hasFacets);
         if (facets.sources && facets.sources.length > 0) {
@@ -1775,6 +1777,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           totalCount={totalCount ?? undefined}
           totalCapped={totalCapped}
           facetsTruncated={facetsTruncated}
+          facetsLimit={facetsLimit}
         />
 
         {/* Stream Controls & Filter Pills Bar */}
