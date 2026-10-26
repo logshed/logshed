@@ -239,6 +239,7 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         name="count_logs",
         description=(
             "Count homelab logs matching filters with optional grouping. "
+            "query uses the same syntax as query_logs. "
             "Very fast and token-efficient for checking error volume, trends, or verifying issue presence. "
             "Accepts relative time ('1h', '24h', 'since_midnight') and named severity ('error', 'warning', 'info'). "
             "group_by supports 'severity' (alias 'level'), 'app' (alias 'app_name'), or "
@@ -285,6 +286,9 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         description=(
             "Search homelab logs using full-text search (FTS5 syntax), application filters, "
             "host filters, severity thresholds, and time bounds. "
+            "In query, every word must match, as a prefix ('time' finds 'timeout'); use \"exact phrase\" for a phrase, "
+            "AND, OR and NOT (any case) with brackets to combine terms, and the column filters app: (or app_name:), "
+            "host: or source: (or source_alias:) and msg: (or message:), for example 'host:pve1 AND msg:refused'. "
             "Returns compact log entries by default (omits redundant raw syslog packets to minimize token usage). "
             "Accepts relative time ('1h', '24h', 'since_midnight') and named severities ('error', 'warning', 'info'). "
             "Set include_raw=True or specify fields list to customize output. "

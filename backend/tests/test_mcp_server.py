@@ -1846,3 +1846,18 @@ class TestQueryTokenIsSupportedOptIn:
                         assert not param.get("deprecated", False), path
                         assert "deprecated" not in param.get("description", "").lower(), path
         assert checked > 0
+
+
+class TestMCPQuerySyntaxDescriptions:
+    """The tool descriptions tell assistants the query syntax history search accepts."""
+
+    def test_query_logs_description_lists_the_query_syntax(self):
+        server = create_mcp_server(stdio=True)
+        desc = server._tool_manager._tools["query_logs"].description
+        for token in ("app:", "host:", "source:", "msg:", "AND", "OR", "NOT", '"exact phrase"', "prefix"):
+            assert token in desc, token
+
+    def test_count_logs_description_points_to_the_same_syntax(self):
+        server = create_mcp_server(stdio=True)
+        desc = server._tool_manager._tools["count_logs"].description
+        assert "same syntax as query_logs" in desc
