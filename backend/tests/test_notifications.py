@@ -893,3 +893,52 @@ class TestNotifierProxyHandling:
             with _pinned_destination_guard():
                 with pytest.raises(BlockedNotificationDestinationError):
                     socket_mod.getaddrinfo("127.0.0.1", 3128)
+
+
+class TestProxyNoticeAtStartup:
+    """BL-07: the proxy notice is logged at startup, not only at the first notification."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_proxy_env(self, monkeypatch):
+        import app.services.notifier as notifier_mod
+
+        for name in _PROXY_ENV_NAMES:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(notifier_mod, "_proxy_notice_logged", False, raising=False)
+
+    @staticmethod
+    def _notices(caplog) -> list[str]:
+        return [r.getMessage() for r in caplog.records if "Notifications use the HTTP proxy" in r.getMessage()]
+
+    def test_logs_the_notice_once_when_a_proxy_is_set(self, monkeypatch, caplog):
+        import logging
+
+        from app.services.notifier import log_proxy_notice_if_configured
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.lan:3128")
+        with caplog.at_level(logging.INFO, logger="app.services.notifier"):
+            log_proxy_notice_if_configured()
+            log_proxy_notice_if_configured()
+        notices = self._notices(caplog)
+        assert len(notices) == 1
+        assert "proxy.lan:3128" in notices[0]
+
+    def test_logs_nothing_without_a_proxy(self, caplog):
+        import logging
+
+        from app.services.notifier import log_proxy_notice_if_configured
+
+        with caplog.at_level(logging.INFO, logger="app.services.notifier"):
+            log_proxy_notice_if_configured()
+        assert self._notices(caplog) == []
+
+    @pytest.mark.asyncio
+    async def test_startup_logs_the_notice(self, monkeypatch, caplog):
+        import logging
+
+        from app.main import create_app, lifespan
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.lan:3128")
+        with caplog.at_level(logging.INFO, logger="app.services.notifier"):
+            async with lifespan(create_app()):
+                assert len(self._notices(caplog)) == 1

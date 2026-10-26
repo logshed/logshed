@@ -338,6 +338,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Error pre-seeding additional Docker hosts: {e}")
 
+    # Say at startup, not at the first send, when notifications go through an HTTP proxy
+    from app.services.notifier import log_proxy_notice_if_configured
+    log_proxy_notice_if_configured()
+
     # Ensure user presets directories exist in DATA_DIR
     for preset_sub in ("alerts", "drops"):
         (Path(get_data_dir()) / "presets" / preset_sub).mkdir(parents=True, exist_ok=True)

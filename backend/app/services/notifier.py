@@ -563,6 +563,13 @@ def _log_proxy_notice_once(endpoints: frozenset) -> None:
     )
 
 
+def log_proxy_notice_if_configured() -> None:
+    """Logs the proxy notice at startup when a proxy variable is set, so it is not first seen at a send."""
+    proxy_endpoints = _configured_proxy_endpoints()
+    if proxy_endpoints:
+        _log_proxy_notice_once(proxy_endpoints)
+
+
 def _is_proxy_lookup(host, port_num: Optional[int], endpoints: frozenset) -> bool:
     if not endpoints or port_num is None:
         return False
