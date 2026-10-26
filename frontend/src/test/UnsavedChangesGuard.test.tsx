@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { App } from '../App.tsx';
 import * as settingsApi from '../api/settings.ts';
@@ -327,5 +327,81 @@ describe('UnsavedChangesGuard Integration', () => {
         expect(screen.getByLabelText('Internal Log Severity Threshold')).toBeInTheDocument();
       });
     });
+  });
+});
+
+describe('Unsaved changes guard keeps the URL of a link it held back', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
+      ai_provider: 'gemini',
+      ai_model: 'gemini-3.7-flash',
+      ai_api_key: '********',
+      ai_base_url: null,
+      internal_log_level: 'WARNING',
+      retention_days: 14,
+      max_retention_days: 30,
+      has_ai_api_key: true,
+    });
+    vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
+      provider: 'gemini',
+      models: [{ id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', supports_thinking: true }],
+      has_api_key: true,
+      cached_at: null,
+      is_live: true,
+    });
+  });
+
+  /** Opens Settings, makes an unsaved edit, then follows a link such as "View logs" on a host alias. */
+  const followLinkWithUnsavedEdits = async (url: string) => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /^Settings$/i }));
+    await waitFor(() => expect(screen.getByText('System Configuration')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Internal Log Severity Threshold'), { target: { value: 'ERROR' } });
+    act(() => {
+      window.history.pushState(null, '', url);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() => expect(screen.getByText('Unsaved Changes')).toBeInTheDocument());
+    // While the prompt is open the address stays on Settings
+    expect(window.location.pathname.startsWith('/settings')).toBe(true);
+  };
+
+  it('Discard & Leave opens the link with its filters', async () => {
+    await followLinkWithUnsavedEdits('/?source=nas');
+    fireEvent.click(screen.getByRole('button', { name: /Discard & Leave/i }));
+    await waitFor(() => expect(screen.getByTestId('live-log-stream')).toBeInTheDocument());
+    expect(window.location.pathname + window.location.search).toBe('/?source=nas');
+  });
+
+  it('Save & Continue opens the link with its filters', async () => {
+    vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
+    await followLinkWithUnsavedEdits('/?source=nas&app=nginx');
+    fireEvent.click(screen.getByRole('button', { name: /Save & Continue/i }));
+    await waitFor(() => expect(screen.getByTestId('live-log-stream')).toBeInTheDocument());
+    expect(window.location.pathname + window.location.search).toBe('/?source=nas&app=nginx');
+  });
+
+  it('Keep Editing stays on Settings, and a later tab click goes to the plain tab path', async () => {
+    await followLinkWithUnsavedEdits('/?source=nas');
+    fireEvent.click(screen.getByRole('button', { name: /Keep Editing/i }));
+    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).toBeNull());
+    expect(screen.getByText('System Configuration')).toBeInTheDocument();
+    expect(window.location.search).toBe('');
+
+    // The held-back link is forgotten: a Navbar click afterwards does not reuse it
+    fireEvent.click(screen.getByRole('button', { name: /Console View/i }));
+    await waitFor(() => expect(screen.getByText('Unsaved Changes')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Discard & Leave/i }));
+    await waitFor(() => expect(screen.getByTestId('live-log-stream')).toBeInTheDocument());
+    expect(window.location.pathname + window.location.search).toBe('/');
   });
 });

@@ -89,12 +89,16 @@ export const App: React.FC = () => {
   const [pendingTab, setPendingTab] = useState<AppTab | null>(null);
   const [isSavingModal, setIsSavingModal] = useState<boolean>(false);
   const saveSettingsTriggerRef = useRef<(() => Promise<boolean>) | null>(null);
+  // Full URL of a link the guard held back (for example "View logs" opens /?source=<alias>), so
+  // leaving afterwards keeps its filters; null for a plain tab change
+  const pendingUrlRef = useRef<string | null>(null);
 
   // Synchronize browser history and popstate navigation
   useEffect(() => {
     const handlePopState = () => {
       const nextTab = pathToTab(window.location.pathname);
       if (activeTab === 'settings' && isSettingsDirty && nextTab !== 'settings') {
+        pendingUrlRef.current = window.location.pathname + window.location.search + window.location.hash;
         window.history.pushState(null, '', tabToPath(activeTab));
         setPendingTab(nextTab);
         return;
@@ -189,6 +193,7 @@ export const App: React.FC = () => {
 
   const handleTabChange = (nextTab: AppTab) => {
     if (activeTab === 'settings' && isSettingsDirty && nextTab !== 'settings') {
+      pendingUrlRef.current = null;
       setPendingTab(nextTab);
       return;
     }
@@ -199,6 +204,28 @@ export const App: React.FC = () => {
     const targetPath = tabToPath(nextTab);
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, '', targetPath);
+    }
+  };
+
+  // The unsaved changes prompt was answered: stay on Settings (target null) or leave for the tab,
+  // at the held-back link's full URL when there was one
+  const finishPendingNavigation = (target: AppTab | null) => {
+    const pendingUrl = pendingUrlRef.current;
+    pendingUrlRef.current = null;
+    setPendingTab(null);
+    if (!target) {
+      const currentPath = tabToPath(activeTab);
+      if (window.location.pathname !== currentPath) {
+        window.history.pushState(null, '', currentPath);
+      }
+      return;
+    }
+    setIsSettingsDirty(false);
+    if (target !== 'settings') clearSettingsHandOffs();
+    setActiveTab(target);
+    const targetUrl = pendingUrl || tabToPath(target);
+    if (window.location.pathname + window.location.search + window.location.hash !== targetUrl) {
+      window.history.pushState(null, '', targetUrl);
     }
   };
 
@@ -299,13 +326,7 @@ export const App: React.FC = () => {
       {/* Unsaved Changes Confirmation Modal */}
       <Modal
         isOpen={pendingTab !== null}
-        onClose={() => {
-          setPendingTab(null);
-          const currentPath = tabToPath(activeTab);
-          if (window.location.pathname !== currentPath) {
-            window.history.pushState(null, '', currentPath);
-          }
-        }}
+        onClose={() => finishPendingNavigation(null)}
         title="Unsaved Changes"
         maxWidth="max-w-md"
       >
@@ -322,32 +343,14 @@ export const App: React.FC = () => {
           <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-3 border-t border-dark-700">
             <button
               type="button"
-              onClick={() => {
-                setPendingTab(null);
-                const currentPath = tabToPath(activeTab);
-                if (window.location.pathname !== currentPath) {
-                  window.history.pushState(null, '', currentPath);
-                }
-              }}
+              onClick={() => finishPendingNavigation(null)}
               className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 transition cursor-pointer"
             >
               Keep Editing
             </button>
             <button
               type="button"
-              onClick={() => {
-                const target = pendingTab;
-                setPendingTab(null);
-                setIsSettingsDirty(false);
-                if (target) {
-                  if (target !== 'settings') clearSettingsHandOffs();
-                  setActiveTab(target);
-                  const targetPath = tabToPath(target);
-                  if (window.location.pathname !== targetPath) {
-                    window.history.pushState(null, '', targetPath);
-                  }
-                }
-              }}
+              onClick={() => finishPendingNavigation(pendingTab)}
               className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/40 border border-red-800/60 transition cursor-pointer"
             >
               Discard &amp; Leave
@@ -362,17 +365,7 @@ export const App: React.FC = () => {
                     ? await saveSettingsTriggerRef.current()
                     : true;
                   if (success) {
-                    const target = pendingTab;
-                    setPendingTab(null);
-                    setIsSettingsDirty(false);
-                    if (target) {
-                      if (target !== 'settings') clearSettingsHandOffs();
-                      setActiveTab(target);
-                      const targetPath = tabToPath(target);
-                      if (window.location.pathname !== targetPath) {
-                        window.history.pushState(null, '', targetPath);
-                      }
-                    }
+                    finishPendingNavigation(pendingTab);
                   }
                 } finally {
                   setIsSavingModal(false);

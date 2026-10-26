@@ -12,7 +12,7 @@ The frontend implements single-page HTML5 History API routing across four top-le
 - **`/storage` (Storage Metrics):** Storage metrics dashboard displaying database file sizes, host mount disk usage, 30-day volume trends, manual prune triggers, and database vacuum utilities. Lowering retention or purging expired data first shows a preview modal listing the logs, history items, metrics and AI audit records that would be deleted.
 - **`/settings` (Settings & Aliases):** Application settings, AI provider configuration, notification channels, API & MCP access, advanced runtime options, and IP-to-Host alias management located at `/settings/aliases`. Top-level requests to `/aliases` automatically redirect to `/settings/aliases`.
 
-Unsaved changes detection and browser exit guards prevent accidental loss of form inputs across settings tabs and modal dialogs.
+Unsaved changes detection and browser exit guards prevent accidental loss of form inputs across settings tabs and modal dialogs. When the prompt holds back a link that leaves Settings (for example "View logs" on a host alias, which opens `/?source=<alias>`), Discard & Leave and Save & Continue open that exact URL, so its filters are kept.
 
 ## 3. Core Components & Views
 
