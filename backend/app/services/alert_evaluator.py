@@ -35,6 +35,9 @@ from app.services.alert_presets import extract_ip_from_message
 
 logger = logging.getLogger(__name__)
 
+# A failed automatic-disable write is retried with the next batches, up to this many attempts in all
+AUTO_DISABLE_MAX_ATTEMPTS = 5
+
 # Characters that make an alert pattern a regular expression; anything else is plain text
 _REGEX_METACHARS_BEFORE_BACKSLASH = frozenset("*+?[](){}^$|")
 _REGEX_METACHARS = _REGEX_METACHARS_BEFORE_BACKSLASH | {"\\"}
@@ -242,6 +245,8 @@ class AlertEvaluator:
         self._auto_disable_pending: set[int] = set()
         # Rule ids whose database write still has to be scheduled
         self._auto_disable_queue: list[int] = []
+        # Failed database writes so far, per rule id
+        self._auto_disable_attempts: dict[int, int] = {}
         if self.db_path:
             self.reload_rules()
 
@@ -521,11 +526,28 @@ class AlertEvaluator:
             with conn:
                 conn.execute("UPDATE alert_rules SET is_enabled = 0 WHERE id = ? AND is_enabled = 1", (rule_id,))
         except Exception as exc:
-            # The rule stays off in memory until restart; the next start runs it again
-            logger.error(f"Failed to store the automatic disable of alert rule {rule_id}: {exc}")
+            # Queue it again for the next batch (for example after a busy database). The rule stays
+            # off in memory meanwhile; if every attempt fails, the next start runs it again.
+            with self._auto_disable_lock:
+                attempts = self._auto_disable_attempts.get(rule_id, 0) + 1
+                self._auto_disable_attempts[rule_id] = attempts
+                retry = attempts < AUTO_DISABLE_MAX_ATTEMPTS
+                if retry:
+                    self._auto_disable_queue.append(rule_id)
+            if retry:
+                logger.warning(
+                    f"Failed to store the automatic disable of alert rule {rule_id} "
+                    f"(attempt {attempts} of {AUTO_DISABLE_MAX_ATTEMPTS}), retrying with the next batch: {exc}"
+                )
+            else:
+                logger.error(
+                    f"Failed to store the automatic disable of alert rule {rule_id} after {attempts} attempts; "
+                    f"it stays off until LogShed restarts, then runs again: {exc}"
+                )
             return
         with self._auto_disable_lock:
             self._auto_disable_pending.discard(rule_id)
+            self._auto_disable_attempts.pop(rule_id, None)
         try:
             self.reload_rules()
         except Exception as exc:

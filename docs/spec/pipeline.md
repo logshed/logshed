@@ -85,7 +85,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Alert Rules Evaluation Order:**
   - Alert rules evaluate in user-configured sequence (`ORDER BY display_order ASC, id ASC`).
   - Each rule evaluates within its own sliding window, and notification dispatch within a batch deterministically follows this configured order.
-- **Pattern Time Limit and Automatic Disabling:** Each match of a user-written alert or drop rule pattern is stopped after `USER_REGEX_TIMEOUT_MS` (default 50 ms) and counts as no match. A rule whose pattern times out 20 times within 5 minutes is switched off automatically: it is stored as disabled (the rules list shows it as off), and an error naming the rule and the reason is logged (once per rule per process). Simplify the pattern, then enable the rule again.
+- **Pattern Time Limit and Automatic Disabling:** Each match of a user-written alert or drop rule pattern is stopped after `USER_REGEX_TIMEOUT_MS` (default 50 ms) and counts as no match. A rule whose pattern times out 20 times within 5 minutes is switched off automatically: it is stored as disabled (the rules list shows it as off), and an error naming the rule and the reason is logged (once per rule per process). If storing the disabled state fails (for example while the database is busy), an alert rule stays off in memory and the write is retried with the next batches, up to 5 attempts (drop rules retry at their 30-second counter flush). Simplify the pattern, then enable the rule again.
 
 ### 5.1 HTTP Ingest (`POST /api/v1/ingest`)
 

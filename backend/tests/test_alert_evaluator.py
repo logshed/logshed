@@ -2182,6 +2182,88 @@ class TestAlertRuleTimeoutAutoDisable:
         await ev.stop()
         assert written == [setup["slow_id"]]
 
+    @staticmethod
+    def _off_in_memory(ev, rule_id: int) -> bool:
+        """Switched off in memory: gone from the cache, or still listed with is_enabled False."""
+        return all(not r.is_enabled for r in ev._rules if r.id == rule_id)
+
+    @staticmethod
+    def _fail_disable_writes(monkeypatch, failures: int) -> list[int]:
+        """Make the first `failures` disable writes fail as a locked database would; returns the attempt log."""
+        import app.api.deps as deps
+
+        attempts: list[int] = []
+        real_get = deps.get_thread_read_connection
+
+        class _Conn:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def __enter__(self):
+                self._conn.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._conn.__exit__(*exc)
+
+            def execute(self, sql, *args):
+                if sql.startswith("UPDATE alert_rules SET is_enabled = 0"):
+                    attempts.append(len(attempts) + 1)
+                    if len(attempts) <= failures:
+                        raise sqlite3.OperationalError("database is locked")
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        monkeypatch.setattr(deps, "get_thread_read_connection", lambda db: _Conn(real_get(db)))
+        return attempts
+
+    @pytest.mark.asyncio
+    async def test_failed_disable_write_is_retried_with_the_next_batch(self, setup, monkeypatch, caplog):
+        """BL-02: a failed write is queued again, so the rule does not come back enabled after a restart."""
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
+        attempts = self._fail_disable_writes(monkeypatch, failures=1)
+        ev = setup["evaluator"]
+        await ev.evaluate_batch(self._batch(20))
+        await ev.stop()
+        assert attempts == [1]
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        assert self._off_in_memory(ev, setup["slow_id"])
+
+        # The next batch retries the write, which now lands
+        await ev.evaluate_batch(self._batch(1, message="boom"))
+        await ev.stop()
+        assert attempts == [1, 2]
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+        assert self._off_in_memory(ev, setup["slow_id"])
+        assert ev._auto_disable_queue == [] and not ev._auto_disable_pending
+        assert any("retrying with the next batch" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_disable_write_gives_up_after_the_attempt_limit(self, setup, monkeypatch, caplog):
+        import logging
+
+        import app.services.alert_evaluator as alert_evaluator_mod
+
+        caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
+        attempts = self._fail_disable_writes(monkeypatch, failures=1000)
+        ev = setup["evaluator"]
+        await ev.evaluate_batch(self._batch(20))
+        await ev.stop()
+        for _ in range(alert_evaluator_mod.AUTO_DISABLE_MAX_ATTEMPTS + 2):
+            await ev.evaluate_batch(self._batch(1, message="boom"))
+            await ev.stop()
+
+        assert len(attempts) == alert_evaluator_mod.AUTO_DISABLE_MAX_ATTEMPTS
+        assert ev._auto_disable_queue == []
+        # Still off in memory until restart, as before this change
+        assert self._off_in_memory(ev, setup["slow_id"])
+        gave_up = [r for r in caplog.records if "stays off until LogShed restarts" in r.getMessage()]
+        assert len(gave_up) == 1 and gave_up[0].levelno == logging.ERROR
+
 
 class TestAlertAiContextRedactionOffLoop:
     """N08-R: the log window sent to AI enrichment is redacted in one worker-thread call."""
