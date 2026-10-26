@@ -365,7 +365,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           <div className="p-8 text-center space-y-2">
             <Key className="w-8 h-8 text-slate-600 mx-auto" />
             <p className="text-xs font-medium text-slate-300">No API tokens generated yet</p>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
               Create a token to allow Home Assistant, backup runners, or AI agents to access LogShed.
             </p>
           </div>
@@ -467,12 +467,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                         </td>
                         <td className="py-3 px-4 text-slate-400">
                           {token.expires_at ? formatDate(token.expires_at) : (
-                            <span className="text-slate-500">Never</span>
+                            <span className="text-slate-400">Never</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-slate-400">
                           {token.last_used_at ? formatDate(token.last_used_at) : (
-                            <span className="text-slate-500">Never</span>
+                            <span className="text-slate-400">Never</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-right whitespace-nowrap">
@@ -567,7 +567,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <label className="text-xs font-semibold text-slate-300">
                   SSE Endpoint URL
                 </label>
-                <span className="text-[11px] text-slate-500">
+                <span className="text-[11px] text-slate-400">
                   Network SSE Transport
                 </span>
               </div>
@@ -684,7 +684,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                     <pre className="p-2.5 bg-dark-900 border border-dark-800 rounded text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
                       {claudeProxyConfigSnippet}
                     </pre>
-                    <p className="text-[10px] text-slate-500">
+                    <p className="text-[11px] text-slate-400">
                       Note: Requires <code className="text-slate-400 font-mono">mcp-proxy</code> installed locally (Python package: <code className="text-slate-400 font-mono">uv tool install mcp-proxy</code> or <code className="text-slate-400 font-mono">pipx install mcp-proxy</code>; the npm package of the same name will not work).
                     </p>
                   </div>

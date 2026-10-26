@@ -73,7 +73,7 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
           <TrendingUp className="w-4 h-4 text-accent-500" />
           <span>30-Day Storage & Volume Trend</span>
         </h3>
-        <div className="h-48 flex items-center justify-center text-slate-500 font-mono text-xs">
+        <div className="h-48 flex items-center justify-center text-slate-400 font-mono text-xs">
           No historical storage metrics recorded yet. Metrics are sampled hourly.
         </div>
       </div>

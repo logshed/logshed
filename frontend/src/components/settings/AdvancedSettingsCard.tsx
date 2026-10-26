@@ -251,7 +251,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               />
             </div>
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-400">
             The timeout applies to every AI provider. The thinking budget applies to Gemini and Claude models that support thinking (OpenAI reasoning models use a fixed low effort). Set the budget to 0 to turn thinking off.
           </p>
         </div>
@@ -275,7 +275,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 onChange={(e) => setAppUrl(e.target.value)}
                 className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
-              <p className="text-[11px] text-slate-500 mt-1">
+              <p className="text-[11px] text-slate-400 mt-1">
                 Used in notification dispatch to generate direct links to incident history.
               </p>
             </div>
@@ -291,7 +291,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 />
                 <span className="font-medium">Allow Local / LAN Webhook Targets</span>
               </label>
-              <p className="text-[11px] text-slate-500 mt-1 pl-6.5">
+              <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
                 Permits webhooks targeting private IPv4/IPv6 ranges (e.g. local Gotify or Home Assistant).
               </p>
             </div>
@@ -317,7 +317,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 onChange={(e) => setTrustedProxies(e.target.value)}
                 className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
-              <p className="text-[11px] text-slate-500 mt-1">
+              <p className="text-[11px] text-slate-400 mt-1">
                 Comma-separated IP addresses or CIDR ranges. Enables X-Forwarded-For parsing.
               </p>
             </div>
@@ -334,7 +334,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                   />
                   <span className="font-medium">Trust Docker Bridge Networks</span>
                 </label>
-                <p className="text-[11px] text-slate-500 mt-1 pl-6.5">
+                <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
                   Trusts private Docker subnet 172.16.0.0/12 as reverse proxy gateways.
                 </p>
               </div>
@@ -350,7 +350,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                   />
                   <span className="font-medium">Force Secure Session Cookies</span>
                 </label>
-                <p className="text-[11px] text-slate-500 mt-1 pl-6.5">
+                <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
                   Applies immediately to inbound client IP extraction and session cookie generation.
                 </p>
               </div>
@@ -396,7 +396,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               />
             </div>
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-400">
             Takes effect immediately for new connections and active listeners. Setting timeout to 0 keeps connections open indefinitely.
           </p>
         </div>

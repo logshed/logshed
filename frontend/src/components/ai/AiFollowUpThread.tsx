@@ -192,7 +192,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
   };
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading follow-up discussion..." className="p-4 text-center text-slate-500 font-mono text-xs flex items-center justify-center gap-2" />;
+    return <LoadingSpinner message="Loading follow-up discussion..." className="p-4 text-center text-slate-400 font-mono text-xs flex items-center justify-center gap-2" />;
   }
 
   if (loadError) {
@@ -362,7 +362,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
               <span className="hidden sm:inline">Send</span>
             </button>
           </div>
-          <div className="flex items-center justify-between font-mono text-[10px] text-slate-500">
+          <div className="flex items-center justify-between font-mono text-[11px] text-slate-400">
             <span className="hidden sm:inline">Ctrl+Enter or Cmd+Enter to send</span>
             <span className="ml-auto">
               {draft.length} / {MAX_QUESTION_LENGTH}

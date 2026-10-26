@@ -341,7 +341,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                   }
                   className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-500">Average logs per second to trigger alert.</p>
+                <p className="text-[11px] text-slate-400">Average logs per second to trigger alert.</p>
               </div>
 
               <div className="space-y-1">
@@ -358,7 +358,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                   }
                   className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-500">Sustained duration window (e.g. 30s).</p>
+                <p className="text-[11px] text-slate-400">Sustained duration window (e.g. 30s).</p>
               </div>
             </div>
             <p className="text-[11px] text-slate-400 pt-1">
@@ -388,7 +388,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                   }
                   className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-500">Number of events to trigger alert.</p>
+                <p className="text-[11px] text-slate-400">Number of events to trigger alert.</p>
               </div>
 
               <div className="space-y-1">
@@ -405,7 +405,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                   }
                   className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-500">Sliding time window duration.</p>
+                <p className="text-[11px] text-slate-400">Sliding time window duration.</p>
               </div>
             </div>
           </div>
@@ -456,7 +456,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             placeholder="e.g. Failed password|authentication failure"
             className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono text-xs"
           />
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-400">
             Matches against log message text using regular expression search or case-insensitive keyword search.
           </p>
           {referenceMessage && (
@@ -485,7 +485,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             }
             className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
           />
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-400">
             Minimum duration to suppress repeat notifications after an alert fires.
           </p>
         </div>

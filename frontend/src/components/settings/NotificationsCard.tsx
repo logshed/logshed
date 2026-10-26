@@ -609,7 +609,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               {scheduleTimeError ? (
                 <p className="text-[11px] text-red-400">{scheduleTimeError}</p>
               ) : (
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-400">
                   {isDigestControlled
                     ? '24-hour format (e.g. 09:00).'
                     : '24-hour format (e.g. 09:00). Saved when you leave this field.'}
@@ -619,7 +619,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           </div>
 
           {digestLastRun && (
-            <div className="text-[11px] text-slate-500 pt-1 font-mono flex items-center gap-1.5">
+            <div className="text-[11px] text-slate-400 pt-1 font-mono flex items-center gap-1.5">
               <span>Last scheduled run:</span>
               <span className="text-slate-400">{new Date(digestLastRun).toLocaleString()}</span>
             </div>
@@ -695,7 +695,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               placeholder="discord://webhook_id/webhook_token or gotify://hostname/token"
               className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-[11px] text-slate-400 mt-1">
               Supports Discord (<code>discord://...</code>), Gotify (<code>gotify://...</code>), Telegram (<code>tgram://...</code>), Ntfy (<code>ntfy://...</code>), Pushover (<code>pover://...</code>), Slack (<code>slack://...</code>), and generic webhooks (<code>https://...</code>).
             </p>
           </div>

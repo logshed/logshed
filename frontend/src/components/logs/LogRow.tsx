@@ -113,7 +113,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         </div>
 
         {/* Line 3: Timestamp (left) + AI Action (right, only when AI is on) */}
-        <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+        <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
           <span className="text-[10px] text-slate-400 font-mono shrink-0 select-none">
             {displayTimestamp}
           </span>

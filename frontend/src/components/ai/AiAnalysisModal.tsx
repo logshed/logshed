@@ -843,7 +843,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         {fallbackList.length} fallback{fallbackList.length === 1 ? '' : 's'}
                       </span>
                     ) : (
-                      <span className="hidden sm:inline text-[10px] text-slate-500">
+                      <span className="hidden sm:inline text-[11px] text-slate-400">
                         no fallbacks
                       </span>
                     )}
@@ -976,13 +976,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-400 uppercase">
                       Fallback Models (Sequential Failover Chain)
                     </label>
-                    <span className="text-[10px] text-slate-500 font-mono">
+                    <span className="text-[11px] text-slate-400 font-mono">
                       Queried in order on 503, 504, or timeout
                     </span>
                   </div>
 
                   {fallbackList.length === 0 ? (
-                    <div className="p-2 bg-dark-950 border border-dark-800 rounded text-[11px] text-slate-500 font-mono">
+                    <div className="p-2 bg-dark-950 border border-dark-800 rounded text-[11px] text-slate-400 font-mono">
                       No fallback models configured for this analysis.
                     </div>
                   ) : (
@@ -1176,7 +1176,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 {/* Live Chain Status Pills */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono">
-                  <span className="text-slate-500 uppercase font-semibold">Chain Status:</span>
+                  <span className="text-slate-400 uppercase font-semibold">Chain Status:</span>
                   <span
                     className={`px-2 py-0.5 rounded border ${
                       streamProgress.failovers.some((f) => f.failedModel === model)

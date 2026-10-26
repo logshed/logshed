@@ -232,7 +232,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         <span>Initiated by: {sess.initiated_by}</span>
                         {sess.target_app && <span>App: {sess.target_app}</span>}
                         {sess.target_host && <span>Host: {sess.target_host}</span>}
-                        <span className="font-mono text-slate-500">ID: {sess.session_id.slice(0, 8)}...</span>
+                        <span className="font-mono text-slate-400">ID: {sess.session_id.slice(0, 8)}...</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
@@ -284,7 +284,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
             <div className="p-8 text-center text-xs text-slate-400">
               <Clock className="w-8 h-8 mx-auto text-slate-600 mb-2" />
               <p className="font-medium text-slate-300">No scheduled windows configured</p>
-              <p className="text-slate-500 mt-1 max-w-sm mx-auto">
+              <p className="text-slate-400 mt-1 max-w-sm mx-auto">
                 Add recurring daily, weekly, or monthly schedules to automatically suppress notifications during routine maintenance.
               </p>
               <button

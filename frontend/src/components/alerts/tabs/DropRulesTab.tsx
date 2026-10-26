@@ -332,7 +332,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
             <FilterX className="w-6 h-6" />
           </div>
           <p className="text-xs text-slate-300 font-medium">No drop rules configured yet.</p>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
             Create a drop rule to filter noisy devices or repetitive syslog chatter at ingestion.
           </p>
           <div className="flex flex-wrap justify-center gap-2 pt-2">
@@ -536,22 +536,22 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                 </p>
                 <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
                   <div>
-                    <span className="text-slate-500">Name:</span> {ruleToDelete.name || ruleToDelete.app_pattern || ruleToDelete.source_pattern || 'Drop Rule'}
+                    <span className="text-slate-400">Name:</span> {ruleToDelete.name || ruleToDelete.app_pattern || ruleToDelete.source_pattern || 'Drop Rule'}
                   </div>
                   {ruleToDelete.source_pattern && (
-                    <div><span className="text-slate-500">Host:</span> {ruleToDelete.source_pattern}</div>
+                    <div><span className="text-slate-400">Host:</span> {ruleToDelete.source_pattern}</div>
                   )}
                   {ruleToDelete.app_pattern && (
-                    <div><span className="text-slate-500">App:</span> {ruleToDelete.app_pattern}</div>
+                    <div><span className="text-slate-400">App:</span> {ruleToDelete.app_pattern}</div>
                   )}
                   {ruleToDelete.message_pattern && (
-                    <div><span className="text-slate-500">Pattern:</span> {ruleToDelete.message_pattern}</div>
+                    <div><span className="text-slate-400">Pattern:</span> {ruleToDelete.message_pattern}</div>
                   )}
                   {ruleToDelete.severity_threshold != null && (
-                    <div><span className="text-slate-500">Severity:</span> {lessSevereLabel(ruleToDelete.severity_threshold)}</div>
+                    <div><span className="text-slate-400">Severity:</span> {lessSevereLabel(ruleToDelete.severity_threshold)}</div>
                   )}
                   {ruleToDelete.dropped_count > 0 && (
-                    <div className="text-slate-400 text-[10px] pt-1 border-t border-dark-800">
+                    <div className="text-slate-400 text-[11px] pt-1 border-t border-dark-800">
                       Total logs dropped by this rule: {ruleToDelete.dropped_count.toLocaleString()}
                     </div>
                   )}

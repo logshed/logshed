@@ -282,7 +282,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         )}
 
         {filteredOptions.length === 0 && !isSearchTermNew ? (
-          <div className="px-3 py-3 text-center text-slate-500 text-[11px]">
+          <div className="px-3 py-3 text-center text-slate-400 text-[11px]">
             {options.length === 0 ? `No ${label.toLowerCase()} discovered yet` : 'No matching items'}
           </div>
         ) : (

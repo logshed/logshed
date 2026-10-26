@@ -198,9 +198,9 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
         </div>
 
         {isLoading ? (
-          <div className="p-6 text-center text-slate-500 font-mono text-xs">Loading mappings...</div>
+          <div className="p-6 text-center text-slate-400 font-mono text-xs">Loading mappings...</div>
         ) : aliases.length === 0 ? (
-          <div className="p-6 text-center text-slate-500 font-mono text-xs">
+          <div className="p-6 text-center text-slate-400 font-mono text-xs">
             No host aliases mapped yet. Add a mapping to label incoming syslog IP addresses.
           </div>
         ) : isMobile ? (
@@ -334,7 +334,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono disabled:opacity-50"
               />
               {editingIp && (
-                <p className="text-[11px] text-slate-500 mt-1">
+                <p className="text-[11px] text-slate-400 mt-1">
                   Source IP cannot be modified while editing. Delete and re-create to change the IP.
                 </p>
               )}
@@ -414,11 +414,11 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 </p>
                 <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
                   <div>
-                    <span className="text-slate-500">IP:</span> {deleteTargetIp}
+                    <span className="text-slate-400">IP:</span> {deleteTargetIp}
                   </div>
                   {aliases.find((a) => a.ip === deleteTargetIp)?.alias && (
                     <div>
-                      <span className="text-slate-500">Alias:</span>{' '}
+                      <span className="text-slate-400">Alias:</span>{' '}
                       {aliases.find((a) => a.ip === deleteTargetIp)?.alias}
                     </div>
                   )}

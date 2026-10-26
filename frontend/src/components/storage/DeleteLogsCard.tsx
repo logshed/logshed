@@ -355,15 +355,15 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
               </span>
             </div>
           ) : (
-            <span className="text-slate-500">
+            <span className="text-slate-400">
               Select criteria above to preview logs targeted for deletion.
             </span>
           )}
         </div>
 
-        <div className="text-[11px] text-slate-500 font-mono">
+        <div className="text-[11px] text-slate-400 font-mono">
           {!hasActiveCriteria ? (
-            <span className="text-slate-500">No criteria selected</span>
+            <span className="text-slate-400">No criteria selected</span>
           ) : isAllLogsTargeted ? (
             <span className="text-red-400 font-semibold">Targets entire log collection</span>
           ) : (

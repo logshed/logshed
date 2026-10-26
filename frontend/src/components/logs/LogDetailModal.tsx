@@ -285,7 +285,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <span className="font-mono text-slate-300 font-medium">{log.app_name}</span>
             <span className="text-slate-500">•</span>
             <span className="font-mono text-slate-400">{log.source_alias}</span>
-            <span className="text-slate-500">({log.source_ip})</span>
+            <span className="text-slate-400">({log.source_ip})</span>
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
@@ -445,7 +445,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <span className="font-mono text-slate-200 text-xs break-all select-all block">
               {formatFullTimestamp(log.timestamp, effectiveTimezone)}
             </span>
-            <span className="text-[10px] font-mono text-slate-500 break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
+            <span className="text-[11px] font-mono text-slate-400 break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
               UTC: {log.timestamp}
             </span>
           </div>
@@ -456,7 +456,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <span className="font-mono text-slate-200 text-xs break-all select-all block">
               {formatFullTimestamp(log.received_at, effectiveTimezone)}
             </span>
-            <span className="text-[10px] font-mono text-slate-500 break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
+            <span className="text-[11px] font-mono text-slate-400 break-all select-all block mt-0.5" title="Universal Coordinated Time stored in database">
               UTC: {log.received_at}
             </span>
           </div>
@@ -558,7 +558,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               ) : contextError ? (
                 <div role="alert" className="p-4 text-center text-red-400 font-mono">{contextError}</div>
               ) : contextLogs.length === 0 ? (
-                <div className="p-4 text-center text-slate-500 font-mono">No surrounding logs found.</div>
+                <div className="p-4 text-center text-slate-400 font-mono">No surrounding logs found.</div>
               ) : (
                 <div className="font-mono text-[11px] divide-y divide-dark-800 max-h-80 overflow-y-auto">
                   {contextLogs.map((ctxLog) => {
@@ -570,7 +570,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                           isTarget ? 'bg-accent-950/40 border-l-2 border-accent-500' : 'hover:bg-dark-900/50'
                         }`}
                       >
-                        <span className="text-slate-500 shrink-0 select-none">#{ctxLog.id}</span>
+                        <span className="text-slate-400 shrink-0 select-none">#{ctxLog.id}</span>
                         <span className="text-slate-400 shrink-0 select-none">
                           {formatLocalTimestamp(ctxLog.timestamp, true, effectiveTimezone).slice(11, 19)}
                         </span>

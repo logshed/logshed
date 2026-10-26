@@ -95,7 +95,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
                 </li>
               ))}
             </ul>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
+            <p className="text-[11px] text-slate-400 leading-relaxed">
               Counts are taken right now and may differ slightly when the deletion runs.
             </p>
           </>
@@ -136,7 +136,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
         </div>
 
         {mode === 'save' && !nothingToDelete && (
-          <p className="text-[11px] text-slate-500 leading-relaxed">
+          <p className="text-[11px] text-slate-400 leading-relaxed">
             The next daily cleanup runs {describeNextCleanup(preview.next_cleanup_at)}.
           </p>
         )}

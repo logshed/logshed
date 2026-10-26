@@ -401,7 +401,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           <div className="p-8 text-center space-y-2">
             <Box className="w-8 h-8 text-slate-600 mx-auto" />
             <p className="text-xs font-medium text-slate-300">No Docker hosts configured</p>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
               Add a remote Docker host or socket proxy to collect logs from other machines.
             </p>
           </div>
@@ -456,12 +456,12 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-slate-500">Alias:</span>
+                    <span className="text-slate-400">Alias:</span>
                     <span className="font-mono text-slate-300 bg-dark-950 px-1.5 py-0.5 rounded border border-dark-800">
                       {host.source_alias}
                     </span>
 
-                    <span className="text-slate-500 ml-2">Status:</span>
+                    <span className="text-slate-400 ml-2">Status:</span>
                     {!host.enabled ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-dark-800 text-slate-400 border border-dark-700">
                         Disabled
@@ -720,7 +720,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 }`}
               />
               {editingHost?.id === 1 && (
-                <p className="text-[11px] text-slate-500 mt-1">
+                <p className="text-[11px] text-slate-400 mt-1">
                   Primary Docker endpoint name is fixed.
                 </p>
               )}
@@ -740,7 +740,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 maxLength={64}
                 className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
-              <p className="text-[11px] text-slate-500 mt-1">
+              <p className="text-[11px] text-slate-400 mt-1">
                 Label assigned to logs under the Host / IP column (defaults to host name).
               </p>
             </div>
@@ -759,7 +759,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
               required
               className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] text-slate-400 mt-1">
               Supports local socket paths or remote TCP addresses (e.g. tcp://192.168.1.50:2375).
             </p>
           </div>
@@ -776,7 +776,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
               onChange={(e) => setExcludeContainers(e.target.value)}
               className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] text-slate-400 mt-1">
               Comma-separated list of container names or IDs to exclude from ingestion.
             </p>
           </div>
@@ -820,7 +820,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   />
                   <span>Verify TLS host name</span>
                 </label>
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-[11px] text-slate-400 mt-1">
                   Turn off only for daemons reached by IP whose certificate does not list that IP.
                 </p>
               </div>
@@ -888,7 +888,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   onChange={(e) => setClientKey(e.target.value)}
                   className="w-full bg-dark-900 border border-dark-700 rounded p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-hidden focus:border-accent-500 resize-none disabled:opacity-50"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-[11px] text-slate-400 mt-1">
                   Encrypted at rest in database using application master key. Decrypted to memory only during connection setup.
                 </p>
               </div>
@@ -1013,10 +1013,10 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 </p>
                 <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
                   <div>
-                    <span className="text-slate-500">Host / Alias:</span> {deletedHostNotice.name}
+                    <span className="text-slate-400">Host / Alias:</span> {deletedHostNotice.name}
                   </div>
                   <div>
-                    <span className="text-slate-500">Source IP:</span> {deletedHostNotice.ip}
+                    <span className="text-slate-400">Source IP:</span> {deletedHostNotice.ip}
                   </div>
                 </div>
               </div>

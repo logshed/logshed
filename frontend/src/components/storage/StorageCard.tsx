@@ -52,7 +52,7 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
           <span className="text-lg font-bold font-mono text-slate-100" data-testid="db-size-display">
             {formatBytes(metrics.db_size_bytes)}
           </span>
-          <span className="text-[10px] text-slate-500 block mt-0.5 font-mono">logs.db + WAL + SHM</span>
+          <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">logs.db + WAL + SHM</span>
         </div>
 
         <div className="bg-dark-950 p-3 rounded-lg border border-dark-800">
@@ -63,7 +63,7 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
           <span className="text-lg font-bold font-mono text-slate-100" data-testid="disk-free-display">
             {formatBytes(metrics.disk_free_bytes)}
           </span>
-          <span className="text-[10px] text-slate-500 block mt-0.5 font-mono">
+          <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">
             of {formatBytes(metrics.disk_total_bytes)} total
           </span>
         </div>
@@ -76,7 +76,7 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
           <span className="text-lg font-bold font-mono text-slate-100">
             {totalLogs.toLocaleString()}
           </span>
-          <span className="text-[10px] text-slate-500 block mt-0.5 font-mono">Indexed in FTS5</span>
+          <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">Indexed in FTS5</span>
         </div>
       </div>
 

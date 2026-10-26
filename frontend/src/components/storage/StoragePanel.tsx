@@ -52,7 +52,7 @@ export const StoragePanel: React.FC = () => {
 
   if (isLoading && !storageMetrics) {
     return (
-      <div className="p-8 text-center text-slate-500 font-mono text-xs flex items-center justify-center gap-2">
+      <div className="p-8 text-center text-slate-400 font-mono text-xs flex items-center justify-center gap-2">
         <RefreshCw className="w-4 h-4 animate-spin text-accent-500" />
         <span>Loading storage metrics and retention configuration...</span>
       </div>

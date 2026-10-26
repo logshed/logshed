@@ -217,7 +217,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <Bell className="w-6 h-6" />
             </div>
             <p className="text-xs text-slate-300 font-medium">No alert rules configured yet.</p>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
               Set up real-time threshold and pattern alerts to get notified of critical system events and errors.
             </p>
             <div className="flex flex-wrap justify-center gap-2 pt-2">
@@ -344,7 +344,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     </div>
 
                     {rule.last_triggered_at && (
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-slate-400">
                         Last triggered: {new Date(rule.last_triggered_at).toLocaleString()}
                       </div>
                     )}

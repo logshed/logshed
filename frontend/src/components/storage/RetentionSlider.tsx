@@ -274,7 +274,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             retentionOverridden ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
           }`}
         />
-        <div className="relative h-6 text-[10px] font-mono text-slate-500 mt-1 select-none">
+        <div className="relative h-6 text-[10px] font-mono text-slate-400 mt-1 select-none">
           {presets.map((val) => {
             const leftPercent = max === min ? 0 : ((val - min) / (max - min)) * 100;
             return (
@@ -385,7 +385,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       </div>
 
       {/* Explanatory Caption */}
-      <p className="text-[11px] text-slate-500 leading-relaxed">
+      <p className="text-[11px] text-slate-400 leading-relaxed">
         Old logs and history are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.
       </p>
 

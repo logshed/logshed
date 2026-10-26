@@ -791,7 +791,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   if (isLoading && !settings) {
     return (
-      <div className="p-8 text-center text-slate-500 font-mono text-xs flex items-center justify-center gap-2">
+      <div className="p-8 text-center text-slate-400 font-mono text-xs flex items-center justify-center gap-2">
         <RefreshCw className="w-4 h-4 animate-spin text-accent-500" />
         <span>Loading system settings...</span>
       </div>
@@ -1074,7 +1074,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
                   Model Selection & Failover Ordering
                 </label>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-400">
                   Select your default primary model and configure fallback models in priority order.{modelsCachedAt ? ` (Cache refreshed: ${new Date(modelsCachedAt).toLocaleTimeString()})` : ''}
                 </p>
               </div>
@@ -1148,7 +1148,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 />
               )}
 
-              <p className="text-[10px] text-slate-500 mt-1">
+              <p className="text-[11px] text-slate-400 mt-1">
                 Queried first for all log inspection requests.
               </p>
             </div>
@@ -1160,7 +1160,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </label>
 
               {fallbackList.length === 0 ? (
-                <div className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-[11px] text-slate-500 font-mono">
+                <div className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-[11px] text-slate-400 font-mono">
                   No fallback models configured. Add a model below to enable automatic failover.
                 </div>
               ) : (
@@ -1304,7 +1304,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
                     AI System Instructions (LLM Persona)
                   </label>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-slate-400">
                     System instructions that establish the LLM's diagnostic persona, reasoning guidelines, and response structure.
                   </p>
                 </div>

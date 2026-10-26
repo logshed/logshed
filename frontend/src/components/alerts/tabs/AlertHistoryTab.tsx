@@ -91,7 +91,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
         <div className="p-10 text-center space-y-2">
           <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
           <p className="text-xs text-slate-300 font-medium">No history recorded yet.</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-400">
             When alert rules trigger or AI analyses run, records will appear here.
           </p>
         </div>
@@ -153,7 +153,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                       {displayTarget}
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono shrink-0">
+                  <span className="text-[11px] text-slate-400 font-mono shrink-0">
                     {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
                   </span>
                 </div>

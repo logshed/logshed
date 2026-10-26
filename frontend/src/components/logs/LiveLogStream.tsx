@@ -1705,7 +1705,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                 );
               })}
               {quickHostChips.length > 0 && (
-                <span className={`flex items-center gap-1 text-slate-500 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ${pinnedViews.length > 0 ? 'ml-1' : ''}`}>
+                <span className={`flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ${pinnedViews.length > 0 ? 'ml-1' : ''}`}>
                   <Server className="w-3 h-3" aria-hidden="true" />
                   <span>Hosts</span>
                 </span>
@@ -1728,7 +1728,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                 );
               })}
               {quickAppChips.length > 0 && (
-                <span className="flex items-center gap-1 text-slate-500 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ml-1">
+                <span className="flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ml-1">
                   <Box className="w-3 h-3" aria-hidden="true" />
                   <span>Apps</span>
                 </span>
@@ -1892,11 +1892,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           className="flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain"
         >
           {isLoadingHistory && logs.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-slate-500 font-mono">
+            <div className="flex items-center justify-center h-full text-slate-400 font-mono">
               Loading log history...
             </div>
           ) : logs.length === 0 && filtersActive ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500 font-mono space-y-3 px-4 text-center">
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 font-mono space-y-3 px-4 text-center">
               <FilterX className="w-8 h-8 text-dark-600" />
               <span>No logs match the current filters.</span>
               <button
@@ -1942,7 +1942,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
               </div>
             </div>
           ) : logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500 font-mono space-y-2">
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 font-mono space-y-2">
               <Info className="w-8 h-8 text-dark-600" />
               <span>Waiting for new logs...</span>
             </div>
@@ -1993,13 +1993,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           )}
 
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
-            <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
+            <div className="py-2.5 flex items-center justify-center text-slate-400 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
              - Reached the end of loaded history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
             </div>
           )}
 
           {logs.length >= SCROLLBACK_BUFFER_SIZE && hasMoreLogs && !isLoadingMore && (
-            <div className="py-2.5 flex items-center justify-center text-slate-500 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none text-center px-3">
+            <div className="py-2.5 flex items-center justify-center text-slate-400 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none text-center px-3">
               Screen buffer limit reached ({SCROLLBACK_BUFFER_SIZE.toLocaleString()} lines). Narrow the filters or time range to see older logs.
             </div>
           )}

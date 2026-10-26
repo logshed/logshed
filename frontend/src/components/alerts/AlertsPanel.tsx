@@ -94,7 +94,7 @@ const SplitCountBadge: React.FC<{ active: number; total: number; title?: string 
     title={title}
     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none shrink-0"
   >
-    <span className={active > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>
+    <span className={active > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
       {active}
     </span>
     <span className="text-slate-600">/</span>

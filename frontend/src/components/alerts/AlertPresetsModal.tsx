@@ -127,7 +127,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
                   </div>
 
                   <div className="pt-3 border-t border-dark-800 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-[11px] text-slate-400">
                       {alreadyInstalled ? (
                         <span className="flex items-center gap-1 text-emerald-400">
                           <CheckCircle2 className="w-3 h-3 shrink-0" />

@@ -41,3 +41,29 @@ describe('StorageCard Component', () => {
     expect(progressBar).toHaveStyle({ width: '55%' });
   });
 });
+
+describe('StorageCard helper text contrast', () => {
+  it('uses brighter 11px text for the caption lines', () => {
+    const metrics: StorageMetricsResponse = {
+      db_size_bytes: 1024,
+      disk_free_bytes: 2048,
+      disk_total_bytes: 4096,
+      history: [
+        {
+          recorded_at: '2026-08-29T12:00:00Z',
+          db_size_bytes: 1024,
+          disk_free_bytes: 2048,
+          disk_total_bytes: 4096,
+          total_logs_count: 10,
+        },
+      ],
+    };
+    render(<StorageCard metrics={metrics} />);
+    for (const caption of [screen.getByText('logs.db + WAL + SHM'), screen.getByText('Indexed in FTS5')]) {
+      expect(caption.className).toContain('text-slate-400');
+      expect(caption.className).toContain('text-[11px]');
+      expect(caption.className).not.toContain('text-slate-500');
+      expect(caption.className).not.toContain('text-[10px]');
+    }
+  });
+});
