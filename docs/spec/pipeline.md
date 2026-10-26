@@ -79,6 +79,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
   - Database auto-increment IDs returned from SQLite are mapped sequentially to in-memory entries.
   - Drained entries are broadcast to live Server-Sent Events (SSE) subscribers (`/api/logs/stream`).
   - Immediately following transaction commit, `fts_indexer.notify_new_logs()` is triggered via an internal `asyncio.Event` to ensure sub-second FTS search catch-up (target SLA <= 1000ms).
+- **Failed Batch Writes:** A batch that fails because the database is busy or locked (`sqlite3.OperationalError`) is retried with backoff (0.5 s doubling to 10 s; at shutdown 5 attempts). Any other failure cannot succeed on a retry, so the batch is stored row by row in one transaction with a savepoint per row (`_insert_rows_separately`): a row with lone surrogates is stored with U+FFFD in their place, a row that still fails is skipped and logged as an error naming its host and app, and the rest are stored, broadcast and checked against the alert rules. A busy database during this step rolls everything back and returns to the normal retry, so no row is stored twice.
 - **Ingestion Drop Filtering Evaluation Order:**
   - Drop rules evaluate in user-configured sequence (`ORDER BY display_order ASC, id ASC`).
   - Evaluation short-circuits upon the first matching rule, immediately discarding the incoming log line and attributing the drop counter to that specific rule.

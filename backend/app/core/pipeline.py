@@ -370,6 +370,34 @@ def clean_log_text(text: str) -> str:
     return _CONTROL_CHARS_RE.sub("", _ANSI_ESCAPE_RE.sub("", text))
 
 
+_SURROGATES_RE = re.compile("[\ud800-\udfff]")
+
+
+def replace_surrogates(text: str) -> str:
+    """
+    Replace lone surrogates with U+FFFD. JSON escapes such as "\\ud800" decode to them, and SQLite
+    refuses to store a string that holds one.
+    """
+    if not text:
+        return text
+    return _SURROGATES_RE.sub("\ufffd", text)
+
+
+def _insert_params(entry: dict) -> list:
+    """Values for one row of the logs INSERT, in column order."""
+    return [
+        entry.get("timestamp"),
+        entry.get("received_at"),
+        entry.get("source_ip", ""),
+        entry.get("source_alias", ""),
+        entry.get("app_name", ""),
+        entry.get("facility", 1),
+        entry.get("severity", 6),
+        entry.get("message", ""),
+        entry.get("raw", ""),
+    ]
+
+
 SEVERITY_LEVEL_MAP = {
     "emerg": 0,
     "emergency": 0,
@@ -872,13 +900,25 @@ class QueueConsumer:
         if not batch:
             return True
         inserted = False
+        # The entries that reached the database (all of them, unless some could not be stored)
+        stored_batch = batch
         backoff = 0.05 if (not self._running or self._stopping) else 0.5
         shutdown_retries = 0
         max_shutdown_retries = 5
 
         while True:
             try:
-                await asyncio.to_thread(self._insert_batch, batch)
+                try:
+                    await asyncio.to_thread(self._insert_batch, batch)
+                except (asyncio.CancelledError, sqlite3.OperationalError):
+                    raise
+                except Exception as batch_error:
+                    # Not a busy or locked database, so the same rows would fail again on every
+                    # retry and stop all later logs: store them one by one instead, repairing or
+                    # skipping the ones that cannot be stored
+                    stored_batch, skipped = await asyncio.to_thread(self._insert_rows_separately, batch)
+                    if skipped:
+                        self._log_skipped_rows(skipped, batch_error)
                 inserted = True
                 break
             except asyncio.CancelledError:
@@ -921,15 +961,15 @@ class QueueConsumer:
                     backoff = min(backoff * 2.0, 10.0)
 
         if inserted:
-            record_ingest(len(batch))
+            record_ingest(len(stored_batch))
             # Broadcast to SSE subscribers on the event loop thread
             from app.core.sse import sse_manager
-            await sse_manager.broadcast_batch(batch)
+            await sse_manager.broadcast_batch(stored_batch)
 
             # Evaluate alert rules on ingested batch
             if self._alert_evaluator is not None:
                 try:
-                    await self._alert_evaluator.evaluate_batch(batch)
+                    await self._alert_evaluator.evaluate_batch(stored_batch)
                 except Exception as e:
                     logger.warning(f"Error evaluating alert rules on batch: {e}")
 
@@ -1012,52 +1052,10 @@ class QueueConsumer:
             return
 
         conn = self._get_connection()
-        utc = datetime.timezone.utc
-        local_tz = None
 
         try:
             cursor = conn.cursor()
-            for entry in batch:
-                # Defensive clamp & UTC normalization: ensure timestamp is in canonical UTC
-                # and no entry is saved more than MAX_FUTURE_TIMESTAMP_SKEW_SECONDS after received_at
-                try:
-                    ts_val = entry.get("timestamp")
-                    rec_val = entry.get("received_at")
-                    if ts_val:
-                        # Fast-path: if both timestamp and received_at are canonical UTC ISO strings and not in the future
-                        if (
-                            isinstance(ts_val, str)
-                            and ts_val.endswith("+00:00")
-                            and isinstance(rec_val, str)
-                            and rec_val.endswith("+00:00")
-                            and ts_val <= rec_val
-                        ):
-                            pass
-                        else:
-                            clean_ts = ts_val[:-1] + "+00:00" if isinstance(ts_val, str) and ts_val.endswith("Z") else str(ts_val)
-                            dt_ts = datetime.datetime.fromisoformat(clean_ts)
-                            if dt_ts.tzinfo is None:
-                                if local_tz is None:
-                                    local_tz = datetime.datetime.now().astimezone().tzinfo or utc
-                                dt_ts = dt_ts.replace(tzinfo=local_tz).astimezone(utc)
-                            else:
-                                dt_ts = dt_ts.astimezone(utc)
-
-                            if rec_val:
-                                clean_rec = rec_val[:-1] + "+00:00" if isinstance(rec_val, str) and rec_val.endswith("Z") else str(rec_val)
-                                dt_rec = datetime.datetime.fromisoformat(clean_rec)
-                                if dt_rec.tzinfo is None:
-                                    dt_rec = dt_rec.replace(tzinfo=utc)
-                                else:
-                                    dt_rec = dt_rec.astimezone(utc)
-
-                                if (dt_ts - dt_rec).total_seconds() > MAX_FUTURE_TIMESTAMP_SKEW_SECONDS:
-                                    dt_ts = dt_rec
-
-                            entry["timestamp"] = dt_ts.isoformat()
-                except Exception:
-                    if entry.get("received_at"):
-                        entry["timestamp"] = entry["received_at"]
+            self._normalize_timestamps(batch)
 
             # Chunked multi-row parameterized insert with RETURNING id (chunk size <= 500)
             chunk_size = 500
@@ -1073,17 +1071,7 @@ class QueueConsumer:
                 """
                 params = []
                 for entry in chunk:
-                    params.extend([
-                        entry.get("timestamp"),
-                        entry.get("received_at"),
-                        entry.get("source_ip", ""),
-                        entry.get("source_alias", ""),
-                        entry.get("app_name", ""),
-                        entry.get("facility", 1),
-                        entry.get("severity", 6),
-                        entry.get("message", ""),
-                        entry.get("raw", ""),
-                    ])
+                    params.extend(_insert_params(entry))
                 cursor.execute(sql, params)
                 returned_rows = cursor.fetchall()
                 if len(returned_rows) != len(chunk):
@@ -1094,14 +1082,129 @@ class QueueConsumer:
                     entry["id"] = row_id
 
             conn.commit()
-            if self._fts_indexer is not None:
-                try:
-                    self._fts_indexer.notify_new_logs()
-                except Exception as e:
-                    logger.warning(f"Failed to notify FTS indexer: {e}")
+            self._notify_fts_indexer()
         except Exception as e:
             try:
                 conn.rollback()
             except Exception:
                 self._close_conn()
             raise e
+
+    def _insert_rows_separately(self, batch: list[dict]) -> tuple[list[dict], list[tuple[dict, Exception]]]:
+        """
+        Synchronous: store a batch that failed as a whole one row at a time, each in its own
+        savepoint inside one transaction. A row with lone surrogates is stored with U+FFFD in their
+        place; a row that still fails is skipped. A busy or locked database (OperationalError) rolls
+        the whole transaction back and is raised, so the normal retry stores each row once.
+        Returns the stored entries and the skipped entries with their errors.
+        """
+        conn = self._get_connection()
+        sql = """
+            INSERT INTO logs (
+                timestamp, received_at, source_ip, source_alias,
+                app_name, facility, severity, message, raw
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+        """
+        stored: list[dict] = []
+        skipped: list[tuple[dict, Exception]] = []
+        try:
+            self._normalize_timestamps(batch)
+            if conn.in_transaction:
+                conn.rollback()
+            conn.execute("BEGIN IMMEDIATE")
+            for entry in batch:
+                conn.execute("SAVEPOINT log_row")
+                try:
+                    try:
+                        rows = conn.execute(sql, _insert_params(entry)).fetchall()
+                    except UnicodeEncodeError:
+                        for key, value in entry.items():
+                            if isinstance(value, str):
+                                entry[key] = replace_surrogates(value)
+                        rows = conn.execute(sql, _insert_params(entry)).fetchall()
+                    entry["id"] = rows[0][0]
+                    stored.append(entry)
+                except sqlite3.OperationalError:
+                    raise
+                except Exception as row_error:
+                    conn.execute("ROLLBACK TO log_row")
+                    skipped.append((entry, row_error))
+                conn.execute("RELEASE log_row")
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                self._close_conn()
+            for entry in stored:
+                entry.pop("id", None)
+            raise
+        if stored:
+            self._notify_fts_indexer()
+        return stored, skipped
+
+    @staticmethod
+    def _log_skipped_rows(skipped: list[tuple[dict, Exception]], batch_error: Exception) -> None:
+        first_entry, first_error = skipped[0]
+        source = first_entry.get("source_alias") or first_entry.get("source_ip") or "unknown host"
+        app = first_entry.get("app_name") or "unknown app"
+        count = len(skipped)
+        logger.error(
+            f"{count} log{'s' if count != 1 else ''} could not be stored and {'were' if count != 1 else 'was'} "
+            f"dropped ({first_error}); the first came from {source}, app {app}. The rest of the batch was stored. "
+            f"Batch error: {batch_error}"
+        )
+
+    def _notify_fts_indexer(self) -> None:
+        if self._fts_indexer is not None:
+            try:
+                self._fts_indexer.notify_new_logs()
+            except Exception as e:
+                logger.warning(f"Failed to notify FTS indexer: {e}")
+
+    @staticmethod
+    def _normalize_timestamps(batch: list[dict]) -> None:
+        """Store each timestamp as canonical UTC, at most MAX_FUTURE_TIMESTAMP_SKEW_SECONDS after received_at."""
+        utc = datetime.timezone.utc
+        local_tz = None
+        for entry in batch:
+            # Defensive clamp & UTC normalization: ensure timestamp is in canonical UTC
+            # and no entry is saved more than MAX_FUTURE_TIMESTAMP_SKEW_SECONDS after received_at
+            try:
+                ts_val = entry.get("timestamp")
+                rec_val = entry.get("received_at")
+                if ts_val:
+                    # Fast-path: if both timestamp and received_at are canonical UTC ISO strings and not in the future
+                    if (
+                        isinstance(ts_val, str)
+                        and ts_val.endswith("+00:00")
+                        and isinstance(rec_val, str)
+                        and rec_val.endswith("+00:00")
+                        and ts_val <= rec_val
+                    ):
+                        pass
+                    else:
+                        clean_ts = ts_val[:-1] + "+00:00" if isinstance(ts_val, str) and ts_val.endswith("Z") else str(ts_val)
+                        dt_ts = datetime.datetime.fromisoformat(clean_ts)
+                        if dt_ts.tzinfo is None:
+                            if local_tz is None:
+                                local_tz = datetime.datetime.now().astimezone().tzinfo or utc
+                            dt_ts = dt_ts.replace(tzinfo=local_tz).astimezone(utc)
+                        else:
+                            dt_ts = dt_ts.astimezone(utc)
+
+                        if rec_val:
+                            clean_rec = rec_val[:-1] + "+00:00" if isinstance(rec_val, str) and rec_val.endswith("Z") else str(rec_val)
+                            dt_rec = datetime.datetime.fromisoformat(clean_rec)
+                            if dt_rec.tzinfo is None:
+                                dt_rec = dt_rec.replace(tzinfo=utc)
+                            else:
+                                dt_rec = dt_rec.astimezone(utc)
+
+                            if (dt_ts - dt_rec).total_seconds() > MAX_FUTURE_TIMESTAMP_SKEW_SECONDS:
+                                dt_ts = dt_rec
+
+                        entry["timestamp"] = dt_ts.isoformat()
+            except Exception:
+                if entry.get("received_at"):
+                    entry["timestamp"] = entry["received_at"]

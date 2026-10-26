@@ -949,3 +949,47 @@ class TestIngestResponseShape:
         )
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok", "accepted": 0, "dropped": 0}
+
+
+class TestIngestLoneSurrogates:
+    """BL-39: JSON escapes such as \\ud800 decode to lone surrogates, which SQLite cannot store."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '[{"message": "disk \\ud800 full", "raw": "r\\udfff", "app_name": "a\\udc80pp", '
+            '"source_alias": "h\\ud800", "source_ip": "10.0.0.\\udc31"}]',
+            '{"message": "disk \\ud800 full", "raw": "r\\udfff", "app_name": "a\\udc80pp", '
+            '"source_alias": "h\\ud800", "source_ip": "10.0.0.\\udc31"}\n',
+        ],
+        ids=["json", "ndjson"],
+    )
+    async def test_lone_surrogates_are_replaced_before_queueing(self, client, write_token, content):
+        resp = await client.post(
+            "/api/v1/ingest",
+            content=content,
+            headers={"Authorization": f"Bearer {write_token}", "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == 1
+        [entry] = _queued_entries()
+        assert entry["message"] == "disk \ufffd full"
+        assert entry["raw"] == "r\ufffd"
+        assert entry["app_name"] == "a\ufffdpp"
+        assert entry["source_alias"] == "h\ufffd"
+        assert entry["source_ip"] == "10.0.0.\ufffd"
+        for value in entry.values():
+            if isinstance(value, str):
+                value.encode("utf-8")  # storable: raises on a lone surrogate
+
+    @pytest.mark.asyncio
+    async def test_a_valid_surrogate_pair_is_kept(self, client, write_token):
+        resp = await client.post(
+            "/api/v1/ingest",
+            content='[{"message": "ok \\ud83d\\ude00"}]',
+            headers={"Authorization": f"Bearer {write_token}", "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        [entry] = _queued_entries()
+        assert entry["message"] == "ok \U0001F600"

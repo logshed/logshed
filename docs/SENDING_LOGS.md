@@ -352,7 +352,7 @@ Create an API token in **Settings > API & MCP Access** with the `logs:write` sco
 | `raw` | The original unparsed line | `message` |
 | `facility` | Syslog facility `0` to `23` | `1` |
 
-Each entry is stored as one log entry. Entries are not merged with the previous one (indented lines or lines starting with `at ...` stay separate), and ANSI and control characters are removed from the text. Your drop rules and any maintenance `drop_errors` session apply to ingested entries as they do to syslog.
+Each entry is stored as one log entry. Entries are not merged with the previous one (indented lines or lines starting with `at ...` stay separate), and ANSI and control characters are removed from the text. Text that is not valid Unicode, such as a lone surrogate escape like `\ud800` in the JSON, is stored with the replacement character U+FFFD instead. Your drop rules and any maintenance `drop_errors` session apply to ingested entries as they do to syslog.
 
 ### Limits
 

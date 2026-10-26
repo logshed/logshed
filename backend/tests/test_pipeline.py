@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import sqlite3
+from unittest.mock import patch
 from app.api.deps import run_db_query
 from app.core.migrations import get_connection, run_migrations
 from app.core import pipeline as pipeline_mod
@@ -1202,3 +1203,107 @@ class TestMultilineEntryCap:
         entries = self._drain()
         assert len(entries) == 1
         assert entries[0]["message"] == "\n".join(lines)
+
+
+class TestQueueConsumerRowsThatCannotBeStored:
+    """BL-39: a batch that can never be stored as it is must not stop ingestion."""
+
+    @staticmethod
+    def _take(entries: list[dict]) -> tuple[list[dict], asyncio.Queue]:
+        """Put entries through the shared queue as the consumer would have taken them."""
+        q = get_queue()
+        for entry in entries:
+            q.put_nowait(entry)
+        return [q.get_nowait() for _ in entries], q
+
+    @staticmethod
+    def _messages(db_path: Path) -> list[str]:
+        conn = get_connection(db_path)
+        try:
+            return [row[0] for row in conn.execute("SELECT message FROM logs ORDER BY id")]
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_lone_surrogates_are_replaced_and_the_whole_batch_is_stored(self, db_path: Path):
+        consumer = QueueConsumer(db_path)
+        consumer._running = True  # steady state, where a failing batch used to be retried forever
+        batch, q = self._take([
+            _make_entry(message="before"),
+            _make_entry(message="disk \ud800 full", app_name="a\udc80pp", raw="r\udfff"),
+            _make_entry(message="after"),
+        ])
+
+        stored = await asyncio.wait_for(consumer._flush_batch(batch, q), timeout=5)
+
+        assert stored is True
+        assert self._messages(db_path) == ["before", "disk \ufffd full", "after"]
+        conn = get_connection(db_path)
+        try:
+            assert conn.execute("SELECT app_name, raw FROM logs WHERE message LIKE 'disk%'").fetchone() == ("a\ufffdpp", "r\ufffd")
+        finally:
+            conn.close()
+        assert all(isinstance(entry.get("id"), int) for entry in batch)
+        await asyncio.to_thread(consumer._close_conn)
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_cannot_be_stored_is_dropped_and_the_rest_are_kept(self, db_path: Path, caplog):
+        import logging
+
+        caplog.set_level(logging.ERROR, logger="app.core.pipeline")
+        consumer = QueueConsumer(db_path)
+        consumer._running = True  # steady state, where a failing batch used to be retried forever
+        broadcast: list[dict] = []
+
+        async def _capture(entries):
+            broadcast.extend(entries)
+
+        batch, q = self._take([
+            _make_entry(message="good 1"),
+            _make_entry(message=None, source_alias="bad-host"),  # NOT NULL: can never be stored
+            _make_entry(message="good 2"),
+        ])
+        with patch("app.core.sse.sse_manager.broadcast_batch", side_effect=_capture):
+            stored = await asyncio.wait_for(consumer._flush_batch(batch, q), timeout=5)
+
+        assert stored is True
+        assert self._messages(db_path) == ["good 1", "good 2"]
+        # Only stored rows go on to the live stream (and the alert rules)
+        assert [entry["message"] for entry in broadcast] == ["good 1", "good 2"]
+        errors = [r.getMessage() for r in caplog.records if "could not be stored" in r.getMessage()]
+        assert len(errors) == 1 and "1 log" in errors[0] and "bad-host" in errors[0]
+        await asyncio.to_thread(consumer._close_conn)
+
+    @pytest.mark.asyncio
+    async def test_a_locked_database_during_row_by_row_storage_stores_nothing_twice(self, db_path: Path, monkeypatch):
+        """A busy database while isolating rows rolls everything back, then the normal retry stores each row once."""
+        consumer = QueueConsumer(db_path)
+        consumer._running = True  # steady state, where a failing batch used to be retried forever
+        batch, q = self._take([
+            _make_entry(message="good 1"),
+            _make_entry(message=None),
+            _make_entry(message="good 2"),
+        ])
+        real_insert_rows = consumer._insert_rows_separately
+        calls = 0
+
+        def _locked_once(rows):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return real_insert_rows(rows)
+
+        monkeypatch.setattr(consumer, "_insert_rows_separately", _locked_once)
+        sleeps: list[float] = []
+
+        async def _no_wait(seconds):
+            sleeps.append(seconds)
+
+        with patch("app.core.pipeline.asyncio.sleep", side_effect=_no_wait):
+            stored = await asyncio.wait_for(consumer._flush_batch(batch, q), timeout=5)
+
+        assert stored is True
+        assert calls == 2 and len(sleeps) == 1
+        assert self._messages(db_path) == ["good 1", "good 2"]
+        await asyncio.to_thread(consumer._close_conn)

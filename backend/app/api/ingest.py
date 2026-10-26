@@ -23,10 +23,16 @@ from app.core.pipeline import (
     MAX_MESSAGE_BYTES,
     clean_log_text,
     filter_and_enqueue,
+    replace_surrogates,
 )
 from app.core.utils import parse_iso_to_utc_datetime, resolve_severity
 
 logger = logging.getLogger(__name__)
+
+
+def _text(value: Any) -> str:
+    """A record field as text SQLite can store (JSON escapes such as \\ud800 decode to lone surrogates)."""
+    return replace_surrogates(str(value))
 
 router = APIRouter(tags=["Log Ingestion"])
 
@@ -350,7 +356,7 @@ async def ingest_logs(
         raw_msg = item.get("message")
         if raw_msg is None:
             raw_msg = item.get("msg", "")
-        msg = clean_log_text(str(raw_msg))[:MAX_MESSAGE_BYTES]
+        msg = clean_log_text(_text(raw_msg))[:MAX_MESSAGE_BYTES]
 
         ts_str = now_utc_str
         ts_val = item.get("timestamp") or item.get("time") or item.get("ts")
@@ -359,8 +365,8 @@ async def ingest_logs(
             if parsed_dt and earliest_ts <= parsed_dt <= latest_ts:
                 ts_str = parsed_dt.isoformat()
 
-        src_ip = (str(item.get("source_ip") or client_ip).strip() or client_ip)[:INGEST_MAX_FIELD_CHARS]
-        raw_alias = (str(item.get("source_alias") or src_ip).strip() or src_ip)[:INGEST_MAX_FIELD_CHARS]
+        src_ip = (_text(item.get("source_ip") or client_ip).strip() or client_ip)[:INGEST_MAX_FIELD_CHARS]
+        raw_alias = (_text(item.get("source_alias") or src_ip).strip() or src_ip)[:INGEST_MAX_FIELD_CHARS]
         reserved = _reserved_identity_reason(src_ip, raw_alias)
         if reserved:
             raise HTTPException(
@@ -369,7 +375,7 @@ async def ingest_logs(
             )
         src_alias = alias_cache.resolve(raw_alias) if alias_cache else raw_alias
 
-        app_name = (str(item.get("app_name") or item.get("app") or "app").strip() or "app")[:INGEST_MAX_FIELD_CHARS]
+        app_name = (_text(item.get("app_name") or item.get("app") or "app").strip() or "app")[:INGEST_MAX_FIELD_CHARS]
 
         try:
             fac = int(item.get("facility", 1))
@@ -388,7 +394,7 @@ async def ingest_logs(
             sev = 6
 
         raw_val = item.get("raw")
-        clean_raw = clean_log_text(str(raw_val))[:MAX_MESSAGE_BYTES] if raw_val is not None else msg
+        clean_raw = clean_log_text(_text(raw_val))[:MAX_MESSAGE_BYTES] if raw_val is not None else msg
 
         entries.append({
             "timestamp": ts_str,
