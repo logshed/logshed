@@ -1,14 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bookmark, Pin, Plus, Trash2, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Bookmark, Pin, Plus, Trash2, ChevronDown, AlertTriangle, Pencil } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { Modal } from '../common/Modal.tsx';
+import { isSavedViewNameTaken } from './useSavedViews.ts';
+
+export const DUPLICATE_VIEW_NAME_MESSAGE = 'A saved view with this name already exists.';
 
 interface SavedViewsMenuProps {
   variant: 'desktop' | 'mobile';
   views: SavedView[];
   isLoading?: boolean;
+  /** The saved view whose filters equal the current filters, if any. */
+  activeViewId?: number | null;
   onApplyView: (params: LogFilterParams) => void;
   onTogglePin: (e: React.MouseEvent, view: SavedView) => void;
+  /** Renames a view; a thrown error is shown in the rename modal. Without it there is no rename action. */
+  onRenameView?: (view: SavedView, name: string) => Promise<void>;
   onDeleteView: (e: React.MouseEvent, viewId: number) => void;
   onOpenSaveModal: () => void;
 }
@@ -16,14 +23,33 @@ interface SavedViewsMenuProps {
 export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
   variant,
   views,
+  activeViewId = null,
   onApplyView,
   onTogglePin,
+  onRenameView,
   onDeleteView,
   onOpenSaveModal,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [viewToDelete, setViewToDelete] = useState<SavedView | null>(null);
+  const [viewToRename, setViewToRename] = useState<SavedView | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const activeView = activeViewId !== null ? views.find((v) => v.id === activeViewId) ?? null : null;
+
+  const renameModal = onRenameView && (
+    <RenameViewModal
+      view={viewToRename}
+      views={views}
+      onClose={() => setViewToRename(null)}
+      onRename={onRenameView}
+    />
+  );
+
+  const openRename = (e: React.MouseEvent, view: SavedView) => {
+    e.stopPropagation();
+    setIsOpen(false);
+    setViewToRename(view);
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -104,18 +130,24 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
           <button
             type="button"
             onClick={() => setIsOpen((prev) => !prev)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition cursor-pointer border ${
-              isOpen
-                ? 'bg-dark-800 text-white border-dark-600'
-                : 'bg-dark-900 text-slate-300 border-dark-700 hover:text-white hover:border-slate-600'
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition cursor-pointer border max-w-[16rem] ${
+              activeView
+                ? `border-accent-500 ${isOpen ? 'bg-dark-800 text-white' : 'bg-dark-900 text-accent-200 hover:text-white'}`
+                : isOpen
+                  ? 'bg-dark-800 text-white border-dark-600'
+                  : 'bg-dark-900 text-slate-300 border-dark-700 hover:text-white hover:border-slate-600'
             }`}
-            title="Saved views menu"
-            aria-label="Saved views menu"
+            title={activeView ? `Saved views menu (active view: ${activeView.name})` : 'Saved views menu'}
+            aria-label={activeView ? `Saved views menu, active view ${activeView.name}` : 'Saved views menu'}
             aria-expanded={isOpen}
           >
-            <Bookmark className="w-3 h-3 text-accent-400" />
-            <span>Views</span>
-            {views.length > 0 && (
+            <Bookmark className={`w-3 h-3 text-accent-400 shrink-0 ${activeView ? 'fill-accent-400' : ''}`} />
+            {activeView ? (
+              <span data-testid="views-button-label" className="truncate">View: {activeView.name}</span>
+            ) : (
+              <span data-testid="views-button-label">Views</span>
+            )}
+            {!activeView && views.length > 0 && (
               <span className="bg-dark-800 text-slate-400 text-[10px] font-mono px-1 rounded-full">
                 {views.length}
               </span>
@@ -178,9 +210,10 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
                           onApplyView(view.query_params);
                           setIsOpen(false);
                         }}
+                        aria-current={view.id === activeViewId ? 'true' : undefined}
                         className={`group flex items-center justify-between px-3 py-1.5 text-xs hover:bg-dark-800 cursor-pointer transition ${
                           view.is_pinned ? 'text-accent-300 font-medium' : 'text-slate-300'
-                        }`}
+                        } ${view.id === activeViewId ? 'bg-dark-800' : ''}`}
                       >
                         <div className="flex items-center gap-2 truncate flex-1 min-w-0">
                           {view.is_pinned && (
@@ -201,6 +234,17 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
                           >
                             <Pin className={`w-2.5 h-2.5 ${view.is_pinned ? 'text-accent-400' : ''}`} />
                           </button>
+                          {onRenameView && (
+                            <button
+                              type="button"
+                              onClick={(e) => openRename(e, view)}
+                              className="p-1 hover:text-accent-300 text-slate-400 rounded transition cursor-pointer"
+                              title="Rename view"
+                              aria-label={`Rename view ${view.name}`}
+                            >
+                              <Pencil className="w-2.5 h-2.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={(e) => {
@@ -223,6 +267,7 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
           )}
         </div>
         {deleteConfirmModal}
+        {renameModal}
       </div>
     );
   }
@@ -261,10 +306,13 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
               key={view.id}
               data-testid={`mobile-saved-view-${view.id}`}
               onClick={() => onApplyView(view.query_params)}
+              aria-current={view.id === activeViewId ? 'true' : undefined}
               className={`group flex items-center gap-1 px-2 py-1 rounded text-xs transition cursor-pointer border ${
-                view.is_pinned
-                  ? 'bg-accent-950/40 text-accent-300 border-accent-700/60 font-medium'
-                  : 'bg-dark-900 text-slate-300 border-dark-700 hover:bg-dark-800'
+                view.id === activeViewId
+                  ? 'bg-accent-900/60 text-white border-accent-500 ring-1 ring-accent-500 font-semibold'
+                  : view.is_pinned
+                    ? 'bg-accent-950/40 text-accent-300 border-accent-700/60 font-medium'
+                    : 'bg-dark-900 text-slate-300 border-dark-700 hover:bg-dark-800'
               }`}
             >
               {view.is_pinned && <Pin className="w-3 h-3 text-accent-400 fill-accent-400 shrink-0" />}
@@ -281,6 +329,17 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
                 >
                   <Pin className={`w-2.5 h-2.5 ${view.is_pinned ? 'text-accent-400' : ''}`} />
                 </button>
+                {onRenameView && (
+                  <button
+                    type="button"
+                    onClick={(e) => openRename(e, view)}
+                    className="p-0.5 hover:text-accent-300 text-slate-400 cursor-pointer"
+                    title="Rename view"
+                    aria-label={`Rename view ${view.name}`}
+                  >
+                    <Pencil className="w-2.5 h-2.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -298,7 +357,105 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
         </div>
       )}
       {deleteConfirmModal}
+      {renameModal}
     </div>
+  );
+};
+
+interface RenameViewModalProps {
+  /** The view being renamed; the modal is open while this is set. */
+  view: SavedView | null;
+  /** All loaded views, to check the new name is not taken. */
+  views: SavedView[];
+  onClose: () => void;
+  onRename: (view: SavedView, name: string) => Promise<void>;
+}
+
+export const RenameViewModal: React.FC<RenameViewModalProps> = ({ view, ...rest }) =>
+  // Keyed by view so each opening starts from that view's name
+  view ? <RenameViewDialog key={view.id} view={view} {...rest} /> : null;
+
+const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = ({ view, views, onClose, onRename }) => {
+  const [name, setName] = useState<string>(view.name);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const trimmed = name.trim();
+  const isTaken = isSavedViewNameTaken(views, trimmed, view.id);
+  // A different case of the same name counts as a change
+  const isUnchanged = trimmed === view.name;
+  const canSave = !isSaving && trimmed.length > 0 && !isUnchanged && !isTaken;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSave) return;
+    try {
+      setIsSaving(true);
+      setError(null);
+      await onRename(view, trimmed);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Could not rename the view.');
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={true} onClose={onClose} title="Rename Saved View" maxWidth="max-w-md">
+      <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+        <div>
+          <label htmlFor="rename-view-input" className="block text-slate-300 font-medium mb-1">
+            View Name <span className="text-red-400">*</span>
+          </label>
+          <input
+            id="rename-view-input"
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={100}
+            aria-invalid={isTaken || undefined}
+            aria-describedby={isTaken ? 'rename-view-taken' : undefined}
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
+          />
+          {isTaken && (
+            <p id="rename-view-taken" className="mt-1 text-red-400 text-[11px]">
+              {DUPLICATE_VIEW_NAME_MESSAGE}
+            </p>
+          )}
+        </div>
+
+        {error && (
+          <div role="alert" className="text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2 text-[11px]">
+            {error}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSaving}
+            className="px-3 py-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canSave}
+            className="px-3 py-1.5 rounded bg-accent-600 hover:bg-accent-500 text-white font-medium transition disabled:opacity-50"
+          >
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 };
 
@@ -307,6 +464,8 @@ interface SaveViewModalProps {
   onClose: () => void;
   currentFilters: LogFilterParams;
   onSave: (name: string, isPinned: boolean) => Promise<void>;
+  /** Loaded views, to warn before saving a name that is already taken (ignoring case). */
+  existingViews?: SavedView[];
 }
 
 export const SaveViewModal: React.FC<SaveViewModalProps> = ({
@@ -314,6 +473,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
   onClose,
   currentFilters,
   onSave,
+  existingViews = [],
 }) => {
   const [name, setName] = useState<string>('');
   const [isPinned, setIsPinned] = useState<boolean>(true);
@@ -335,6 +495,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
       setError('View name is required.');
       return;
     }
+    if (isSavedViewNameTaken(existingViews, trimmed)) return;
 
     try {
       setIsSaving(true);
@@ -347,6 +508,8 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
       setIsSaving(false);
     }
   };
+
+  const isTaken = isSavedViewNameTaken(existingViews, name);
 
   const hasActiveFilters = Boolean(
     currentFilters.query?.trim() ||
@@ -378,8 +541,15 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             placeholder="e.g. Traefik Errors, DHCP Traffic"
             maxLength={100}
             autoFocus
+            aria-invalid={isTaken || undefined}
+            aria-describedby={isTaken ? 'save-view-taken' : undefined}
             className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
           />
+          {isTaken && (
+            <p id="save-view-taken" className="mt-1 text-red-400 text-[11px]">
+              {DUPLICATE_VIEW_NAME_MESSAGE}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -436,7 +606,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
           </button>
           <button
             type="submit"
-            disabled={isSaving || !name.trim()}
+            disabled={isSaving || !name.trim() || isTaken}
             className="px-3 py-1.5 rounded bg-accent-600 hover:bg-accent-500 text-white font-medium transition disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save View'}

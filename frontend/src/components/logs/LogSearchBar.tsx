@@ -1,13 +1,13 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, RotateCcw, Filter, Clock, X, SlidersHorizontal } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { Search, RotateCcw, Filter, Clock, X, SlidersHorizontal, CircleHelp } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel, compactMoreSevereLabel } from '../../utils/severityLabels.ts';
 import { toLocalDatetimeInputString, fromLocalDatetimeInputString } from '../../utils/formatters.ts';
-import { fetchSavedViews, createSavedView, updateSavedView, deleteSavedView } from '../../api/savedViews.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
+import { SavedViewsState, useSavedViews, findActiveView } from './useSavedViews.ts';
 
 // Time presets are stored as relative values (the backend resolves them at query time), so a saved
 // view or shared link keeps meaning "the last hour" instead of freezing the moment it was made.
@@ -21,6 +21,19 @@ const TIME_PRESET_MS: Record<string, number> = {
 
 const FACETS_NOTE_HOSTS = 'Showing the first 500 hosts. Type a name to add others.';
 const FACETS_NOTE_APPS = 'Showing the first 500 apps. Type a name to add others.';
+
+export const SEARCH_PLACEHOLDER = 'Search logs, e.g. "disk full", error OR timeout, app:nginx';
+
+/** The search syntax listed in the help popover; each entry works in the history search. */
+export const SEARCH_SYNTAX_HELP: { example: string; text: string }[] = [
+  { example: 'disk time', text: 'Every word must match, as the start of a word (time finds timeout).' },
+  { example: '"exact phrase"', text: 'The words in this order.' },
+  { example: 'error OR timeout', text: 'Either word.' },
+  { example: 'auth NOT cron', text: 'The first word without the second. OR and NOT work in any case.' },
+  { example: 'app:nginx', text: 'App or container name.' },
+  { example: 'host:pve-node2', text: 'Host name (host alias).' },
+  { example: 'msg:"disk full"', text: 'Message text only.' },
+];
 
 // 'since_midnight' is a relative preset too: the backend resolves it as 00:00 today in the server
 // time zone, the zone the UI shows times in.
@@ -43,6 +56,11 @@ interface LogSearchBarProps {
   availableSources?: string[];
   availableApps?: string[];
   onApplySavedView?: (filters: LogFilterParams) => void;
+  /**
+   * Saved views shared with the Quick Filters bar (from useSavedViews). Without it the search bar
+   * loads its own list.
+   */
+  savedViews?: SavedViewsState;
   totalCount?: number;
   totalCapped?: boolean;
   /** True when the host and app lists were capped by the facets endpoint. */
@@ -57,6 +75,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   availableSources = [],
   availableApps = [],
   onApplySavedView,
+  savedViews: sharedSavedViews,
   totalCount,
   totalCapped = false,
   facetsTruncated = false,
@@ -71,84 +90,57 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
     if (derivedTimePreset !== 'all' && derivedTimePreset !== 'custom') setCustomTimeRequested(false);
   }, [derivedTimePreset]);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
-  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
-  const [isViewsLoading, setIsViewsLoading] = useState<boolean>(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
-  const [viewsError, setViewsError] = useState<string | null>(null);
 
-  const loadSavedViews = useCallback(async () => {
-    try {
-      setIsViewsLoading(true);
-      const data = await fetchSavedViews();
-      setSavedViews(data);
-    } catch {
-      // Non-critical background fetch
-    } finally {
-      setIsViewsLoading(false);
-    }
-  }, []);
+  const ownSavedViews = useSavedViews(!sharedSavedViews);
+  const savedViewsState = sharedSavedViews ?? ownSavedViews;
+  const { views: savedViews, isLoading: isViewsLoading, error: viewsError } = savedViewsState;
+  const { togglePin, deleteView, renameView, createView } = savedViewsState;
+  const activeView = useMemo(() => findActiveView(savedViews, filters), [savedViews, filters]);
 
-  useEffect(() => {
-    loadSavedViews();
-  }, [loadSavedViews]);
-
-  const handleTogglePin = useCallback(async (e: React.MouseEvent, view: SavedView) => {
+  const handleTogglePin = useCallback((e: React.MouseEvent, view: SavedView) => {
     e.stopPropagation();
-    try {
-      setViewsError(null);
-      const updated = await updateSavedView(view.id, { is_pinned: !view.is_pinned });
-      setSavedViews((prev) =>
-        prev
-          .map((v) => (v.id === view.id ? updated : v))
-          .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || a.name.localeCompare(b.name))
-      );
-    } catch (err) {
-      setViewsError(err instanceof Error ? err.message : 'Could not update saved view');
-    }
-  }, []);
+    void togglePin(view);
+  }, [togglePin]);
 
-  const handleDeleteSavedView = useCallback(async (e: React.MouseEvent, viewId: number) => {
+  const handleDeleteSavedView = useCallback((e: React.MouseEvent, viewId: number) => {
     e.stopPropagation();
-    try {
-      setViewsError(null);
-      await deleteSavedView(viewId);
-      setSavedViews((prev) => prev.filter((v) => v.id !== viewId));
-    } catch (err) {
-      setViewsError(err instanceof Error ? err.message : 'Could not delete saved view');
-    }
-  }, []);
+    void deleteView(viewId);
+  }, [deleteView]);
+
+  const handleRenameView = useCallback(async (view: SavedView, name: string) => {
+    await renameView(view.id, name);
+  }, [renameView]);
 
   const handleSaveViewSubmit = useCallback(async (name: string, isPinned: boolean) => {
-    const cleanParams: Record<string, any> = {};
-    if (filters.query?.trim()) cleanParams.query = filters.query.trim();
-    if (filters.severity_max !== undefined && filters.severity_max !== null) {
-      cleanParams.severity_max = filters.severity_max;
-    }
-    if (filters.sources && filters.sources.length > 0) {
-      cleanParams.sources = filters.sources;
-    } else if (filters.source) {
-      cleanParams.source = filters.source;
-    }
-    if (filters.apps && filters.apps.length > 0) {
-      cleanParams.apps = filters.apps;
-    } else if (filters.app_name) {
-      cleanParams.app_name = filters.app_name;
-    }
-    if (filters.from) cleanParams.from = filters.from;
-    if (filters.to) cleanParams.to = filters.to;
+    await createView(name, filters, isPinned);
+  }, [createView, filters]);
 
-    const created = await createSavedView({
-      name,
-      query_params: cleanParams,
-      is_pinned: isPinned,
-    });
-
-    setSavedViews((prev) =>
-      [...prev, created].sort(
-        (a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || a.name.localeCompare(b.name)
-      )
-    );
-  }, [filters]);
+  // Search syntax help popover: closes on Esc, a click outside, or focus leaving it
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
+  const helpRef = useRef<HTMLDivElement>(null);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!isHelpOpen) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      if (helpRef.current && !helpRef.current.contains(event.target as Node)) setIsHelpOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsHelpOpen(false);
+        helpButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isHelpOpen]);
+  const handleHelpBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsHelpOpen(false);
+  }, []);
 
   // Compute active sources as an array
   const activeSources: string[] = useMemo(() => {
@@ -229,10 +221,49 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             value={filters.query || ''}
             onChange={(e) => onFilterChange({ ...filters, query: e.target.value })}
             onKeyDown={(e) => e.key === 'Enter' && onSearch()}
-            placeholder="Full-text search (FTS5 syntax: error, timeout, status:*)..."
-            className="w-full bg-dark-900 border border-dark-700 rounded px-3 py-1.5 pl-8 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+            placeholder={SEARCH_PLACEHOLDER}
+            aria-label="Search logs"
+            className={`w-full bg-dark-900 border border-dark-700 rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
           />
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
+          {/* Search syntax help, left of the clear button */}
+          <div
+            ref={helpRef}
+            onBlur={handleHelpBlur}
+            className={`absolute top-1.5 ${filters.query ? 'right-7' : 'right-2'}`}
+          >
+            <button
+              ref={helpButtonRef}
+              type="button"
+              onClick={() => setIsHelpOpen((prev) => !prev)}
+              className={`block transition cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-slate-500 hover:text-slate-300'}`}
+              title="Search syntax"
+              aria-label="Search syntax help"
+              aria-expanded={isHelpOpen}
+              aria-controls="search-syntax-help"
+            >
+              <CircleHelp className="w-3.5 h-3.5" />
+            </button>
+            {isHelpOpen && (
+              <div
+                id="search-syntax-help"
+                role="dialog"
+                aria-label="Search syntax"
+                tabIndex={-1}
+                className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-dark-900 border border-dark-700 rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-hidden"
+              >
+                <p className="font-semibold text-slate-200 mb-2">Search syntax</p>
+                <ul className="space-y-1.5">
+                  {SEARCH_SYNTAX_HELP.map((item) => (
+                    <li key={item.example} className="flex flex-col gap-0.5">
+                      <code className="font-mono text-accent-300">{item.example}</code>
+                      <span className="text-slate-400 leading-snug">{item.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
           {filters.query && (
             <button
               onClick={() => onFilterChange({ ...filters, query: '' })}
@@ -261,13 +292,15 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           )}
         </button>
 
-        {/* Action Button: Filter */}
+        {/* Search now (filters already apply as they change; Enter does the same) */}
         <button
+          type="button"
           onClick={() => onSearch()}
-          className="bg-accent-600 hover:bg-accent-500 text-white font-medium px-3 py-1.5 rounded flex items-center gap-1 transition shadow-xs cursor-pointer shrink-0"
+          title="Search now (Enter)"
+          aria-label="Search now"
+          className="flex items-center px-2.5 py-1.5 rounded bg-dark-900 border border-dark-700 text-slate-300 hover:text-white hover:border-slate-600 transition shrink-0 cursor-pointer"
         >
           <Search className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Filter</span>
         </button>
 
         {/* Capped or Matched Count Indicator */}
@@ -423,6 +456,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           variant="desktop"
           views={savedViews}
           isLoading={isViewsLoading}
+          activeViewId={activeView?.id ?? null}
+          onRenameView={handleRenameView}
           onApplyView={(params) => {
             if (onApplySavedView) onApplySavedView(params);
             else {
@@ -454,6 +489,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             variant="mobile"
             views={savedViews}
             isLoading={isViewsLoading}
+            activeViewId={activeView?.id ?? null}
+            onRenameView={handleRenameView}
             onApplyView={(params) => {
               if (onApplySavedView) onApplySavedView(params);
               else {
@@ -591,7 +628,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               }}
               className="flex-1 bg-accent-600 hover:bg-accent-500 text-white font-medium py-2 rounded text-center transition"
             >
-              Apply Filters
+              Done
             </button>
             {hasActiveFilters && (
               <button
@@ -614,6 +651,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         onClose={() => setIsSaveModalOpen(false)}
         currentFilters={filters}
         onSave={handleSaveViewSubmit}
+        existingViews={savedViews}
       />
     </div>
   );

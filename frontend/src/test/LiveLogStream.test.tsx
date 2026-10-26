@@ -854,7 +854,7 @@ describe('LiveLogStream Component', () => {
     });
     fetchLogsSpy.mockClear();
 
-    const searchInput = screen.getByPlaceholderText(/Full-text search/i);
+    const searchInput = screen.getByPlaceholderText(/Search logs/i);
     for (const partial of ['e', 'ex', 'exi', 'exis', 'exist', 'existi', 'existin', 'existing']) {
       fireEvent.change(searchInput, { target: { value: partial } });
     }
@@ -875,7 +875,7 @@ describe('LiveLogStream Component', () => {
     });
     fetchLogsSpy.mockClear();
 
-    const searchInput = screen.getByPlaceholderText(/Full-text search/i);
+    const searchInput = screen.getByPlaceholderText(/Search logs/i);
     fireEvent.change(searchInput, { target: { value: 'timeout' } });
     fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
 
@@ -938,7 +938,7 @@ describe('LiveLogStream Component', () => {
     });
 
     // Enter a search query in the search bar
-    const searchInput = screen.getByPlaceholderText(/Full-text search/i);
+    const searchInput = screen.getByPlaceholderText(/Search logs/i);
     fireEvent.change(searchInput, { target: { value: 'timeout' } });
     fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
 
@@ -1790,7 +1790,7 @@ describe('LiveLogStream B11 fixes', () => {
       expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ severity_max: 3 }), expect.anything());
     });
     fetchSpy.mockClear();
-    fireEvent.click(screen.getByText('Filter').closest('button') as HTMLElement);
+    fireEvent.click(screen.getByLabelText('Search now'));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const arg = fetchSpy.mock.calls[0][0] as any;
     expect(arg.severity_max).toBe(3);
@@ -2169,7 +2169,7 @@ describe('LiveLogStream B12 fixes', () => {
     });
     renderStream();
     await waitFor(() => expect(signals.length).toBe(1));
-    fireEvent.click(screen.getByText('Filter'));
+    fireEvent.click(screen.getByLabelText('Search now'));
     await waitFor(() => expect(signals.length).toBe(2));
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
@@ -2737,5 +2737,97 @@ describe('Quick Filter and empty-state helpers (WP1-5, WP1-6)', () => {
     expect(hasActiveLogFilters({ app_name: ['a'] })).toBe(true);
     expect(hasActiveLogFilters({ from: '1h' })).toBe(true);
     expect(hasActiveLogFilters({ to: '2026-10-13T12:00:00Z' })).toBe(true);
+  });
+});
+
+describe('Pinned saved views on the Quick Filters bar (WP5-1)', () => {
+  const views = [
+    { id: 1, name: 'Nginx errors', query_params: { query: 'nginx', severity_max: 3 }, is_pinned: true, created_at: '2026-10-01T00:00:00Z' },
+    { id: 2, name: 'Router', query_params: { sources: ['opnsense-router'], source: 'opnsense-router' }, is_pinned: true, created_at: '2026-10-01T00:00:00Z' },
+    { id: 3, name: 'Unpinned view', query_params: { query: 'postgres' }, is_pinned: false, created_at: '2026-10-01T00:00:00Z' },
+  ];
+
+  const renderStream = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({} as any);
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({
+      sources: ['homelab-host', 'opnsense-router'],
+      apps: ['nginx'],
+      host_to_apps: {},
+      app_to_hosts: {},
+    } as any);
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue(views.map((v) => ({ ...v })) as any);
+  });
+
+  it('shows pinned views first on the bar, before the Hosts group, and leaves unpinned views out', async () => {
+    renderStream();
+    await waitFor(() => expect(screen.getAllByTestId('quick-filter-view')).toHaveLength(2));
+    const chips = screen.getAllByTestId('quick-filter-view');
+    expect(chips.map((c) => c.textContent)).toEqual(['Nginx errors', 'Router']);
+    await screen.findByText('Hosts');
+    expect(chips[1].compareDocumentPosition(screen.getByText('Hosts')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Saved views are loaded once and shared with the search bar
+    expect(savedViewsApi.fetchSavedViews).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a view on click and highlights its chip and the Views button', async () => {
+    renderStream();
+    const chip = (await screen.findAllByTestId('quick-filter-view'))[0];
+    expect(chip).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('views-button-label')).toHaveTextContent('Views');
+    const fetchSpy = vi.mocked(logsApi.fetchLogs);
+    fetchSpy.mockClear();
+
+    fireEvent.click(chip);
+
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'nginx', severity_max: 3 }), expect.anything())
+    );
+    expect(screen.getAllByTestId('quick-filter-view')[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByTestId('quick-filter-view')[1]).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('views-button-label')).toHaveTextContent('View: Nginx errors');
+  });
+
+  it('marks a view active when the filters match it in another form (host chip instead of the view)', async () => {
+    renderStream();
+    await screen.findAllByTestId('quick-filter-view');
+    const routerHost = await waitFor(() => {
+      const chip = screen.getAllByTestId('quick-filter-host').find((el) => el.textContent === 'opnsense-router');
+      expect(chip).toBeTruthy();
+      return chip as HTMLElement;
+    });
+    fireEvent.click(routerHost);
+    await waitFor(() => expect(screen.getAllByTestId('quick-filter-view')[1]).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('views-button-label')).toHaveTextContent('View: Router');
+  });
+
+  it('a rename from the Views menu updates the pinned chip at once, without loading the list again', async () => {
+    vi.spyOn(savedViewsApi, 'updateSavedView').mockImplementation(async (id, data) => ({
+      ...views.find((v) => v.id === id)!,
+      ...data,
+    }) as any);
+    renderStream();
+    await screen.findAllByTestId('quick-filter-view');
+    fireEvent.click(screen.getByRole('button', { name: /Saved views menu/i }));
+    fireEvent.click(screen.getByLabelText('Rename view Router'));
+    const input = screen.getByLabelText(/View Name/);
+    fireEvent.change(input, { target: { value: 'Firewall' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getAllByTestId('quick-filter-view').map((c) => c.textContent)).toEqual(['Firewall', 'Nginx errors']));
+    expect(savedViewsApi.fetchSavedViews).toHaveBeenCalledTimes(1);
   });
 });

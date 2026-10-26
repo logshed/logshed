@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { LogSearchBar } from '../components/logs/LogSearchBar.tsx';
 import { LogFilterParams } from '../types.ts';
@@ -191,12 +191,12 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
 });
 
 describe('LogSearchBar B11 fixes', () => {
-  it('calls onSearch without arguments when the Filter button is clicked (B-01)', () => {
+  it('calls onSearch without arguments when the Search now button is clicked (B-01)', () => {
     const onSearch = vi.fn();
     render(
       <LogSearchBar filters={{ severity_max: 3 }} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />
     );
-    fireEvent.click(screen.getByText('Filter').closest('button') as HTMLElement);
+    fireEvent.click(screen.getByLabelText('Search now'));
     expect(onSearch).toHaveBeenCalledTimes(1);
     expect(onSearch.mock.calls[0]).toHaveLength(0);
   });
@@ -327,5 +327,83 @@ describe('LogSearchBar severity wording (WP2)', () => {
     fireEvent.click(screen.getByLabelText('Open filters drawer'));
     expect(screen.getByRole('option', { name: 'Warning (4) and more severe' })).toBeInTheDocument();
     expect(screen.queryByText(/Maximum Severity/)).toBeNull();
+  });
+});
+
+describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', () => {
+  const renderBar = (filters: LogFilterParams = {}, onSearch = vi.fn()) => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+    render(<LogSearchBar filters={filters} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />);
+    return onSearch;
+  };
+
+  it('uses a secondary Search now icon button instead of the blue Filter button', () => {
+    const onSearch = renderBar();
+    const button = screen.getByRole('button', { name: 'Search now' });
+    expect(button).toHaveAttribute('title', 'Search now (Enter)');
+    expect(button.className).not.toContain('bg-accent-600');
+    expect(screen.queryByText('Filter')).toBeNull();
+    fireEvent.click(button);
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it('mobile drawer closes and searches with Done', async () => {
+    const onSearch = renderBar();
+    fireEvent.click(screen.getByLabelText('Open filters drawer'));
+    expect(screen.queryByText('Apply Filters')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onSearch).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Done' })).toBeNull());
+  });
+
+  it('shows the new placeholder', () => {
+    renderBar();
+    expect(screen.getByPlaceholderText('Search logs, e.g. "disk full", error OR timeout, app:nginx')).toBeInTheDocument();
+  });
+
+  it('the help button opens a popover listing the search syntax', () => {
+    renderBar();
+    const help = screen.getByRole('button', { name: 'Search syntax help' });
+    expect(help).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(help);
+    expect(help).toHaveAttribute('aria-expanded', 'true');
+    const popover = screen.getByRole('dialog', { name: 'Search syntax' });
+    for (const example of ['"exact phrase"', 'error OR timeout', 'auth NOT cron', 'app:nginx', 'host:pve-node2', 'msg:"disk full"']) {
+      expect(within(popover).getByText(example)).toBeInTheDocument();
+    }
+    expect(within(popover).getByText(/time finds timeout/)).toBeInTheDocument();
+    expect(within(popover).getByText(/any case/)).toBeInTheDocument();
+    fireEvent.click(help);
+    expect(screen.queryByRole('dialog', { name: 'Search syntax' })).toBeNull();
+  });
+
+  it('the popover closes on Esc, on an outside click and when focus leaves it', () => {
+    renderBar();
+    const help = screen.getByRole('button', { name: 'Search syntax help' });
+
+    fireEvent.click(help);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Search syntax' })).toBeNull();
+    expect(help).toHaveAttribute('aria-expanded', 'false');
+    expect(document.activeElement).toBe(help);
+
+    fireEvent.click(help);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('dialog', { name: 'Search syntax' })).toBeNull();
+
+    fireEvent.click(help);
+    // Moving focus into the popover keeps it open; moving it elsewhere closes it
+    fireEvent.blur(help, { relatedTarget: screen.getByRole('dialog', { name: 'Search syntax' }) });
+    expect(screen.getByRole('dialog', { name: 'Search syntax' })).toBeInTheDocument();
+    fireEvent.blur(help, { relatedTarget: screen.getByPlaceholderText(/Search logs/) });
+    expect(screen.queryByRole('dialog', { name: 'Search syntax' })).toBeNull();
+  });
+
+  it('places the help button left of the clear button when there is a query', () => {
+    renderBar({ query: 'disk' });
+    const help = screen.getByRole('button', { name: 'Search syntax help' });
+    const clear = screen.getByRole('button', { name: 'Clear search query' });
+    expect(help.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(help.parentElement!.className).toContain('right-7');
   });
 });

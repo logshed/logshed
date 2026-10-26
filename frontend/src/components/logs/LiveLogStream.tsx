@@ -18,9 +18,11 @@ import {
   Check,
   FilterX,
   Inbox,
+  Bookmark,
 } from 'lucide-react';
 import { LogEntry, LogFilterParams, DockerEndpoint } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
+import { useSavedViews, findActiveView } from './useSavedViews.ts';
 import { LogDetailModal } from './LogDetailModal.tsx';
 import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
 import { getAuthStatus } from '../../api/auth.ts';
@@ -1539,6 +1541,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     [availableAppsForSelectedHosts, chipCounts.apps, activeApps],
   );
 
+  // Saved views are shared by the search bar (Views menu, mobile drawer) and the pinned chips below
+  const savedViews = useSavedViews();
+  const pinnedViews = useMemo(() => savedViews.views.filter((v) => v.is_pinned), [savedViews.views]);
+  const activeSavedView = useMemo(() => findActiveView(savedViews.views, filters), [savedViews.views, filters]);
+
   const filtersActive = useMemo(() => hasActiveLogFilters(filters), [filters]);
 
   // Multi-select across single or multiple hosts with Shift-click range support
@@ -1662,6 +1669,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           availableSources={availableSourcesForSelectedApps}
           availableApps={availableAppsForSelectedHosts}
           onApplySavedView={handleApplySavedView}
+          savedViews={savedViews}
           totalCount={totalCount ?? undefined}
           totalCapped={totalCapped}
           facetsTruncated={facetsTruncated}
@@ -1673,9 +1681,30 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
             <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-w-full">
               <span className="text-slate-400 font-medium text-[11px] shrink-0">Quick Filters:</span>
-              {/* Pinned saved view chips go here, before the host and app groups */}
+              {/* Pinned saved views first: a click applies the view, as the Views menu does */}
+              {pinnedViews.map((view) => {
+                const isActive = activeSavedView?.id === view.id;
+                return (
+                  <button
+                    key={`view-${view.id}`}
+                    type="button"
+                    data-testid="quick-filter-view"
+                    onClick={() => handleApplySavedView(view.query_params)}
+                    aria-pressed={isActive}
+                    title={isActive ? `Saved view ${view.name} (active)` : `Apply saved view ${view.name}`}
+                    className={`flex items-center gap-1 px-2 py-1 md:py-0.5 rounded text-[11px] border transition cursor-pointer shrink-0 ${
+                      isActive
+                        ? 'bg-accent-950 text-accent-300 border-accent-500 font-semibold'
+                        : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
+                    }`}
+                  >
+                    <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
+                    <span className="truncate max-w-[10rem]">{view.name}</span>
+                  </button>
+                );
+              })}
               {quickHostChips.length > 0 && (
-                <span className="flex items-center gap-1 text-slate-500 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none">
+                <span className={`flex items-center gap-1 text-slate-500 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ${pinnedViews.length > 0 ? 'ml-1' : ''}`}>
                   <Server className="w-3 h-3" aria-hidden="true" />
                   <span>Hosts</span>
                 </span>
