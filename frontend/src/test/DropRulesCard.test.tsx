@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DropRulesCard } from '../components/alerts/tabs/DropRulesTab.tsx';
 import * as dropRulesApi from '../api/dropRules.ts';
 import { DropRule } from '../types.ts';
+import { stubDownloads } from './downloadStubs.ts';
 
 describe('DropRulesCard Component', () => {
   const mockRules: DropRule[] = [
@@ -69,6 +70,8 @@ describe('DropRulesCard Component', () => {
     fireEvent.click(activeBtn);
 
     expect(updateSpy).toHaveBeenCalledWith(1, { is_enabled: false });
+    // The card shows the saved state
+    expect(await screen.findByText('Disabled')).toBeInTheDocument();
   });
 
   it('allows editing an existing rule and resetting its counter inside the modal', async () => {
@@ -506,6 +509,7 @@ describe('DropRulesCard Component', () => {
       new Blob([JSON.stringify({ version: '1', drop_rules: mockRules })], { type: 'application/json' })
     );
 
+    const restoreDownloads = stubDownloads();
     render(<DropRulesCard />);
 
     await waitFor(() => {
@@ -514,6 +518,9 @@ describe('DropRulesCard Component', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Export All/i }));
     expect(exportSpy).toHaveBeenCalled();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:export'));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(await exportSpy.mock.results[0].value);
+    restoreDownloads();
   });
 
   it('exports a single drop rule when row Export button is clicked', async () => {
@@ -521,6 +528,7 @@ describe('DropRulesCard Component', () => {
       new Blob([JSON.stringify({ version: '1', drop_rule: mockRules[0] })], { type: 'application/json' })
     );
 
+    const restoreDownloads = stubDownloads();
     render(<DropRulesCard />);
 
     await waitFor(() => {
@@ -529,6 +537,8 @@ describe('DropRulesCard Component', () => {
 
     fireEvent.click(screen.getByLabelText('Export rule 1'));
     expect(exportSpy).toHaveBeenCalledWith(1);
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:export'));
+    restoreDownloads();
   });
 
   it('imports drop rules from a JSON file and displays feedback', async () => {

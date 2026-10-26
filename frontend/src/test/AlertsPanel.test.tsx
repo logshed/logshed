@@ -7,6 +7,7 @@ import * as notificationsApi from '../api/notifications.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
 import * as logsApi from '../api/logs.ts';
 import { setAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
+import { stubDownloads } from './downloadStubs.ts';
 
 const mockRules: AlertRule[] = [
   {
@@ -525,16 +526,20 @@ describe('AlertsPanel Component', () => {
     // Click Drop Rules
     const dropRulesTab = screen.getByRole('button', { name: /Drop Rules/i });
     fireEvent.click(dropRulesTab);
+    // Let the tab's data load land inside act
+    await act(async () => {});
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules/drop-rules');
 
     // Click History
     const historyTab = screen.getByRole('button', { name: /^History/i });
     fireEvent.click(historyTab);
+    await act(async () => {});
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules/history');
 
     // Click Alert Rules
     const rulesTab = screen.getByRole('button', { name: /Alert Rules/i });
     fireEvent.click(rulesTab);
+    await act(async () => {});
     expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/rules/rules');
   });
 
@@ -674,6 +679,7 @@ describe('AlertsPanel Component', () => {
       new Blob([JSON.stringify({ version: '1', alert_rules: [] })], { type: 'application/json' })
     );
 
+    const restoreDownloads = stubDownloads();
     render(<AlertsPanel />);
 
     await waitFor(() => {
@@ -682,6 +688,9 @@ describe('AlertsPanel Component', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Export All/i }));
     expect(exportSpy).toHaveBeenCalled();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:export'));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(await exportSpy.mock.results[0].value);
+    restoreDownloads();
   });
 
   it('exports a single alert rule when row Export button is clicked', async () => {
@@ -689,6 +698,7 @@ describe('AlertsPanel Component', () => {
       new Blob([JSON.stringify({ version: '1', alert_rule: {} })], { type: 'application/json' })
     );
 
+    const restoreDownloads = stubDownloads();
     render(<AlertsPanel />);
 
     await waitFor(() => {
@@ -697,6 +707,8 @@ describe('AlertsPanel Component', () => {
 
     fireEvent.click(screen.getByLabelText('Export rule SSH Brute-Force Detection'));
     expect(exportSpy).toHaveBeenCalledWith(1);
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:export'));
+    restoreDownloads();
   });
 
   it('imports alert rules from a JSON file and displays feedback', async () => {

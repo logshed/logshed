@@ -1137,11 +1137,12 @@ describe('LiveLogStream Component', () => {
       expect(screen.getByText('Container started cleanly')).toBeInTheDocument();
     });
 
-    // Now slow filtered request resolves AFTER reset has already finished
-    if (slowResolve) (slowResolve as () => void)();
-
-    // Give microtasks time to run
-    await new Promise((r) => setTimeout(r, 50));
+    // Now slow filtered request resolves AFTER reset has already finished; give microtasks time to
+    // run inside act, so anything the stale response still updates is applied before the checks
+    await act(async () => {
+      if (slowResolve) (slowResolve as () => void)();
+      await new Promise((r) => setTimeout(r, 50));
+    });
 
     // The live logs MUST NOT be overwritten by the stale slow filtered response!
     expect(screen.getByText('Container started cleanly')).toBeInTheDocument();

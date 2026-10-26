@@ -1,8 +1,19 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import type { ReactElement } from 'react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LogSearchBar } from '../components/logs/LogSearchBar.tsx';
 import { LogFilterParams } from '../types.ts';
 import * as savedViewsApi from '../api/savedViews.ts';
+
+/**
+ * Renders, then lets the saved views request the search bar starts on mount settle inside act, so
+ * its state updates do not land after the test (BL-11).
+ */
+async function renderSettled(ui: ReactElement) {
+  const result = render(ui);
+  await act(async () => {});
+  return result;
+}
 
 describe('LogSearchBar Component (Items #6, #22, #31)', () => {
   it('hides the Reset button when no filters are active', () => {
@@ -226,37 +237,37 @@ describe('LogSearchBar B11 fixes', () => {
 });
 
 describe('LogSearchBar time presets (B-23)', () => {
-  const renderBar = (filters: LogFilterParams, onFilterChange = vi.fn()) => {
+  const renderBar = async (filters: LogFilterParams, onFilterChange = vi.fn()) => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
-    render(<LogSearchBar filters={filters} onFilterChange={onFilterChange} onSearch={vi.fn()} onReset={vi.fn()} />);
+    await renderSettled(<LogSearchBar filters={filters} onFilterChange={onFilterChange} onSearch={vi.fn()} onReset={vi.fn()} />);
     return onFilterChange;
   };
   const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
 
-  it('stores a preset as a relative value instead of a fixed timestamp', () => {
-    const onFilterChange = renderBar({ query: 'x' });
+  it('stores a preset as a relative value instead of a fixed timestamp', async () => {
+    const onFilterChange = await renderBar({ query: 'x' });
     fireEvent.change(desktopTimeSelect(), { target: { value: '1h' } });
     expect(onFilterChange).toHaveBeenCalledWith({ query: 'x', from: '1h', to: undefined });
   });
 
-  it('shows the preset that matches a relative from value (saved view or link)', () => {
-    renderBar({ from: '24h' });
+  it('shows the preset that matches a relative from value (saved view or link)', async () => {
+    await renderBar({ from: '24h' });
     expect(desktopTimeSelect().value).toBe('24h');
   });
 
-  it('shows Custom with the date pickers for an absolute from value', () => {
-    renderBar({ from: '2026-10-13T10:00:00.000Z' });
+  it('shows Custom with the date pickers for an absolute from value', async () => {
+    await renderBar({ from: '2026-10-13T10:00:00.000Z' });
     expect(desktopTimeSelect().value).toBe('custom');
     expect(screen.getAllByText('From:').length).toBeGreaterThan(0);
   });
 
-  it('shows All Time when no time bounds are set', () => {
-    renderBar({});
+  it('shows All Time when no time bounds are set', async () => {
+    await renderBar({});
     expect(desktopTimeSelect().value).toBe('all');
   });
 
-  it('turns a relative preset into an absolute start when switching to Custom', () => {
-    const onFilterChange = renderBar({ from: '1h' });
+  it('turns a relative preset into an absolute start when switching to Custom', async () => {
+    const onFilterChange = await renderBar({ from: '1h' });
     const before = Date.now();
     fireEvent.change(desktopTimeSelect(), { target: { value: 'custom' } });
     const call = onFilterChange.mock.calls[0][0];
@@ -275,23 +286,27 @@ describe('LogSearchBar N07 fixes', () => {
     availableApps: ['nginx'],
   };
 
-  it('shows a note in the host and app lists when the facets were capped', () => {
-    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated facetsLimit={500} />);
+  beforeEach(() => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  it('shows a note in the host and app lists when the facets were capped', async () => {
+    await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated facetsLimit={500} />);
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.getByText(/Showing the first 500 hosts/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('All Apps'));
     expect(screen.getByText(/Showing the first 500 apps/)).toBeInTheDocument();
   });
 
-  it('shows no capped note when the facets were not capped', () => {
-    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated={false} />);
+  it('shows no capped note when the facets were not capped', async () => {
+    await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated={false} />);
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.queryByText(/Showing the first 500/)).toBeNull();
   });
 
-  it('offers a Today preset that sends since_midnight', () => {
+  it('offers a Today preset that sends since_midnight', async () => {
     const onFilterChange = vi.fn();
-    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={onFilterChange} />);
+    await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={onFilterChange} />);
     const select = screen.getAllByRole('combobox').find((el) =>
       Array.from((el as HTMLSelectElement).options).some((o) => o.value === '15m')
     ) as HTMLSelectElement;
@@ -300,8 +315,8 @@ describe('LogSearchBar N07 fixes', () => {
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }));
   });
 
-  it('shows Today for a saved view or link carrying since_midnight', () => {
-    render(<LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={vi.fn()} />);
+  it('shows Today for a saved view or link carrying since_midnight', async () => {
+    await renderSettled(<LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={vi.fn()} />);
     const select = screen.getAllByRole('combobox').find((el) =>
       Array.from((el as HTMLSelectElement).options).some((o) => o.value === '15m')
     ) as HTMLSelectElement;
@@ -310,8 +325,12 @@ describe('LogSearchBar N07 fixes', () => {
 });
 
 describe('LogSearchBar severity wording (WP2)', () => {
-  it('desktop select uses compact labels and a long title', () => {
-    render(
+  beforeEach(() => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  it('desktop select uses compact labels and a long title', async () => {
+    await renderSettled(
       <LogSearchBar filters={{ severity_max: 4 }} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
     );
     const option = screen.getByRole('option', { name: 'Warn+ (0-4)' });
@@ -320,8 +339,8 @@ describe('LogSearchBar severity wording (WP2)', () => {
     expect(screen.getByRole('option', { name: 'Debug+ (0-7)' })).toBeInTheDocument();
   });
 
-  it('mobile drawer select uses the long "and more severe" labels', () => {
-    render(
+  it('mobile drawer select uses the long "and more severe" labels', async () => {
+    await renderSettled(
       <LogSearchBar filters={{}} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
     );
     fireEvent.click(screen.getByLabelText('Open filters drawer'));
@@ -331,14 +350,14 @@ describe('LogSearchBar severity wording (WP2)', () => {
 });
 
 describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', () => {
-  const renderBar = (filters: LogFilterParams = {}, onSearch = vi.fn()) => {
+  const renderBar = async (filters: LogFilterParams = {}, onSearch = vi.fn()) => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
-    render(<LogSearchBar filters={filters} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />);
+    await renderSettled(<LogSearchBar filters={filters} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />);
     return onSearch;
   };
 
-  it('uses a secondary Search now icon button instead of the blue Filter button', () => {
-    const onSearch = renderBar();
+  it('uses a secondary Search now icon button instead of the blue Filter button', async () => {
+    const onSearch = await renderBar();
     const button = screen.getByRole('button', { name: 'Search now' });
     expect(button).toHaveAttribute('title', 'Search now (Enter)');
     expect(button.className).not.toContain('bg-accent-600');
@@ -348,7 +367,7 @@ describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', ()
   });
 
   it('mobile drawer closes and searches with Done', async () => {
-    const onSearch = renderBar();
+    const onSearch = await renderBar();
     fireEvent.click(screen.getByLabelText('Open filters drawer'));
     expect(screen.queryByText('Apply Filters')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
@@ -356,13 +375,13 @@ describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', ()
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Done' })).toBeNull());
   });
 
-  it('shows the new placeholder', () => {
-    renderBar();
+  it('shows the new placeholder', async () => {
+    await renderBar();
     expect(screen.getByPlaceholderText('Search logs, e.g. "disk full", error OR timeout, app:nginx')).toBeInTheDocument();
   });
 
-  it('the help button opens a popover listing the search syntax', () => {
-    renderBar();
+  it('the help button opens a popover listing the search syntax', async () => {
+    await renderBar();
     const help = screen.getByRole('button', { name: 'Search syntax help' });
     expect(help).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(help);
@@ -377,8 +396,8 @@ describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', ()
     expect(screen.queryByRole('dialog', { name: 'Search syntax' })).toBeNull();
   });
 
-  it('the popover closes on Esc, on an outside click and when focus leaves it', () => {
-    renderBar();
+  it('the popover closes on Esc, on an outside click and when focus leaves it', async () => {
+    await renderBar();
     const help = screen.getByRole('button', { name: 'Search syntax help' });
 
     fireEvent.click(help);
@@ -399,8 +418,8 @@ describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', ()
     expect(screen.queryByRole('dialog', { name: 'Search syntax' })).toBeNull();
   });
 
-  it('places the help button left of the clear button when there is a query', () => {
-    renderBar({ query: 'disk' });
+  it('places the help button left of the clear button when there is a query', async () => {
+    await renderBar({ query: 'disk' });
     const help = screen.getByRole('button', { name: 'Search syntax help' });
     const clear = screen.getByRole('button', { name: 'Clear search query' });
     expect(help.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -416,16 +435,20 @@ describe('LogSearchBar capped-list note follows the server limit (BL-04)', () =>
     availableApps: ['nginx'],
   };
 
-  it('names the limit the server reported', () => {
-    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated facetsLimit={250} />);
+  beforeEach(() => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  it('names the limit the server reported', async () => {
+    await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated facetsLimit={250} />);
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.getByText('Showing the first 250 hosts. Type a name to add others.')).toBeInTheDocument();
     fireEvent.click(screen.getByText('All Apps'));
     expect(screen.getByText('Showing the first 250 apps. Type a name to add others.')).toBeInTheDocument();
   });
 
-  it('does not guess a number when the limit is unknown', () => {
-    render(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated />);
+  it('does not guess a number when the limit is unknown', async () => {
+    await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated />);
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.getByText('Showing only some hosts. Type a name to add others.')).toBeInTheDocument();
   });

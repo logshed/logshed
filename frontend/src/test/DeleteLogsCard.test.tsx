@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DeleteLogsCard } from '../components/storage/DeleteLogsCard.tsx';
 import * as logsApi from '../api/logs.ts';
@@ -16,6 +16,8 @@ describe('DeleteLogsCard Component', () => {
 
   it('renders card with None defaults and does not target all logs initially', async () => {
     render(<DeleteLogsCard />);
+    // Let the host and app lists load
+    await act(async () => {});
 
     expect(screen.getByRole('heading', { name: /Targeted Log Deletion/i })).toBeInTheDocument();
     expect(screen.getByText(/Host \/ IP \(Optional\)/i)).toBeInTheDocument();
@@ -109,6 +111,8 @@ describe('DeleteLogsCard Component', () => {
     vi.spyOn(logsApi, 'previewDeleteLogs').mockResolvedValue({ matched_count: 10 });
 
     render(<DeleteLogsCard />);
+    // Let the host and app lists load
+    await act(async () => {});
 
     // Change time preset to '7d'
     const sevenDayBtn = screen.getByRole('button', { name: 'Past 7 Days' });
