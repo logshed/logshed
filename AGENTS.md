@@ -33,6 +33,7 @@
   * On-demand redaction of all sensitive tokens/passwords via `redactor.py` before LLM dispatch.
   * Native Auth: Argon2id password hashing + HTTP-only SameSite=Lax session cookies.
   * Database & Migrations: SQLite (WAL mode + FTS5 external content table) versioned via `PRAGMA user_version = 3`. Asynchronous FTS5 indexing decoupled from raw ingestion via supervised `FTSIndexWorker` (target catch-up latency <= 1000ms), durable state tracking in `fts_index_state` (last_indexed_id), conditional triggers guarding against unindexed row deletions, and thread-local read connection reuse via `run_db_query` in `backend/app/api/deps.py`. No external database servers.
+- **No Plan or Backlog IDs in Code:** Never put internal tracking IDs (backlog, audit, review or work package references such as `BL-12`, `B-23`, `S-14`, `WP3` or `Item #4`) in code, comments, docstrings, test names or `describe` blocks. They mean nothing to future developers. Describe the behaviour instead, and keep the IDs in the planning notes.
 
 ## Workflow Protocol
 1. Consult `docs/SPEC.md` for technical schemas, endpoints, and exact trigger definitions. It is a short index mapping each topic to a domain module in `docs/spec/`; read only the modules relevant to the task rather than loading the whole specification into context.
