@@ -1089,7 +1089,7 @@ class TestQueueConsumerPersistentConnection:
 
 
 class TestFutureTimestampWindow:
-    """N03-1: the consumer clamp uses the same 5 minute future window as HTTP ingest and syslog."""
+    """The consumer clamp uses the same 5 minute future window as HTTP ingest and syslog."""
 
     @staticmethod
     def _store(db_path: Path, entries: list[dict]) -> dict[str, str]:
@@ -1143,7 +1143,7 @@ class TestFutureTimestampWindow:
 
 
 class TestMultilineEntryCap:
-    """N03-4: a merged multiline entry never grows past MAX_MESSAGE_BYTES in message or raw."""
+    """A merged multiline entry never grows past MAX_MESSAGE_BYTES in message or raw."""
 
     @staticmethod
     def _drain() -> list[dict]:
@@ -1206,7 +1206,7 @@ class TestMultilineEntryCap:
 
 
 class TestQueueConsumerRowsThatCannotBeStored:
-    """BL-39: a batch that can never be stored as it is must not stop ingestion."""
+    """A batch that can never be stored as it is must not stop ingestion."""
 
     @staticmethod
     def _take(entries: list[dict]) -> tuple[list[dict], asyncio.Queue]:

@@ -114,7 +114,7 @@ describe('AlertTestModal Component', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('sends the rule filters, not the sample values, and shows not matched (B-03)', async () => {
+  it('sends the rule filters, not the sample values, and shows not matched', async () => {
     const testSpy = vi.spyOn(alertsApi, 'testAlertRule').mockImplementation(async (req) => ({
       matched: req.filter_app === req.sample_app,
     }));
@@ -154,7 +154,7 @@ describe('AlertTestModal Component', () => {
     });
   });
 
-  it('offers all 8 severities for the sample (E-25)', () => {
+  it('offers all 8 severities for the sample', () => {
     render(<AlertTestModal isOpen={true} rule={mockRule} availableApps={[]} onClose={onClose} />);
     const select = screen.getByLabelText('Sample Severity') as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.value)).toEqual(['0', '1', '2', '3', '4', '5', '6', '7']);

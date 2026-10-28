@@ -532,7 +532,7 @@ def _set_expires(db_path: Path, session_id: str, minutes_from_now: int) -> str:
 
 
 class TestReadOnlyStatus:
-    """E-04: status reads must not take the SQLite write lock."""
+    """Status reads must not take the SQLite write lock."""
 
     def test_status_performs_no_writes(self, db_path: Path):
         with get_connection(db_path) as conn:
@@ -608,7 +608,7 @@ class TestReadOnlyStatus:
 
 
 class TestShutdownFlush:
-    """B-20: drop counts recorded since the last sweep survive a shutdown."""
+    """Drop counts recorded since the last sweep survive a shutdown."""
 
     @pytest.mark.asyncio
     async def test_shutdown_flushes_pending_drop_counts(self, db_path: Path, monkeypatch):
@@ -634,7 +634,7 @@ class TestShutdownFlush:
 
 
 class TestAtomicCap:
-    """B-64: the session cap holds under concurrent creates from separate connections."""
+    """The session cap holds under concurrent creates from separate connections."""
 
     def test_concurrent_creates_never_exceed_cap(self, db_path: Path):
         attempts = ms.MAX_ACTIVE_MAINTENANCE_SESSIONS + 5
@@ -677,7 +677,7 @@ class TestAtomicCap:
 
 
 class TestUiEndTime:
-    """B-57: the web UI must not start a window that has already ended."""
+    """The web UI must not start a window that has already ended."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("offset_seconds", [-3600, 0, 10])

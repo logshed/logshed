@@ -349,7 +349,7 @@ class TestSystemMetricsApi:
 
 
 class TestSystemMetricsUdpReceiveErrors:
-    """N03-7: system metrics (REST and the MCP tool) report kernel UDP receive drops since start."""
+    """System metrics (REST and the MCP tool) report kernel UDP receive drops since start."""
 
     @pytest.mark.asyncio
     async def test_metrics_report_change_since_baseline(self, client: AsyncClient, full_token_headers: dict, monkeypatch):

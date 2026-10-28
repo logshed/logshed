@@ -1026,7 +1026,7 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
   });
 });
 
-describe('AiAnalysisModal N07 model list run guard', () => {
+describe('AiAnalysisModal model list from an earlier run', () => {
   const logsA: LogEntry[] = [
     {
       id: 1,
@@ -1088,7 +1088,7 @@ describe('AiAnalysisModal N07 model list run guard', () => {
   });
 });
 
-describe('AiAnalysisModal masked-values badge (WP3)', () => {
+describe('AiAnalysisModal masked-values badge', () => {
   const logs: LogEntry[] = [
     {
       id: 1,
@@ -1158,7 +1158,7 @@ describe('AiAnalysisModal masked-values badge (WP3)', () => {
   });
 });
 
-describe('AiAnalysisModal situational context limit (BL-06)', () => {
+describe('AiAnalysisModal situational context limit', () => {
   const logs: LogEntry[] = [
     {
       id: 1,

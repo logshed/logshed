@@ -209,7 +209,7 @@ class TestSchemaIntegrity:
         assert expected.issubset(indexes)
 
     def test_redundant_indexes_absent(self, db_path: Path):
-        """E-46: indexes that duplicate a UNIQUE autoindex or a composite index prefix are not created."""
+        """Indexes that duplicate a UNIQUE autoindex or a composite index prefix are not created."""
         conn = get_connection(db_path)
         indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
         conn.close()
@@ -655,7 +655,7 @@ class TestMigrationRunner:
 
 
 # ===================================================================
-# 2a. Migration Atomicity and v3 Repair (B-15, E-46)
+# 2a. Migration Atomicity and v3 Repair
 # ===================================================================
 
 def _schema_snapshot(path: Path) -> tuple:
@@ -1271,7 +1271,7 @@ class TestFTS5Sync:
 
 
 # ===================================================================
-# WP8. Unique saved view names (ignoring case)
+# Unique saved view names (ignoring case)
 # ===================================================================
 
 _RENAMED_LOG = "saved views whose names were duplicates"

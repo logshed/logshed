@@ -1,5 +1,5 @@
 """
-N05-1: Docker host addresses are checked when the collector (and the "Test connection"
+Docker host addresses are checked when the collector (and the "Test connection"
 client) actually connects, not only when a host is saved, so a DNS answer that changes
 after the save-time check (DNS rebinding) cannot reach a link-local or metadata address.
 

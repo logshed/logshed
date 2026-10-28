@@ -921,7 +921,7 @@ class TestAliasLessHosts:
 
 
 class TestKeysetPlans:
-    """The OR keyset predicate is already turned into an index range by SQLite (B-17 guard)."""
+    """Guards that SQLite already turns the OR keyset predicate into an index range."""
 
     @pytest.mark.parametrize(
         "where, index",

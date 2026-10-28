@@ -1853,7 +1853,7 @@ class TestRetentionOverridePersistence:
 
 
 class TestHealthUdpReceiveErrors:
-    """N03-7: the authenticated health response reports kernel UDP receive drops since start."""
+    """The authenticated health response reports kernel UDP receive drops since start."""
 
     @pytest.mark.asyncio
     async def test_health_reports_change_since_baseline(self, client: AsyncClient, auth_cookie: dict, monkeypatch):

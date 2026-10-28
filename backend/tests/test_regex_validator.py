@@ -111,7 +111,7 @@ class TestRegexValidator:
         assert safe_regex_search(backtracking_pat, candidate, timeout=0.01) is False
 
 
-# Patterns that slipped past the static detector before 1.3.0 (S-11)
+# Patterns that slipped past the static detector before 1.3.0
 BYPASS_PATTERNS = [
     r"(a|a)+$",
     r"(\w|\d)+$",
@@ -257,7 +257,7 @@ class TestStaticDetectorCost:
 
 
 class TestRuleTimeoutTracker:
-    """N06-2 (D-13): per-rule sliding window of pattern timeouts."""
+    """Per-rule sliding window of pattern timeouts."""
 
     class _FakePattern:
         pattern = "slow"

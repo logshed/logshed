@@ -16,7 +16,7 @@ const item: AlertHistoryItem = {
 describe('AlertHistoryTab time zone', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('shows trigger times in the server time zone, not browser time (E-06)', async () => {
+  it('shows trigger times in the server time zone, not browser time', async () => {
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({ server_timezone: 'Pacific/Kiritimati' } as any);
     render(
       <AlertHistoryTab

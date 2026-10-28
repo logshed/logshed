@@ -62,7 +62,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders "Modify Host Alias" when isHostAliased is true (Item #11)', () => {
+  it('renders "Modify Host Alias" when isHostAliased is true', () => {
     const handleAddAlias = vi.fn();
     render(
       <LogDetailModal
@@ -147,7 +147,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(modifyBtn).toBeInTheDocument();
   });
 
-  it('loads surrounding context and calls fetchLogContext with same_app=false by default (Item #9)', async () => {
+  it('loads surrounding context and calls fetchLogContext with same_app=false by default', async () => {
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({
       target_id: sampleLog.id,
       logs: contextLogs,
@@ -174,7 +174,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(screen.getByText(/task worker died with error code 1/i)).toBeInTheDocument();
   });
 
-  it('toggling "Same App Only" reloads context with same_app=true (Item #9)', async () => {
+  it('toggling "Same App Only" reloads context with same_app=true', async () => {
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({
       target_id: sampleLog.id,
       logs: contextLogs.filter((l) => l.app_name === 'pveproxy'),
@@ -208,7 +208,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     });
   });
 
-  it('renders "Inspect Target + Context (N logs)" and transfers logs to AI analysis (Item #8)', async () => {
+  it('renders "Inspect Target + Context (N logs)" and transfers logs to AI analysis', async () => {
     vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({
       target_id: sampleLog.id,
       logs: contextLogs,
@@ -249,7 +249,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
 
-  it('filters out any logs not matching the target host to enforce single-host constraint (Item #8)', async () => {
+  it('filters out any logs not matching the target host to enforce single-host constraint', async () => {
     const mixedHostLogs: LogEntry[] = [
       ...contextLogs,
       {
@@ -667,7 +667,7 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
 });
 
 
-describe('LogDetailModal context handling (B-25)', () => {
+describe('LogDetailModal context handling', () => {
   const mk = (id: number): LogEntry => ({
     id,
     timestamp: '2026-08-29T14:30:00.000Z',
@@ -716,7 +716,7 @@ describe('LogDetailModal context handling (B-25)', () => {
   });
 });
 
-describe('LogDetailModal AI setting, Newer / Older steps and context app names (WP1)', () => {
+describe('LogDetailModal AI setting, Newer / Older steps and context app names', () => {
   const log: LogEntry = {
     id: 500,
     timestamp: '2026-08-29T14:30:00.000Z',
@@ -896,7 +896,7 @@ describe('LogDetailModal AI setting, Newer / Older steps and context app names (
   });
 });
 
-describe('LogDetailModal "Create Alert Rule" (WP6-2)', () => {
+describe('LogDetailModal "Create Alert Rule"', () => {
   const log: LogEntry = {
     id: 600,
     timestamp: '2026-08-29T14:30:00.000Z',

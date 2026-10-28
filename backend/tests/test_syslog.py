@@ -1539,7 +1539,7 @@ def _hold_port(kind: int):
 
 
 class TestSyslogListenerSupervision:
-    """B-19: bind failures raise so the supervisor retries, and start() runs until stop()."""
+    """Bind failures raise so the supervisor retries, and start() runs until stop()."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("held", ["udp", "tcp"])
@@ -1653,7 +1653,7 @@ class TestSyslogListenerSupervision:
 
 
 class TestSyslogMessageCaps:
-    """S-12: oversize messages are truncated, and one IP cannot hold every TCP slot."""
+    """Oversize messages are truncated, and one IP cannot hold every TCP slot."""
 
     def test_oversize_message_is_truncated(self):
         from app.core.pipeline import MAX_MESSAGE_BYTES
@@ -1756,7 +1756,7 @@ class TestSyslogMessageCaps:
 
 
 class TestSyslogShutdownDrain:
-    """B-67: stop() hands every queued message to the assembler before the workers end."""
+    """`stop()` hands every queued message to the assembler before the workers end."""
 
     @pytest.mark.asyncio
     async def test_udp_stop_drains_queued_datagrams(self, db_path: Path, monkeypatch):
@@ -1817,7 +1817,7 @@ class TestSyslogShutdownDrain:
 
 
 class TestSyslogFutureTimestampWindow:
-    """N03-1: syslog keeps timestamps up to 5 minutes ahead, like HTTP ingest and the queue consumer."""
+    """Syslog keeps timestamps up to 5 minutes ahead, like HTTP ingest and the queue consumer."""
 
     NOW = datetime.datetime(2026, 10, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
 
@@ -1850,7 +1850,7 @@ class TestSyslogFutureTimestampWindow:
 
 
 class TestSyslogTcpDisconnectDrain:
-    """N03-5: frames read before a sender disconnects are still parsed, and stop() waits for that."""
+    """Frames read before a sender disconnects are still parsed, and stop() waits for that."""
 
     @staticmethod
     async def _send_and_disconnect(server: SyslogServer, count: int) -> None:
@@ -1946,7 +1946,7 @@ class _FakeUdpSocket:
 
 
 class TestSyslogUdpReceiveBuffer:
-    """N03-6: the UDP listener asks for a large receive buffer (SYSLOG_UDP_RECEIVE_BUFFER_BYTES)."""
+    """The UDP listener asks for a large receive buffer (SYSLOG_UDP_RECEIVE_BUFFER_BYTES)."""
 
     @pytest.fixture(autouse=True)
     def _linux_kernel(self, monkeypatch):
@@ -2080,7 +2080,7 @@ UdpLite: 0 0 0 0 0 0 0 0 0
 
 
 class TestUdpReceiveErrorCounter:
-    """N03-7: UDP datagrams the kernel dropped (RcvbufErrors) are read from /proc/net/snmp."""
+    """UDP datagrams the kernel dropped (RcvbufErrors) are read from /proc/net/snmp."""
 
     def test_parser_reads_counters_by_header_name(self, tmp_path: Path):
         from app.collectors.syslog import read_udp_receive_buffer_errors, read_udp_snmp_counters

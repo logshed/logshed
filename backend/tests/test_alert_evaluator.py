@@ -1842,7 +1842,7 @@ class TestAlertEvaluatorWindowPruningAndLightweightRecords:
 
 
 class TestAlertEnrichmentAiSettings:
-    """B-71: alert AI enrichment uses the configured AI timeout and thinking budget."""
+    """Alert AI enrichment uses the configured AI timeout and thinking budget."""
 
     @pytest.mark.asyncio
     async def test_enrichment_passes_configured_timeout_and_thinking_budget(self, tmp_path: Path, monkeypatch):
@@ -1894,7 +1894,7 @@ class TestAlertEnrichmentAiSettings:
 
 
 class TestInvalidAlertPatternIsNotRevalidated:
-    """E-03: a rule whose regex fails validation is marked invalid once, not re-checked per log line."""
+    """A rule whose regex fails validation is marked invalid once, not re-checked per log line."""
 
     def test_invalid_rule_never_calls_validator_after_construction(self, monkeypatch):
         import app.core.regex_validator as regex_validator
@@ -1924,7 +1924,7 @@ class TestInvalidAlertPatternIsNotRevalidated:
 
 
 class TestAlertRuleUserRegexEngine:
-    """S-11: alert rule patterns run on the `regex` engine with a real per-match timeout."""
+    """Alert rule patterns run on the `regex` engine with a real per-match timeout."""
 
     def _rule(self, pattern: str) -> CompiledAlertRule:
         return CompiledAlertRule(
@@ -1964,7 +1964,7 @@ class TestAlertRuleUserRegexEngine:
 
 
 class TestAlertPatternBackslashCodes:
-    """N06-1 (D-12): a backslash makes an alert pattern a regular expression."""
+    """A backslash makes an alert pattern a regular expression."""
 
     def _rule(self, pattern: str, rule_id: int = 21, name: str = "Backslash") -> CompiledAlertRule:
         return CompiledAlertRule(
@@ -2029,7 +2029,7 @@ class TestAlertPatternBackslashCodes:
 
 
 class TestAlertRuleTimeoutAutoDisable:
-    """N06-2 (D-13): an alert rule whose pattern keeps timing out is disabled automatically."""
+    """An alert rule whose pattern keeps timing out is disabled automatically."""
 
     class _TimingOutPattern:
         def __init__(self, pattern):
@@ -2221,7 +2221,7 @@ class TestAlertRuleTimeoutAutoDisable:
 
     @pytest.mark.asyncio
     async def test_failed_disable_write_is_retried_with_the_next_batch(self, setup, monkeypatch, caplog):
-        """BL-02: a failed write is queued again, so the rule does not come back enabled after a restart."""
+        """A failed write is queued again, so the rule does not come back enabled after a restart."""
         import logging
 
         caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
@@ -2266,7 +2266,7 @@ class TestAlertRuleTimeoutAutoDisable:
 
 
 class TestAlertAiContextRedactionOffLoop:
-    """N08-R: the log window sent to AI enrichment is redacted in one worker-thread call."""
+    """The log window sent to AI enrichment is redacted in one worker-thread call."""
 
     @pytest.fixture
     def test_db(self, tmp_path: Path):

@@ -112,7 +112,7 @@ class CompiledAlertRule:
         self.suppress_until_epoch: Optional[float] = None
         self._recompute_suppress_epoch()
 
-        # Pre-split comma-delimited filter_app into a tuple of stripped, lowercased strings (PERF-02)
+        # Pre-split comma-delimited filter_app into a tuple of stripped, lowercased strings
         if self.filter_app and self.filter_app.strip():
             self._filter_apps = tuple(
                 p.strip().lower() for p in self.filter_app.split(",") if p.strip()
@@ -237,7 +237,7 @@ class AlertEvaluator:
         self._windows: dict[int, deque[tuple[float, dict[str, Any]]]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self._lock = threading.Lock()
-        # Automatic disabling of rules whose pattern keeps timing out (D-13).
+        # Automatic disabling of rules whose pattern keeps timing out.
         # Lock order: self._lock, then self._auto_disable_lock.
         self._timeout_tracker = RuleTimeoutTracker()
         self._auto_disable_lock = threading.Lock()
@@ -357,7 +357,7 @@ class AlertEvaluator:
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         now_epoch = now_utc.timestamp()
 
-        # Prune expired window entries for all rules (PERF-04)
+        # Prune expired window entries for all rules
         self.prune_expired_windows(now_epoch)
 
         batch = [entry for entry in batch if not entry.get(SKIP_ALERT_RULES_KEY)]
@@ -374,11 +374,11 @@ class AlertEvaluator:
         min_epoch = now_epoch - 86400.0
         max_epoch = now_epoch + 300.0
 
-        # Pre-parse and store normalized float epoch timestamps on incoming log entries (PERF-02, SEC-05)
+        # Pre-parse and store normalized float epoch timestamps on incoming log entries
         for entry in batch:
             entry_epoch = parse_iso_to_epoch(entry.get("timestamp"), fallback=now_epoch)
 
-            # Clamp incoming entry epoch timestamps between now_epoch - 86400 and now_epoch + 300 (SEC-05)
+            # Clamp incoming entry epoch timestamps between now_epoch - 86400 and now_epoch + 300
             if entry_epoch < min_epoch:
                 entry_epoch = min_epoch
             elif entry_epoch > max_epoch:
@@ -390,7 +390,7 @@ class AlertEvaluator:
         with self._lock:
             for rule in rules:
                 window = self._windows.setdefault(rule.id, deque())
-                # Compute window cutoff using now_epoch - rule.window_seconds (SEC-05)
+                # Compute window cutoff using now_epoch - rule.window_seconds
                 window_cutoff = now_epoch - rule.window_seconds
                 needed = (rule.threshold_count * rule.window_seconds) if rule.rule_type == "rate" else rule.threshold_count
                 max_window_size = max(500, min(20000, needed * 2)) if rule.rule_type == "rate" else rule.threshold_count * 2
@@ -428,7 +428,7 @@ class AlertEvaluator:
                         else:
                             payload = entry
 
-                        # Append entry preserving chronological order under timestamp jitter (PERF-02)
+                        # Append entry preserving chronological order under timestamp jitter
                         if not window or entry_epoch >= (window[-1][0] if isinstance(window[-1], (tuple, list)) else window[-1]):
                             window.append((entry_epoch, payload))
                         else:
@@ -472,7 +472,7 @@ class AlertEvaluator:
                         logger.debug(f"Error evaluating rule {rule.id}: {e}")
                         continue
 
-        # Store automatic disables off the hot path, once per rule (D-13)
+        # Store automatic disables off the hot path, once per rule
         with self._auto_disable_lock:
             to_store = self._auto_disable_queue
             self._auto_disable_queue = []
@@ -481,7 +481,7 @@ class AlertEvaluator:
             self._pending_tasks.add(store_task)
             store_task.add_done_callback(self._pending_tasks.discard)
 
-        # Process fired alert events outside lock (PERF-04)
+        # Process fired alert events outside lock
         for rule, logs in fired_events:
             # Dispatch alert notification asynchronously in background with lifecycle tracking
             task = asyncio.create_task(self._dispatch_alert(rule, logs))
@@ -599,13 +599,13 @@ class AlertEvaluator:
     ) -> None:
         """
         Process alert firing:
-        1. Persist rule trigger state to SQLite non-blocking via asyncio.to_thread (PERF-04).
+        1. Persist rule trigger state to SQLite non-blocking via asyncio.to_thread.
         2. Extract IP indicators (for security canary alerts).
         3. Perform AI diagnosis enrichment if enabled.
         4. Persist record into alert_history table non-blocking via asyncio.to_thread.
         5. Send notification via NotifierService.
         """
-        # Persist rule trigger state to SQLite non-blocking in worker thread (PERF-04)
+        # Persist rule trigger state to SQLite non-blocking in worker thread
         await asyncio.to_thread(self._update_rule_trigger_state, rule)
 
         now_utc = datetime.datetime.now(datetime.timezone.utc)

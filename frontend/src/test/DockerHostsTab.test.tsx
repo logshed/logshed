@@ -414,7 +414,7 @@ describe('DockerHostsTab row enable toggle', () => {
   });
 });
 
-describe('DockerHostsTab row controls (WP3)', () => {
+describe('DockerHostsTab row controls', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });

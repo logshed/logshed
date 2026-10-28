@@ -427,7 +427,7 @@ class TestPresetEdgeCasesAndConventions:
 
 
 
-# A sample log line per shipped preset that the preset is meant to catch (S-11)
+# A sample log line per shipped preset that the preset is meant to catch
 ALERT_PRESET_SAMPLES = {
     "oom_killer": "Out of memory: Killed process 1234 (node) total-vm:1024kB",
     "proxy_auth_flood": '192.168.1.1 - - [18/Sep/2026:12:00:00 +0000] "GET /admin HTTP/1.1" 401 123',
@@ -528,7 +528,7 @@ class TestShippedPresetsWithUserRegexEngine:
 
 
 class TestSystemdSessionDropPreset:
-    """The systemd session preset drops exactly the PAM systemd-user session lines (P-01)."""
+    """The systemd session preset drops exactly the PAM systemd-user session lines."""
 
     @staticmethod
     def _filter(tmp_path: Path):

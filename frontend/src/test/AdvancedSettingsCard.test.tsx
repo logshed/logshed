@@ -150,7 +150,7 @@ describe('AdvancedSettingsCard Component', () => {
     });
   });
 
-  it('B-29: exposes its save through saveTriggerRef, resolving true on success and false on failure', async () => {
+  it('exposes its save through saveTriggerRef, resolving true on success and false on failure', async () => {
     const saveTriggerRef = { current: null } as { current: (() => Promise<boolean>) | null };
     const onSaved = vi.fn();
     vi.mocked(settingsApi.updateSettings).mockResolvedValueOnce({ status: 'ok' });

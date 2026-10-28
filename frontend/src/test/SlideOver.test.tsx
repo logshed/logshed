@@ -2,7 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { SlideOver } from '../components/common/SlideOver.tsx';
 
-describe('SlideOver Component (Item #7)', () => {
+describe('SlideOver Component', () => {
   it('renders nothing when isOpen is false', () => {
     const handleClose = vi.fn();
     render(

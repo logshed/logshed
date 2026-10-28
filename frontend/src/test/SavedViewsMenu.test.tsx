@@ -280,7 +280,7 @@ describe('SavedViewsMenu Component', () => {
   });
 });
 
-describe('Rename saved views and the active view (WP5-1, WP5-4)', () => {
+describe('Rename saved views and the active view', () => {
   const views: SavedView[] = [
     { id: 1, name: 'Traefik Errors', query_params: { query: 'traefik', severity_max: 3 }, is_pinned: true, created_at: '2026-09-18T10:00:00Z' },
     { id: 2, name: 'DHCP Traffic', query_params: { query: 'DHCP' }, is_pinned: false, created_at: '2026-09-18T10:05:00Z' },
@@ -458,7 +458,7 @@ describe('Rename saved views and the active view (WP5-1, WP5-4)', () => {
   });
 });
 
-describe('SaveViewModal unique names (WP5-4)', () => {
+describe('SaveViewModal unique names', () => {
   const existing: SavedView[] = [
     { id: 1, name: 'Traefik Errors', query_params: {}, is_pinned: false, created_at: '2026-09-18T10:00:00Z' },
   ];

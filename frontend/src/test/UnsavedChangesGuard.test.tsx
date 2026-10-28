@@ -254,7 +254,7 @@ describe('UnsavedChangesGuard Integration', () => {
       });
     };
 
-    it('B-28: still asks before leaving Settings when an Application tab edit is open on another sub-tab', async () => {
+    it('still asks before leaving Settings when an Application tab edit is open on another sub-tab', async () => {
       render(<App />);
       await openSettings();
 
@@ -271,7 +271,7 @@ describe('UnsavedChangesGuard Integration', () => {
       expect(screen.queryByTestId('storage-panel')).toBeNull();
     });
 
-    it('B-29: asks before leaving Settings with unsaved Advanced edits, and Save & Continue saves them', async () => {
+    it('asks before leaving Settings with unsaved Advanced edits, and Save & Continue saves them', async () => {
       const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
       render(<App />);
       await openSettings();
@@ -295,7 +295,7 @@ describe('UnsavedChangesGuard Integration', () => {
       });
     });
 
-    it('B-29: switching away from an Advanced tab with unsaved edits asks first, and Discard & Leave switches', async () => {
+    it('switching away from an Advanced tab with unsaved edits asks first, and Discard & Leave switches', async () => {
       render(<App />);
       await openSettings();
 

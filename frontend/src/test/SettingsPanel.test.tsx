@@ -792,7 +792,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.queryByText('Internal Application Logging')).toBeNull();
     });
 
-    it('keeps reporting App tab edits as dirty while another sub-tab is shown (B-28)', async () => {
+    it('keeps reporting App tab edits as dirty while another sub-tab is shown', async () => {
       const onDirtyChange = vi.fn();
       render(<SettingsPanel onDirtyChange={onDirtyChange} />);
 
@@ -1124,7 +1124,7 @@ describe('SettingsPanel Component', () => {
     });
   });
 
-  describe('B08: dirty tracking and save handling', () => {
+  describe('dirty tracking and save handling', () => {
     const keylessCompatSettings = {
       ai_enabled: true,
       ai_provider: 'openai_compatible' as const,
@@ -1184,7 +1184,7 @@ describe('SettingsPanel Component', () => {
       });
     });
 
-    it('B-05: a keyless OpenAI-compatible provider loads clean (no save bar, no unload prompt)', async () => {
+    it('a keyless OpenAI-compatible provider loads clean (no save bar, no unload prompt)', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
       const onDirtyChange = vi.fn();
       render(<SettingsPanel onDirtyChange={onDirtyChange} />);
@@ -1201,7 +1201,7 @@ describe('SettingsPanel Component', () => {
       expect(event.defaultPrevented).toBe(false);
     });
 
-    it('B-05: an OpenAI-compatible provider with a stored key loads clean, and typing a new key makes it dirty', async () => {
+    it('an OpenAI-compatible provider with a stored key loads clean, and typing a new key makes it dirty', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
         ...keylessCompatSettings,
         ai_api_key: '********',
@@ -1224,7 +1224,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
     });
 
-    it('B-05: typing a key into a keyless OpenAI-compatible provider makes the form dirty', async () => {
+    it('typing a key into a keyless OpenAI-compatible provider makes the form dirty', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
       render(<SettingsPanel />);
 
@@ -1236,7 +1236,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
     });
 
-    it('B-07: emptying the base URL saves an empty string instead of null', async () => {
+    it('emptying the base URL saves an empty string instead of null', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
       const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
       render(<SettingsPanel />);
@@ -1255,7 +1255,7 @@ describe('SettingsPanel Component', () => {
       expect(payload.ai_providers_config.openai_compatible.ai_base_url).toBe('');
     });
 
-    it('S-14: tells the user when the API key was cleared because the endpoint changed', async () => {
+    it('tells the user when the API key was cleared because the endpoint changed', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
       vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({
         status: 'ok',
@@ -1277,7 +1277,7 @@ describe('SettingsPanel Component', () => {
       });
     });
 
-    it('B-27: clearing the API key and leaving the field is a pending change that keeps other edits', async () => {
+    it('clearing the API key and leaving the field is a pending change that keeps other edits', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
       const updateSpy = vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
       render(<SettingsPanel />);
@@ -1306,7 +1306,7 @@ describe('SettingsPanel Component', () => {
       expect(updateSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('B-54: editing a non-active provider counts as an unsaved change', async () => {
+    it('editing a non-active provider counts as an unsaved change', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
       vi.spyOn(aiApi, 'getAiModels').mockResolvedValue({
         provider: 'gemini',
@@ -1335,7 +1335,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
     });
 
-    it('B-54: switching providers and back without edits leaves the form clean', async () => {
+    it('switching providers and back without edits leaves the form clean', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
       render(<SettingsPanel />);
 
@@ -1353,7 +1353,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
     });
 
-    it('B-53: forces a fresh settings fetch when the panel mounts', async () => {
+    it('forces a fresh settings fetch when the panel mounts', async () => {
       const fetchSpy = vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(twoProviderSettings);
       render(<SettingsPanel />);
       await waitFor(() => {
@@ -1363,7 +1363,7 @@ describe('SettingsPanel Component', () => {
     });
   });
 
-  describe('B08: App tab edits survive other sub-tabs', () => {
+  describe('App tab edits survive other sub-tabs', () => {
     const mcpSettings = {
       ai_enabled: true,
       ai_provider: 'gemini' as const,
@@ -1377,7 +1377,7 @@ describe('SettingsPanel Component', () => {
       enable_mcp: false,
     };
 
-    it('B-28: keeps reporting dirty on other sub-tabs and keeps the edit after a save made there', async () => {
+    it('keeps reporting dirty on other sub-tabs and keeps the edit after a save made there', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(mcpSettings);
       vi.spyOn(settingsApi, 'updateSettings').mockResolvedValue({ status: 'ok' });
       const onDirtyChange = vi.fn();
@@ -1415,7 +1415,7 @@ describe('SettingsPanel Component', () => {
       expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     });
 
-    it('B-29: Advanced edits are reported as dirty and saved through saveTriggerRef', async () => {
+    it('Advanced edits are reported as dirty and saved through saveTriggerRef', async () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({
         ...mcpSettings,
         ai_timeout: 45,

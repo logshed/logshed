@@ -343,7 +343,7 @@ describe('AlertRuleModal Component', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('lists all 8 severities plus Any in the max severity filter (E-25)', () => {
+  it('lists all 8 severities plus Any in the max severity filter', () => {
     render(
       <AlertRuleModal
         isOpen={true}
@@ -362,7 +362,7 @@ describe('AlertRuleModal Component', () => {
   });
 });
 
-describe('AlertRuleModal severity wording (WP2)', () => {
+describe('AlertRuleModal severity wording', () => {
   it('labels the field and explains the direction', () => {
     render(
       <AlertRuleModal
@@ -380,7 +380,7 @@ describe('AlertRuleModal severity wording (WP2)', () => {
   });
 });
 
-describe('AlertRuleModal prefill from a log (WP6-2)', () => {
+describe('AlertRuleModal prefill from a log', () => {
   const onClose = vi.fn();
   const onSuccess = vi.fn();
   const message = 'upstream timed out (110: Connection timed out) while reading response header from upstream';

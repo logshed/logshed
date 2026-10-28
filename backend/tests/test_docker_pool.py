@@ -228,7 +228,7 @@ class TestDockerCollectorPool:
 
 
 class TestDockerTlsHostnameVerification:
-    """S-16: per-endpoint TLS host name verification, on by default."""
+    """Per-endpoint TLS host name verification, on by default."""
 
     def test_ssl_context_checks_hostname_by_default(self):
         from app.collectors.docker_collector import create_docker_ssl_context

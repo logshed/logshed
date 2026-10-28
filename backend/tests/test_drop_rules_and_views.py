@@ -910,7 +910,7 @@ class TestDropRulesIngestionPipeline:
 
 
 # ===================================================================
-# 5. Drop rule update and reorder regressions (B-04, B-13, B-60)
+# 5. Drop rule update and reorder regressions
 # ===================================================================
 
 class TestDropRuleUpdateRegressions:
@@ -1057,7 +1057,7 @@ class TestDropRuleUpdateRegressions:
 
 
 # ===================================================================
-# 6. User regex engine for drop rules (S-11)
+# 6. User regex engine for drop rules
 # ===================================================================
 
 DROP_BYPASS_PATTERNS = [r"(a|a)+$", r"(\w|\d)+$", r"(\s|\W)+$", r"(.*a){20}", r".*.*.*.*="]
@@ -1136,7 +1136,7 @@ class TestDropRuleUserRegexEngine:
 
 
 class TestDropRuleTimeoutAutoDisable:
-    """N06-2 (D-13): a drop rule whose pattern keeps timing out is disabled automatically."""
+    """A drop rule whose pattern keeps timing out is disabled automatically."""
 
     class _TimingOutPattern:
         def __init__(self, pattern):
@@ -1275,7 +1275,7 @@ class TestDropRuleTimeoutAutoDisable:
 
 
 # ===================================================================
-# WP8. Saved view names are unique, ignoring case
+# Saved view names are unique, ignoring case
 # ===================================================================
 
 class TestSavedViewUniqueNames:

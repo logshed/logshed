@@ -266,7 +266,7 @@ def isolated_filters(monkeypatch):
 
 @pytest.mark.usefixtures("isolated_filters")
 class TestIngestPipelinePath:
-    """HTTP records are complete entries: no multiline merging, and the shared filters apply (B-21)."""
+    """HTTP records are complete entries: no multiline merging, and the shared filters apply."""
 
     @pytest.mark.asyncio
     async def test_indented_record_is_not_merged_into_previous(self, client, write_token, monkeypatch):
@@ -359,7 +359,7 @@ class TestIngestPipelinePath:
 
 @pytest.mark.usefixtures("isolated_filters")
 class TestIngestLimitsAndFields:
-    """Body, entry and field limits on POST /api/v1/ingest (S-06)."""
+    """Body, entry and field limits on POST /api/v1/ingest."""
 
     @pytest.mark.asyncio
     async def test_oversize_content_length_is_rejected(self, client, write_token, monkeypatch):
@@ -467,7 +467,7 @@ class TestIngestLimitsAndFields:
 
 @pytest.mark.usefixtures("isolated_filters")
 class TestIngestReservedIdentitiesAndTimestamps:
-    """Ingest cannot forge LogShed's own or Docker identities, and timestamps are kept in range (S-19)."""
+    """Ingest cannot forge LogShed's own or Docker identities, and timestamps are kept in range."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -549,7 +549,7 @@ class TestIngestReservedIdentitiesAndTimestamps:
 
 
 class TestIngestTokenRevocationRace:
-    """A token revoked while an ingest request is between its lookup and its cache write stays revoked (S-32)."""
+    """A token revoked while an ingest request is between its lookup and its cache write stays revoked."""
 
     @pytest.mark.asyncio
     async def test_revocation_between_lookup_and_cache_write(
@@ -790,7 +790,7 @@ def _store_through_consumer(entries: list[dict]) -> dict[str, dict]:
 
 @pytest.mark.usefixtures("isolated_filters")
 class TestIngestFutureTimestampWindow:
-    """N03-1: an ingest timestamp up to 5 minutes ahead is stored as sent, through the queue consumer too."""
+    """An ingest timestamp up to 5 minutes ahead is stored as sent, through the queue consumer too."""
 
     @pytest.mark.asyncio
     async def test_five_minute_window_holds_end_to_end(self, client, write_token):
@@ -812,7 +812,7 @@ class TestIngestFutureTimestampWindow:
 
 
 class TestIngestEpochTimestamps:
-    """N03-2: numeric Unix times (seconds or milliseconds) are accepted as entry timestamps."""
+    """Numeric Unix times (seconds or milliseconds) are accepted as entry timestamps."""
 
     @pytest.mark.parametrize(
         "value, expected",
@@ -880,7 +880,7 @@ class TestIngestEpochTimestamps:
 
 @pytest.mark.usefixtures("isolated_filters")
 class TestIngestFieldLengths:
-    """N03-3: source_ip, source_alias and app_name are cut to 255 characters, and the entry is stored."""
+    """`source_ip`, `source_alias` and `app_name` are cut to 255 characters, and the entry is stored."""
 
     @pytest.mark.asyncio
     async def test_long_fields_are_cut_to_255_characters(self, client, write_token):
@@ -927,7 +927,7 @@ class TestIngestFieldLengths:
 
 
 class TestIngestResponseShape:
-    """N01-3: the ingest response is {status, accepted, dropped} only (no ingested alias)."""
+    """The ingest response is {status, accepted, dropped} only (no ingested alias)."""
 
     @pytest.mark.asyncio
     async def test_success_response_has_no_ingested_key(self, client, write_token):
@@ -952,7 +952,7 @@ class TestIngestResponseShape:
 
 
 class TestIngestLoneSurrogates:
-    """BL-39: JSON escapes such as \\ud800 decode to lone surrogates, which SQLite cannot store."""
+    """JSON escapes such as \\ud800 decode to lone surrogates, which SQLite cannot store."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

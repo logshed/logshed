@@ -189,7 +189,7 @@ describe('HostAliasManager Component', () => {
     expect(screen.getAllByTitle('Delete Alias').length).toBe(2);
   });
 
-  it('B-46: cancelling the Add Alias modal opened from a hand-off calls onCancel', async () => {
+  it('cancelling the Add Alias modal opened from a hand-off calls onCancel', async () => {
     const onCancel = vi.fn();
     const onAliasSaved = vi.fn();
     renderWithContext(
@@ -209,7 +209,7 @@ describe('HostAliasManager Component', () => {
   });
 });
 
-describe('HostAliasManager View logs action (WP3)', () => {
+describe('HostAliasManager View logs action', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.history.pushState(null, '', '/settings/sources');

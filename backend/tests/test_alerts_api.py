@@ -735,7 +735,7 @@ class TestAlertRuleRegressions:
 
 
 class TestAlertRunTestBackslashCodes:
-    """N06-1 (D-12): Run Test treats backslash codes the same way as the live rule."""
+    """Run Test treats backslash codes the same way as the live rule."""
 
     @pytest.mark.asyncio
     async def test_word_boundary_code_matches_in_run_test(self, client: AsyncClient, auth_headers: dict):

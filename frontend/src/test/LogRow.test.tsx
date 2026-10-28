@@ -207,7 +207,7 @@ describe('LogRow Component and Optimization', () => {
   });
 });
 
-describe('LogRow AI controls follow the AI setting (WP1-1)', () => {
+describe('LogRow AI controls follow the AI setting', () => {
   const log: ProcessedLogEntry = {
     id: 301,
     timestamp: '2026-09-03T14:30:15.123Z',

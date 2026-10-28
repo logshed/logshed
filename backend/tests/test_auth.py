@@ -930,7 +930,7 @@ class TestTrustDockerProxiesWarning:
 
 
 # ===================================================================
-# CORS and Bearer scheme hardening (S-09)
+# CORS and Bearer scheme hardening
 # ===================================================================
 
 def _plain_client(app) -> AsyncClient:
@@ -1232,7 +1232,7 @@ class TestPasswordChangeUsesArgon2Pool:
 
 
 class TestSetupUsesArgon2Pool:
-    """N01-11: first-run setup hashes the password on the Argon2 pool, not inside the shared database pool."""
+    """First-run setup hashes the password on the Argon2 pool, not inside the shared database pool."""
 
     @pytest.mark.asyncio
     async def test_setup_hash_runs_on_the_argon2_pool(self, client: AsyncClient, monkeypatch):

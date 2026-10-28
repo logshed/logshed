@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { DropPresetsModal } from '../components/alerts/DropPresetsModal.tsx';
 import { DropPreset } from '../types.ts';
 
-describe('DropPresetsModal severity wording (WP2)', () => {
+describe('DropPresetsModal severity wording', () => {
   it('shows the severity range with "and less severe"', () => {
     const preset: DropPreset = {
       id: 'p1',

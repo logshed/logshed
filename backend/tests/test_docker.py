@@ -2923,7 +2923,7 @@ class TestBatchUpdateAppAliases:
 
 
 class TestAppAliasDedupBound:
-    """E-61: the renamed-container dedup set is a bounded LRU."""
+    """The renamed-container dedup set is a bounded LRU."""
 
     @pytest.mark.asyncio
     async def test_dedup_set_stays_bounded_and_keeps_recent_entries(self, tmp_path: Path):

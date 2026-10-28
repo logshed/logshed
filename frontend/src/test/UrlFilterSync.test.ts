@@ -61,7 +61,7 @@ describe('URL Filter Deep-Linking and Synchronization', () => {
   });
 });
 
-describe('URL end time (to) for absolute Console ranges (WP1-9)', () => {
+describe('URL end time (to) for absolute Console ranges', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
   });

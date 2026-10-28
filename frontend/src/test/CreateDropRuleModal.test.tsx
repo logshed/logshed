@@ -133,14 +133,14 @@ describe('CreateDropRuleModal Component', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('links the drop rules guide to the Ingestion Drop Rules anchor (B-49)', () => {
+  it('links the drop rules guide to the Ingestion Drop Rules anchor', () => {
     render(<CreateDropRuleModal isOpen={true} onClose={onClose} onSuccess={onSuccess} ruleToEdit={null} />);
     const link = screen.getByTitle('Open Drop Rules Documentation');
     expect(link.getAttribute('href')).toMatch(/RULES_GUIDE\.md#ingestion-drop-rules$/);
   });
 });
 
-describe('CreateDropRuleModal severity range and whole-line hint (WP2)', () => {
+describe('CreateDropRuleModal severity range and whole-line hint', () => {
   const HINT = /remove numbers, times or IDs that change between lines/i;
 
   it('uses "less severe" wording and help text for the severity range', () => {

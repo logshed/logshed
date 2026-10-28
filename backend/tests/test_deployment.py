@@ -515,7 +515,7 @@ class TestEntrypointHardening:
 
 
 # ===================================================================
-# HTTP perimeter: CSP, no-store and API docs toggle (S-21, S-22)
+# HTTP perimeter: CSP, no-store and API docs toggle
 # ===================================================================
 
 STRICT_CSP = (
@@ -632,7 +632,7 @@ class TestHttpPerimeterHeaders:
 
 
 # ===================================================================
-# API docs behind the login, served from local assets (N05-4, N05-5; D-09, D-10)
+# API docs behind the login, served from local assets
 # ===================================================================
 
 STATIC_DIR = REPO_ROOT / "backend" / "app" / "static"

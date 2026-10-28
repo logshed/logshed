@@ -593,7 +593,7 @@ describe('DropRulesCard Component', () => {
     expect(screen.getByTestId('drop-rule-row-2')).toBeInTheDocument();
   });
 
-  it('sends drop rule reorder requests one at a time and ends on the last move (B-50)', async () => {
+  it('sends drop rule reorder requests one at a time and ends on the last move', async () => {
     const rules: DropRule[] = [1, 2, 3].map((id) => ({ ...mockRules[0], id, name: `Rule ${id}` }));
     vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(rules);
     const resolvers: Array<(r: DropRule[]) => void> = [];
@@ -619,7 +619,7 @@ describe('DropRulesCard Component', () => {
     expect(order()).toEqual([2, 3, 1]);
   });
 
-  it('clears the dragged row when a drag ends outside a row (B-51)', async () => {
+  it('clears the dragged row when a drag ends outside a row', async () => {
     render(<DropRulesCard />);
     await waitFor(() => expect(screen.getByTestId('drop-rule-row-1')).toBeInTheDocument());
     const row = screen.getByTestId('drop-rule-row-1');
@@ -631,7 +631,7 @@ describe('DropRulesCard Component', () => {
 });
 
 
-describe('DropRulesCard pattern display (WP2)', () => {
+describe('DropRulesCard pattern display', () => {
   const base = {
     source_pattern: null,
     app_pattern: null,

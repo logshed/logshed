@@ -500,7 +500,7 @@ def _assert_fts_consistent(db_path: Path, word: str, expected: int) -> None:
 class TestConcurrentIndexers:
 
     def test_concurrent_indexers_do_not_index_rows_twice(self, db_path: Path):
-        """B-14: a second indexer that runs while the first is between its read and its insert adds nothing."""
+        """A second indexer that runs while the first is between its read and its insert adds nothing."""
         _insert_plain_logs(db_path, 30, "racing")
         first_read = threading.Event()
         second_done = threading.Event()
@@ -591,7 +591,7 @@ def _assert_index_compact_and_valid(db_path: Path, word: str, expected: int) -> 
 
 
 class TestIncrementalFtsMerge:
-    """B-18: index compaction after a prune or a large delete runs in short, separately committed merge steps."""
+    """Index compaction after a prune or a large delete runs in short, separately committed merge steps."""
 
     def _segmented_index_with_deletes(self, db_path: Path) -> sqlite3.Connection:
         """400 rows of 30 distinct terms each in 40 b-trees, then half the rows deleted."""
@@ -757,7 +757,7 @@ async def _poll_until(predicate, timeout: float = 2.0) -> None:
 
 
 class TestFTSIndexWorkerCancelledPass:
-    """N03-8: a cancelled run() keeps the index lock until its worker thread has finished the pass."""
+    """A cancelled run() keeps the index lock until its worker thread has finished the pass."""
 
     @pytest.mark.asyncio
     async def test_cancel_mid_pass_holds_lock_and_stop_waits(self, db_path: Path, monkeypatch):

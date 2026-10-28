@@ -371,7 +371,7 @@ class TestDockerHostsFixes:
     async def test_toggling_primary_host_leaves_remote_hosts_running(
         self, client: AsyncClient, auth_headers: dict, tmp_path: Path
     ):
-        """PUT host 1 enabled switches only the local host; remote tailers keep running (B-10 keeps the pool in sync)."""
+        """PUT host 1 enabled switches only the local host; remote tailers keep running and the pool stays in sync."""
         from app.collectors.docker_collector import DockerTailer
         from app.collectors.docker_pool import DockerCollectorPool
         from app.core.pipeline import KeyedMultilineAssembler
@@ -401,7 +401,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_rename_to_existing_name_returns_409(self, client: AsyncClient, auth_headers: dict):
-        """B-11: renaming an endpoint onto another endpoint's name is a 409, not a 500."""
+        """Renaming an endpoint onto another endpoint's name is a 409, not a 500."""
         for name, url in (("Host A", "tcp://10.0.0.6:2375"), ("Host B", "tcp://10.0.0.7:2375")):
             res = await client.post("/api/docker/hosts", json={"name": name, "url": url}, headers=auth_headers)
             assert res.status_code == 200
@@ -418,7 +418,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_update_with_empty_certs_clears_them(self, client: AsyncClient, auth_headers: dict):
-        """B-08: an empty string for ca_cert or client_cert clears the stored value; null keeps it."""
+        """An empty string for ca_cert or client_cert clears the stored value; null keeps it."""
         res = await client.post(
             "/api/docker/hosts",
             json={
@@ -448,7 +448,7 @@ class TestDockerHostsFixes:
     async def test_connection_test_without_stored_secrets_never_decrypts_key(
         self, client: AsyncClient, auth_headers: dict
     ):
-        """B-08: use_stored_secrets false never loads the stored client key or certs."""
+        """`use_stored_secrets` false never loads the stored client key or certs."""
         res = await client.post(
             "/api/docker/hosts",
             json={
@@ -516,7 +516,7 @@ class TestDockerHostsFixes:
     async def test_connection_test_to_other_url_does_not_load_stored_key(
         self, client: AsyncClient, auth_headers: dict
     ):
-        """S-14: an endpoint_id combined with a different URL must not send the stored key elsewhere."""
+        """An endpoint_id combined with a different URL must not send the stored key elsewhere."""
         res = await client.post(
             "/api/docker/hosts",
             json={
@@ -551,7 +551,7 @@ class TestDockerHostsFixes:
     async def test_primary_alias_backfill_via_hosts_api_for_socket_proxy(
         self, client: AsyncClient, auth_headers: dict, tmp_path: Path
     ):
-        """B-12: a primary host reached through a socket proxy backfills rows stamped with the proxy host name."""
+        """A primary host reached through a socket proxy backfills rows stamped with the proxy host name."""
         db_file = tmp_path / "docker_hosts_test.db"
         with get_connection(db_file) as conn:
             conn.execute("UPDATE docker_endpoints SET url = 'tcp://socket-proxy:2375', source_alias = 'old-main' WHERE id = 1")
@@ -566,7 +566,7 @@ class TestDockerHostsFixes:
     async def test_primary_alias_backfill_via_settings_for_socket_proxy(
         self, client: AsyncClient, auth_headers: dict, tmp_path: Path
     ):
-        """B-12: the settings page alias change backfills rows from a socket-proxy primary host."""
+        """The settings page alias change backfills rows from a socket-proxy primary host."""
         db_file = tmp_path / "docker_hosts_test.db"
         with get_connection(db_file) as conn:
             conn.execute("UPDATE docker_endpoints SET url = 'tcp://socket-proxy:2375', source_alias = 'old-main' WHERE id = 1")
@@ -583,7 +583,7 @@ class TestDockerHostsFixes:
     async def test_alias_backfill_for_second_unix_socket_endpoint(
         self, client: AsyncClient, auth_headers: dict, tmp_path: Path
     ):
-        """B-12: a second Unix-socket endpoint stamps rows with its old alias as source_ip; they are backfilled."""
+        """A second Unix-socket endpoint stamps rows with its old alias as source_ip; they are backfilled."""
         db_file = tmp_path / "docker_hosts_test.db"
         _seed_endpoint(db_file, id=2, name="Rootless", url="unix:///run/user/1000/docker.sock", source_alias="rootless-old")
         _seed_logs(db_file, [("rootless-old", "rootless-old", "a"), ("rootless-old", "rootless-old", "b")])
@@ -669,7 +669,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_oversize_fields_rejected(self, client: AsyncClient, auth_headers: dict):
-        """S-30: oversize URL, exclusion list and PEM fields are rejected with 422."""
+        """Oversize URL, exclusion list and PEM fields are rejected with 422."""
         big_pem = "A" * 16385
         cases = [
             {"name": "Big", "url": "tcp://10.0.0.8:2375/" + "a" * 600},
@@ -696,7 +696,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_link_local_and_metadata_targets_rejected(self, client: AsyncClient, auth_headers: dict):
-        """S-17: link-local and cloud metadata addresses are refused for create and test."""
+        """Link-local and cloud metadata addresses are refused for create and test."""
         for bad_url in (
             "tcp://169.254.169.254:2375",
             "http://169.254.10.1:2375",
@@ -716,7 +716,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_names_resolving_to_metadata_targets_rejected(self, client: AsyncClient, auth_headers: dict):
-        """S-17: a host name that resolves to a link-local address is refused."""
+        """A host name that resolves to a link-local address is refused."""
         async def _fake_resolve(host: str) -> list[str]:
             return ["169.254.169.254"] if host == "metadata.internal" else []
 
@@ -738,7 +738,7 @@ class TestDockerHostsFixes:
     async def test_unix_socket_paths_restricted(
         self, client: AsyncClient, auth_headers: dict, monkeypatch
     ):
-        """S-17: only Docker socket paths (or ones listed in DOCKER_ALLOWED_SOCKETS) are accepted."""
+        """Only Docker socket paths (or ones listed in DOCKER_ALLOWED_SOCKETS) are accepted."""
         monkeypatch.delenv("DOCKER_ALLOWED_SOCKETS", raising=False)
         monkeypatch.delenv("DOCKER_HOST", raising=False)
         for bad_url in ("unix:///etc/passwd", "unix:///run/postgresql/.s.PGSQL.5432", "unix:///tmp/docker.sock.bak"):
@@ -759,7 +759,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_connection_test_errors_are_generic(self, client: AsyncClient, auth_headers: dict):
-        """S-17: probe failures return generic text and keep the details in the server log."""
+        """Probe failures return generic text and keep the details in the server log."""
         import httpx
 
         class _FailingClient:
@@ -799,7 +799,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_connection_test_non_docker_reply_is_generic(self, client: AsyncClient, auth_headers: dict):
-        """S-17: a reachable service that is not Docker reports 'not a Docker API' without echoing the reply."""
+        """A reachable service that is not Docker reports 'not a Docker API' without echoing the reply."""
         class _Resp:
             status_code = 404
 
@@ -823,7 +823,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_tls_without_ca_rejected_for_remote_hosts(self, client: AsyncClient, auth_headers: dict):
-        """S-16: TLS to a non-loopback host requires a CA certificate."""
+        """TLS to a non-loopback host requires a CA certificate."""
         res = await client.post(
             "/api/docker/hosts",
             json={"name": "No CA", "url": "tcp://10.0.0.9:2376", "tls_enabled": True},
@@ -861,7 +861,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_verify_hostname_defaults_on_and_round_trips(self, client: AsyncClient, auth_headers: dict):
-        """S-16: verify_hostname defaults to on and can be turned off per endpoint."""
+        """`verify_hostname` defaults to on and can be turned off per endpoint."""
         res = await client.post(
             "/api/docker/hosts",
             json={"name": "Verify", "url": "tcp://10.0.0.11:2376", "tls_enabled": True, "ca_cert": _PEM_CERT},
@@ -880,7 +880,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_connection_test_passes_verify_hostname(self, client: AsyncClient, auth_headers: dict):
-        """S-16: the connection test builds its TLS context with the requested hostname check."""
+        """The connection test builds its TLS context with the requested hostname check."""
         with patch("app.api.docker_hosts.create_docker_ssl_context", side_effect=ValueError("bad pem")) as mock_ctx:
             await client.post(
                 "/api/docker/hosts/test",
@@ -891,7 +891,7 @@ class TestDockerHostsFixes:
 
     @pytest.mark.asyncio
     async def test_connection_test_hostname_mismatch_mentions_toggle(self, client: AsyncClient, auth_headers: dict):
-        """S-16: a certificate host name mismatch points at the verify host name toggle."""
+        """A certificate host name mismatch points at the verify host name toggle."""
         import httpx
 
         class _FailingClient:
@@ -920,7 +920,7 @@ class TestDockerHostsFixes:
 
 
 class TestAdditionalHostsEnvParsing:
-    """N01-9: bad DOCKER_ADDITIONAL_HOSTS values log a warning and give the empty default."""
+    """Bad DOCKER_ADDITIONAL_HOSTS values log a warning and give the empty default."""
 
     @pytest.mark.parametrize("raw", ["{not json", '{"name": "a", "url": "tcp://h:2375"}', '"just a string"', "42"])
     def test_invalid_values_warn_and_return_empty_list(self, monkeypatch, caplog, raw):

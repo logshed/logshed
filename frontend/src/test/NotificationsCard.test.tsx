@@ -357,7 +357,7 @@ describe('NotificationsCard Component', () => {
   });
 });
 
-describe('NotificationsCard action buttons (WP3)', () => {
+describe('NotificationsCard action buttons', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

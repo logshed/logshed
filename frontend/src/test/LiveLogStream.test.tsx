@@ -213,7 +213,7 @@ describe('LiveLogStream Component', () => {
     vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
   });
 
-  it('displays Screen Buffer label and clear screen buffer tooltip (Item #14)', async () => {
+  it('displays Screen Buffer label and clear screen buffer tooltip', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
@@ -224,7 +224,7 @@ describe('LiveLogStream Component', () => {
     expect(trashBtn).toBeInTheDocument();
   });
 
-  it('does not render the redundant Maximize2 row action button (Item #17)', async () => {
+  it('does not render the redundant Maximize2 row action button', async () => {
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({ ai_enabled: true } as any);
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
@@ -238,7 +238,7 @@ describe('LiveLogStream Component', () => {
     await waitFor(() => expect(screen.getAllByTitle('Explain with AI').length).toBeGreaterThan(0));
   });
 
-  it('formats timestamps and renders UTC + received_at tooltip (Item #5)', async () => {
+  it('formats timestamps and renders UTC + received_at tooltip', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
@@ -253,7 +253,7 @@ describe('LiveLogStream Component', () => {
     expect(timestampEl.getAttribute('title')).toContain(sampleLogs[0].received_at);
   });
 
-  it('maintains top-to-bottom stream direction and prepends SSE logs to the top (Item #4)', async () => {
+  it('maintains top-to-bottom stream direction and prepends SSE logs to the top', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
@@ -293,7 +293,7 @@ describe('LiveLogStream Component', () => {
     });
   });
 
-  it('handles checkbox clicking without bubbling to row detail modal (Item #15)', async () => {
+  it('handles checkbox clicking without bubbling to row detail modal', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
@@ -461,7 +461,7 @@ describe('LiveLogStream Component', () => {
     });
   });
 
-  it('displays auto-scroll pause banner and jumps to top on click (Item #4)', async () => {
+  it('displays auto-scroll pause banner and jumps to top on click', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
@@ -560,7 +560,7 @@ describe('LiveLogStream Component', () => {
     expect(scrollContainer.scrollTop).toBe(284);
   });
 
-  it('maintains quick filter buttons even after a filter is applied (Item #32)', async () => {
+  it('maintains quick filter buttons even after a filter is applied', async () => {
     // Initially returns sampleLogs with homelab-host and opnsense-router
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
@@ -760,7 +760,7 @@ describe('LiveLogStream Component', () => {
     expect(within(hostDropdown).queryByText('192.168.1.50')).toBeNull();
   });
 
-  it('automatically fetches older logs with offset pagination on infinite scroll (Item #33)', async () => {
+  it('automatically fetches older logs with offset pagination on infinite scroll', async () => {
     // Render only a viewport's worth of rows at each end, as the real virtualizer does
     virtualizerControl.edgeRows = 20;
     // Generate 500 initial logs
@@ -1742,7 +1742,7 @@ describe('matchesSearchQuery Helper Function', () => {
 
 
 
-describe('LiveLogStream B11 fixes', () => {
+describe('LiveLogStream loading, connection and selection', () => {
   const renderStream = () =>
     render(
       <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
@@ -1782,7 +1782,7 @@ describe('LiveLogStream B11 fixes', () => {
     vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
   });
 
-  it('Filter button loads logs with the current filters (B-01)', async () => {
+  it('Filter button loads logs with the current filters', async () => {
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
@@ -1799,13 +1799,13 @@ describe('LiveLogStream B11 fixes', () => {
     expect(arg.limit).toBe(500);
   });
 
-  it('shows the error message when loading logs fails (B-25)', async () => {
+  it('shows the error message when loading logs fails', async () => {
     vi.spyOn(logsApi, 'fetchLogs').mockRejectedValue(new Error('fts5: syntax error near "("'));
     renderStream();
     expect(await screen.findByText('fts5: syntax error near "("')).toBeInTheDocument();
   });
 
-  it('shows a disconnected pill and retries when the live stream closes (B-09)', async () => {
+  it('shows a disconnected pill and retries when the live stream closes', async () => {
     renderStream();
     await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
     const es = MockEventSource.instances[0] as any;
@@ -1828,7 +1828,7 @@ describe('LiveLogStream B11 fixes', () => {
     }
   });
 
-  it('dispatches logshed:unauthorized when the stream closes and the session is gone (B-09)', async () => {
+  it('dispatches logshed:unauthorized when the stream closes and the session is gone', async () => {
     renderStream();
     await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
     const es = MockEventSource.instances[0] as any;
@@ -1851,7 +1851,7 @@ describe('LiveLogStream B11 fixes', () => {
     }
   });
 
-  it('resets the shift-click anchor after deleting a log from the detail modal (B-75)', async () => {
+  it('resets the shift-click anchor after deleting a log from the detail modal', async () => {
     vi.spyOn(logsApi, 'deleteSingleLog').mockResolvedValue(undefined as any);
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
@@ -1870,7 +1870,7 @@ describe('LiveLogStream B11 fixes', () => {
   });
 });
 
-describe('LiveLogStream B12 fixes', () => {
+describe('LiveLogStream time zone and time presets', () => {
   const renderStream = () =>
     render(
       <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
@@ -1910,7 +1910,7 @@ describe('LiveLogStream B12 fixes', () => {
     vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
   });
 
-  it('re-formats loaded rows when the server time zone arrives after the first page (B-73)', async () => {
+  it('re-formats loaded rows when the server time zone arrives after the first page', async () => {
     let resolveSettings: (s: any) => void = () => {};
     vi.spyOn(settingsApi, 'fetchSettings').mockImplementation(
       () => new Promise((resolve) => { resolveSettings = resolve; })
@@ -1932,7 +1932,7 @@ describe('LiveLogStream B12 fixes', () => {
 
   const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
 
-  it('keeps a relative time from a link and shows the matching preset (B-23)', async () => {
+  it('keeps a relative time from a link and shows the matching preset', async () => {
     window.history.replaceState(null, '', '/?time=1h');
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
@@ -1940,14 +1940,14 @@ describe('LiveLogStream B12 fixes', () => {
     expect(desktopTimeSelect().value).toBe('1h');
   });
 
-  it('shows Custom for a digest link with an absolute time (B-23)', async () => {
+  it('shows Custom for a digest link with an absolute time', async () => {
     window.history.replaceState(null, '', '/?time=2026-10-13T10%3A00%3A00.000Z&severity=3');
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
     expect(desktopTimeSelect().value).toBe('custom');
   });
 
-  describe('buffer cap (B-34)', () => {
+  describe('buffer cap', () => {
     const makeLog = (id: number, label: string): LogEntry => ({
       id,
       timestamp: new Date(Date.UTC(2026, 8, 3, 12, 0, 0) + id).toISOString(),
@@ -2079,7 +2079,7 @@ describe('LiveLogStream B12 fixes', () => {
     });
   });
 
-  it('anchors the scroll position with the mobile row height after crossing the breakpoint (B-74)', async () => {
+  it('anchors the scroll position with the mobile row height after crossing the breakpoint', async () => {
     const listeners: ((e: { matches: boolean }) => void)[] = [];
     window.matchMedia = ((query: string) => ({
       matches: false,
@@ -2115,7 +2115,7 @@ describe('LiveLogStream B12 fixes', () => {
     expect(top).toBe(200 + 3 * 74);
   });
 
-  it('keys virtual rows by log id so prepending a batch keeps existing rows (E-07)', async () => {
+  it('keys virtual rows by log id so prepending a batch keeps existing rows', async () => {
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
     const getItemKey = virtualizerControl.lastOptions.getItemKey;
@@ -2124,7 +2124,7 @@ describe('LiveLogStream B12 fixes', () => {
     expect(getItemKey(3)).toBe(104);
   });
 
-  it('does not render the log detail panel while it is closed (E-07)', async () => {
+  it('does not render the log detail panel while it is closed', async () => {
     const modalSpy = vi.spyOn(logDetailModalModule, 'LogDetailModal');
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
@@ -2138,7 +2138,7 @@ describe('LiveLogStream B12 fixes', () => {
     expect(modalSpy).toHaveBeenCalled();
   });
 
-  it('applying a saved view fetches once and keeps its relative time (E-28, B-23)', async () => {
+  it('applying a saved view fetches once and keeps its relative time', async () => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([
       { id: 9, name: 'Recent nginx', query_params: { query: 'nginx', from: '1h' }, is_pinned: false, created_at: '2026-10-01T00:00:00Z' },
     ] as any);
@@ -2163,7 +2163,7 @@ describe('LiveLogStream B12 fixes', () => {
     expect(desktopTimeSelect().value).toBe('1h');
   });
 
-  it('aborts a superseded log request when a new one starts (E-28)', async () => {
+  it('aborts a superseded log request when a new one starts', async () => {
     const signals: AbortSignal[] = [];
     vi.spyOn(logsApi, 'fetchLogs').mockImplementation((_params: any, options?: { signal?: AbortSignal }) => {
       if (options?.signal) signals.push(options.signal);
@@ -2178,7 +2178,7 @@ describe('LiveLogStream B12 fixes', () => {
   });
 });
 
-describe('compileSearchQuery (E-27)', () => {
+describe('compileSearchQuery', () => {
   const log: LogEntry = { ...sampleLogs[0] };
 
   it('compiles the query once and matches like the string form', () => {
@@ -2191,7 +2191,7 @@ describe('compileSearchQuery (E-27)', () => {
   });
 });
 
-describe('LiveLogStream N07 fixes', () => {
+describe('LiveLogStream capped host list and Today preset', () => {
   const renderStream = () =>
     render(
       <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
@@ -2260,7 +2260,7 @@ describe('LiveLogStream N07 fixes', () => {
   });
 });
 
-describe('LiveLogStream WP1 console changes', () => {
+describe('LiveLogStream console controls', () => {
   const dbFacets = {
     sources: ['homelab-host', 'opnsense-router'],
     apps: ['nginx', 'postgres', 'docker', 'filterlog'],
@@ -2321,7 +2321,7 @@ describe('LiveLogStream WP1 console changes', () => {
     vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
   });
 
-  describe('AI controls (WP1-1)', () => {
+  describe('AI controls', () => {
     it('hides row AI buttons, the actions column and "Run Analysis" when AI is off', async () => {
       mockSettings({ ai_enabled: false, has_ai_api_key: true });
       renderStream();
@@ -2416,7 +2416,7 @@ describe('LiveLogStream WP1 console changes', () => {
     });
   });
 
-  describe('drawer Newer / Older (WP1-2)', () => {
+  describe('drawer Newer / Older', () => {
     it('steps to the row below with Older and the row above with Newer, by button and key', async () => {
       mockSettings({});
       renderStream();
@@ -2458,7 +2458,7 @@ describe('LiveLogStream WP1 console changes', () => {
     });
   });
 
-  it('prefills Create Drop Rule with the host alias rather than the IP (WP1-4)', async () => {
+  it('prefills Create Drop Rule with the host alias rather than the IP', async () => {
     mockSettings({});
     const modalSpy = vi.spyOn(dropRuleModalModule, 'CreateDropRuleModal');
     renderStream();
@@ -2470,7 +2470,7 @@ describe('LiveLogStream WP1 console changes', () => {
     expect(props.initialSource).toBe('homelab-host');
   });
 
-  describe('empty states (WP1-5)', () => {
+  describe('empty states', () => {
     it('shows "No logs match the current filters." with a Clear filters button when filters match nothing', async () => {
       mockSettings({});
       window.history.replaceState(null, '', '/?q=nothing-matches');
@@ -2567,7 +2567,7 @@ describe('LiveLogStream WP1 console changes', () => {
     });
   });
 
-  describe('Quick Filters (WP1-6, WP1-8)', () => {
+  describe('Quick Filters', () => {
     const mk = (id: number, host: string, app: string): LogEntry => ({
       id,
       timestamp: `2026-09-03T14:${String(59 - (id % 60)).padStart(2, '0')}:00.000Z`,
@@ -2660,7 +2660,7 @@ describe('LiveLogStream WP1 console changes', () => {
     });
   });
 
-  it('switches Select All at the same 768px width as the mobile cards (WP1-7)', async () => {
+  it('switches Select All at the same 768px width as the mobile cards', async () => {
     mockSettings({});
     renderStream();
     await waitForRows();
@@ -2670,7 +2670,7 @@ describe('LiveLogStream WP1 console changes', () => {
     expect(within(group).getByRole('button', { name: 'Select All' })).toBeInTheDocument();
   });
 
-  it('opens on an absolute range from time and to URL params in custom-time mode (WP1-9)', async () => {
+  it('opens on an absolute range from time and to URL params in custom-time mode', async () => {
     mockSettings({});
     const from = '2026-10-13T10:00:00.000Z';
     const to = '2026-10-13T12:00:00.000Z';
@@ -2692,7 +2692,7 @@ describe('LiveLogStream WP1 console changes', () => {
   });
 });
 
-describe('Quick Filter and empty-state helpers (WP1-5, WP1-6)', () => {
+describe('Quick Filter and empty-state helpers', () => {
   it('rankQuickFilterChips orders by count, then alphabetically, and caps the list', () => {
     const counts = { b: 5, a: 5, c: 9, d: 1 };
     expect(rankQuickFilterChips(['d', 'c', 'b', 'a', 'e'], counts, [], 3)).toEqual(['c', 'a', 'b']);
@@ -2743,7 +2743,7 @@ describe('Quick Filter and empty-state helpers (WP1-5, WP1-6)', () => {
   });
 });
 
-describe('Pinned saved views on the Quick Filters bar (WP5-1)', () => {
+describe('Pinned saved views on the Quick Filters bar', () => {
   const views = [
     { id: 1, name: 'Nginx errors', query_params: { query: 'nginx', severity_max: 3 }, is_pinned: true, created_at: '2026-10-01T00:00:00Z' },
     { id: 2, name: 'Router', query_params: { sources: ['opnsense-router'], source: 'opnsense-router' }, is_pinned: true, created_at: '2026-10-01T00:00:00Z' },
@@ -2835,7 +2835,7 @@ describe('Pinned saved views on the Quick Filters bar (WP5-1)', () => {
   });
 });
 
-describe('LiveLogStream "Create Alert Rule" hand-off (WP6-2)', () => {
+describe('LiveLogStream "Create Alert Rule" hand-off', () => {
   const renderStream = () =>
     render(
       <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
@@ -2946,7 +2946,7 @@ describe('matchesSearchQuery AND, OR and NOT like history search', () => {
   });
 });
 
-describe('LiveLogStream passes the facets limit to the capped-list note (BL-04)', () => {
+describe('LiveLogStream passes the facets limit to the capped-list note', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();

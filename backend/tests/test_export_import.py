@@ -441,7 +441,7 @@ class TestAlertRulesExportImport:
 
 
 class TestAlertRulesExportImportPaths:
-    """The /api/alerts/rules/... paths are canonical in OpenAPI and the old paths still work (B-43)."""
+    """The /api/alerts/rules/... paths are canonical in OpenAPI and the old paths still work."""
 
     @pytest.mark.asyncio
     async def test_openapi_lists_rules_paths_and_hides_old_aliases(self, client: AsyncClient, auth_headers: dict):

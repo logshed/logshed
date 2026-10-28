@@ -414,7 +414,7 @@ describe('Navbar Component', () => {
 
 
 
-describe('Navbar maintenance and health handling (B11)', () => {
+describe('Navbar maintenance and health handling', () => {
   const okHealth = { status: 'ok', db: 'ok', queue_depth: 0, dropped_logs: 0, ingest_rate: 0 };
 
   beforeEach(() => {
@@ -486,7 +486,7 @@ describe('Navbar maintenance and health handling (B11)', () => {
   });
 });
 
-describe('Navbar UDP lost figure (N07)', () => {
+describe('Navbar UDP lost figure', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -529,7 +529,7 @@ describe('Navbar UDP lost figure (N07)', () => {
   });
 });
 
-describe('Navbar Lost counter (WP3)', () => {
+describe('Navbar Lost counter', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });

@@ -668,7 +668,7 @@ class TestSubsystemIntegrations:
 
 
 # ===================================================================
-# 5. AI provider base URL / key handling, reload errors, read-only GET (B08)
+# 5. AI provider base URL / key handling, reload errors, read-only GET
 # ===================================================================
 
 def _stored_settings(tmp_path: Path) -> dict[str, str]:
@@ -682,7 +682,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_per_provider_base_url_must_be_http_or_https(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-07: the per-provider base URL gets the same http/https validation as the top-level field."""
+        """The per-provider base URL gets the same http/https validation as the top-level field."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         res = await client.post(
             "/api/settings",
@@ -704,7 +704,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_empty_base_url_clears_stored_value(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-07: an empty string clears the base URL at both the top level and per provider."""
+        """An empty string clears the base URL at both the top level and per provider."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         res = await client.post(
             "/api/settings",
@@ -734,7 +734,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_empty_per_provider_base_url_alone_clears_active_provider(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-07: clearing only through ai_providers_config also clears the legacy top-level value."""
+        """Clearing only through ai_providers_config also clears the legacy top-level value."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         await client.post(
             "/api/settings",
@@ -753,7 +753,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_changing_base_url_with_masked_key_clears_stored_key(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):
-        """S-14: a new base URL without a new key must not keep sending the stored key to the new host."""
+        """A new base URL without a new key must not keep sending the stored key to the new host."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         res = await client.post(
             "/api/settings",
@@ -784,7 +784,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_changing_provider_config_base_url_with_masked_key_clears_that_provider_key(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):
-        """S-14: same rule through ai_providers_config, and other providers keep their keys."""
+        """Same rule through ai_providers_config, and other providers keep their keys."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         await client.post(
             "/api/settings",
@@ -815,7 +815,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_unchanged_base_url_or_new_key_keeps_stored_key(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):
-        """S-14: an unchanged base URL keeps the key; a changed one with a fresh key stores the fresh key."""
+        """An unchanged base URL keeps the key; a changed one with a fresh key stores the fresh key."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         await client.post(
             "/api/settings",
@@ -848,7 +848,7 @@ class TestSettingsAiBaseUrlAndKey:
     async def test_docker_source_alias_is_stored_without_surrounding_whitespace(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path
     ):
-        """B06 follow-up: the stored alias equals the stripped value the Docker backfill uses."""
+        """The stored alias equals the stripped value the Docker backfill uses."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         res = await client.post("/api/settings", json={"docker_source_alias": "  myalias  "})
         assert res.status_code == 200
@@ -865,7 +865,7 @@ class TestSettingsReloadErrorsAndReads:
     async def test_syslog_reload_error_is_logged(
         self, client: AsyncClient, auth_cookie: dict, caplog
     ):
-        """B-62: a failing syslog limit update is logged with its traceback, not swallowed."""
+        """A failing syslog limit update is logged with its traceback, not swallowed."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         server = MagicMock()
         server.update_limits.side_effect = RuntimeError("syslog limit boom")
@@ -880,7 +880,7 @@ class TestSettingsReloadErrorsAndReads:
     async def test_docker_pool_reload_error_is_logged(
         self, client: AsyncClient, auth_cookie: dict, caplog
     ):
-        """B-62: a failing Docker pool reload is logged with its traceback, not swallowed."""
+        """A failing Docker pool reload is logged with its traceback, not swallowed."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         pool = MagicMock()
         pool.set_primary_enabled = AsyncMock()
@@ -896,7 +896,7 @@ class TestSettingsReloadErrorsAndReads:
     async def test_enabling_docker_starts_endpoint_one_only_once(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-62: enabling Docker records the local host switch and starts endpoint 1 exactly once."""
+        """Enabling Docker records the local host switch and starts endpoint 1 exactly once."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         pool = MagicMock()
         pool.set_primary_enabled = AsyncMock()
@@ -912,7 +912,7 @@ class TestSettingsReloadErrorsAndReads:
     async def test_exclude_change_with_pool_already_enabled_still_reloads_endpoint_one(
         self, client: AsyncClient, auth_cookie: dict
     ):
-        """B-62: a settings change that does not toggle Docker still reloads endpoint 1."""
+        """A settings change that does not toggle Docker still reloads endpoint 1."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         pool = MagicMock()
         pool.set_primary_enabled = AsyncMock()
@@ -929,7 +929,7 @@ class TestSettingsReloadErrorsAndReads:
     async def test_get_settings_does_not_write_clamped_retention(
         self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """B-78: GET clamps retention in the response only and never writes system_settings."""
+        """GET clamps retention in the response only and never writes system_settings."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
         with get_connection(tmp_path / "logs.db") as conn:
             conn.execute(

@@ -2053,7 +2053,7 @@ class TestAiModelDiscovery:
 
 
 # ===================================================================
-# 6. AI Rate Limiting Tests (SEC-H3)
+# 6. AI Rate Limiting Tests
 # ===================================================================
 
 class TestAiRateLimiting:
@@ -3329,7 +3329,7 @@ class TestAiModelRefreshRedaction:
 
 
 class TestAiModelRefreshStoredKeyScope:
-    """S-14: the stored API key is only used for the stored endpoint."""
+    """The stored API key is only used for the stored endpoint."""
 
     async def _store_compat(self, auth_client):
         res = await auth_client.post(
@@ -3504,7 +3504,7 @@ class TestAiModelRefreshBaseUrlScope:
 
 
 class TestNoLegacyDispatchAliases:
-    """N01-4: the dispatch_*_request aliases and shutdown_regex_executor are gone."""
+    """The dispatch_*_request aliases and shutdown_regex_executor are gone."""
 
     def test_aliases_are_removed(self):
         from app.core import regex_validator
@@ -3529,7 +3529,7 @@ class TestNoLegacyDispatchAliases:
 
 
 class TestDiagnosisContextRedactionOffLoop:
-    """N08-R: build_diagnosis_context redacts its formatted rows in one worker-thread call."""
+    """`build_diagnosis_context` redacts its formatted rows in one worker-thread call."""
 
     @staticmethod
     def _slow_redact(observed: dict, started, release):
@@ -3595,7 +3595,7 @@ class TestDiagnosisContextRedactionOffLoop:
 
 
 class TestAiRequestTextLimits:
-    """BL-06: the free-text AI request fields have length limits well above real use."""
+    """The free-text AI request fields have length limits well above real use."""
 
     @pytest.mark.parametrize(
         "model_name, field, limit",

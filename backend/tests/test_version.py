@@ -261,7 +261,7 @@ class TestVersionEndpoint:
 
 
 class TestVersionCheckHardening:
-    """S-21: failed GHCR checks are throttled and anonymous callers get no version string."""
+    """Failed GHCR checks are throttled and anonymous callers get no version string."""
 
     @pytest.mark.asyncio
     async def test_failed_check_is_not_retried_within_minimum_interval(self):

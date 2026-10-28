@@ -255,7 +255,7 @@ class TestCancellationKeepsLock:
 
     @pytest.mark.asyncio
     async def test_prune_worker_cancellation_keeps_lock_until_prune_returns(self, tmp_path: Path, monkeypatch):
-        """B-58: cancelling the PruneWorker mid-prune keeps the shared lock until the prune thread returns."""
+        """Cancelling the PruneWorker mid-prune keeps the shared lock until the prune thread returns."""
         started = threading.Event()
         release = threading.Event()
 

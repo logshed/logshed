@@ -152,7 +152,7 @@ class DropFilter:
         self._rules: list[CompiledDropRule] = []
         self._pending_counts: dict[int, int] = {}
         self._lock = threading.Lock()
-        # Automatic disabling of rules whose pattern keeps timing out (D-13), guarded by self._lock
+        # Automatic disabling of rules whose pattern keeps timing out, guarded by self._lock
         self._timeout_tracker = RuleTimeoutTracker()
         # Rule ids switched off in memory whose database write has not landed yet; reloads skip them
         self._auto_disable_pending: set[int] = set()
@@ -210,7 +210,7 @@ class DropFilter:
         """
         Flush accumulated drop counts to SQLite.
         Returns the total count of drops written.
-        Also stores any automatic rule disables still waiting (D-13).
+        Also stores any automatic rule disables still waiting.
         """
         self.store_auto_disables(conn=conn)
         with self._lock:

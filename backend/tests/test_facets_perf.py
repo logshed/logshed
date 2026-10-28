@@ -346,7 +346,7 @@ class TestFacetsCaps:
 
     @pytest.mark.asyncio
     async def test_response_reports_the_list_limit(self, client: AsyncClient, auth_cookie: dict, tmp_path: Path):
-        """BL-04: the UI's "Showing the first N" note reads the cap from the response."""
+        """The UI's "Showing the first N" note reads the cap from the response."""
         from app.api.logs import FACET_LIMIT
 
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])

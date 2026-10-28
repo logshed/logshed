@@ -16,7 +16,7 @@ const view = (id: number, name: string, query_params: SavedView['query_params'],
   created_at: '2026-10-01T00:00:00Z',
 });
 
-describe('saved view helpers (WP5-1, WP5-4)', () => {
+describe('saved view helpers', () => {
   it('treats empty strings, empty lists and missing values alike and sorts lists', () => {
     expect(canonicalViewParams({ query: '', sources: [], apps: undefined, from: null })).toEqual({});
     expect(canonicalViewParams({ sources: ['b', 'a'], source: 'b,a' })).toEqual({ sources: ['a', 'b'] });

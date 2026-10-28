@@ -346,7 +346,7 @@ def tool_error_text(result: dict) -> str:
 
 
 class TestLegacySseSessionAuth:
-    """S-05: legacy SSE sessions are bound to the token that opened them and re-verified on every post."""
+    """Legacy SSE sessions are bound to the token that opened them and re-verified on every post."""
 
     @pytest.mark.asyncio
     async def test_session_only_post_rejected_after_revocation_and_stream_closes(
@@ -536,7 +536,7 @@ class TestTokenEditOverLegacySse:
 
 
 class TestPerToolScopes:
-    """S-07: connecting needs only logs:read; every tool and resource checks its own scope."""
+    """Connecting needs only logs:read; every tool and resource checks its own scope."""
 
     @pytest.mark.asyncio
     async def test_logs_read_token_over_streamable_http(
@@ -674,7 +674,7 @@ class TestPerToolScopes:
 
 
 class TestMCPListServicesTruncation:
-    """P-02: list_services passes on the facets cap flag."""
+    """`list_services` passes on the facets cap flag."""
 
     @pytest.mark.asyncio
     async def test_small_database_is_not_truncated(self, tmp_path: Path):
@@ -1360,7 +1360,7 @@ class TestMCPApiAndTransport:
 
 
 class TestQueryStringToken:
-    """S-20: ?token= ends up in proxy access logs, so it is refused unless MCP_ALLOW_QUERY_TOKEN=true."""
+    """A `?token=` ends up in proxy access logs, so it is refused unless MCP_ALLOW_QUERY_TOKEN=true."""
 
     @pytest.mark.asyncio
     async def test_query_token_rejected_by_default(self, client: AsyncClient, auth_headers: dict):
@@ -1476,7 +1476,7 @@ def _maintenance_row(db_path: Path, session_id: str) -> dict:
 
 
 class TestMCPMaintenanceAttribution:
-    """B-65: MCP-started maintenance sessions record the token that started them."""
+    """MCP-started maintenance sessions record the token that started them."""
 
     @pytest.mark.asyncio
     async def test_streamable_http_session_records_token(self, client: AsyncClient, auth_headers: dict, tmp_path: Path):
@@ -1512,7 +1512,7 @@ class TestMCPMaintenanceAttribution:
 
 
 class TestMCPDisableMaintenance:
-    """B-66: disable_maintenance uses the REST response keys and refuses unknown session ids."""
+    """`disable_maintenance` uses the REST response keys and refuses unknown session ids."""
 
     @pytest.mark.asyncio
     async def test_response_uses_rest_keys_only(self, client: AsyncClient, auth_headers: dict):
@@ -1559,7 +1559,7 @@ class TestMCPDisableMaintenance:
 
 
 class TestMCPStdio:
-    """B-22: the stdio transport uses --db-path and reports what a separate process cannot see."""
+    """The stdio transport uses --db-path and reports what a separate process cannot see."""
 
     def test_db_path_flag_points_the_server_at_that_database(self, tmp_path: Path, monkeypatch):
         # MCP is enabled only in the database named by --db-path, so the enable check must read it too
@@ -1791,7 +1791,7 @@ class TestMcpBearerSchemeCase:
 
 
 class TestMCPStdioUdpReceiveErrors:
-    """N01-10: udp_receive_errors is a web-process figure, so stdio reports it as unavailable."""
+    """`udp_receive_errors` is a web-process figure, so stdio reports it as unavailable."""
 
     @pytest.mark.asyncio
     async def test_stdio_metrics_report_udp_receive_errors_as_unavailable(self, tmp_path: Path, monkeypatch):
@@ -1811,7 +1811,7 @@ class TestMCPStdioUdpReceiveErrors:
 
 
 class TestQueryTokenIsSupportedOptIn:
-    """N01-2: MCP_ALLOW_QUERY_TOKEN is a supported opt-in for header-less clients, not a deprecated form."""
+    """MCP_ALLOW_QUERY_TOKEN is a supported opt-in for header-less clients, not a deprecated form."""
 
     @pytest.mark.asyncio
     async def test_warning_is_logged_once_across_requests_and_not_called_deprecated(

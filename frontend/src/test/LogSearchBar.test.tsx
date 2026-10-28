@@ -7,7 +7,7 @@ import * as savedViewsApi from '../api/savedViews.ts';
 
 /**
  * Renders, then lets the saved views request the search bar starts on mount settle inside act, so
- * its state updates do not land after the test (BL-11).
+ * its state updates do not land after the test.
  */
 async function renderSettled(ui: ReactElement) {
   const result = render(ui);
@@ -201,8 +201,8 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
   });
 });
 
-describe('LogSearchBar B11 fixes', () => {
-  it('calls onSearch without arguments when the Search now button is clicked (B-01)', () => {
+describe('LogSearchBar search button and saved view errors', () => {
+  it('calls onSearch without arguments when the Search now button is clicked', () => {
     const onSearch = vi.fn();
     render(
       <LogSearchBar filters={{ severity_max: 3 }} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />
@@ -212,7 +212,7 @@ describe('LogSearchBar B11 fixes', () => {
     expect(onSearch.mock.calls[0]).toHaveLength(0);
   });
 
-  it('shows an inline error when deleting a saved view fails (B-47)', async () => {
+  it('shows an inline error when deleting a saved view fails', async () => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([
       { id: 1, name: 'Errors', query_params: {}, is_pinned: false, created_at: '2026-09-18T10:00:00Z' },
     ] as any);
@@ -224,7 +224,7 @@ describe('LogSearchBar B11 fixes', () => {
     expect(await screen.findByText('Delete failed on server')).toBeInTheDocument();
   });
 
-  it('shows an inline error when pinning a saved view fails (B-47)', async () => {
+  it('shows an inline error when pinning a saved view fails', async () => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([
       { id: 1, name: 'Errors', query_params: {}, is_pinned: false, created_at: '2026-09-18T10:00:00Z' },
     ] as any);
@@ -236,7 +236,7 @@ describe('LogSearchBar B11 fixes', () => {
   });
 });
 
-describe('LogSearchBar time presets (B-23)', () => {
+describe('LogSearchBar time presets', () => {
   const renderBar = async (filters: LogFilterParams, onFilterChange = vi.fn()) => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
     await renderSettled(<LogSearchBar filters={filters} onFilterChange={onFilterChange} onSearch={vi.fn()} onReset={vi.fn()} />);
@@ -278,7 +278,7 @@ describe('LogSearchBar time presets (B-23)', () => {
   });
 });
 
-describe('LogSearchBar N07 fixes', () => {
+describe('LogSearchBar capped lists and Today preset', () => {
   const baseProps = {
     onSearch: vi.fn(),
     onReset: vi.fn(),
@@ -324,7 +324,7 @@ describe('LogSearchBar N07 fixes', () => {
   });
 });
 
-describe('LogSearchBar severity wording (WP2)', () => {
+describe('LogSearchBar severity wording', () => {
   beforeEach(() => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
   });
@@ -349,7 +349,7 @@ describe('LogSearchBar severity wording (WP2)', () => {
   });
 });
 
-describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', () => {
+describe('LogSearchBar search button, drawer and syntax help', () => {
   const renderBar = async (filters: LogFilterParams = {}, onSearch = vi.fn()) => {
     vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
     await renderSettled(<LogSearchBar filters={filters} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />);
@@ -427,7 +427,7 @@ describe('LogSearchBar search button, drawer and syntax help (WP5-2, WP5-3)', ()
   });
 });
 
-describe('LogSearchBar capped-list note follows the server limit (BL-04)', () => {
+describe('LogSearchBar capped-list note follows the server limit', () => {
   const baseProps = {
     onSearch: vi.fn(),
     onReset: vi.fn(),

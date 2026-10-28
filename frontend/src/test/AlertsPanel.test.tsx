@@ -1147,7 +1147,7 @@ describe('AlertsPanel Component', () => {
         .getAllByLabelText(/Move rule \d+ up/)
         .map((el) => Number(el.getAttribute('aria-label')!.match(/\d+/)![0]));
 
-    it('sends reorder requests one at a time and ends on the last move (B-50)', async () => {
+    it('sends reorder requests one at a time and ends on the last move', async () => {
       const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B'), makeRule(3, 'Rule C')];
       vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
       const resolvers: Array<(r: AlertRule[]) => void> = [];
@@ -1181,7 +1181,7 @@ describe('AlertsPanel Component', () => {
       expect(ruleOrder()).toEqual([2, 3, 1]);
     });
 
-    it('rolls back to the last server-confirmed order when a reorder fails (B-50)', async () => {
+    it('rolls back to the last server-confirmed order when a reorder fails', async () => {
       const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B'), makeRule(3, 'Rule C')];
       vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
       const calls: Array<{ resolve: (r: AlertRule[]) => void; reject: (e: Error) => void }> = [];
@@ -1204,7 +1204,7 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('boom')).toBeInTheDocument();
     });
 
-    it('clears the dragged row state when a drag ends outside a row (B-51)', async () => {
+    it('clears the dragged row state when a drag ends outside a row', async () => {
       const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B')];
       vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
       render(<AlertsPanel />);
@@ -1217,7 +1217,7 @@ describe('AlertsPanel Component', () => {
       expect(row.className).not.toContain('opacity-40');
     });
 
-    it('keeps the drop rules badge at its loaded count while the Drop Rules tab loads (B-51)', async () => {
+    it('keeps the drop rules badge at its loaded count while the Drop Rules tab loads', async () => {
       render(<AlertsPanel />);
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /Drop Rules.*1\s*\/\s*2/i })).toBeInTheDocument();
@@ -1238,7 +1238,7 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByRole('button', { name: /Drop Rules.*1\s*\/\s*2/i })).toBeInTheDocument();
     });
 
-    it('steps back a page when deleting the only row on the last history page (B-52)', async () => {
+    it('steps back a page when deleting the only row on the last history page', async () => {
       const item = (id: number) => ({ ...mockHistory.items[0], id, rule_name: `Rule ${id}` });
       const page1 = { items: [item(1)], total: 51, limit: 50, offset: 0 };
       const page2 = { items: [item(2)], total: 51, limit: 50, offset: 50 };
@@ -1274,7 +1274,7 @@ describe('AlertsPanel Component', () => {
 
 
 
-describe('AlertsPanel maintenance end-time presets (WP3)', () => {
+describe('AlertsPanel maintenance end-time presets', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -1337,7 +1337,7 @@ describe('AlertsPanel maintenance end-time presets (WP3)', () => {
   });
 });
 
-describe('AlertsPanel hand-offs (WP6)', () => {
+describe('AlertsPanel hand-offs', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.history.pushState(null, '', '/rules/rules');

@@ -233,7 +233,7 @@ MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfnNkGFOQCPO...
 
 
 class TestRedactorQuotedKeys:
-    """S-03: key/value patterns must also match JSON and Python style quoted keys."""
+    """Key/value patterns must also match JSON and Python style quoted keys."""
 
     def test_json_password_redacted(self):
         result = redact('{"password":"hunter2"}')
@@ -313,7 +313,7 @@ class TestRedactorQuotedKeys:
 
 
 class TestRedactorTokenFormats:
-    """S-03: standalone token formats that appear in logs without a key name."""
+    """Standalone token formats that appear in logs without a key name."""
 
     def test_bare_logshed_api_token_redacted(self):
         token = "ls_live_" + "0123456789abcdef" * 2 + "01234567"
@@ -484,7 +484,7 @@ class TestRedactorTokenFormats:
         assert "myserver.postgres.database.azure.com:5432/db" in result
 
 
-# S-04: hostile input must not make redact() quadratic. Lines are kept under the
+# Hostile input must not make redact() quadratic. Lines are kept under the
 # per-line truncation limit so these cases exercise the patterns themselves.
 def _lines(unit: str, per_line: int, line_count: int = 18) -> str:
     return "\n".join(unit * per_line for _ in range(line_count))
@@ -593,7 +593,7 @@ class TestRedactorTruncation:
 
 
 class TestRedactorInputCap:
-    """N05-3: one call to redact() never processes more than MAX_REDACT_INPUT_CHARS of text."""
+    """One call to redact() never processes more than MAX_REDACT_INPUT_CHARS of text."""
 
     _LINE = "2026-10-19T10:00:00Z web-01 app[123]: user=alice password=hunter2 token=abcdef ok\n"
 

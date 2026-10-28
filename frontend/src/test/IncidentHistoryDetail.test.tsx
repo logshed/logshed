@@ -72,7 +72,7 @@ describe('IncidentHistoryDetail Component', () => {
   });
 });
 
-describe('IncidentHistoryDetail "Inspect in Console" (WP6-1)', () => {
+describe('IncidentHistoryDetail "Inspect in Console"', () => {
   const ruleAlert: AlertHistoryItem = {
     id: 3,
     rule_id: 7,

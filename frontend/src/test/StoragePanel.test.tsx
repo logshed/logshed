@@ -48,7 +48,7 @@ describe('StoragePanel Component', () => {
     expect(screen.getByRole('heading', { level: 3, name: /Targeted Log Deletion/i })).toBeInTheDocument();
   });
 
-  it('B-53: forces a fresh settings fetch when the panel mounts', async () => {
+  it('forces a fresh settings fetch when the panel mounts', async () => {
     const fetchSpy = vi.spyOn(settingsApi, 'fetchSettings');
     render(<StoragePanel />);
 

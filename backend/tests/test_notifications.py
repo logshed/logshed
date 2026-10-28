@@ -595,7 +595,7 @@ class TestDigestChannelDelete:
 
 
 # ===================================================================
-# SSRF pinning, event loop safety and log scrubbing (S-15, S-28, S-33)
+# SSRF pinning, event loop safety and log scrubbing
 # ===================================================================
 
 _PUBLIC_IP = "93.184.216.34"
@@ -763,7 +763,7 @@ _PROXY_ENV_NAMES = (
 
 
 class TestNotifierProxyHandling:
-    """N05-2: sends through an administrator-configured HTTP proxy are not refused."""
+    """Sends through an administrator-configured HTTP proxy are not refused."""
 
     @pytest.fixture(autouse=True)
     def _clean_proxy_env(self, monkeypatch):
@@ -896,7 +896,7 @@ class TestNotifierProxyHandling:
 
 
 class TestProxyNoticeAtStartup:
-    """BL-07: the proxy notice is logged at startup, not only at the first notification."""
+    """The proxy notice is logged at startup, not only at the first notification."""
 
     @pytest.fixture(autouse=True)
     def _clean_proxy_env(self, monkeypatch):

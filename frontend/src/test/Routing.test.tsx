@@ -252,7 +252,7 @@ describe('URL Routing and History API Synchronization', () => {
   });
 
   describe('Add Alias hand-off from the log stream', () => {
-    it('B-46: a cancelled hand-off does not reopen the Add Alias modal on the next visit', async () => {
+    it('a cancelled hand-off does not reopen the Add Alias modal on the next visit', async () => {
       render(<App />);
 
       fireEvent.click(screen.getByRole('button', { name: 'Mock Add Alias' }));
@@ -277,7 +277,7 @@ describe('URL Routing and History API Synchronization', () => {
       expect(screen.queryByTestId('alias-modal-open')).toBeNull();
     });
 
-    it('B-46: leaving Settings with the hand-off still pending clears it', async () => {
+    it('leaving Settings with the hand-off still pending clears it', async () => {
       render(<App />);
 
       fireEvent.click(screen.getByRole('button', { name: 'Mock Add Alias' }));
