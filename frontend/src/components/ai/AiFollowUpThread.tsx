@@ -4,8 +4,8 @@ import { AiConversationMessage } from '../../types.ts';
 import { clearConversationThread, fetchConversationMessages, sendAiFollowUp } from '../../api/ai.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { LoadingSpinner } from '../common/LoadingSpinner.tsx';
+import { AI_FOLLOW_UP_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
-const MAX_QUESTION_LENGTH = 2000;
 const DEFAULT_MAX_TURNS = 10;
 const STICK_TO_BOTTOM_THRESHOLD_PX = 40;
 
@@ -345,7 +345,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isSending}
-              maxLength={MAX_QUESTION_LENGTH}
+              maxLength={AI_FOLLOW_UP_MAX_LENGTH}
               rows={2}
               placeholder="Ask a follow-up question about this diagnosis..."
               aria-label="Follow-up question"
@@ -365,7 +365,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
           <div className="flex items-center justify-between font-mono text-[11px] text-slate-400">
             <span className="hidden sm:inline">Ctrl+Enter or Cmd+Enter to send</span>
             <span className="ml-auto">
-              {draft.length} / {MAX_QUESTION_LENGTH}
+              {draft.length} / {AI_FOLLOW_UP_MAX_LENGTH}
             </span>
           </div>
         </div>

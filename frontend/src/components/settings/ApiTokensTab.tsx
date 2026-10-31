@@ -18,6 +18,7 @@ import { ApiToken, ApiTokenCreateRequest, ApiTokenUpdateRequest, SystemSettings 
 import { fetchApiTokens, createApiToken, revokeApiToken, updateApiToken } from '../../api/tokens.ts';
 import { updateSettings } from '../../api/settings.ts';
 import { formatDate } from '../../utils/formatters.ts';
+import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 import { useClipboard, useMediaQuery } from '../../utils/hooks.ts';
 import { TokenScopeChooser } from './TokenScopeChooser.tsx';
@@ -949,7 +950,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   id="edit-token-name"
                   type="text"
                   required
-                  maxLength={100}
+                  maxLength={NAME_MAX_LENGTH}
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   aria-describedby={editScopesChanged && !editNameChanged ? 'edit-token-name-hint' : undefined}

@@ -18,7 +18,8 @@ export interface ScopeCategory {
 
 export const FULL_ACCESS_SCOPE = '*';
 
-// Keep in step with KNOWN_SCOPES in backend/app/core/api_tokens.py.
+// Must list the same scopes as KNOWN_SCOPES in backend/app/core/api_tokens.py (checked by
+// backend/tests/test_frontend_limits.py).
 export const SCOPE_CATALOG: ScopeCategory[] = [
   {
     id: 'logs',

@@ -28,6 +28,7 @@ import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEn
 import { Modal } from '../common/Modal.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { AiFollowUpThread } from './AiFollowUpThread.tsx';
+import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   gemini: DEFAULT_AI_MODEL,
@@ -37,7 +38,7 @@ const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
 };
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
-export const MAX_USER_CONTEXT_LENGTH = 20000;
+export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
 
 interface ProviderLocalState {
   hasKey: boolean;

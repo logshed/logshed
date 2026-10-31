@@ -35,6 +35,7 @@ import { ApiTokensTab } from './ApiTokensTab.tsx';
 import { DockerHostsTab } from './DockerHostsTab.tsx';
 import { Modal } from '../common/Modal.tsx';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
+import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
 
 export type { SettingsSubTab };
 
@@ -763,8 +764,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPwd.length < 8) {
-      setPwdMsg({ text: 'New password must be at least 8 characters long.', isError: true });
+    if (newPwd.length < PASSWORD_MIN_LENGTH) {
+      setPwdMsg({ text: `New password must be at least ${PASSWORD_MIN_LENGTH} characters long.`, isError: true });
       return;
     }
     if (newPwd !== confirmPwd) {
@@ -1617,14 +1618,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
               <div>
                 <label htmlFor="new-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  New Password (min 8 chars)
+                  New Password (min {PASSWORD_MIN_LENGTH} chars)
                 </label>
                 <input
                   id="new-password"
                   type="password"
                   value={newPwd}
                   onChange={(e) => setNewPwd(e.target.value)}
-                  minLength={8}
+                  minLength={PASSWORD_MIN_LENGTH}
                   required
                   className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
                 />
@@ -1639,7 +1640,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="password"
                   value={confirmPwd}
                   onChange={(e) => setConfirmPwd(e.target.value)}
-                  minLength={8}
+                  minLength={PASSWORD_MIN_LENGTH}
                   required
                   className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
                 />
@@ -1648,7 +1649,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <div className="sm:col-span-3 flex justify-end pt-1">
                 <button
                   type="submit"
-                  disabled={isChangingPwd || !currentPwd || newPwd.length < 8 || newPwd !== confirmPwd}
+                  disabled={isChangingPwd || !currentPwd || newPwd.length < PASSWORD_MIN_LENGTH || newPwd !== confirmPwd}
                   className="w-full sm:w-auto justify-center bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-dark-600 font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
                 >
                   <Lock className="w-3.5 h-3.5" />

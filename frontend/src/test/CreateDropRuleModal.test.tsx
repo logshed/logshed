@@ -182,3 +182,20 @@ describe('CreateDropRuleModal severity range and whole-line hint', () => {
     expect(screen.queryByText(HINT)).toBeNull();
   });
 });
+
+describe('CreateDropRuleModal message pattern length', () => {
+  it('accepts a message pattern as long as the backend allows', () => {
+    const longPattern = 'x'.repeat(1000);
+    render(
+      <CreateDropRuleModal
+        isOpen={true}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        ruleToEdit={{ ...mockRule, message_pattern: longPattern }}
+      />
+    );
+    const input = screen.getByPlaceholderText(/DHCPACK/);
+    expect(input).toHaveAttribute('maxLength', '1000');
+    expect(input).toHaveValue(longPattern);
+  });
+});

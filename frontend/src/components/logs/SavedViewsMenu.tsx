@@ -3,6 +3,7 @@ import { Bookmark, Pin, Plus, Trash2, ChevronDown, AlertTriangle, Pencil } from 
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { Modal } from '../common/Modal.tsx';
 import { isSavedViewNameTaken } from './useSavedViews.ts';
+import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 export const DUPLICATE_VIEW_NAME_MESSAGE = 'A saved view with this name already exists.';
 
@@ -419,7 +420,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            maxLength={100}
+            maxLength={NAME_MAX_LENGTH}
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'rename-view-taken' : undefined}
             className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
@@ -539,7 +540,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Traefik Errors, DHCP Traffic"
-            maxLength={100}
+            maxLength={NAME_MAX_LENGTH}
             autoFocus
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'save-view-taken' : undefined}

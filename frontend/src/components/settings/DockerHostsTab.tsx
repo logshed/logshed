@@ -29,6 +29,7 @@ import {
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { Modal } from '../common/Modal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
+import { HOST_ALIAS_MAX_LENGTH, NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 export interface DockerHostsTabProps {
   initialEditEndpointId?: number | null;
@@ -714,6 +715,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 required
+                maxLength={NAME_MAX_LENGTH}
                 disabled={editingHost?.id === 1}
                 className={`w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 ${
                   editingHost?.id === 1 ? 'opacity-60 cursor-not-allowed' : ''
@@ -737,7 +739,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 value={sourceAlias}
                 onChange={(e) => handleAliasChange(e.target.value)}
                 required
-                maxLength={64}
+                maxLength={HOST_ALIAS_MAX_LENGTH}
                 className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
               <p className="text-[11px] text-slate-400 mt-1">

@@ -5,6 +5,7 @@ import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } fr
 import { Modal } from '../common/Modal.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
+import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 interface CreateDropRuleModalProps {
   isOpen: boolean;
@@ -302,7 +303,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             value={ruleName}
             onChange={(e) => setRuleName(e.target.value)}
             placeholder="e.g. CRON Chatter or Docker Healthchecks"
-            maxLength={100}
+            maxLength={NAME_MAX_LENGTH}
             required
             autoFocus
             className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 focus:outline-hidden focus:border-accent-500"
@@ -318,7 +319,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             value={messagePattern}
             onChange={(e) => setMessagePattern(e.target.value)}
             placeholder="e.g. DHCPACK, query\s+from\b, probe, or * to match all messages"
-            maxLength={500}
+            maxLength={MESSAGE_PATTERN_MAX_LENGTH}
             className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono focus:outline-hidden focus:border-accent-500"
           />
           <span className="text-[11px] text-slate-400 mt-1 block">
@@ -383,7 +384,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                     }
                   }}
                   placeholder="e.g. 192.168.1.*, router*, *dns*"
-                  maxLength={255}
+                  maxLength={RULE_FILTER_MAX_LENGTH}
                   autoFocus
                   className="flex-1 bg-dark-950 border border-dark-700 rounded px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
                 />
@@ -444,7 +445,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                     }
                   }}
                   placeholder="e.g. dnsmasq, smartbulb*, traefik"
-                  maxLength={255}
+                  maxLength={RULE_FILTER_MAX_LENGTH}
                   autoFocus
                   className="flex-1 bg-dark-950 border border-dark-700 rounded px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
                 />
