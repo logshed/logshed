@@ -968,7 +968,7 @@ async def list_alert_history(
 
         query_sql = f"""
             SELECT h.id, h.rule_id, h.rule_name, h.channel_id, h.trigger_count,
-                   h.sample_log, h.incident_summary, h.ai_enrichment, h.ai_model,
+                   h.sample_log, h.sample_log_id, h.incident_summary, h.ai_enrichment, h.ai_model,
                    h.ai_audit_id, h.triggered_at,
                    a.tokens_in, a.tokens_out, a.tokens_thoughts, a.tokens_used,
                    a.prompt_sent, a.system_prompt, a.response_text,
@@ -1009,6 +1009,7 @@ async def list_alert_history(
                     channel_id=r["channel_id"],
                     trigger_count=r["trigger_count"] or 1,
                     sample_log=r["sample_log"],
+                    sample_log_id=r["sample_log_id"],
                     incident_summary=r["incident_summary"],
                     ai_enrichment=bool(r["ai_enrichment"]),
                     ai_model=r["ai_model"],

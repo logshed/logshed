@@ -1,7 +1,12 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LiveLogStream, matchesSearchQuery, compileSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  LiveLogStream,
+  matchesSearchQuery,
+  compileSearchQuery,
+  parseFocusLogIdFromUrl,
+} from '../components/logs/LiveLogStream.tsx';
 import {
   rankQuickFilterChips,
   countQuickFilterVolumes,
@@ -27,10 +32,16 @@ import { takeAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 // Test control for the virtualizer mock: when edgeRows is set, only the first and last
 // edgeRows rows are "visible" (like a real viewport), so large buffers stay cheap to render.
 // headOnly hides the tail too, so older pages load only through scroll events.
-const virtualizerControl: { edgeRows: number | null; headOnly: boolean; lastOptions: any } = {
+const virtualizerControl: {
+  edgeRows: number | null;
+  headOnly: boolean;
+  lastOptions: any;
+  scrollToIndex: ReturnType<typeof vi.fn>;
+} = {
   edgeRows: null,
   headOnly: false,
   lastOptions: null,
+  scrollToIndex: vi.fn(),
 };
 
 vi.mock('@tanstack/react-virtual', () => ({
@@ -56,7 +67,7 @@ vi.mock('@tanstack/react-virtual', () => ({
           start: index * size,
           size,
         })),
-      scrollToIndex: vi.fn(),
+      scrollToIndex: (...args: unknown[]) => virtualizerControl.scrollToIndex(...args),
     };
   },
 }));
@@ -3021,5 +3032,106 @@ describe('LiveLogStream passes the facets limit to the capped-list note', () => 
     await act(async () => {});
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.getByText(/Showing the first 300 hosts/)).toBeInTheDocument();
+  });
+});
+
+describe('Focus on the log an alert link points at', () => {
+  const range = 'time=2026-09-03T14:29:00.000Z&to=2026-09-03T14:31:00.000Z';
+
+  const renderStream = () =>
+    render(
+      <AliasContext.Provider value={{ aliasVersion: 0, bumpAliasVersion: vi.fn() }}>
+        <LiveLogStream onDiagnoseAi={vi.fn()} />
+      </AliasContext.Provider>
+    );
+
+  const focusedRows = () => Array.from(document.querySelectorAll('.log-row[data-focused="true"]'));
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    MockEventSource.instances = [];
+    virtualizerControl.edgeRows = null;
+    virtualizerControl.headOnly = false;
+    virtualizerControl.scrollToIndex = vi.fn();
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({} as any);
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValue({ logs: [...sampleLogs], total: sampleLogs.length, limit: 500, offset: 0 });
+    vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({
+      sources: ['homelab-host', 'opnsense-router'],
+      apps: ['nginx'],
+      host_to_apps: {},
+      app_to_hosts: {},
+    } as any);
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([]);
+    vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('reads only a positive whole number from the focus parameter', () => {
+    for (const [query, expected] of [
+      ['?focus=103', 103],
+      ['?focus=0', null],
+      ['?focus=-3', null],
+      ['?focus=abc', null],
+      ['?focus=12.5', null],
+      ['', null],
+    ] as const) {
+      window.history.replaceState(null, '', `/${query}`);
+      expect(parseFocusLogIdFromUrl()).toBe(expected);
+    }
+  });
+
+  it('scrolls to and highlights the focused log, and does not send focus as a filter', async () => {
+    window.history.replaceState(null, '', `/?${range}&focus=${sampleLogs[2].id}`);
+    renderStream();
+
+    await waitFor(() => expect(focusedRows()).toHaveLength(1));
+    expect(focusedRows()[0]).toHaveTextContent(sampleLogs[2].message);
+    expect(virtualizerControl.scrollToIndex).toHaveBeenCalledWith(2, { align: 'center' });
+    const params = vi.mocked(logsApi.fetchLogs).mock.calls[0][0] as Record<string, unknown>;
+    expect(params).not.toHaveProperty('focus');
+    // The link's range is kept as filters, with the focus parameter beside them
+    expect(window.location.search).toContain(`focus=${sampleLogs[2].id}`);
+  });
+
+  it('loads older pages until the focused log is found', async () => {
+    const newerPage: LogEntry[] = Array.from({ length: 500 }, (_, i) => ({
+      ...sampleLogs[0],
+      id: 5000 - i,
+      message: `later line ${i}`,
+    }));
+    const trigger: LogEntry = { ...sampleLogs[1], id: 4321, message: 'the line that fired the alert' };
+    vi.mocked(logsApi.fetchLogs).mockImplementation(async (params: any) =>
+      params.offset === 0
+        ? { logs: newerPage, total: 501, limit: 500, offset: 0 }
+        : { logs: [trigger], total: 501, limit: 500, offset: 500 }
+    );
+    virtualizerControl.edgeRows = 3;
+    window.history.replaceState(null, '', `/?${range}&focus=4321`);
+    renderStream();
+
+    await waitFor(() => expect(focusedRows()).toHaveLength(1));
+    expect(focusedRows()[0]).toHaveTextContent('the line that fired the alert');
+    expect(vi.mocked(logsApi.fetchLogs).mock.calls.map((c) => (c[0] as any).offset)).toEqual([0, 500]);
+    expect(virtualizerControl.scrollToIndex).toHaveBeenCalledWith(500, { align: 'center' });
+  });
+
+  it('stops highlighting and drops the focus parameter when the filters change', async () => {
+    window.history.replaceState(null, '', `/?${range}&focus=${sampleLogs[0].id}`);
+    renderStream();
+    await waitFor(() => expect(focusedRows()).toHaveLength(1));
+
+    const hostChip = await waitFor(() => {
+      const chip = screen.getAllByTestId('quick-filter-host').find((el) => el.textContent === 'homelab-host');
+      expect(chip).toBeTruthy();
+      return chip as HTMLElement;
+    });
+    fireEvent.click(hostChip);
+
+    await waitFor(() => expect(focusedRows()).toHaveLength(0));
+    expect(window.location.search).not.toContain('focus=');
   });
 });

@@ -96,23 +96,32 @@ describe('IncidentHistoryDetail "Inspect in Console"', () => {
     window.history.replaceState(null, '', '/');
   });
 
-  it('opens the Console from 5 minutes before to 5 minutes after the alert when the rule is not loaded', () => {
+  it('opens the Console from 1 minute before to 1 minute after the alert when the rule is not loaded', () => {
     render(<IncidentHistoryDetail item={ruleAlert} />);
     const link = screen.getByRole('link', { name: 'Inspect in Console' });
     const params = paramsOf(link);
     expect(new URL(link.getAttribute('href') || '', 'http://localhost').pathname).toBe('/');
     expect(params.get('source')).toBe('nas-01');
-    expect(params.get('time')).toBe('2026-10-13T09:55:00.000Z');
-    expect(params.get('to')).toBe('2026-10-13T10:05:00.000Z');
+    expect(params.get('time')).toBe('2026-10-13T09:59:00.000Z');
+    expect(params.get('to')).toBe('2026-10-13T10:01:00.000Z');
     // Host-wide by default
     expect(params.has('app')).toBe(false);
   });
 
-  it('starts at the rule window when it is longer than 5 minutes, and never less than 5 minutes', () => {
+  it('points the Console at the log that triggered the alert when it was recorded', () => {
+    const { rerender } = render(<IncidentHistoryDetail item={{ ...ruleAlert, sample_log_id: 4321 }} />);
+    expect(paramsOf(screen.getByRole('link', { name: 'Inspect in Console' })).get('focus')).toBe('4321');
+    expect(paramsOf(screen.getByRole('link', { name: 'Same app only' })).get('focus')).toBe('4321');
+    // Alerts recorded without it open the same range with nothing to focus
+    rerender(<IncidentHistoryDetail item={{ ...ruleAlert, sample_log_id: null }} />);
+    expect(paramsOf(screen.getByRole('link', { name: 'Inspect in Console' })).has('focus')).toBe(false);
+  });
+
+  it('starts at the rule window when it is longer than 1 minute, and never less than 1 minute', () => {
     const { rerender } = render(<IncidentHistoryDetail item={ruleAlert} ruleWindowSeconds={3600} />);
     expect(paramsOf(screen.getByRole('link', { name: 'Inspect in Console' })).get('time')).toBe('2026-10-13T09:00:00.000Z');
-    rerender(<IncidentHistoryDetail item={ruleAlert} ruleWindowSeconds={60} />);
-    expect(paramsOf(screen.getByRole('link', { name: 'Inspect in Console' })).get('time')).toBe('2026-10-13T09:55:00.000Z');
+    rerender(<IncidentHistoryDetail item={ruleAlert} ruleWindowSeconds={30} />);
+    expect(paramsOf(screen.getByRole('link', { name: 'Inspect in Console' })).get('time')).toBe('2026-10-13T09:59:00.000Z');
   });
 
   it('offers "Same app only", which adds the app filter', () => {
@@ -120,7 +129,7 @@ describe('IncidentHistoryDetail "Inspect in Console"', () => {
     const params = paramsOf(screen.getByRole('link', { name: 'Same app only' }));
     expect(params.get('app')).toBe('kernel');
     expect(params.get('source')).toBe('nas-01');
-    expect(params.get('time')).toBe('2026-10-13T09:55:00.000Z');
+    expect(params.get('time')).toBe('2026-10-13T09:59:00.000Z');
   });
 
   it('leaves out source and "Same app only" when the item has no source or app', () => {
@@ -149,8 +158,8 @@ describe('IncidentHistoryDetail "Inspect in Console"', () => {
     const filters = parseFiltersFromUrl();
     expect(filters.source).toBe('nas-01');
     expect(filters.app_name).toBe('kernel');
-    expect(filters.from).toBe('2026-10-13T09:55:00.000Z');
-    expect(filters.to).toBe('2026-10-13T10:05:00.000Z');
+    expect(filters.from).toBe('2026-10-13T09:59:00.000Z');
+    expect(filters.to).toBe('2026-10-13T10:01:00.000Z');
   });
 
   it('uses UTC times that parseFiltersFromUrl reads, whatever the browser and server time zones', () => {
@@ -162,8 +171,8 @@ describe('IncidentHistoryDetail "Inspect in Console"', () => {
       render(<IncidentHistoryDetail item={{ ...ruleAlert, triggered_at: '2026-10-13 23:30:00' }} />);
       fireEvent.click(screen.getByRole('link', { name: 'Inspect in Console' }));
       const filters = parseFiltersFromUrl();
-      expect(filters.from).toBe('2026-10-13T23:25:00.000Z');
-      expect(filters.to).toBe('2026-10-13T23:35:00.000Z');
+      expect(filters.from).toBe('2026-10-13T23:29:00.000Z');
+      expect(filters.to).toBe('2026-10-13T23:31:00.000Z');
     } finally {
       process.env.TZ = originalTz;
     }

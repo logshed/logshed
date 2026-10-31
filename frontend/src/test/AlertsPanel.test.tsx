@@ -1407,9 +1407,9 @@ describe('AlertsPanel hand-offs', () => {
     fireEvent.click(await screen.findByText('SSH Brute-Force Detection'));
     const link = await screen.findByRole('link', { name: 'Inspect in Console' });
     const params = new URL(link.getAttribute('href') || '', 'http://localhost').searchParams;
-    // 30-minute rule window is longer than the 5-minute minimum
+    // 30-minute rule window is longer than the 1-minute minimum
     expect(params.get('time')).toBe('2026-09-18T09:30:00.000Z');
-    expect(params.get('to')).toBe('2026-09-18T10:05:00.000Z');
+    expect(params.get('to')).toBe('2026-09-18T10:01:00.000Z');
     expect(params.get('source')).toBe('bastion');
   });
 });

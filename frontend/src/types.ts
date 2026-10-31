@@ -560,6 +560,7 @@ export interface AlertHistoryItem {
   channel_id?: number | null;
   trigger_count: number;
   sample_log?: string | null;
+  sample_log_id?: number | null;
   incident_summary?: string | null;
   ai_enrichment: boolean;
   ai_model?: string | null;

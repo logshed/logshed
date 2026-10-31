@@ -26,6 +26,13 @@ export function logGridCols(aiEnabled: boolean): string {
 export const DESKTOP_LOG_ROW_HEIGHT = 28;
 export const MOBILE_LOG_ROW_HEIGHT = 84;
 
+/** Background and left border: the alert's log (amber) wins over a selected row (accent). */
+function rowStateClass(isSelected: boolean, isFocused: boolean): string {
+  if (isFocused) return 'bg-amber-950/50 border-l-amber-400';
+  if (isSelected) return 'bg-accent-950/40 border-l-accent-500';
+  return 'border-l-transparent';
+}
+
 export interface LogRowProps {
   log: ProcessedLogEntry;
   index: number;
@@ -34,6 +41,8 @@ export interface LogRowProps {
   isMobile: boolean;
   /** Shows the "Explain with AI" row action; off until settings say AI is on. */
   aiEnabled?: boolean;
+  /** Highlights the row as the log an alert link pointed at (the log that triggered the alert). */
+  isFocused?: boolean;
   style: React.CSSProperties;
   onSelect: (log: LogEntry, index: number, e: React.MouseEvent) => void;
   onClick: (log: LogEntry) => void;
@@ -47,6 +56,7 @@ export function areLogRowPropsEqual(prevProps: LogRowProps, nextProps: LogRowPro
   if (prevProps.index !== nextProps.index) return false;
   if (prevProps.isMobile !== nextProps.isMobile) return false;
   if (Boolean(prevProps.aiEnabled) !== Boolean(nextProps.aiEnabled)) return false;
+  if (Boolean(prevProps.isFocused) !== Boolean(nextProps.isFocused)) return false;
 
   if (
     prevProps.style.transform !== nextProps.style.transform ||
@@ -84,6 +94,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   isHovered,
   isMobile,
   aiEnabled = false,
+  isFocused = false,
   style,
   onSelect,
   onClick,
@@ -98,10 +109,11 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
     return (
       <div
         data-index={index}
+        data-focused={isFocused || undefined}
         onClick={() => onClick(log)}
         style={style}
         className={`log-row flex flex-col px-3 py-1 border-b border-dark-900 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
-          isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
+          rowStateClass(isSelected, isFocused)
         }`}
       >
         {/* Line 1: Severity Badge + App Name (Host Name) */}
@@ -145,10 +157,11 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   return (
     <div
       data-index={index}
+      data-focused={isFocused || undefined}
       onClick={() => onClick(log)}
       style={style}
       className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
-        isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
+        rowStateClass(isSelected, isFocused)
       }${isHovered ? ' bg-dark-900/60' : ''}`}
     >
       {/* Checkbox */}

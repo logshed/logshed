@@ -29,11 +29,13 @@ import {
 } from '../../utils/maintenanceHistory.ts';
 import { cleanIsoString } from '../../utils/formatters.ts';
 
-const CONSOLE_MARGIN_MS = 5 * 60 * 1000;
+const CONSOLE_MARGIN_MS = 60 * 1000;
 
 /**
- * Console URL for the logs around a rule alert: from the trigger time minus the larger of 5 minutes and
- * the rule window, to 5 minutes after it. Times are UTC ISO strings, the format parseFiltersFromUrl reads.
+ * Console URL for the logs around a rule alert: from the trigger time minus the larger of 1 minute and
+ * the rule window (so every log the rule counted is included), to 1 minute after it. Times are UTC ISO
+ * strings, the format parseFiltersFromUrl reads. When the alert recorded the log that triggered it,
+ * `focus` makes the Console scroll to that log and highlight it.
  * Returns null when the trigger time cannot be read.
  */
 export function buildIncidentConsoleUrl(
@@ -50,6 +52,7 @@ export function buildIncidentConsoleUrl(
   if (sameAppOnly && item.app_name) params.set('app', item.app_name);
   params.set('time', new Date(triggeredMs - Math.max(CONSOLE_MARGIN_MS, windowMs)).toISOString());
   params.set('to', new Date(triggeredMs + CONSOLE_MARGIN_MS).toISOString());
+  if (item.sample_log_id) params.set('focus', String(item.sample_log_id));
   return `/?${params.toString()}`;
 }
 

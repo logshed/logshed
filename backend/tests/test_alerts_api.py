@@ -264,8 +264,8 @@ class TestAlertsApi:
         cur.execute(
             """
             INSERT INTO alert_history
-            (rule_id, rule_name, channel_id, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (rule_id, rule_name, channel_id, trigger_count, sample_log, sample_log_id, incident_summary, ai_enrichment, triggered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 None,
@@ -273,6 +273,7 @@ class TestAlertsApi:
                 None,
                 5,
                 "Failed password from 10.0.0.1",
+                4321,
                 "SSH brute-force attack detected.",
                 1,
                 now_iso,
@@ -289,6 +290,7 @@ class TestAlertsApi:
         assert data["total"] == 1
         assert data["items"][0]["id"] == history_id
         assert data["items"][0]["rule_name"] == "Test Security Spike"
+        assert data["items"][0]["sample_log_id"] == 4321
 
         # 2. Delete single history record
         del_item = await client.delete(f"/api/alerts/history/{history_id}", headers=auth_headers)

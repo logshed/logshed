@@ -1089,6 +1089,7 @@ class AlertHistoryItem(BaseModel):
     channel_id: Optional[int] = None
     trigger_count: int = 1
     sample_log: Optional[str] = None
+    sample_log_id: Optional[int] = Field(None, description="Id of the log that triggered a rule alert (it may have been pruned or deleted since)")
     incident_summary: Optional[str] = None
     ai_enrichment: bool = False
     ai_model: Optional[str] = None

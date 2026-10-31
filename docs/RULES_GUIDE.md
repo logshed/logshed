@@ -193,7 +193,7 @@ Alert rules filter by app and severity only, so the host is not carried over. Cl
 
 ### Inspecting an Incident in the Console
 
-In **Rules & History > History**, open an alert raised by a rule and click **Inspect in Console** (or **View in Console** next to the triggering log snippet). The Console opens on the alert's host, from 5 minutes before the alert (or the rule's window, when that is longer and the rule still exists) to 5 minutes after it. **Same app only** also filters to the alert's app. Daily Digest and On-Demand Analysis items have no Console link.
+In **Rules & History > History**, open an alert raised by a rule and click **Inspect in Console** (or **View in Console** next to the triggering log snippet). The Console opens on the alert's host, from 1 minute before the alert (or the rule's window, when that is longer and the rule still exists) to 1 minute after it, scrolled to the log that triggered the alert, which is highlighted in amber. Alerts recorded before LogShed kept that log open the same range without a highlight. You can widen the range with the time pickers. **Same app only** also filters to the alert's app. Daily Digest and On-Demand Analysis items have no Console link.
 
 ---
 

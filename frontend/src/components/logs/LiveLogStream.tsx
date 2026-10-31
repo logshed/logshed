@@ -101,6 +101,34 @@ export function parseFiltersFromUrl(): LogFilterParams {
   }
 }
 
+/**
+ * Id of the log to scroll to and highlight, from the `focus` URL parameter (alert links set it to the
+ * log that triggered the alert). It is not a filter, so it never reaches the API or a saved view.
+ */
+export function parseFocusLogIdFromUrl(): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = new URLSearchParams(window.location.search).get('focus');
+    if (!raw || !/^\d+$/.test(raw)) return null;
+    const id = parseInt(raw, 10);
+    return id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function removeFocusFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('focus')) return;
+    params.delete('focus');
+    const query = params.toString();
+    window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
+  } catch {
+    // Ignore URL manipulation failures in restricted environments
+  }
+}
+
 export function syncFiltersToUrl(filters: LogFilterParams) {
   if (typeof window === 'undefined') return;
   try {
@@ -468,6 +496,8 @@ interface LiveLogStreamProps {
 
 // Rows kept while auto-scroll is on, and while the user is scrolled back reading history
 const LIVE_BUFFER_SIZE = 3000;
+// Pages of older logs loaded at most while looking for a focused log (500 logs each)
+const MAX_FOCUS_PAGES = 10;
 const SCROLLBACK_BUFFER_SIZE = 20000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -525,6 +555,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const historicalOffsetRef = useRef<number>(0);
   const isLoadingMoreRef = useRef<boolean>(false);
   const [filters, setFilters] = useState<LogFilterParams>(() => parseFiltersFromUrl());
+  // The log an alert link points at: scrolled into view and highlighted once, cleared when the filters change
+  const [focusLogId, setFocusLogId] = useState<number | null>(() => parseFocusLogIdFromUrl());
+  const initialFiltersKeyRef = useRef<string>(JSON.stringify(filters));
+  const focusScrolledRef = useRef<boolean>(false);
+  const focusPagesLoadedRef = useRef<number>(0);
   const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] = useState<boolean>(false);
   const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
   const [deleteSelectedError, setDeleteSelectedError] = useState<string | null>(null);
@@ -565,6 +600,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     syncFiltersToUrl(filters);
   }, [filters]);
+
+  useEffect(() => {
+    if (focusLogId === null || JSON.stringify(filters) === initialFiltersKeyRef.current) return;
+    setFocusLogId(null);
+    removeFocusFromUrl();
+  }, [filters, focusLogId]);
 
   // Decoupled facet accumulation states
   const [accumulatedSources, setAccumulatedSources] = useState<string[]>([]);
@@ -1405,6 +1446,25 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     rowVirtualizer.measure();
   }, [isMobile, rowVirtualizer]);
 
+  // Scroll the focused log into view once it is loaded, paging older logs (newest first) until it is found
+  useEffect(() => {
+    if (focusLogId === null || focusScrolledRef.current || isLoadingHistory || logs.length === 0) return;
+    const index = logs.findIndex((l) => l.id === focusLogId);
+    if (index >= 0) {
+      focusScrolledRef.current = true;
+      // Stop the initial load from scrolling back to the top, and keep live rows from moving the list
+      isAutoScrollRef.current = false;
+      setAutoScroll(false);
+      rowVirtualizer.scrollToIndex(index, { align: 'center' });
+      return;
+    }
+    if (hasMoreLogs && !isLoadingMore && focusPagesLoadedRef.current < MAX_FOCUS_PAGES) {
+      focusPagesLoadedRef.current += 1;
+      isAutoScrollRef.current = false;
+      loadMoreLogs();
+    }
+  }, [focusLogId, logs, isLoadingHistory, hasMoreLogs, isLoadingMore, loadMoreLogs, rowVirtualizer]);
+
   const virtualItems = rowVirtualizer.getVirtualItems();
   const lastVirtualItem = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1] : null;
 
@@ -2084,6 +2144,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                     isSelected={isSelected}
                     isMobile={isMobile}
                     aiEnabled={aiEnabled}
+                    isFocused={log.id === focusLogId}
                     style={{
                       position: 'absolute',
                       top: 0,

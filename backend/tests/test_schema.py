@@ -889,6 +889,36 @@ class TestRepairV3:
         assert info["verify_hostname"][4] == "1"  # DEFAULT 1
         assert values == [1, 1]
 
+    @pytest.mark.parametrize("origin", ["fresh", "from_v2", "beta_v3_without_column"])
+    def test_alert_history_has_sample_log_id(self, tmp_path: Path, monkeypatch, origin: str):
+        """Fresh, upgraded and repaired databases all get a nullable alert_history.sample_log_id."""
+        p = tmp_path / f"{origin}.db"
+        if origin == "from_v2":
+            _migrate_to(p, 2, monkeypatch)
+            conn = get_connection(p)
+            conn.execute(
+                "INSERT INTO alert_history (rule_name, trigger_count, triggered_at) VALUES ('Old alert', 1, datetime('now'))"
+            )
+            conn.commit()
+            conn.close()
+        elif origin == "beta_v3_without_column":
+            run_migrations(p)
+            conn = get_connection(p)
+            conn.execute("ALTER TABLE alert_history DROP COLUMN sample_log_id")
+            conn.commit()
+            conn.close()
+
+        run_migrations(p)
+        run_migrations(p)  # the repair is idempotent
+
+        conn = get_connection(p)
+        info = {r[1]: r for r in conn.execute("PRAGMA table_info(alert_history)")}
+        values = [r[0] for r in conn.execute("SELECT sample_log_id FROM alert_history")]
+        conn.close()
+        assert info["sample_log_id"][2] == "INTEGER"
+        assert info["sample_log_id"][3] == 0  # nullable
+        assert all(v is None for v in values)
+
 
 
 # ===================================================================

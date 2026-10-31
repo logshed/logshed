@@ -276,13 +276,16 @@ class TestAlertEvaluatorEngine:
         # Verify alert_history table has a record
         conn = get_connection(test_db)
         cur = conn.cursor()
-        cur.execute("SELECT rule_id, rule_name, trigger_count FROM alert_history")
+        cur.execute("SELECT rule_id, rule_name, trigger_count, sample_log, sample_log_id FROM alert_history")
         rows = cur.fetchall()
         conn.close()
         assert len(rows) == 1
         assert rows[0][0] == rule_id
         assert rows[0][1] == "Spike Alert"
         assert rows[0][2] == 3
+        # The newest matching log is the sample, and its id is kept so the Console can open on it
+        assert rows[0][3] == "error 3"
+        assert rows[0][4] == 3
 
     @pytest.mark.asyncio
     async def test_internal_alerting_logs_marked_to_skip_are_never_evaluated(self, test_db: Path, monkeypatch):
@@ -1464,12 +1467,19 @@ class TestQueueConsumerAlertIntegration:
         # 3. Check alert_history record in SQLite
         conn = get_connection(test_db)
         cur = conn.cursor()
-        cur.execute("SELECT trigger_count, incident_summary FROM alert_history WHERE rule_id = ?", (rule_id,))
+        cur.execute(
+            "SELECT trigger_count, incident_summary, sample_log, sample_log_id FROM alert_history WHERE rule_id = ?",
+            (rule_id,),
+        )
         row = cur.fetchone()
         conn.close()
 
         assert row is not None
         assert row[0] >= 50
+        # Rate rules keep a lightweight record per log, including its id. The sample is the log that
+        # took the window to the 50 needed: the 10th of the second batch
+        assert row[2] == "database connection pool exhausted"
+        assert row[3] == 109
         summary = row[1]
         assert "Log storm detected" in summary
         assert "storm-service" in summary

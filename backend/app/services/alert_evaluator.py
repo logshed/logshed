@@ -43,6 +43,12 @@ _REGEX_METACHARS_BEFORE_BACKSLASH = frozenset("*+?[](){}^$|")
 _REGEX_METACHARS = _REGEX_METACHARS_BEFORE_BACKSLASH | {"\\"}
 
 
+def _log_id(entry: dict[str, Any]) -> Optional[int]:
+    """The stored id of a log entry (set by the queue consumer after its insert), or None."""
+    value = entry.get("id")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def format_sample_log_for_alert(raw_msg: str, max_lines: int = 5, max_chars: int = 500) -> str:
     """
     Format and truncate log message for clean mobile/webhook push notifications.
@@ -419,6 +425,7 @@ class AlertEvaluator:
                             # For rate rules that only track log counts, store lightweight records
                             # rather than holding entire log payload dictionaries in memory.
                             payload = {
+                                "id": entry.get("id"),
                                 "timestamp": entry.get("timestamp"),
                                 "app_name": entry.get("app_name"),
                                 "source_alias": entry.get("source_alias"),
@@ -613,6 +620,7 @@ class AlertEvaluator:
 
         # Extract offending IP, host, and app/container if present in triggering logs
         sample_log = ""
+        sample_log_id: Optional[int] = None
         extracted_ip = None
         extracted_host = None
         extracted_app = None
@@ -620,6 +628,7 @@ class AlertEvaluator:
             sample_entry = triggering_logs[-1]
             if isinstance(sample_entry, dict):
                 sample_log = str(sample_entry.get("message") or sample_entry.get("raw") or "")
+                sample_log_id = _log_id(sample_entry)
             for log_entry in reversed(triggering_logs):
                 if not isinstance(log_entry, dict):
                     continue
@@ -673,6 +682,7 @@ class AlertEvaluator:
                         cand_app = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
                         if str(cand_app) == str(top_app):
                             sample_log = str(log_entry.get("message") or log_entry.get("raw") or "")
+                            sample_log_id = _log_id(log_entry)
                             break
             if host_counter:
                 top_host, host_count = host_counter.most_common(1)[0]
@@ -886,8 +896,8 @@ class AlertEvaluator:
             conn.execute(
                 """
                 INSERT INTO alert_history
-                (rule_id, rule_name, channel_id, trigger_count, sample_log, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (rule_id, rule_name, channel_id, trigger_count, sample_log, sample_log_id, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule.id,
@@ -895,6 +905,7 @@ class AlertEvaluator:
                     rule.channel_id,
                     len(triggering_logs),
                     sample_log[:1000],
+                    sample_log_id,
                     incident_summary,
                     int(rule.ai_enrichment and ai_enabled),
                     actual_ai_model,

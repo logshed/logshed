@@ -434,6 +434,8 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
     - Create api_tokens table for Bearer token authentication.
     - Create maintenance_sessions table for concurrent maintenance tracking, including audit columns
       (ended_at, end_reason, dropped_count, trigger_label) and link alert_history rows via maintenance_session_id.
+    - Add alert_history.sample_log_id: the id of the log that triggered a rule alert (the sample log), so
+      the Console can open on it. Not a foreign key: the log can be pruned or deleted before the alert.
     - Create docker_endpoints table and seed default primary Docker host.
     - Create ai_conversation_messages table for AI follow-up conversation threads
       (cascade-deleted with their ai_audit_log entry).
@@ -460,6 +462,8 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
     history_cols = {row[1] for row in cur.fetchall()}
     if "maintenance_session_id" not in history_cols:
         conn.execute("ALTER TABLE alert_history ADD COLUMN maintenance_session_id TEXT;")
+    if "sample_log_id" not in history_cols:
+        conn.execute("ALTER TABLE alert_history ADD COLUMN sample_log_id INTEGER;")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_history_maint_session ON alert_history(maintenance_session_id);")
 
     _run_script(conn, '''
@@ -587,6 +591,7 @@ def repair_v3(conn: sqlite3.Connection) -> None:
     incomplete by earlier 1.3.0 builds, whose migrations were not atomic:
     - re-run migrate_v3 when its tables are missing (pre-release databases);
     - add docker_endpoints.verify_hostname (on by default, including existing endpoints);
+    - add alert_history.sample_log_id;
     - number rules by id when a table holds more than one rule and none was ever ordered;
     - create the rule order indexes and drop the redundant ones;
     - make saved view names unique ignoring case and add their unique index (dedupe_saved_view_names).
@@ -603,6 +608,11 @@ def repair_v3(conn: sqlite3.Connection) -> None:
     if endpoint_cols and "verify_hostname" not in endpoint_cols:
         logger.info("Adding verify_hostname column to docker_endpoints...")
         conn.execute("ALTER TABLE docker_endpoints ADD COLUMN verify_hostname INTEGER NOT NULL DEFAULT 1;")
+
+    history_cols = {row[1] for row in conn.execute("PRAGMA table_info(alert_history);").fetchall()}
+    if history_cols and "sample_log_id" not in history_cols:
+        logger.info("Adding sample_log_id column to alert_history...")
+        conn.execute("ALTER TABLE alert_history ADD COLUMN sample_log_id INTEGER;")
 
     for table in ("drop_rules", "alert_rules"):
         cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table});").fetchall()}
