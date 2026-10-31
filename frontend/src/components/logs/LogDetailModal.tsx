@@ -180,6 +180,9 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     });
   }, [log, contextLogs]);
 
+  // The API returns context oldest first; show it newest first, the same order as the log stream
+  const contextLogsNewestFirst = useMemo(() => [...contextLogs].reverse(), [contextLogs]);
+
   const handleInspectTargetAndContext = () => {
     if (!log || targetAndContextLogs.length === 0) return;
     if (onInspectWithContext) {
@@ -561,7 +564,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                 <div className="p-4 text-center text-slate-400 font-mono">No surrounding logs found.</div>
               ) : (
                 <div className="font-mono text-[11px] divide-y divide-dark-800 max-h-80 overflow-y-auto">
-                  {contextLogs.map((ctxLog) => {
+                  {contextLogsNewestFirst.map((ctxLog) => {
                     const isTarget = ctxLog.id === log.id;
                     return (
                       <div

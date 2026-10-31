@@ -879,9 +879,20 @@ describe('LogDetailModal AI setting, Newer / Older steps and context app names',
     fireEvent.click(screen.getByRole('button', { name: /Load Surrounding Context/i }));
     await screen.findByText('token received');
     const apps = screen.getAllByTestId('context-app-name');
-    expect(apps.map((a) => a.textContent)).toEqual(['corosync-cluster-engine-daemon', 'pveproxy']);
-    expect(apps[0]).toHaveAttribute('title', 'corosync-cluster-engine-daemon');
-    expect(apps[0].className).toContain('truncate');
+    expect(apps.map((a) => a.textContent)).toEqual(['pveproxy', 'corosync-cluster-engine-daemon']);
+    expect(apps[1]).toHaveAttribute('title', 'corosync-cluster-engine-daemon');
+    expect(apps[1].className).toContain('truncate');
+  });
+
+  it('lists surrounding context newest first, like the log stream', async () => {
+    const older = { ...log, id: 498, message: 'older line' };
+    const newer = { ...log, id: 501, message: 'newer line' };
+    vi.spyOn(logsApi, 'fetchLogContext').mockResolvedValue({ target_id: log.id, logs: [older, log, newer] });
+    render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Load Surrounding Context/i }));
+    await screen.findByText('newer line');
+    const ids = screen.getAllByText(/^#\d+$/).map((el) => el.textContent);
+    expect(ids).toEqual(['#501', '#500', '#498']);
   });
 
   it('hides the context app column when "Same App Only" is checked', async () => {
