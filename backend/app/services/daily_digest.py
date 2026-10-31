@@ -20,12 +20,17 @@ from typing import Any, Optional, Union
 import urllib.parse
 
 from app.api.deps import run_db_query
-from app.core.config import get_cached_setting, get_db_path
+from app.core.config import get_cached_setting, get_db_path, parse_bool
 from app.core.utils import parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.retention import get_db_footprint_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def is_daily_digest_enabled(settings: dict[str, str]) -> bool:
+    """The stored daily digest switch (off until saved)."""
+    return parse_bool(settings.get("daily_digest_enabled"), False)
 
 
 def format_bytes(num_bytes: Union[int, float]) -> str:
@@ -269,8 +274,7 @@ async def run_daily_digest(
 
     settings_map, active_channels = await run_db_query(_read_config_and_channels, custom_db_path=effective_db)
 
-    is_enabled_raw = settings_map.get("daily_digest_enabled", "0")
-    daily_digest_enabled = is_enabled_raw.strip().lower() in ("1", "true", "yes", "on")
+    daily_digest_enabled = is_daily_digest_enabled(settings_map)
 
     if not force and not daily_digest_enabled:
         return {"status": "skipped", "reason": "daily_digest_disabled"}
@@ -472,7 +476,7 @@ class DailyDigestWorker:
             )
             rows = {r[0]: r[1] for r in cur.fetchall()}
 
-            is_enabled = rows.get("daily_digest_enabled", "0").strip().lower() in ("1", "true", "yes", "on")
+            is_enabled = is_daily_digest_enabled(rows)
             if not is_enabled:
                 return False
 

@@ -30,6 +30,7 @@ from app.collectors.docker_collector import DockerTailer
 from app.collectors.docker_pool import DockerCollectorPool
 from app.collectors.syslog import SyslogServer
 from app.core.config import (
+    env_bool,
     get_all_system_settings,
     get_cors_origins,
     get_data_dir,
@@ -643,8 +644,7 @@ def _register_api_docs(app: FastAPI) -> tuple[set[str], str]:
 
 def _api_docs_enabled() -> bool:
     """ENABLE_API_DOCS (default true) serves /docs, /redoc and /openapi.json."""
-    raw = os.environ.get("ENABLE_API_DOCS", "true").strip().lower()
-    return raw not in ("false", "0", "no", "off")
+    return env_bool("ENABLE_API_DOCS", True)
 
 
 def create_app() -> FastAPI:

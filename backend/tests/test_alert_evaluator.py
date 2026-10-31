@@ -15,6 +15,16 @@ from app.services.alert_evaluator import AlertEvaluator, CompiledAlertRule
 from app.services.alert_presets import extract_ip_from_message, get_security_presets
 
 
+def _turn_ai_on(db_file: Path) -> None:
+    """Saves the AI switch as on, as the Settings page does, so enrichment runs without an API key."""
+    conn = get_connection(db_file)
+    conn.execute(
+        "INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('ai_enabled', '1', datetime('now'), 0)"
+    )
+    conn.commit()
+    conn.close()
+
+
 class TestCompiledAlertRule:
     """Tests for single rule match evaluation."""
 
@@ -376,6 +386,7 @@ class TestAlertEvaluatorEngine:
 
     @pytest.mark.asyncio
     async def test_ai_enrichment_and_ip_extraction(self, test_db: Path, monkeypatch):
+        _turn_ai_on(test_db)
         # Preset rule: SSH brute-force with ai_enrichment=1
         conn = get_connection(test_db)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -850,6 +861,7 @@ class TestQueueConsumerAlertIntegration:
 
     @pytest.mark.asyncio
     async def test_ai_enrichment_failure_sends_alert_with_note_and_records_history(self, test_db: Path, monkeypatch):
+        _turn_ai_on(test_db)
         """Verify that when AI enrichment fails, notification is still sent with a failure note and history is logged."""
         conn = get_connection(test_db)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -1488,6 +1500,7 @@ class TestQueueConsumerAlertIntegration:
 
     @pytest.mark.asyncio
     async def test_rate_spike_alert_ai_enrichment_prompt(self, test_db: Path, monkeypatch):
+        _turn_ai_on(test_db)
         """Verify rate spike alerts include culprit breakdown in AI prompt."""
         conn = get_connection(test_db)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -1858,6 +1871,7 @@ class TestAlertEnrichmentAiSettings:
     async def test_enrichment_passes_configured_timeout_and_thinking_budget(self, tmp_path: Path, monkeypatch):
         db_file = tmp_path / "alerts_ai.db"
         run_migrations(db_file)
+        _turn_ai_on(db_file)
         conn = get_connection(db_file)
         conn.execute(
             """
@@ -2286,6 +2300,7 @@ class TestAlertAiContextRedactionOffLoop:
 
     @staticmethod
     def _insert_ai_rule(db_file: Path) -> None:
+        _turn_ai_on(db_file)
         conn = get_connection(db_file)
         conn.execute(
             """

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.core.config import parse_bool
 from app.version import APP_VERSION, SemVer, compare_semver, is_newer_stable_version, parse_semver
 
 logger = logging.getLogger("logshed.version")
@@ -106,7 +107,7 @@ def _is_update_check_enabled_in_db(conn) -> bool:
     row = cursor.fetchone()
     if row is None:
         return True
-    return str(row[0]).strip().lower() not in ("0", "false", "no", "off")
+    return parse_bool(row[0], True)
 
 
 async def check_for_updates(

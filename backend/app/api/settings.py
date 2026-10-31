@@ -21,12 +21,15 @@ from app.core.config import (
     resolve_all_system_settings,
     invalidate_settings_cache,
     get_cached_setting,
+    parse_bool,
 )
 from app.core.security import decrypt_value, encrypt_value, mask_secret
 from app.core.utils import get_server_timezone_name, parse_iso_to_utc_datetime
 
 from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest, AiProviderConfig
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
+from app.services.ai_service import is_ai_enabled
+from app.services.daily_digest import is_daily_digest_enabled
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 logger = logging.getLogger(__name__)
@@ -146,10 +149,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     else:
         internal_log_level = env_level_name
 
-    check_for_updates_raw = stored.get("check_for_updates")
-    check_for_updates = True
-    if check_for_updates_raw is not None:
-        check_for_updates = check_for_updates_raw.strip().lower() not in ("0", "false", "no", "off")
+    check_for_updates = parse_bool(stored.get("check_for_updates"), True)
 
     stored_until = stored.get("maintenance_until")
     maintenance_until = None
@@ -160,16 +160,8 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
 
     resolved = resolve_all_system_settings(stored)
 
-    stored_ai_enabled = stored.get("ai_enabled")
-    if stored_ai_enabled is not None:
-        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
-    else:
-        ai_enabled = bool(ai_api_key_val) if active_provider != "openai_compatible" else True
-
-    daily_digest_enabled_raw = stored.get("daily_digest_enabled")
-    daily_digest_enabled = False
-    if daily_digest_enabled_raw is not None:
-        daily_digest_enabled = daily_digest_enabled_raw.strip().lower() in ("1", "true", "yes", "on")
+    ai_enabled = is_ai_enabled(stored, active_provider, ai_api_key_val or "")
+    daily_digest_enabled = is_daily_digest_enabled(stored)
 
     daily_digest_channel_id_raw = stored.get("daily_digest_channel_id")
     daily_digest_channel_id = None
@@ -380,7 +372,7 @@ async def update_settings(
                 "WHERE key IN ('daily_digest_enabled', 'daily_digest_schedule_time')"
             )
             stored_digest = {k: v for k, v in cursor.fetchall()}
-            was_enabled = (stored_digest.get("daily_digest_enabled") or "").strip().lower() in ("1", "true", "yes", "on")
+            was_enabled = is_daily_digest_enabled(stored_digest)
             stored_time = (stored_digest.get("daily_digest_schedule_time") or "09:00").strip()
             turned_on = bool(req.daily_digest_enabled) and not was_enabled
             time_changed = (

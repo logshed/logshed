@@ -21,7 +21,7 @@ from typing import Any, Callable, Optional, Union
 
 import regex
 
-from app.core.pipeline import SKIP_ALERT_RULES_KEY
+from app.core.pipeline import MAX_FUTURE_TIMESTAMP_SKEW_SECONDS, SKIP_ALERT_RULES_KEY
 from app.core.redactor import redact
 from app.core.regex_validator import (
     RuleTimeoutTracker,
@@ -378,13 +378,13 @@ class AlertEvaluator:
 
         now_iso = now_utc.isoformat()
         min_epoch = now_epoch - 86400.0
-        max_epoch = now_epoch + 300.0
+        max_epoch = now_epoch + MAX_FUTURE_TIMESTAMP_SKEW_SECONDS
 
         # Pre-parse and store normalized float epoch timestamps on incoming log entries
         for entry in batch:
             entry_epoch = parse_iso_to_epoch(entry.get("timestamp"), fallback=now_epoch)
 
-            # Clamp incoming entry epoch timestamps between now_epoch - 86400 and now_epoch + 300
+            # Clamp entry timestamps to between a day ago and the future skew the ingest paths allow
             if entry_epoch < min_epoch:
                 entry_epoch = min_epoch
             elif entry_epoch > max_epoch:
@@ -713,11 +713,8 @@ class AlertEvaluator:
 
                 ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
 
-                ai_enabled_raw = ai_settings.get("ai_enabled")
-                if ai_enabled_raw is not None:
-                    ai_enabled = ai_enabled_raw.strip().lower() not in ("0", "false", "no", "off")
-                else:
-                    ai_enabled = True
+                provider_settings = resolve_ai_provider_settings(ai_settings)
+                ai_enabled = provider_settings["ai_enabled"]
 
                 if not ai_enabled:
                     logger.info(
@@ -735,7 +732,6 @@ class AlertEvaluator:
                     else:
                         incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
                 else:
-                    provider_settings = resolve_ai_provider_settings(ai_settings)
                     ai_provider = provider_settings["provider"]
                     ai_model = provider_settings["model"]
                     ai_key = provider_settings["api_key"]

@@ -15,7 +15,6 @@ import asyncio
 import datetime
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -32,7 +31,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from app.api.deps import parse_bearer_token, rate_limit_headers, run_db_query, verify_api_token
 from app.core.api_tokens import api_token_rate_limiter, has_scope_permission, should_update_last_used
-from app.core.config import get_cached_setting
+from app.core.config import env_bool, get_cached_setting
 from app.core.utils import parse_iso_to_utc_datetime
 from app.mcp.server import MCP_ACCESS_SCOPE_KEY, McpAccess, create_mcp_server
 
@@ -208,7 +207,7 @@ def _unauthorized(detail: str) -> HTTPException:
 
 def query_token_allowed() -> bool:
     """?token= is off by default because URLs (and so the token) are written to reverse proxy access logs."""
-    return os.environ.get("MCP_ALLOW_QUERY_TOKEN", "").strip().lower() in ("1", "true", "yes", "on")
+    return env_bool("MCP_ALLOW_QUERY_TOKEN", False)
 
 
 def _warn_query_token_used() -> None:

@@ -7,7 +7,6 @@ import asyncio
 import datetime
 import ipaddress
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -178,17 +177,15 @@ def _is_secure_cookie(request: Request) -> bool:
     If COOKIE_SECURE environment variable is explicitly set ('true'/'false'), respects it.
     Otherwise auto-detects HTTPS request scheme or X-Forwarded-Proto header.
     """
-    from app.core.config import get_cached_setting
+    from app.core.config import env_bool, get_cached_setting
 
     cookie_secure = get_cached_setting("cookie_secure", False)
     if cookie_secure is True:
         return True
 
-    cookie_secure_env = os.environ.get("COOKIE_SECURE", "").strip().lower()
-    if cookie_secure_env in ("true", "1", "yes"):
-        return True
-    if cookie_secure_env in ("false", "0", "no"):
-        return False
+    cookie_secure_env = env_bool("COOKIE_SECURE", None)
+    if cookie_secure_env is not None:
+        return cookie_secure_env
     if request.url.scheme == "https":
         return True
 

@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.collectors.syslog import AliasCache
-from app.core.config import get_db_path
+from app.core.config import env_bool, env_docker_disabled, get_db_path
 from app.core.migrations import get_connection
 from app.core.net_guard import GuardedAsyncHTTPTransport
 from app.core.pipeline import (
@@ -135,11 +135,6 @@ def create_docker_ssl_context(
     return ctx
 
 
-def env_docker_disabled() -> bool:
-    """True when ENABLE_DOCKER turns the local Docker host off, whatever the stored setting says (as in 1.2.x)."""
-    return os.environ.get("ENABLE_DOCKER", "true").lower() in ("0", "false", "no", "disabled")
-
-
 def _parse_docker_host(
     enable_docker: Optional[bool] = None,
     docker_host: Optional[str] = None,
@@ -163,7 +158,7 @@ def _parse_docker_host(
                 from app.core.config import get_cached_setting
                 enable_docker = bool(get_cached_setting("enable_docker", True))
             except Exception:
-                enable_docker = os.environ.get("ENABLE_DOCKER", "true").lower() not in ("0", "false", "no", "disabled")
+                enable_docker = env_bool("ENABLE_DOCKER", True)
 
     if not enable_docker:
         return "", None

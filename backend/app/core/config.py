@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +145,8 @@ def get_docker_additional_hosts() -> list[dict[str, Any]]:
             "name": name,
             "url": url,
             "source_alias": str(item.get("source_alias", "docker")).strip() or "docker",
-            "enabled": 0 if str(item.get("enabled", "1")).lower() in ("0", "false", "no", "disabled") else 1,
-            "tls_enabled": 1 if bool(item.get("tls_enabled")) else 0,
+            "enabled": 1 if parse_bool(item.get("enabled"), True) else 0,
+            "tls_enabled": 1 if parse_bool(item.get("tls_enabled"), False) else 0,
             "ca_cert": str(item.get("ca_cert", "")).strip() or None if item.get("ca_cert") else None,
             "client_cert": str(item.get("client_cert", "")).strip() or None if item.get("client_cert") else None,
             "client_key": str(item.get("client_key", "")).strip() or None if item.get("client_key") else None,
@@ -158,7 +158,7 @@ def is_debug_or_dev() -> bool:
     """Returns True if running in development mode or debug is enabled."""
     return (
         os.environ.get("ENVIRONMENT", "").lower() == "development"
-        or os.environ.get("DEBUG", "").lower() in ("true", "1", "yes")
+        or env_bool("DEBUG", False)
     )
 
 
@@ -329,10 +329,44 @@ def get_all_system_settings(conn: sqlite3.Connection) -> dict[str, str]:
     return settings
 
 
+_TRUE_WORDS = frozenset({"1", "true", "yes", "on", "enabled"})
+_FALSE_WORDS = frozenset({"0", "false", "no", "off", "disabled"})
+_Default = TypeVar("_Default", bool, Optional[bool])
+
+
+def parse_bool(value: Any, default: _Default) -> Union[bool, _Default]:
+    """
+    Reads a yes/no setting or environment value: 1/0, true/false, yes/no, on/off or
+    enabled/disabled, in any letter case. Anything else, including None and "", gives default.
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    word = str(value).strip().lower()
+    if word in _TRUE_WORDS:
+        return True
+    if word in _FALSE_WORDS:
+        return False
+    return default
+
+
+def env_bool(name: str, default: _Default) -> Union[bool, _Default]:
+    """parse_bool for the environment variable name."""
+    return parse_bool(os.environ.get(name), default)
+
+
+def env_docker_disabled() -> bool:
+    """True when ENABLE_DOCKER turns the local Docker host off, whatever the stored setting says (as in 1.2.x)."""
+    return not env_bool("ENABLE_DOCKER", True)
+
+
 def _cast_bool(v: Any) -> bool:
-    if isinstance(v, bool):
-        return v
-    return str(v).strip().lower() in ("true", "1", "yes", "on")
+    """resolve_setting caster: an unrecognised word raises, so the next tier (or the default) is used."""
+    parsed = parse_bool(v, None)
+    if parsed is None:
+        raise ValueError(f"not a yes/no value: {v!r}")
+    return parsed
 
 
 def resolve_setting(

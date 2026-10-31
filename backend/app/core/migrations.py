@@ -23,6 +23,8 @@ import uuid
 from pathlib import Path
 from typing import Callable, Union
 
+from app.core.config import parse_bool
+
 logger = logging.getLogger(__name__)
 
 def get_connection(db_path: Union[str, Path], check_same_thread: bool = False) -> sqlite3.Connection:
@@ -542,8 +544,8 @@ VALUES ('server_name', 'LogShed', datetime('now'), 0);
     if not cur.fetchone():
         cur = conn.execute("SELECT key, value FROM system_settings WHERE key IN ('enable_docker', 'docker_source_alias', 'docker_exclude_containers');")
         db_settings = dict(cur.fetchall())
-        enable_docker_val = db_settings.get("enable_docker", os.environ.get("ENABLE_DOCKER", "1"))
-        enabled = 0 if str(enable_docker_val).lower() in ("0", "false", "no", "disabled") else 1
+        enable_docker_val = db_settings.get("enable_docker", os.environ.get("ENABLE_DOCKER"))
+        enabled = 1 if parse_bool(enable_docker_val, True) else 0
         docker_source_alias = db_settings.get("docker_source_alias", os.environ.get("DOCKER_SOURCE_ALIAS", "docker")) or "docker"
         docker_exclude_containers = db_settings.get("docker_exclude_containers", os.environ.get("DOCKER_EXCLUDE_CONTAINERS", "")) or ""
         docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock") or "unix:///var/run/docker.sock"

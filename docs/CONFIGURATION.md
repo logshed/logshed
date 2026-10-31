@@ -24,6 +24,8 @@ When LogShed reads an operational setting (such as timeouts, reverse proxy subne
 2. **Environment Variable Fallback (Tier 2)**: If no database setting exists, LogShed falls back to the environment variable defined in your `docker-compose.yml`.
 3. **Hardcoded Default (Tier 3)**: If neither the web UI nor the environment specifies a value, LogShed uses its built-in default.
 
+**Yes/no values.** Every on/off variable below accepts `true`, `1`, `yes`, `on` or `enabled` for on and `false`, `0`, `no`, `off` or `disabled` for off, in any letter case. Any other value is ignored, so the next tier (or the default) applies.
+
 > [!TIP]
 > **Can all UI settings be set in Docker Compose?**
 > **No.** Sensitive credentials (such as your Google Gemini or OpenAI API keys and Apprise notification webhook URLs) are intentionally excluded from environment variables. This prevents API tokens and secrets from leaking into `docker inspect`, container process tables, or shared compose files. Enter these once in the web UI where they are encrypted at rest with Fernet cryptography.
@@ -173,7 +175,7 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
 | `LOGSHED_ENABLE_MCP` | `false` | Web UI or Compose | Master switch to activate the integrated Model Context Protocol (MCP) server endpoints and tools (`true` or `false`). | 1.3.0 |
-| `MCP_ALLOW_QUERY_TOKEN` | `false` | Docker Compose only | Accept the API token in the URL query string (`?token=`) on MCP routes (`true`, `1`, `yes` or `on`). Off by default because URLs are written to reverse proxy access logs. Prefer the `Authorization: Bearer` header; turn this on only for MCP clients that cannot send headers and can only be given a URL. A warning is logged while a token in the URL is used. | 1.3.0 |
+| `MCP_ALLOW_QUERY_TOKEN` | `false` | Docker Compose only | Accept the API token in the URL query string (`?token=`) on MCP routes (`true` or `false`). Off by default because URLs are written to reverse proxy access logs. Prefer the `Authorization: Bearer` header; turn this on only for MCP clients that cannot send headers and can only be given a URL. A warning is logged while a token in the URL is used. | 1.3.0 |
 
 ---
 
@@ -198,7 +200,7 @@ Login attempts are limited to 5 failures per client address per minute (IPv6 cli
 | `ENVIRONMENT` | `production` | Docker Compose only | Runtime mode (`production` or `development`). `development` adds the localhost development CORS origins (ports 5173, 8080 and 3000) and includes tracebacks in AI failure logs. Use this, not `DEBUG`, for a local frontend dev server. | 1.0.0 |
 | `DEBUG` | `false` | Docker Compose only | Includes tracebacks in AI failure logs (`true` or `false`). Since 1.3.0 it no longer trusts localhost development origins; use `ENVIRONMENT=development` for that. | 1.0.0 |
 | `CORS_ORIGINS` | *(empty)* | Docker Compose only | Comma-separated list of permitted origins for cross-origin resource sharing requests. List each trusted origin. A `*` entry is ignored and an error is logged, because with credentials it would let any website send logged-in requests. Cross-origin requests may send only the `Content-Type`, `X-Requested-With` and `Authorization` headers. | 1.0.0 |
-| `ENABLE_API_DOCS` | `true` | Docker Compose only | Serves the interactive API documentation (`/docs`, `/redoc`) and `/openapi.json`. The pages need the web login (without one, `/docs` and `/redoc` redirect to the login page and `/openapi.json` returns `401`); `/openapi.json` also accepts any valid API token in `Authorization: Bearer`. Swagger UI and ReDoc are served by LogShed itself, so they work offline. Set to `false` (or `0`, `no`, `off`) to turn them off. | 1.3.0 |
+| `ENABLE_API_DOCS` | `true` | Docker Compose only | Serves the interactive API documentation (`/docs`, `/redoc`) and `/openapi.json`. The pages need the web login (without one, `/docs` and `/redoc` redirect to the login page and `/openapi.json` returns `401`); `/openapi.json` also accepts any valid API token in `Authorization: Bearer`. Swagger UI and ReDoc are served by LogShed itself, so they work offline. Set to `false` to turn them off. | 1.3.0 |
 | `LOGSHED_VERSION` | *(runtime build)* | Docker Compose only | Override the version string displayed in the web dashboard header. | 1.0.0 |
 | `LOGSHED_IMAGE_REPO` | `logshed/logshed` | Docker Compose only | Container image repository checked for version updates. | 1.1.0 |
 

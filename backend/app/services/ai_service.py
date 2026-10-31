@@ -23,6 +23,7 @@ from app.core.config import (
     DEFAULT_AI_TIMEOUT,
     get_all_system_settings,
     get_cached_setting,
+    parse_bool,
 )
 from app.core.redactor import redact
 from app.core.security import decrypt_value
@@ -147,6 +148,14 @@ def save_models_cache(conn: sqlite3.Connection, cache_key: str, models_data: lis
     return now_iso
 
 
+def is_ai_enabled(settings: dict[str, str], provider: str, api_key: str) -> bool:
+    """
+    The stored AI switch. When it was never saved, AI is on with an API key, or with an
+    OpenAI-compatible server, which may not need one.
+    """
+    return parse_bool(settings.get("ai_enabled"), bool(api_key.strip()) or provider == "openai_compatible")
+
+
 def resolve_ai_provider_settings(
     settings: dict[str, str],
     provider_override: Optional[str] = None,
@@ -175,11 +184,7 @@ def resolve_ai_provider_settings(
         else configured_fallbacks
     )
 
-    stored_ai_enabled = settings.get("ai_enabled")
-    if stored_ai_enabled is not None:
-        ai_enabled = stored_ai_enabled.strip().lower() not in ("0", "false", "no", "off")
-    else:
-        ai_enabled = bool(api_key.strip())
+    ai_enabled = is_ai_enabled(settings, provider, api_key)
 
     return {
         "provider": provider,
