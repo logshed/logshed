@@ -10,6 +10,7 @@ import {
   ONBOARDING_LOGGER_COMMAND,
 } from '../components/logs/LiveLogStream.tsx';
 import * as savedViewsApi from '../api/savedViews.ts';
+import { MOBILE_LOG_ROW_HEIGHT, DESKTOP_LOG_ROW_HEIGHT } from '../components/logs/LogRow.tsx';
 import { formatStreamTimestamp } from '../utils/formatters.ts';
 import * as settingsApi from '../api/settings.ts';
 import * as logDetailModalModule from '../components/logs/LogDetailModal.tsx';
@@ -2111,8 +2112,9 @@ describe('LiveLogStream time zone and time presets', () => {
       }
     });
     await waitFor(() => expect(screen.getByText(/3 new logs at top/)).toBeInTheDocument());
-    // 3 prepended cards of 74px each, not the 28px desktop row height
-    expect(top).toBe(200 + 3 * 74);
+    // 3 prepended mobile cards, not desktop rows
+    expect(MOBILE_LOG_ROW_HEIGHT).not.toBe(DESKTOP_LOG_ROW_HEIGHT);
+    expect(top).toBe(200 + 3 * MOBILE_LOG_ROW_HEIGHT);
   });
 
   it('keys virtual rows by log id so prepending a batch keeps existing rows', async () => {

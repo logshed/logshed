@@ -32,7 +32,14 @@ import { fetchSettings, getCachedServerTimezone } from '../../api/settings.ts';
 import { useMediaQuery, useClipboard } from '../../utils/hooks.ts';
 import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
-import { LogRow, ProcessedLogEntry, areLogRowPropsEqual, logGridCols } from './LogRow.tsx';
+import {
+  LogRow,
+  ProcessedLogEntry,
+  areLogRowPropsEqual,
+  logGridCols,
+  DESKTOP_LOG_ROW_HEIGHT,
+  MOBILE_LOG_ROW_HEIGHT,
+} from './LogRow.tsx';
 import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
 import { setAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { Modal } from '../common/Modal.tsx';
@@ -1057,8 +1064,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
     if (!isAutoScrollRef.current) {
       setMissedLogsCount((prev) => prev + toFlush.length);
-      // Anchor scroll position by compensating for prepended items' height (74px on mobile, 28px on desktop)
-      pendingScrollAdjustmentRef.current += toFlush.length * (isMobileRef.current ? 74 : 28);
+      // Anchor scroll position by compensating for prepended items' height
+      pendingScrollAdjustmentRef.current += toFlush.length * (isMobileRef.current ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT);
     } else if (parentRef.current && !isTouchingRef.current) {
       requestAnimationFrame(() => {
         if (parentRef.current && isAutoScrollRef.current && !isTouchingRef.current) {
@@ -1382,11 +1389,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   };
 
-  // Virtualizer with responsive row estimate (74px mobile cards, 28px desktop rows)
+  // Virtualizer with fixed row heights (mobile cards or desktop rows)
   const rowVirtualizer = useVirtualizer({
     count: processedLogs.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => (isMobile ? 74 : 28),
+    estimateSize: () => (isMobile ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT),
     overscan: isMobile ? 12 : 25,
     // Key rows by log id: prepending a batch then leaves existing rows (and LogRow memo) untouched
     getItemKey: (index) => logs[index]?.id ?? index,

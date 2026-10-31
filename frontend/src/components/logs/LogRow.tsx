@@ -20,6 +20,12 @@ export function logGridCols(aiEnabled: boolean): string {
   return aiEnabled ? LOG_GRID_COLS_WITH_AI : LOG_GRID_COLS_WITHOUT_AI;
 }
 
+// Fixed row heights for the virtualized list. The mobile card is 8px of padding, a 20px header line,
+// a 32px two-line message, a 16px footer and two 4px gaps; every line has a fixed height so the
+// message is never squeezed into a partly visible second line.
+export const DESKTOP_LOG_ROW_HEIGHT = 28;
+export const MOBILE_LOG_ROW_HEIGHT = 84;
+
 export interface LogRowProps {
   log: ProcessedLogEntry;
   index: number;
@@ -94,12 +100,12 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         data-index={index}
         onClick={() => onClick(log)}
         style={style}
-        className={`log-row flex flex-col justify-between px-3 py-1.5 border-b border-dark-900 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
+        className={`log-row flex flex-col px-3 py-1 border-b border-dark-900 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
           isSelected ? 'bg-accent-950/40 border-l-accent-500' : 'border-l-transparent'
         }`}
       >
         {/* Line 1: Severity Badge + App Name (Host Name) */}
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0 h-5 shrink-0">
           <SeverityBadge severity={log.severity} />
           <span className="font-mono text-xs truncate">
             <span className="text-slate-200 font-semibold">{log.app_name}</span>
@@ -107,24 +113,24 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
           </span>
         </div>
 
-        {/* Line 2: Message Payload (break-all, 2 lines clamp) */}
-        <div className="text-slate-200 text-xs font-mono break-all line-clamp-2 select-text leading-snug">
+        {/* Line 2: Message Payload (break-all, 2 lines clamp, always two full lines of height) */}
+        <div className="text-slate-200 text-xs font-mono break-all line-clamp-2 select-text leading-4 h-8 shrink-0">
           {displayMessage}
         </div>
 
         {/* Line 3: Timestamp (left) + AI Action (right, only when AI is on) */}
-        <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+        <div className="flex items-center justify-between h-4 shrink-0 text-[11px] text-slate-400 font-mono">
           <span className="text-[10px] text-slate-400 font-mono shrink-0 select-none">
             {displayTimestamp}
           </span>
           {aiEnabled && (
-            // 32px tall touch target; the negative margin keeps the card's layout height unchanged
+            // 32px tall touch target; the negative margin keeps the 16px footer height unchanged
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onDiagnoseAi([log]);
               }}
-              className="text-accent-400 hover:text-accent-300 min-h-8 px-2 -my-1.5 flex items-center gap-1 shrink-0"
+              className="text-accent-400 hover:text-accent-300 min-h-8 px-2 -my-2 flex items-center gap-1 shrink-0"
               title="Explain with AI"
             >
               <Sparkles className="w-3 h-3" />
