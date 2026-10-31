@@ -135,3 +135,17 @@ export async function deleteMaintenanceSession(
   });
 }
 
+
+/** Moves the end of one active maintenance session later (60 minutes by default). */
+export async function extendMaintenanceSession(
+  sessionId: string,
+  minutes: number = 60
+): Promise<MaintenanceWindowResponse> {
+  return apiFetch<MaintenanceWindowResponse>(
+    `/api/alerts/maintenance/sessions/${encodeURIComponent(sessionId)}/extend`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ minutes }),
+    }
+  );
+}

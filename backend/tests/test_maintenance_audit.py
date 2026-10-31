@@ -700,3 +700,79 @@ class TestUiEndTime:
         res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)
         assert res.status_code == 200
         assert res.json()["active"] is True
+
+
+def _parse(value: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(value)
+
+
+class TestExtendSession:
+    @pytest.mark.asyncio
+    async def test_extend_moves_that_session_end_and_keeps_one_session(
+        self, client: AsyncClient, auth_headers: dict, db_path: Path
+    ):
+        with get_connection(db_path) as conn:
+            first = ms.create_maintenance_session(conn, duration_minutes=30, initiated_by="web_ui", trigger_label="UI")
+            second = ms.create_maintenance_session(conn, duration_minutes=90, initiated_by="web_ui", trigger_label="UI")
+        first_end = _parse(_session_row(db_path, first["session_id"])["expires_at"])
+        second_end_before = _session_row(db_path, second["session_id"])["expires_at"]
+
+        res = await client.post(f"/api/alerts/maintenance/sessions/{first['session_id']}/extend", headers=auth_headers)
+
+        assert res.status_code == 200
+        body = res.json()
+        assert body["active_sessions_count"] == 2
+        new_end = _parse(_session_row(db_path, first["session_id"])["expires_at"])
+        assert new_end - first_end == datetime.timedelta(hours=1)
+        # Only the chosen session moved, and it still has a single history row
+        assert _session_row(db_path, second["session_id"])["expires_at"] == second_end_before
+        assert len(_history_rows(db_path, first["session_id"])) == 1
+        listed = {s["session_id"]: s["expires_at"] for s in body["sessions"]}
+        assert _parse(listed[first["session_id"]]) == new_end
+
+    @pytest.mark.asyncio
+    async def test_extend_takes_custom_minutes(self, client: AsyncClient, auth_headers: dict, db_path: Path):
+        with get_connection(db_path) as conn:
+            session_id = ms.create_maintenance_session(conn, duration_minutes=10)["session_id"]
+        before = _parse(_session_row(db_path, session_id)["expires_at"])
+        res = await client.post(
+            f"/api/alerts/maintenance/sessions/{session_id}/extend", json={"minutes": 30}, headers=auth_headers
+        )
+        assert res.status_code == 200
+        assert _parse(_session_row(db_path, session_id)["expires_at"]) - before == datetime.timedelta(minutes=30)
+
+        res = await client.post(
+            f"/api/alerts/maintenance/sessions/{session_id}/extend", json={"minutes": 0}, headers=auth_headers
+        )
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_extend_works_on_an_api_token_session(
+        self, client: AsyncClient, auth_headers: dict, api_token_headers: dict, db_path: Path
+    ):
+        res = await client.post(
+            "/api/v1/maintenance/enable", json={"duration_minutes": 15}, headers=api_token_headers
+        )
+        session_id = res.json()["session_id"]
+        before = _parse(_session_row(db_path, session_id)["expires_at"])
+
+        res = await client.post(f"/api/alerts/maintenance/sessions/{session_id}/extend", headers=auth_headers)
+
+        assert res.status_code == 200
+        row = _session_row(db_path, session_id)
+        assert _parse(row["expires_at"]) - before == datetime.timedelta(hours=1)
+        assert row["trigger_label"].startswith("API")
+
+    @pytest.mark.asyncio
+    async def test_extend_unknown_or_ended_session_returns_404(
+        self, client: AsyncClient, auth_headers: dict, db_path: Path
+    ):
+        with get_connection(db_path) as conn:
+            session_id = ms.create_maintenance_session(conn, duration_minutes=30)["session_id"]
+        await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
+
+        res = await client.post(f"/api/alerts/maintenance/sessions/{session_id}/extend", headers=auth_headers)
+        assert res.status_code == 404
+        res = await client.post("/api/alerts/maintenance/sessions/does-not-exist/extend", headers=auth_headers)
+        assert res.status_code == 404
+        assert _session_row(db_path, session_id)["end_reason"] == "terminated"

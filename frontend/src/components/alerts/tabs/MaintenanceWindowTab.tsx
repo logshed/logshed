@@ -45,7 +45,8 @@ export interface MaintenanceWindowTabProps {
   setCustomUntil: (val: string) => void;
   onClearMaintenance: () => void;
   onSetPreset: (hours: number) => void;
-  onExtendWindow: () => void;
+  /** Moves one session's end an hour later; shown on every active session row. */
+  onExtendSession: (sessionId: string) => void;
   onApplyCustomWindow: () => void;
   onOpenAddScheduleModal: () => void;
   onOpenEditScheduleModal: (sched: MaintenanceSchedule) => void;
@@ -62,7 +63,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   setCustomUntil,
   onClearMaintenance,
   onSetPreset,
-  onExtendWindow,
+  onExtendSession,
   appUrl,
   onApplyCustomWindow,
   onOpenAddScheduleModal,
@@ -157,7 +158,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
             {/* Quick Presets */}
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Set end time from now</span>
+              <span className="text-xs font-medium text-slate-400">{isOnDemandActiveNow ? 'Start a new window' : 'Set end time from now'}</span>
               <div className="flex flex-wrap items-center gap-2">
                 {[1, 4, 8, 24].map((hours) => (
                   <button
@@ -169,16 +170,6 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     {hours} {hours === 1 ? 'Hour' : 'Hours'}
                   </button>
                 ))}
-                {isOnDemandActiveNow && (
-                  <button
-                    type="button"
-                    onClick={onExtendWindow}
-                    title="Move the current end time one hour later"
-                    className="px-3 py-1.5 text-xs font-medium bg-amber-950/30 hover:bg-amber-950/50 text-amber-200 hover:text-white border border-amber-800/60 rounded-lg transition cursor-pointer"
-                  >
-                    Extend +1h
-                  </button>
-                )}
               </div>
             </div>
 
@@ -239,6 +230,15 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                       <span className="text-[11px] text-slate-400">
                         Expires: <strong className="text-white">{formatMaintenanceTime(sess.expires_at)}</strong>
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => onExtendSession(sess.session_id)}
+                        title="Move this session's end one hour later"
+                        aria-label={`Extend session ${sess.reason || 'On-Demand Session'} by one hour`}
+                        className="px-2.5 py-1 text-xs font-medium bg-amber-950/30 hover:bg-amber-950/50 text-amber-200 hover:text-white border border-amber-800/60 rounded transition cursor-pointer"
+                      >
+                        +1h
+                      </button>
                       {onDisableSession && (
                         <button
                           type="button"

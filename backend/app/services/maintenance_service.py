@@ -556,6 +556,44 @@ def disable_maintenance_sessions(
     return terminated, len(sessions)
 
 
+def extend_maintenance_session(
+    conn: sqlite3.Connection,
+    session_id: str,
+    minutes: int = 60,
+) -> Optional[str]:
+    """
+    Move the end of one active maintenance session `minutes` later, counted from its current end
+    or from now when that is later. The session keeps its id and its single incident history row.
+    Returns the new end as an ISO string, or None when no active session has that id.
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_iso = now_utc.isoformat()
+    _sweep_expired_sessions(conn, now_iso)
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT expires_at FROM maintenance_sessions WHERE session_id = ? AND is_active = 1 AND expires_at > ?",
+            (session_id, now_iso),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        current_end = parse_iso_to_utc_datetime(row[0]) or now_utc
+        new_end_iso = (max(current_end, now_utc) + datetime.timedelta(minutes=minutes)).isoformat()
+        conn.execute(
+            "UPDATE maintenance_sessions SET expires_at = ? WHERE session_id = ?",
+            (new_end_iso, session_id),
+        )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    update_cached_maintenance_sessions(_load_active_sessions(conn, now_iso))
+    return new_end_iso
+
+
 def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowResponse:
     """
     Compute overall maintenance window status including on-demand, external API sessions, and recurring schedules.

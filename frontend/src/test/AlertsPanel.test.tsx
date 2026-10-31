@@ -1286,7 +1286,7 @@ describe('AlertsPanel maintenance end-time presets', () => {
     vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
   });
 
-  it('labels the presets as an end time from now and hides Extend while no window is active', async () => {
+  it('labels the presets as an end time from now and shows no +1h buttons while no window is active', async () => {
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
     render(<AlertsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
@@ -1295,7 +1295,7 @@ describe('AlertsPanel maintenance end-time presets', () => {
     for (const label of ['1 Hour', '4 Hours', '8 Hours', '24 Hours']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
-    expect(screen.queryByRole('button', { name: 'Extend +1h' })).toBeNull();
+    expect(screen.queryAllByRole('button', { name: /^Extend session/ })).toHaveLength(0);
   });
 
   it('sets the preset end time from now', async () => {
@@ -1316,24 +1316,40 @@ describe('AlertsPanel maintenance end-time presets', () => {
     expect(sent).toBeLessThan(Date.now() + 4 * 3600 * 1000 + 1000);
   });
 
-  it('extends the current end time by one hour, not now plus one hour', async () => {
-    const currentEnd = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+  it('extends only the session whose +1h is clicked, and labels the presets as a new window', async () => {
+    const uiEnd = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
+    const apiEnd = new Date(Date.now() + 5 * 3600 * 1000).toISOString();
+    const sessions = [
+      { session_id: 'ui-1', reason: 'Web Console', log_handling: 'silence_alerts', initiated_by: 'web_ui', expires_at: uiEnd },
+      { session_id: 'api-1', reason: 'Nightly backup', log_handling: 'silence_alerts', initiated_by: 'api_token', expires_at: apiEnd },
+    ];
     vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
       active: true,
-      until: currentEnd,
-      on_demand_until: currentEnd,
-    });
-    const setSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      until: apiEnd,
+      sessions,
+      active_sessions_count: 2,
+    } as any);
+    const extendedEnd = new Date(new Date(uiEnd).getTime() + 3600 * 1000).toISOString();
+    const extendSpy = vi.spyOn(alertsApi, 'extendMaintenanceSession').mockResolvedValue({
       active: true,
-      until: currentEnd,
-      on_demand_until: currentEnd,
-    });
+      until: apiEnd,
+      sessions: [{ ...sessions[0], expires_at: extendedEnd }, sessions[1]],
+      active_sessions_count: 2,
+    } as any);
+    const setSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow');
     render(<AlertsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Extend +1h' }));
 
-    await waitFor(() => expect(setSpy).toHaveBeenCalledTimes(1));
-    expect(setSpy).toHaveBeenCalledWith(new Date(new Date(currentEnd).getTime() + 3600 * 1000).toISOString());
+    expect(await screen.findByText('Start a new window')).toBeInTheDocument();
+    const extendButtons = await screen.findAllByRole('button', { name: /^Extend session/ });
+    expect(extendButtons).toHaveLength(2);
+    expect(extendButtons.map((b) => b.textContent)).toEqual(['+1h', '+1h']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Extend session Web Console by one hour' }));
+
+    await waitFor(() => expect(extendSpy).toHaveBeenCalledWith('ui-1', 60));
+    expect(setSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Session extended until/)).toBeInTheDocument();
   });
 });
 

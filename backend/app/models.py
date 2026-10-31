@@ -1129,6 +1129,11 @@ class MaintenanceWindowRequest(BaseModel):
     until: Optional[str] = Field(None, description="End time in ISO 8601 format, or null to clear.")
 
 
+class MaintenanceSessionExtendRequest(BaseModel):
+    """Payload to move the end of one active maintenance session later."""
+    minutes: int = Field(60, ge=1, le=1440, description="Minutes to add, from the current end or from now when later (1 - 1440)")
+
+
 class MaintenanceSchedule(BaseModel):
     """Configuration for a recurring alert maintenance window schedule."""
     id: str = Field(default_factory=lambda: "")

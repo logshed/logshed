@@ -34,6 +34,7 @@ import {
   setMaintenanceWindow,
   updateMaintenanceSchedules,
   deleteMaintenanceSession,
+  extendMaintenanceSession,
 } from '../../api/alerts.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
@@ -395,11 +396,25 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     await handleSetWindow(targetDate.toISOString());
   };
 
-  /** Moves the current on-demand end one hour later (not now plus one hour). */
-  const handleExtendWindow = async () => {
-    const currentEnd = new Date(maintenance.on_demand_until || maintenance.until || '');
-    const base = Number.isNaN(currentEnd.getTime()) ? Date.now() : Math.max(currentEnd.getTime(), Date.now());
-    await handleSetWindow(new Date(base + 3600 * 1000).toISOString());
+  /** Moves one session's end an hour later (from its end, or from now when that is later). */
+  const handleExtendSession = async (sessionId: string) => {
+    try {
+      const res = await extendMaintenanceSession(sessionId, 60);
+      setMaintenance(res);
+      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
+      const extended = res.sessions?.find((s) => s.session_id === sessionId);
+      setFeedbackMsg({
+        text: extended
+          ? `Session extended until ${formatMaintenanceTime(extended.expires_at)}.`
+          : 'Session extended.',
+        isError: false,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: err.message || 'Failed to extend maintenance session.',
+        isError: true,
+      });
+    }
   };
 
   const handleApplyCustomWindow = async () => {
@@ -956,7 +971,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           setCustomUntil={setCustomUntil}
           onClearMaintenance={handleClearMaintenance}
           onSetPreset={handleSetPreset}
-          onExtendWindow={handleExtendWindow}
+          onExtendSession={handleExtendSession}
           onApplyCustomWindow={handleApplyCustomWindow}
           onOpenAddScheduleModal={handleOpenAddScheduleModal}
           onOpenEditScheduleModal={handleOpenEditScheduleModal}

@@ -30,6 +30,7 @@ from app.models import (
     AlertTestResponse,
     MaintenanceSchedule,
     MaintenanceSchedulesUpdateRequest,
+    MaintenanceSessionExtendRequest,
     MaintenanceWindowRequest,
     MaintenanceWindowResponse,
     MessageResponse,
@@ -173,6 +174,24 @@ async def disable_single_maintenance_session(
         )
     return await run_db_query(get_maintenance_status)
 
+
+@router.post("/maintenance/sessions/{session_id}/extend", response_model=MaintenanceWindowResponse)
+async def extend_single_maintenance_session(
+    session_id: str,
+    payload: Optional[MaintenanceSessionExtendRequest] = None,
+    user: dict = Depends(get_current_user),
+) -> MaintenanceWindowResponse:
+    """Move the end of one active maintenance session later (60 minutes by default; 404 if unknown or ended)."""
+    from app.services.maintenance_service import extend_maintenance_session, get_maintenance_status
+
+    minutes = payload.minutes if payload else 60
+    new_end = await run_db_query(lambda conn: extend_maintenance_session(conn, session_id.strip(), minutes))
+    if new_end is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active maintenance session with ID {session_id}.",
+        )
+    return await run_db_query(get_maintenance_status)
 
 
 @router.post("/maintenance/schedules", response_model=MaintenanceWindowResponse)
