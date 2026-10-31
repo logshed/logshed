@@ -1273,6 +1273,78 @@ class TestDropRuleTimeoutAutoDisable:
         assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
         assert len([r for r in caplog.records if "disabled automatically" in r.getMessage()]) == 1
 
+    @staticmethod
+    def _fail_disable_writes(monkeypatch, failures: int) -> list[int]:
+        """Make the first `failures` disable writes fail as a locked database would; returns the attempt log."""
+        import sqlite3
+
+        import app.services.drop_filter as drop_filter_mod
+
+        attempts: list[int] = []
+        real_get = drop_filter_mod.get_connection
+
+        class _Conn:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def __enter__(self):
+                self._conn.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._conn.__exit__(*exc)
+
+            def execute(self, sql, *args):
+                if sql.startswith("UPDATE drop_rules SET is_enabled = 0"):
+                    attempts.append(len(attempts) + 1)
+                    if len(attempts) <= failures:
+                        raise sqlite3.OperationalError("database is locked")
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        monkeypatch.setattr(drop_filter_mod, "get_connection", lambda db: _Conn(real_get(db)))
+        return attempts
+
+    def test_failed_disable_write_is_retried_with_the_next_flush(self, setup, monkeypatch):
+        attempts = self._fail_disable_writes(monkeypatch, failures=1)
+        flt = setup["flt"]
+        for i in range(20):
+            flt.should_drop(None, None, None, f"line {i}")
+        flt.flush_counts()
+        assert attempts == [1]
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 1
+        flt.reload_rules()
+        assert setup["slow_id"] not in [r.id for r in flt._rules]
+
+        flt.flush_counts()
+        assert attempts == [1, 2]
+        assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
+        assert not flt._auto_disables.pending()
+
+    def test_disable_write_gives_up_after_the_attempt_limit(self, setup, monkeypatch, caplog):
+        import logging
+
+        from app.services.rule_auto_disable import AUTO_DISABLE_MAX_ATTEMPTS
+
+        caplog.set_level(logging.WARNING, logger="app.services.drop_filter")
+        attempts = self._fail_disable_writes(monkeypatch, failures=1000)
+        flt = setup["flt"]
+        for i in range(20):
+            flt.should_drop(None, None, None, f"line {i}")
+        for _ in range(AUTO_DISABLE_MAX_ATTEMPTS + 2):
+            flt.flush_counts()
+
+        assert len(attempts) == AUTO_DISABLE_MAX_ATTEMPTS
+        assert flt._auto_disables.queued() == []
+        # Off in memory until restart, even after a reload
+        flt.reload_rules()
+        assert setup["slow_id"] not in [r.id for r in flt._rules]
+        assert any("retrying with the next count flush" in r.getMessage() for r in caplog.records)
+        gave_up = [r for r in caplog.records if "stays off until LogShed restarts" in r.getMessage()]
+        assert len(gave_up) == 1 and gave_up[0].levelno == logging.ERROR
+
 
 # ===================================================================
 # Saved view names are unique, ignoring case

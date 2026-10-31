@@ -2198,7 +2198,7 @@ class TestAlertRuleTimeoutAutoDisable:
     async def test_reload_before_the_write_lands_keeps_the_rule_off(self, setup, monkeypatch):
         ev = setup["evaluator"]
         written = []
-        monkeypatch.setattr(ev, "_store_auto_disabled_rule", lambda rule_id: written.append(rule_id))
+        monkeypatch.setattr(ev, "_store_auto_disabled_rules", lambda: written.extend(ev._auto_disables.queued()))
         await ev.evaluate_batch(self._batch(20))
         # An unrelated rules edit reloads the cache while the database still says enabled
         ev.reload_rules()
@@ -2263,26 +2263,26 @@ class TestAlertRuleTimeoutAutoDisable:
         assert attempts == [1, 2]
         assert self._is_enabled(setup["db"], setup["slow_id"]) == 0
         assert self._off_in_memory(ev, setup["slow_id"])
-        assert ev._auto_disable_queue == [] and not ev._auto_disable_pending
+        assert ev._auto_disables.queued() == [] and not ev._auto_disables.pending()
         assert any("retrying with the next batch" in r.getMessage() for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_disable_write_gives_up_after_the_attempt_limit(self, setup, monkeypatch, caplog):
         import logging
 
-        import app.services.alert_evaluator as alert_evaluator_mod
+        from app.services.rule_auto_disable import AUTO_DISABLE_MAX_ATTEMPTS
 
         caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
         attempts = self._fail_disable_writes(monkeypatch, failures=1000)
         ev = setup["evaluator"]
         await ev.evaluate_batch(self._batch(20))
         await ev.stop()
-        for _ in range(alert_evaluator_mod.AUTO_DISABLE_MAX_ATTEMPTS + 2):
+        for _ in range(AUTO_DISABLE_MAX_ATTEMPTS + 2):
             await ev.evaluate_batch(self._batch(1, message="boom"))
             await ev.stop()
 
-        assert len(attempts) == alert_evaluator_mod.AUTO_DISABLE_MAX_ATTEMPTS
-        assert ev._auto_disable_queue == []
+        assert len(attempts) == AUTO_DISABLE_MAX_ATTEMPTS
+        assert ev._auto_disables.queued() == []
         # Still off in memory until restart, as before this change
         assert self._off_in_memory(ev, setup["slow_id"])
         gave_up = [r for r in caplog.records if "stays off until LogShed restarts" in r.getMessage()]

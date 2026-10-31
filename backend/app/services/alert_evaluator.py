@@ -8,6 +8,7 @@ Integrates with QueueConsumer batch processing, redactor, AI diagnosis, and noti
 
 import asyncio
 from collections import Counter, deque
+from contextlib import nullcontext
 import datetime
 import fnmatch
 import logging
@@ -32,11 +33,9 @@ from app.core.regex_validator import (
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
+from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
-
-# A failed automatic-disable write is retried with the next batches, up to this many attempts in all
-AUTO_DISABLE_MAX_ATTEMPTS = 5
 
 # Characters that make an alert pattern a regular expression; anything else is plain text
 _REGEX_METACHARS_BEFORE_BACKSLASH = frozenset("*+?[](){}^$|")
@@ -244,15 +243,9 @@ class AlertEvaluator:
         self._pending_tasks: set[asyncio.Task] = set()
         self._lock = threading.Lock()
         # Automatic disabling of rules whose pattern keeps timing out.
-        # Lock order: self._lock, then self._auto_disable_lock.
+        # Lock order: self._lock, then the queue's own lock.
         self._timeout_tracker = RuleTimeoutTracker()
-        self._auto_disable_lock = threading.Lock()
-        # Rule ids switched off in memory whose database write has not landed yet; reloads skip them
-        self._auto_disable_pending: set[int] = set()
-        # Rule ids whose database write still has to be scheduled
-        self._auto_disable_queue: list[int] = []
-        # Failed database writes so far, per rule id
-        self._auto_disable_attempts: dict[int, int] = {}
+        self._auto_disables = AutoDisableQueue("alert_rules", "alert rule", logger, "with the next batch")
         if self.db_path:
             self.reload_rules()
 
@@ -315,10 +308,8 @@ class AlertEvaluator:
             active_ids.add(rule.id)
 
         with self._lock:
-            with self._auto_disable_lock:
-                if self._auto_disable_pending:
-                    compiled = [rule for rule in compiled if rule.id not in self._auto_disable_pending]
-                    active_ids = {rule.id for rule in compiled}
+            compiled = self._auto_disables.without_pending(compiled)
+            active_ids = {rule.id for rule in compiled}
             self._rules = compiled
             # Clean up windows for rules that are no longer active
             stale_ids = [rid for rid in self._windows if rid not in active_ids]
@@ -479,12 +470,9 @@ class AlertEvaluator:
                         logger.debug(f"Error evaluating rule {rule.id}: {e}")
                         continue
 
-        # Store automatic disables off the hot path, once per rule
-        with self._auto_disable_lock:
-            to_store = self._auto_disable_queue
-            self._auto_disable_queue = []
-        for rule_id in to_store:
-            store_task = asyncio.create_task(asyncio.to_thread(self._store_auto_disabled_rule, rule_id))
+        # Store automatic disables off the hot path
+        if self._auto_disables.has_queued():
+            store_task = asyncio.create_task(asyncio.to_thread(self._store_auto_disabled_rules))
             self._pending_tasks.add(store_task)
             store_task.add_done_callback(self._pending_tasks.discard)
 
@@ -511,9 +499,7 @@ class AlertEvaluator:
         if not self._timeout_tracker.record(rule.id):
             return
         rule.is_enabled = False
-        with self._auto_disable_lock:
-            self._auto_disable_pending.add(rule.id)
-            self._auto_disable_queue.append(rule.id)
+        self._auto_disables.add(rule.id)
         logger.error(
             "Alert rule %s (%s) disabled automatically: %s. Simplify the pattern, then enable the rule again.",
             rule.id,
@@ -521,44 +507,21 @@ class AlertEvaluator:
             describe_rule_timeout_limit(),
         )
 
-    def _store_auto_disabled_rule(self, rule_id: int) -> None:
-        """Store is_enabled = 0 for an automatically disabled rule, then reload the rule cache (worker thread)."""
+    def _store_auto_disabled_rules(self) -> None:
+        """Store is_enabled = 0 for automatically disabled rules, then reload the rule cache (worker thread)."""
         from app.core.config import get_db_path
         from app.api.deps import get_thread_read_connection
         effective_db = self.db_path or get_db_path()
         if not effective_db:
             return
-        try:
-            conn = get_thread_read_connection(effective_db)
-            with conn:
-                conn.execute("UPDATE alert_rules SET is_enabled = 0 WHERE id = ? AND is_enabled = 1", (rule_id,))
-        except Exception as exc:
-            # Queue it again for the next batch (for example after a busy database). The rule stays
-            # off in memory meanwhile; if every attempt fails, the next start runs it again.
-            with self._auto_disable_lock:
-                attempts = self._auto_disable_attempts.get(rule_id, 0) + 1
-                self._auto_disable_attempts[rule_id] = attempts
-                retry = attempts < AUTO_DISABLE_MAX_ATTEMPTS
-                if retry:
-                    self._auto_disable_queue.append(rule_id)
-            if retry:
-                logger.warning(
-                    f"Failed to store the automatic disable of alert rule {rule_id} "
-                    f"(attempt {attempts} of {AUTO_DISABLE_MAX_ATTEMPTS}), retrying with the next batch: {exc}"
-                )
-            else:
-                logger.error(
-                    f"Failed to store the automatic disable of alert rule {rule_id} after {attempts} attempts; "
-                    f"it stays off until LogShed restarts, then runs again: {exc}"
-                )
+        # A failed write is queued again for the next batch. The rule stays off in memory meanwhile;
+        # if every attempt fails, the next start runs it again.
+        if not self._auto_disables.store(lambda: nullcontext(get_thread_read_connection(effective_db))):
             return
-        with self._auto_disable_lock:
-            self._auto_disable_pending.discard(rule_id)
-            self._auto_disable_attempts.pop(rule_id, None)
         try:
             self.reload_rules()
         except Exception as exc:
-            logger.warning(f"Failed to reload alert rules after disabling rule {rule_id}: {exc}")
+            logger.warning(f"Failed to reload alert rules after automatic disables: {exc}")
 
     def _update_rule_trigger_state(self, rule: CompiledAlertRule) -> None:
         """Persist last_triggered_at, suppress_until, and trigger_count to SQLite."""
