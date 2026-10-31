@@ -369,7 +369,16 @@ async def get_log_facets(
         host_to_apps: dict[str, set[str]] = {}
         app_to_hosts: dict[str, set[str]] = {}
 
+        # Every name that marks a row as Docker output (including the built-in "docker"), used below
+        # only to keep Docker and syslog rows from the same machine apart
         docker_aliases = load_docker_source_aliases(conn)
+        # The aliases Docker hosts use now. Only these are listed as hosts without any logs, so a
+        # renamed host's old name (or "docker") stays listed only while logs still carry it.
+        configured_docker_aliases = {
+            str(r[0]).strip()
+            for r in cursor.execute("SELECT source_alias FROM docker_endpoints").fetchall()
+            if r[0] and str(r[0]).strip()
+        }
 
         # Add all configured Syslog aliases
         for alias in aliases_map.values():
@@ -379,7 +388,7 @@ async def get_log_facets(
                     host_to_apps[alias] = set()
 
         # Add all configured Docker aliases
-        for d_alias in docker_aliases:
+        for d_alias in configured_docker_aliases:
             if d_alias:
                 sources_set.add(d_alias)
                 if d_alias not in host_to_apps:

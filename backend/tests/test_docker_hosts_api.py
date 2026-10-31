@@ -616,6 +616,26 @@ class TestDockerHostsFixes:
         assert "tower-docker" not in facets["sources"]
 
     @pytest.mark.asyncio
+    async def test_renamed_primary_host_is_not_listed_as_docker_without_logs(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """The host list offers configured Docker aliases, but "docker" only while logs still carry it."""
+        db_file = tmp_path / "docker_hosts_test.db"
+        with get_connection(db_file) as conn:
+            conn.execute("UPDATE docker_endpoints SET source_alias = 'nas-docker' WHERE id = 1")
+            conn.commit()
+
+        facets = (await client.get("/api/logs/facets", headers=auth_headers)).json()
+        assert "nas-docker" in facets["sources"]
+        assert "docker" not in facets["sources"]
+
+        _seed_logs(db_file, [("docker", "docker", "line stored before the rename")])
+        facets = (await client.get("/api/logs/facets", headers=auth_headers)).json()
+        assert {"nas-docker", "docker"} <= set(facets["sources"])
+        resp = await client.get("/api/logs", params={"source": "docker"}, headers=auth_headers)
+        assert [log["message"] for log in resp.json()["logs"]] == ["line stored before the rename"]
+
+    @pytest.mark.asyncio
     async def test_syslog_and_docker_aliases_must_differ(self, client: AsyncClient, auth_headers: dict):
         """A syslog host alias and a Docker host alias with the same name (any letter case) are refused with 409."""
         resp = await client.post("/api/aliases", json={"ip": "192.168.1.50", "alias": "Tower"}, headers=auth_headers)
