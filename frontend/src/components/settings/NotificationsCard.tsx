@@ -22,6 +22,7 @@ import {
   sendDailyDigest,
 } from '../../api/notifications.ts';
 import { fetchSettings, updateSettings } from '../../api/settings.ts';
+import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 
 export interface NotificationsCardProps {
@@ -70,6 +71,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   // Daily Digest states
   const [internalSettings, setInternalSettings] = useState<SystemSettings | null>(null);
   const effectiveSettings = externalSettings !== undefined ? externalSettings : internalSettings;
+  const serverTimezone = effectiveSettings?.server_timezone || undefined;
 
   const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
   const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
@@ -621,7 +623,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           {digestLastRun && (
             <div className="text-[11px] text-slate-400 pt-1 font-mono flex items-center gap-1.5">
               <span>Last scheduled run:</span>
-              <span className="text-slate-400">{new Date(digestLastRun).toLocaleString()}</span>
+              <span className="text-slate-400">{formatLocalTimestamp(digestLastRun, true, serverTimezone)}</span>
             </div>
           )}
         </div>

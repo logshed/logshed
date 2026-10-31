@@ -360,23 +360,26 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/** The time zone if the runtime accepts it, else undefined (browser time). */
+function usableTimeZone(timeZone?: string): string | undefined {
+  return timeZone && getDateTimeFormatter(timeZone) ? timeZone : undefined;
+}
+
 /**
- * Formats a maintenance window end timestamp into a clean, human-readable time string.
+ * Formats a maintenance window end timestamp into a clean, human-readable time string,
+ * in the given time zone (browser time when none, or an invalid one, is given).
  */
-export function formatMaintenanceTime(isoString?: string | null): string {
+export function formatMaintenanceTime(isoString?: string | null, timeZone?: string): string {
   if (!isoString) return '';
   const d = new Date(isoString);
   if (isNaN(d.getTime())) return isoString;
-  const now = new Date();
-  const isSameDay =
-    d.getDate() === now.getDate() &&
-    d.getMonth() === now.getMonth() &&
-    d.getFullYear() === now.getFullYear();
-  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const zone = usableTimeZone(timeZone);
+  const isSameDay = dayKey(getDateParts(d, zone)) === getTodayKey(zone);
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: zone });
   if (isSameDay) {
     return timeStr;
   }
-  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${timeStr}`;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: zone })} ${timeStr}`;
 }
 
 /**
@@ -396,9 +399,10 @@ export function formatBytes(bytes: number): string {
 
 /**
  * Formats an ISO datetime string into human-readable date (e.g. "Oct 9, 2026").
- * Returns "Never" when input is empty or null.
+ * Returns "Never" when input is empty or null. The day is taken in the given time zone
+ * (browser time when none, or an invalid one, is given).
  */
-export function formatDate(isoString?: string | null): string {
+export function formatDate(isoString?: string | null, timeZone?: string): string {
   if (!isoString) return 'Never';
   const d = new Date(isoString);
   if (isNaN(d.getTime())) return String(isoString);
@@ -406,6 +410,7 @@ export function formatDate(isoString?: string | null): string {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    timeZone: usableTimeZone(timeZone),
   });
 }
 

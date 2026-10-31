@@ -43,6 +43,7 @@ import { fetchSettings } from '../../api/settings.ts';
 import {
   downloadBlob,
   slugify,
+  formatLocalTimestamp,
   formatMaintenanceTime,
   fromLocalDatetimeInputString,
 } from '../../utils/formatters.ts';
@@ -52,7 +53,7 @@ import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
 import { AlertRuleHandoff, takeAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
-import { useMediaQuery } from '../../utils/hooks.ts';
+import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
 import { isMaintenanceItem } from '../../utils/maintenanceHistory.ts';
 import { useSerialReorder } from '../../utils/useSerialReorder.ts';
 import { AlertRulesTab } from './tabs/AlertRulesTab.tsx';
@@ -118,6 +119,7 @@ export interface AlertsPanelProps {
 
 export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }) => {
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const serverTimezone = useServerTimezone();
   const [activeSubTab, setActiveSubTab] = useState<AlertViewTab>(() =>
     pathToAlertSubTab(window.location.pathname)
   );
@@ -338,7 +340,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
       refreshHistory();
       setFeedbackMsg({
-        text: `Maintenance window active until ${formatMaintenanceTime(res.until)}.`,
+        text: `Maintenance window active until ${formatMaintenanceTime(res.until, serverTimezone)}.`,
         isError: false,
       });
     } catch (err: any) {
@@ -405,7 +407,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       const extended = res.sessions?.find((s) => s.session_id === sessionId);
       setFeedbackMsg({
         text: extended
-          ? `Session extended until ${formatMaintenanceTime(extended.expires_at)}.`
+          ? `Session extended until ${formatMaintenanceTime(extended.expires_at, serverTimezone)}.`
           : 'Session extended.',
         isError: false,
       });
@@ -1116,7 +1118,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       >
         <div className="space-y-4 text-xs">
           <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{historyItemToDelete?.triggered_at ? new Date(historyItemToDelete.triggered_at).toLocaleString() : ''}</span>? This action cannot be undone.
+            Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{formatLocalTimestamp(historyItemToDelete?.triggered_at, true, serverTimezone)}</span>? This action cannot be undone.
           </p>
           <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
             <button

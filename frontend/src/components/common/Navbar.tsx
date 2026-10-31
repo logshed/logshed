@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
 import { fetchMaintenanceWindow } from '../../api/alerts.ts';
 import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '../../types.ts';
-import { useMediaQuery } from '../../utils/hooks.ts';
+import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { formatMaintenanceTime } from '../../utils/formatters.ts';
 
@@ -23,8 +23,8 @@ export const formatInitiator = (initiatedBy: string): string => {
   return ` (${initiatedBy})`;
 };
 
-export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse): string => {
-  const untilFormatted = formatMaintenanceTime(maintenance.until);
+export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse, timeZone?: string): string => {
+  const untilFormatted = formatMaintenanceTime(maintenance.until, timeZone);
   const isDropErrors = maintenance.log_handling === 'drop_errors';
   const actionText = isDropErrors ? 'errors filtered' : 'alerts silenced';
 
@@ -61,6 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse | null>(null);
   const [migrationBannerDismissed, setMigrationBannerDismissed] = useState(false);
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const serverTimezone = useServerTimezone();
 
   const loadHealth = async () => {
     try {
@@ -304,7 +305,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center space-x-2">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>
-              {getMaintenanceBannerText(maintenance)}
+              {getMaintenanceBannerText(maintenance, serverTimezone)}
             </span>
           </div>
           <a

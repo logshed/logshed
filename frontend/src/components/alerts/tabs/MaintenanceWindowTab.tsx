@@ -12,6 +12,7 @@ import {
 import { MaintenanceSchedule, MaintenanceWindowResponse } from '../../../types.ts';
 import { formatMaintenanceTime, toLocalDatetimeInputString } from '../../../utils/formatters.ts';
 import { copyToClipboard } from '../../../utils/clipboard.ts';
+import { useServerTimezone } from '../../../utils/hooks.ts';
 
 export const DAYS_OF_WEEK = [
   { value: 0, label: 'Sunday' },
@@ -73,6 +74,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   onDisableSession,
 }) => {
   const [copiedSnippetId, setCopiedSnippetId] = React.useState<number | null>(null);
+  const serverTimezone = useServerTimezone();
 
   const copySnippet = async (text: string, id: number) => {
     const ok = await copyToClipboard(text);
@@ -138,7 +140,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   Alert notifications are currently silenced
                 </p>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Active until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until || maintenance.on_demand_until)}</span>
+                  Active until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until || maintenance.on_demand_until, serverTimezone)}</span>
                 </p>
               </div>
               <button
@@ -228,7 +230,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     </div>
                     <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                       <span className="text-[11px] text-slate-400">
-                        Expires: <strong className="text-white">{formatMaintenanceTime(sess.expires_at)}</strong>
+                        Expires: <strong className="text-white">{formatMaintenanceTime(sess.expires_at, serverTimezone)}</strong>
                       </span>
                       <button
                         type="button"
@@ -322,7 +324,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                       </span>
                       {sched.next_run && sched.enabled && !sched.is_active && (
                         <span>
-                          Next: <span className="font-mono text-slate-300">{formatMaintenanceTime(sched.next_run)}</span>
+                          Next: <span className="font-mono text-slate-300">{formatMaintenanceTime(sched.next_run, serverTimezone)}</span>
                         </span>
                       )}
                     </div>

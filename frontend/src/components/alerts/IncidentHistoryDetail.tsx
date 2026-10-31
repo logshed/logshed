@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../types.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
-import { useClipboard } from '../../utils/hooks.ts';
+import { useClipboard, useServerTimezone } from '../../utils/hooks.ts';
 import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
 import { AiFollowUpThread } from '../ai/AiFollowUpThread.tsx';
 import { DEFAULT_SYSTEM_PROMPT, buildFullEnvelope } from '../../utils/aiPrompt.ts';
@@ -27,7 +27,7 @@ import {
   maintenanceTypeLabel,
   MAINTENANCE_RULE_NAME,
 } from '../../utils/maintenanceHistory.ts';
-import { cleanIsoString } from '../../utils/formatters.ts';
+import { cleanIsoString, formatLocalTimestamp } from '../../utils/formatters.ts';
 
 const CONSOLE_MARGIN_MS = 60 * 1000;
 
@@ -82,6 +82,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
   const [promptViewMode, setPromptViewMode] = useState<'analysis' | 'full'>('analysis');
   const [showFollowUp, setShowFollowUp] = useState<boolean>(false);
   const [followUpOpened, setFollowUpOpened] = useState<boolean>(false);
+  const serverTimezone = useServerTimezone();
 
   const isDigest = item.rule_name === 'Daily Digest';
   const isOnDemand = !isDigest && !item.rule_id && (item.rule_name === 'On-Demand Analysis' || Boolean(item.ai_audit_id && !item.sample_log));
@@ -147,10 +148,10 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
     const inProgress = !item.maintenance_ended_at;
     const dropped = item.maintenance_dropped_count ?? 0;
     const rows: { label: string; value: string }[] = [
-      { label: 'Start', value: new Date(item.maintenance_started_at || item.triggered_at).toLocaleString() },
+      { label: 'Start', value: formatLocalTimestamp(item.maintenance_started_at || item.triggered_at, true, serverTimezone) },
       {
         label: item.maintenance_end_reason === 'terminated' ? 'Ended early at' : 'End',
-        value: item.maintenance_ended_at ? new Date(item.maintenance_ended_at).toLocaleString() : 'In progress',
+        value: item.maintenance_ended_at ? formatLocalTimestamp(item.maintenance_ended_at, true, serverTimezone) : 'In progress',
       },
       { label: 'Trigger', value: item.maintenance_trigger || 'Unknown' },
       { label: 'Type', value: maintenanceTypeLabel(item.maintenance_type) },
@@ -238,7 +239,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
             )}
           </div>
           <span className="font-mono text-[11px] text-slate-400 shrink-0">
-            {new Date(item.triggered_at).toLocaleString()}
+            {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
           </span>
         </div>
 

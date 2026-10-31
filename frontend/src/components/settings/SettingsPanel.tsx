@@ -34,6 +34,7 @@ import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
 import { ApiTokensTab } from './ApiTokensTab.tsx';
 import { DockerHostsTab } from './DockerHostsTab.tsx';
 import { Modal } from '../common/Modal.tsx';
+import { formatLocalTimestamp } from '../../utils/formatters.ts';
 
 export type { SettingsSubTab };
 
@@ -242,6 +243,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [hasApiKeyForProvider, setHasApiKeyForProvider] = useState<boolean>(true);
   const [modelsCachedAt, setModelsCachedAt] = useState<string | null>(null);
+  const serverTimezone = settings?.server_timezone || undefined;
   const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
   const [selectedFallbackToAdd, setSelectedFallbackToAdd] = useState<string>('');
   const [customFallbackInput, setCustomFallbackInput] = useState<string>('');
@@ -1075,7 +1077,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   Model Selection & Failover Ordering
                 </label>
                 <p className="text-[11px] text-slate-400">
-                  Select your default primary model and configure fallback models in priority order.{modelsCachedAt ? ` (Cache refreshed: ${new Date(modelsCachedAt).toLocaleTimeString()})` : ''}
+                  Select your default primary model and configure fallback models in priority order.{modelsCachedAt ? ` (Cache refreshed: ${formatLocalTimestamp(modelsCachedAt, true, serverTimezone)})` : ''}
                 </p>
               </div>
               <button

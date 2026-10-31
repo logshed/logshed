@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { copyToClipboard } from './clipboard.ts';
+import { fetchSettings, getCachedServerTimezone } from '../api/settings.ts';
 
 export interface UseClipboardReturn {
   copied: boolean;
@@ -89,3 +90,23 @@ export function useMediaQuery(query: string): boolean {
   return matches;
 }
 
+
+/**
+ * The server's configured time zone, for showing times the way the log stream does.
+ * Starts from the cached settings and is undefined (browser time) until settings load.
+ */
+export function useServerTimezone(): string | undefined {
+  const [serverTimezone, setServerTimezone] = useState<string | undefined>(() => getCachedServerTimezone());
+  useEffect(() => {
+    let active = true;
+    fetchSettings()
+      .then((s) => {
+        if (active && s.server_timezone) setServerTimezone(s.server_timezone);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+  return serverTimezone;
+}

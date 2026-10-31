@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   History,
   Trash2,
@@ -14,7 +14,7 @@ import {
 import { AlertHistoryItem } from '../../../types.ts';
 import { extractCleanSummary } from '../../../utils/summary.ts';
 import { formatLocalTimestamp } from '../../../utils/formatters.ts';
-import { fetchSettings, getCachedServerTimezone } from '../../../api/settings.ts';
+import { useServerTimezone } from '../../../utils/hooks.ts';
 import {
   isMaintenanceItem,
   maintenanceSummary,
@@ -45,18 +45,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
   offset = 0,
   onPageChange,
 }) => {
-  const [serverTimezone, setServerTimezone] = useState<string | undefined>(() => getCachedServerTimezone());
-  useEffect(() => {
-    let active = true;
-    fetchSettings()
-      .then((s) => {
-        if (active && s.server_timezone) setServerTimezone(s.server_timezone);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
+  const serverTimezone = useServerTimezone();
 
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = Math.max(1, Math.ceil(historyTotal / limit));

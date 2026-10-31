@@ -5,6 +5,8 @@ Parent document: [docs/SPEC.md](../../docs/SPEC.md)
 ## 1. Overview & Architecture
 The LogShed frontend is a responsive single-page web application built with React, Vite, and Tailwind CSS. The interface is tailored for dense, real-time log observation, incident investigation, rule configuration, and system administration. Production builds are bundled directly into `backend/app/static/` and served by FastAPI with HTML5 History API fallback routing to `index.html`.
 
+Times are shown in the server time zone (`server_timezone` from `GET /api/settings`), the same zone the log stream and search presets use, falling back to browser time until settings load. This covers the log stream, alert history and incident details, "Last triggered" on alert rules, maintenance end and next-run times (also in the navbar banner), the prune cut-off, the digest's last run, the model cache time and API token dates. Date and time inputs (the custom range pickers and the maintenance "until" picker) still take browser time.
+
 ## 2. Navigation Hierarchy
 The frontend implements single-page HTML5 History API routing across four top-level navigation destinations:
 - **`/` (Logs / Console):** Live streaming log console with virtual scrolling, search, filters, saved views, and context inspection.

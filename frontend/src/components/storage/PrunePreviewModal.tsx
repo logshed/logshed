@@ -2,6 +2,8 @@ import React from 'react';
 import { Trash2, Clock, RefreshCw } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
 import { PrunePreview } from '../../types.ts';
+import { formatLocalTimestamp } from '../../utils/formatters.ts';
+import { useServerTimezone } from '../../utils/hooks.ts';
 
 export type PrunePreviewMode = 'save' | 'purge';
 
@@ -49,6 +51,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
   onDeleteLater,
   onCancel,
 }) => {
+  const serverTimezone = useServerTimezone();
   if (!preview) return null;
 
   const rows: { label: string; count: number }[] = [
@@ -62,7 +65,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
   ].filter((r) => r.count > 0);
 
   const nothingToDelete = preview.total === 0;
-  const cutoffText = new Date(preview.cutoff).toLocaleString();
+  const cutoffText = formatLocalTimestamp(preview.cutoff, true, serverTimezone);
   const title = mode === 'save' ? 'Lower Retention Period' : 'Purge Expired Logs and History';
 
   return (

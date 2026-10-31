@@ -55,6 +55,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   onSettingsSaved,
 }) => {
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const serverTimezone = settings?.server_timezone || undefined;
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -412,18 +413,18 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
                       <span>
-                        Created: <span className="text-slate-300">{formatDate(token.created_at)}</span>
+                        Created: <span className="text-slate-300">{formatDate(token.created_at, serverTimezone)}</span>
                       </span>
                       <span>
                         Expires:{' '}
                         <span className="text-slate-300">
-                          {token.expires_at ? formatDate(token.expires_at) : 'Never'}
+                          {token.expires_at ? formatDate(token.expires_at, serverTimezone) : 'Never'}
                         </span>
                       </span>
                       <span>
                         Last Used:{' '}
                         <span className="text-slate-300">
-                          {token.last_used_at ? formatDate(token.last_used_at) : 'Never'}
+                          {token.last_used_at ? formatDate(token.last_used_at, serverTimezone) : 'Never'}
                         </span>
                       </span>
                     </div>
@@ -463,15 +464,15 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-slate-400">
-                          {formatDate(token.created_at)}
+                          {formatDate(token.created_at, serverTimezone)}
                         </td>
                         <td className="py-3 px-4 text-slate-400">
-                          {token.expires_at ? formatDate(token.expires_at) : (
+                          {token.expires_at ? formatDate(token.expires_at, serverTimezone) : (
                             <span className="text-slate-400">Never</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-slate-400">
-                          {token.last_used_at ? formatDate(token.last_used_at) : (
+                          {token.last_used_at ? formatDate(token.last_used_at, serverTimezone) : (
                             <span className="text-slate-400">Never</span>
                           )}
                         </td>

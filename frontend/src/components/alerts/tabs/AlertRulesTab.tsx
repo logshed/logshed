@@ -17,7 +17,8 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { AlertRule, NotificationChannel, MaintenanceWindowResponse } from '../../../types.ts';
-import { formatMaintenanceTime } from '../../../utils/formatters.ts';
+import { formatLocalTimestamp, formatMaintenanceTime } from '../../../utils/formatters.ts';
+import { useServerTimezone } from '../../../utils/hooks.ts';
 
 export interface AlertRulesTabProps {
   rules: AlertRule[];
@@ -67,6 +68,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
   getChannelStatus,
 }) => {
   const [draggedIndex, setDraggedIndex] = React.useState<number | null>(null);
+  const serverTimezone = useServerTimezone();
 
   const handleMoveRule = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
@@ -125,7 +127,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <p className="text-slate-300 mt-0.5">
                 Alert notifications are silenced
                 {maintenance.until ? (
-                  <> until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until)}</span></>
+                  <> until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until, serverTimezone)}</span></>
                 ) : null}. Rule evaluation and incident recording continue normally.
               </p>
             </div>
@@ -345,7 +347,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
 
                     {rule.last_triggered_at && (
                       <div className="text-[11px] text-slate-400">
-                        Last triggered: {new Date(rule.last_triggered_at).toLocaleString()}
+                        Last triggered: {formatLocalTimestamp(rule.last_triggered_at, true, serverTimezone)}
                       </div>
                     )}
                   </div>
