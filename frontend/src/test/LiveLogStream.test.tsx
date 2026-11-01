@@ -1229,6 +1229,42 @@ describe('LiveLogStream Component', () => {
     expect(screen.queryByTitle(/Clear screen buffer/i)).toBeNull();
   });
 
+  it('on a phone, puts the quick filters and stream controls on the Filters line, saving a row', async () => {
+    window.matchMedia = vi.fn().mockImplementation((query) => ({
+      matches: query.includes('767px'),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    const line = screen.getByTestId('search-bar-mobile-line');
+    expect(line).toContainElement(screen.getByLabelText('Open filters drawer'));
+    expect(line).toContainElement(screen.getByTitle('Auto-scroll is on: click to pause'));
+    expect(screen.getAllByTitle('Auto-scroll is on: click to pause')).toHaveLength(1);
+    expect(screen.queryByText('Quick Filters:')).toBeNull();
+  });
+
+  it('on a desktop, keeps the quick filters in their own band under the search bar', async () => {
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Quick Filters:')).toBeInTheDocument();
+    expect(screen.getByTestId('search-bar-mobile-line')).not.toContainElement(
+      screen.getByTitle('Auto-scroll is on: click to pause')
+    );
+  });
+
   it('re-fetches aliases and updates displayed log rows when aliasVersion changes', async () => {
     let currentAliases = [
       { ip: '192.168.1.50', alias: 'homelab-host', notes: null, created_at: '2026-09-01T00:00:00Z' },

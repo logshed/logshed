@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LogSearchBar } from '../components/logs/LogSearchBar.tsx';
@@ -495,5 +495,40 @@ describe('LogSearchBar phone layout', () => {
     expect(popover.className).toContain('inset-x-0');
     expect(popover.parentElement!.className).toBe('');
     expect(commonParent(popover, screen.getByLabelText('Search logs')).className).toContain('relative');
+  });
+});
+
+describe('LogSearchBar phone toolbar slot', () => {
+  const renderBar = async (mobileToolbar?: ReactNode) => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+    await renderSettled(
+      <LogSearchBar
+        filters={{ query: 'disk' }}
+        onFilterChange={vi.fn()}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        totalCount={110}
+        mobileToolbar={mobileToolbar}
+      />
+    );
+  };
+
+  it('shows the toolbar on the Filters line, with icon-only Filters and Reset buttons', async () => {
+    await renderBar(<button type="button">Scroll</button>);
+    const line = screen.getByTestId('search-bar-mobile-line');
+    expect(line).toContainElement(screen.getByRole('button', { name: 'Scroll' }));
+    expect(line).toContainElement(screen.getByLabelText('Open filters drawer'));
+    expect(within(screen.getByLabelText('Open filters drawer')).queryByText('Filters')).toBeNull();
+    const reset = screen.getByRole('button', { name: 'Reset all active filters' });
+    expect(within(reset).getByText('Reset').className).toContain('hidden md:inline');
+    // The count stays visible next to the buttons
+    expect(within(line).getByTestId('search-bar-total-count')).toHaveTextContent('110 logs');
+  });
+
+  it('keeps the labelled buttons when no toolbar is passed', async () => {
+    await renderBar();
+    expect(within(screen.getByLabelText('Open filters drawer')).getByText('Filters')).toBeInTheDocument();
+    const reset = screen.getByRole('button', { name: 'Reset all active filters' });
+    expect(within(reset).getByText('Reset').className).not.toContain('hidden');
   });
 });

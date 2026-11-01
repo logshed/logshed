@@ -1827,6 +1827,155 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   }, []);
 
+  // Quick filter chips and stream controls: a band under the search bar on desktop, and on
+  // phones part of the search bar's second line, next to Filters, to save a row
+  const streamBarContent = (
+    <>
+      {/* Left: Quick Filter Pills */}
+      <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
+        <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-w-full">
+          {/* On phones the Filters button that comes first on the line does the labelling */}
+          {!isMobile && <span className="text-slate-400 font-medium text-[11px] shrink-0">Quick Filters:</span>}
+          {/* Pinned saved views first: a click applies the view, as the Views menu does, and a
+              click on the active view clears its filters again, like a host or app chip */}
+          {pinnedViews.map((view) => {
+            const isActive = activeSavedView?.id === view.id;
+            return (
+              <button
+                key={`view-${view.id}`}
+                type="button"
+                data-testid="quick-filter-view"
+                onClick={() => (isActive ? handleResetFilters() : handleApplySavedView(view.query_params))}
+                aria-pressed={isActive}
+                title={isActive ? `Clear saved view ${view.name}` : `Apply saved view ${view.name}`}
+                className={`flex items-center gap-1 px-2 py-1 md:py-0.5 rounded text-[11px] border transition cursor-pointer shrink-0 ${
+                  isActive
+                    ? 'bg-accent-950 text-accent-300 border-accent-500 font-semibold'
+                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
+                }`}
+              >
+                <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
+                <span className="truncate max-w-[10rem]">{view.name}</span>
+              </button>
+            );
+          })}
+          {quickHostChips.length > 0 && (
+            <span className={`flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ${pinnedViews.length > 0 ? 'ml-1' : ''}`}>
+              <Server className="w-3 h-3" aria-hidden="true" />
+              <span>Hosts</span>
+            </span>
+          )}
+          {quickHostChips.map((src) => {
+            const isSelected = activeSources.includes(src);
+            return (
+              <button
+                key={src}
+                data-testid="quick-filter-host"
+                onClick={() => toggleQuickSource(src)}
+                className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
+                  isSelected
+                    ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
+                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
+                }`}
+              >
+                {src}
+              </button>
+            );
+          })}
+          {quickAppChips.length > 0 && (
+            <span className="flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ml-1">
+              <Box className="w-3 h-3" aria-hidden="true" />
+              <span>Apps</span>
+            </span>
+          )}
+          {quickAppChips.map((app) => {
+            const isSelected = activeApps.includes(app);
+            return (
+              <button
+                key={app}
+                data-testid="quick-filter-app"
+                onClick={() => toggleQuickApp(app)}
+                className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
+                  isSelected
+                    ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
+                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
+                }`}
+              >
+                {app}
+              </button>
+            );
+          })}
+        </div>
+        {/* Fade overlay on the right edge of quick filters */}
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-dark-900 z-10" />
+      </div>
+
+      {/* Right: Stream State Controls */}
+      <div className="flex items-center gap-2.5 shrink-0 ml-auto bg-dark-900 relative z-20 pl-1">
+        {/* md, not sm: below 768px the table becomes cards, which have no multi-select */}
+        <div data-testid="select-all-group" className="hidden md:flex items-center gap-1.5 border-r border-dark-700 pr-3 mr-1">
+        <button
+          onClick={selectAllLogs}
+          disabled={logs.length === 0}
+          className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-300 border border-dark-700 hover:border-slate-500 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          title={logs.length > 200 ? 'Select all logs in buffer (capped at 200)' : 'Select all logs in buffer'}
+        >
+          Select All
+        </button>
+        {selectedLogIds.size > 0 && (
+          <button
+            onClick={deselectAllLogs}
+            className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:border-slate-500 hover:text-slate-200 transition cursor-pointer"
+            title="Deselect all selected logs"
+          >
+            Deselect All
+          </button>
+        )}
+      </div>
+
+      <span className="hidden sm:inline font-mono text-slate-400 text-[11px]">
+        Screen Buffer: <span className="text-slate-200">{logs.length.toLocaleString()}</span> lines
+      </span>
+
+      {filters.to ? (
+        <span
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-amber-950/50 text-amber-300 border border-amber-800/70 font-mono select-none"
+          title="A historical end-time (To) is set. Live stream is paused to preserve historical boundaries."
+        >
+          <Clock className="w-3.5 h-3.5 text-amber-400" />
+          <span>{isMobile ? 'History' : 'Historical Range (Stream Paused)'}</span>
+        </span>
+      ) : (
+        <button
+          onClick={() => (autoScroll ? setAutoScroll(false) : resumeAutoScroll())}
+          title={autoScroll ? 'Auto-scroll is on: click to pause' : 'Paused: click to resume auto-scroll'}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border transition ${
+            autoScroll
+              ? 'bg-dark-800 text-emerald-400 border-emerald-900/60 hover:bg-dark-700'
+              : 'bg-amber-950/60 text-amber-300 border-amber-800 hover:bg-amber-900/60'
+          }`}
+        >
+          {autoScroll ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+          {/* Short label on phones, where the bar is narrow */}
+          <span>{autoScroll ? (isMobile ? 'Scroll' : 'Auto-Scroll ON') : 'Paused'}</span>
+        </button>
+      )}
+
+      {/* Left out on phones to leave room for the quick filters */}
+      {!isMobile && (
+        <button
+          onClick={clearLogsBuffer}
+          title="Clear screen buffer (clears browser view only; does not delete logs from disk)"
+          aria-label="Clear screen buffer (clears browser view only; does not delete logs from disk)"
+          className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+    </>
+  );
+
   return (
     <div className="flex flex-col h-full min-h-0 flex-1 bg-dark-950 select-text overflow-hidden">
       {/* Top Filter & Search Controls (Supports Pull-to-Refresh on Mobile) */}
@@ -1845,152 +1994,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           totalCapped={totalCapped}
           facetsTruncated={facetsTruncated}
           facetsLimit={facetsLimit}
+          mobileToolbar={isMobile ? streamBarContent : undefined}
         />
 
-        {/* Stream Controls & Filter Pills Bar */}
-        <div className="bg-dark-900 px-3 py-1.5 border-b border-dark-700 flex flex-nowrap items-center justify-between gap-2 text-xs select-none relative overflow-hidden">
-          {/* Left: Quick Filter Pills */}
-          <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
-            <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-w-full">
-              <span className="text-slate-400 font-medium text-[11px] shrink-0">Quick Filters:</span>
-              {/* Pinned saved views first: a click applies the view, as the Views menu does, and a
-                  click on the active view clears its filters again, like a host or app chip */}
-              {pinnedViews.map((view) => {
-                const isActive = activeSavedView?.id === view.id;
-                return (
-                  <button
-                    key={`view-${view.id}`}
-                    type="button"
-                    data-testid="quick-filter-view"
-                    onClick={() => (isActive ? handleResetFilters() : handleApplySavedView(view.query_params))}
-                    aria-pressed={isActive}
-                    title={isActive ? `Clear saved view ${view.name}` : `Apply saved view ${view.name}`}
-                    className={`flex items-center gap-1 px-2 py-1 md:py-0.5 rounded text-[11px] border transition cursor-pointer shrink-0 ${
-                      isActive
-                        ? 'bg-accent-950 text-accent-300 border-accent-500 font-semibold'
-                        : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
-                    }`}
-                  >
-                    <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
-                    <span className="truncate max-w-[10rem]">{view.name}</span>
-                  </button>
-                );
-              })}
-              {quickHostChips.length > 0 && (
-                <span className={`flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ${pinnedViews.length > 0 ? 'ml-1' : ''}`}>
-                  <Server className="w-3 h-3" aria-hidden="true" />
-                  <span>Hosts</span>
-                </span>
-              )}
-              {quickHostChips.map((src) => {
-                const isSelected = activeSources.includes(src);
-                return (
-                  <button
-                    key={src}
-                    data-testid="quick-filter-host"
-                    onClick={() => toggleQuickSource(src)}
-                    className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
-                      isSelected
-                        ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
-                        : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
-                    }`}
-                  >
-                    {src}
-                  </button>
-                );
-              })}
-              {quickAppChips.length > 0 && (
-                <span className="flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ml-1">
-                  <Box className="w-3 h-3" aria-hidden="true" />
-                  <span>Apps</span>
-                </span>
-              )}
-              {quickAppChips.map((app) => {
-                const isSelected = activeApps.includes(app);
-                return (
-                  <button
-                    key={app}
-                    data-testid="quick-filter-app"
-                    onClick={() => toggleQuickApp(app)}
-                    className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
-                      isSelected
-                        ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
-                        : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
-                    }`}
-                  >
-                    {app}
-                  </button>
-                );
-              })}
-            </div>
-            {/* Fade overlay on the right edge of quick filters */}
-            <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-dark-900 z-10" />
+        {/* Stream Controls & Filter Pills Bar (on phones it is part of the search bar) */}
+        {!isMobile && (
+          <div className="bg-dark-900 px-3 py-1.5 border-b border-dark-700 flex flex-nowrap items-center justify-between gap-2 text-xs select-none relative overflow-hidden">
+            {streamBarContent}
           </div>
-
-          {/* Right: Stream State Controls */}
-          <div className="flex items-center gap-2.5 shrink-0 ml-auto bg-dark-900 relative z-20 pl-1">
-            {/* md, not sm: below 768px the table becomes cards, which have no multi-select */}
-            <div data-testid="select-all-group" className="hidden md:flex items-center gap-1.5 border-r border-dark-700 pr-3 mr-1">
-            <button
-              onClick={selectAllLogs}
-              disabled={logs.length === 0}
-              className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-300 border border-dark-700 hover:border-slate-500 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              title={logs.length > 200 ? 'Select all logs in buffer (capped at 200)' : 'Select all logs in buffer'}
-            >
-              Select All
-            </button>
-            {selectedLogIds.size > 0 && (
-              <button
-                onClick={deselectAllLogs}
-                className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:border-slate-500 hover:text-slate-200 transition cursor-pointer"
-                title="Deselect all selected logs"
-              >
-                Deselect All
-              </button>
-            )}
-          </div>
-
-          <span className="hidden sm:inline font-mono text-slate-400 text-[11px]">
-            Screen Buffer: <span className="text-slate-200">{logs.length.toLocaleString()}</span> lines
-          </span>
-
-          {filters.to ? (
-            <span
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-amber-950/50 text-amber-300 border border-amber-800/70 font-mono select-none"
-              title="A historical end-time (To) is set. Live stream is paused to preserve historical boundaries."
-            >
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Historical Range (Stream Paused)</span>
-            </span>
-          ) : (
-            <button
-              onClick={() => (autoScroll ? setAutoScroll(false) : resumeAutoScroll())}
-              title={autoScroll ? 'Auto-scroll is on: click to pause' : 'Paused: click to resume auto-scroll'}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border transition ${
-                autoScroll
-                  ? 'bg-dark-800 text-emerald-400 border-emerald-900/60 hover:bg-dark-700'
-                  : 'bg-amber-950/60 text-amber-300 border-amber-800 hover:bg-amber-900/60'
-              }`}
-            >
-              {autoScroll ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              {/* Short label on phones, where the bar is narrow */}
-              <span>{autoScroll ? (isMobile ? 'Scroll' : 'Auto-Scroll ON') : 'Paused'}</span>
-            </button>
-          )}
-
-          {/* Left out on phones to leave room for the quick filters */}
-          {!isMobile && (
-            <button
-              onClick={clearLogsBuffer}
-              title="Clear screen buffer (clears browser view only; does not delete logs from disk)"
-              aria-label="Clear screen buffer (clears browser view only; does not delete logs from disk)"
-              className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+        )}
     </div>
 
       {/* Virtualized Table View */}

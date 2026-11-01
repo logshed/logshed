@@ -70,6 +70,11 @@ interface LogSearchBarProps {
   facetsTruncated?: boolean;
   /** Most entries the facets endpoint returns per list (its `limit` field). */
   facetsLimit?: number;
+  /**
+   * Shown after the Filters, count and Reset controls on the second line on phones, which then
+   * becomes a compact toolbar band (the Console passes its quick filters and stream controls).
+   */
+  mobileToolbar?: React.ReactNode;
 }
 
 export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
@@ -85,6 +90,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   totalCapped = false,
   facetsTruncated = false,
   facetsLimit,
+  mobileToolbar,
 }) => {
   // The selected preset follows the filters (saved views, links, Reset); "Custom" chosen before any
   // bounds are entered is the only local choice.
@@ -294,17 +300,25 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           </button>
         </div>
 
-        {/* Second line on phones: filters drawer, match count and reset */}
-        <div className="flex items-center gap-2 md:contents">
+        {/* Second line on phones: filters drawer, match count and reset, then the toolbar the
+            caller passes. With a toolbar the line is a compact band and the buttons show icons only. */}
+        <div
+          data-testid="search-bar-mobile-line"
+          className={
+            mobileToolbar
+              ? '-mx-2.5 -mb-2.5 px-3 py-1.5 bg-dark-900 border-t border-dark-700 flex flex-nowrap items-center gap-2 relative overflow-hidden md:contents'
+              : 'flex items-center gap-2 md:contents'
+          }
+        >
           {/* Mobile Filters Drawer Trigger Button */}
           <button
             onClick={() => setIsMobileDrawerOpen(true)}
-            className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-dark-900 border border-dark-700 text-slate-300 hover:text-white shrink-0 cursor-pointer"
+            className={`md:hidden flex items-center gap-1.5 px-2.5 ${mobileToolbar ? 'py-1 bg-dark-800' : 'py-1.5 bg-dark-900'} rounded border border-dark-700 text-slate-300 hover:text-white shrink-0 cursor-pointer`}
             title="Open filters drawer"
             aria-label="Open filters drawer"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" />
-            <span>Filters</span>
+            {!mobileToolbar && <span>Filters</span>}
             {activeFilterCount > 0 && (
               <span className="bg-accent-600 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
                 {activeFilterCount}
@@ -329,15 +343,16 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               onClick={handleResetFilters}
               title="Reset all active filters"
               aria-label="Reset all active filters"
-              className="bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-600/70 px-2.5 py-1.5 rounded flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0 ml-auto md:ml-0"
+              className={`bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-600/70 px-2.5 ${mobileToolbar ? 'py-1 md:py-1.5' : 'py-1.5 ml-auto md:ml-0'} rounded flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0`}
             >
               <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-              <span>Reset</span>
+              <span className={mobileToolbar ? 'hidden md:inline' : ''}>Reset</span>
               <span className="bg-amber-500/30 text-amber-200 border border-amber-500/50 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-bold leading-none">
                 {activeFilterCount}
               </span>
             </button>
           )}
+          {mobileToolbar && <div className="md:hidden flex-1 min-w-0 flex items-center gap-2">{mobileToolbar}</div>}
         </div>
       </div>
 
