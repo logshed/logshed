@@ -45,7 +45,7 @@ export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse,
 };
 
 // The health dot turns amber once the 95th percentile loop lag stays at or above this for this long
-export const LOOP_LAG_WARNING_MS = 250;
+export const LOOP_LAG_WARNING_MS = 50;
 export const LOOP_LAG_WARNING_DURATION_MS = 30000;
 
 export const getRateTooltip = (health: HealthResponse): string => {
