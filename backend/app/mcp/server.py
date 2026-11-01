@@ -87,7 +87,16 @@ def _trigger_label(access: McpAccess) -> str:
     return f"MCP - {access.token_name or 'token'}"
 
 # The stdio server is a separate OS process (docker exec), so it cannot see the web process's memory.
-STDIO_UNAVAILABLE_COUNTERS = ("ingest_rate", "queue_depth", "dropped_logs", "dropped_by_filter", "udp_receive_errors")
+STDIO_UNAVAILABLE_COUNTERS = (
+    "ingest_rate",
+    "queue_depth",
+    "dropped_logs",
+    "dropped_by_filter",
+    "udp_receive_errors",
+    "loop_lag_ms",
+    "loop_lag_p95_ms",
+    "loop_lag_max_ms",
+)
 STDIO_MAINTENANCE_NOTE = (
     "Changed from the stdio MCP process: the LogShed web process applies this change within 30 seconds."
 )

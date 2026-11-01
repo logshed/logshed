@@ -26,7 +26,7 @@
 ## Architecture & Code Standards
 - **Runtime:** Python 3.12 (`asyncio`) + FastAPI + SQLite (WAL mode + FTS5).
 - **Frontend:** React + Vite + Tailwind CSS (bundled to `backend/app/static`).
-- **Process Model:** Single container, **single OS process**, running multiple concurrent `asyncio` tasks under supervisor isolation: `SyslogServer`, `DockerCollectorPool` (one `DockerTailer` per configured Docker host), `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`, `DropFilterWorker`, `MaintenanceSweepWorker` and `DailyDigestWorker` (started in `backend/app/main.py`). Never run multiple uvicorn/gunicorn worker processes (`--workers 1` only) - the in-memory ingestion queue, rate limiter, and drop counters are process-local and would silently desync across separate OS processes.
+- **Process Model:** Single container, **single OS process**, running multiple concurrent `asyncio` tasks under supervisor isolation: `SyslogServer`, `DockerCollectorPool` (one `DockerTailer` per configured Docker host), `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`, `DropFilterWorker`, `MaintenanceSweepWorker`, `DailyDigestWorker` and `LoopLagMonitor` (started in `backend/app/main.py`). Never run multiple uvicorn/gunicorn worker processes (`--workers 1` only) - the in-memory ingestion queue, rate limiter, and drop counters are process-local and would silently desync across separate OS processes.
 - **Docker Access:** Respect `DOCKER_HOST` (supports socket or `tecnativa/docker-socket-proxy`).
 - **Security Baseline:**
   * App drops privileges via `gosu` to run as a non-root user defined by `PUID` and `PGID` environment variables (defaults to 1000:1000).

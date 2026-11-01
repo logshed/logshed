@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from app.api.deps import get_current_user, get_optional_user, run_db_query
 from app.collectors.syslog import get_udp_receive_errors
 from app.core.config import get_db_path, get_max_retention_days, is_max_retention_days_overridden
+from app.core.loop_lag import get_loop_lag
 from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
 from app.models import (
@@ -80,6 +81,7 @@ async def health_check(request: Request, response: Response) -> HealthResponse:
         dropped_logs=dropped_count,
         ingest_rate=ingest_rate,
         udp_receive_errors=get_udp_receive_errors(),
+        **get_loop_lag(),
     )
 
 

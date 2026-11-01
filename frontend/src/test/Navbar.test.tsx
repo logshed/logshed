@@ -1,6 +1,6 @@
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Navbar, getMaintenanceBannerText } from '../components/common/Navbar.tsx';
+import { Navbar, getMaintenanceBannerText, LOOP_LAG_WARNING_MS } from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
 import * as alertsApi from '../api/alerts.ts';
 
@@ -526,6 +526,96 @@ describe('Navbar UDP lost figure', () => {
   it('shows nothing when the field is missing', async () => {
     await renderWithHealth(undefined);
     expect(screen.queryByTestId('udp-lost')).toBeNull();
+  });
+});
+
+describe('Navbar event loop lag', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+  });
+
+  const healthWithLag = (p95: number) => ({
+    status: 'ok',
+    db: 'ok',
+    queue_depth: 0,
+    dropped_logs: 0,
+    ingest_rate: 1.0,
+    loop_lag_ms: 12,
+    loop_lag_p95_ms: p95,
+    loop_lag_max_ms: 900,
+  });
+
+  const advancePolls = async (count: number) => {
+    for (let i = 0; i < count; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+    }
+  };
+
+  it('puts the loop lag figures in the rate tooltip', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(healthWithLag(40));
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    const rate = (await screen.findByText('1.0 logs/s')).parentElement as HTMLElement;
+    expect(rate.getAttribute('title')).toBe(
+      'Ingestion Rate\nEvent loop lag (last 60 s): 12 ms now, 40 ms 95th percentile, 900 ms max',
+    );
+  });
+
+  it('keeps the plain rate tooltip when the server reports no loop lag', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({ ...healthWithLag(0), loop_lag_p95_ms: null });
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+    const rate = (await screen.findByText('1.0 logs/s')).parentElement as HTMLElement;
+    expect(rate.getAttribute('title')).toBe('Ingestion Rate');
+  });
+
+  it('shows the amber dot only after the 95th percentile stays above the threshold for 30 s, and clears it when it drops', async () => {
+    const fetchSpy = vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(healthWithLag(LOOP_LAG_WARNING_MS + 50));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+      await screen.findByText('1.0 logs/s');
+      await advancePolls(2);
+      expect(screen.queryByTestId('health-near-limit')).toBeNull();
+
+      await advancePolls(1);
+      const dot = await screen.findByTestId('health-near-limit');
+      expect(dot.getAttribute('title')).toContain('near its processing limit');
+      expect(screen.queryByTestId('health-degraded')).toBeNull();
+
+      fetchSpy.mockResolvedValue(healthWithLag(LOOP_LAG_WARNING_MS - 50));
+      await advancePolls(1);
+      await waitFor(() => expect(screen.queryByTestId('health-near-limit')).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never shows the dot below the threshold, and starts the 30 s again after a dip', async () => {
+    const high = healthWithLag(LOOP_LAG_WARNING_MS);
+    const low = healthWithLag(LOOP_LAG_WARNING_MS - 1);
+    const fetchSpy = vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(low);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+      await screen.findByText('1.0 logs/s');
+      await advancePolls(5);
+      expect(screen.queryByTestId('health-near-limit')).toBeNull();
+
+      // High for 20 s, one low poll, then high again: 30 s are counted from the second rise
+      fetchSpy.mockResolvedValue(high);
+      await advancePolls(3);
+      fetchSpy.mockResolvedValue(low);
+      await advancePolls(1);
+      fetchSpy.mockResolvedValue(high);
+      await advancePolls(3);
+      expect(screen.queryByTestId('health-near-limit')).toBeNull();
+      await advancePolls(1);
+      expect(await screen.findByTestId('health-near-limit')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

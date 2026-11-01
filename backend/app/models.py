@@ -508,6 +508,10 @@ class HealthResponse(BaseModel):
     ingest_rate: Optional[float] = None
     # UDP datagrams the kernel dropped (receive buffer full) since syslog started; None when unknown
     udp_receive_errors: Optional[int] = None
+    # Event loop wake-up lag over the last 60 s (latest, 95th percentile, maximum); None before the first sample
+    loop_lag_ms: Optional[float] = None
+    loop_lag_p95_ms: Optional[float] = None
+    loop_lag_max_ms: Optional[float] = None
 
 
 class StorageMetricItem(BaseModel):
@@ -1372,6 +1376,10 @@ class SystemMetricsResponse(BaseModel):
     maintenance: SystemMaintenanceMetrics
     # UDP datagrams the kernel dropped (receive buffer full) since syslog started; None when unknown
     udp_receive_errors: Optional[int] = None
+    # Event loop wake-up lag over the last 60 s, as on /api/health; None before the first sample
+    loop_lag_ms: Optional[float] = None
+    loop_lag_p95_ms: Optional[float] = None
+    loop_lag_max_ms: Optional[float] = None
 
 
 

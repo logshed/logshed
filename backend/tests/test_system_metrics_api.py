@@ -376,6 +376,29 @@ class TestSystemMetricsUdpReceiveErrors:
             metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
         assert metrics["udp_receive_errors"] == 7
 
+    @pytest.mark.asyncio
+    async def test_metrics_and_mcp_report_loop_lag(self, client: AsyncClient, full_token_headers: dict):
+        import time
+
+        from app.core.loop_lag import get_loop_lag_monitor
+        from app.mcp.server import McpAccess, create_mcp_server, mcp_access_context
+
+        monitor = get_loop_lag_monitor()
+        monitor.reset()
+        try:
+            res = await client.get("/api/v1/system/metrics", headers=full_token_headers)
+            assert res.json()["loop_lag_ms"] is None
+
+            monitor.record(0.25, now=time.monotonic())
+            data = (await client.get("/api/v1/system/metrics", headers=full_token_headers)).json()
+            assert (data["loop_lag_ms"], data["loop_lag_p95_ms"], data["loop_lag_max_ms"]) == (250.0, 250.0, 250.0)
+
+            with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
+                metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()
+            assert metrics["loop_lag_p95_ms"] == 250.0
+        finally:
+            monitor.reset()
+
 
 class TestSystemVersionApi:
     """Tests for GET /api/v1/system/version."""

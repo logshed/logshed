@@ -41,6 +41,7 @@ from app.core.config import (
     get_syslog_tcp_inactivity_timeout,
     get_internal_log_level,
 )
+from app.core.loop_lag import get_loop_lag_monitor
 from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
 from app.core.security import get_or_create_master_key
@@ -346,6 +347,9 @@ async def lifespan(app: FastAPI):
     # Ensure user presets directories exist in DATA_DIR
     for preset_sub in ("alerts", "drops"):
         (Path(get_data_dir()) / "presets" / preset_sub).mkdir(parents=True, exist_ok=True)
+
+    # Measure event loop lag (reported by /api/health and the navbar)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(get_loop_lag_monitor().run, "LoopLagMonitor")))
 
     # Initialize in-memory drop filter cache
     from app.services.drop_filter import init_drop_filter

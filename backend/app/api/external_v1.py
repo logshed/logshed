@@ -330,6 +330,7 @@ async def get_system_metrics(
     Serves rolling error stats from an in-memory cache to maintain high polling performance.
     """
     from app.collectors.syslog import get_udp_receive_errors
+    from app.core.loop_lag import get_loop_lag
 
     db_path = get_db_path()
 
@@ -426,6 +427,7 @@ async def get_system_metrics(
             log_handling=maint_status.log_handling,
         ),
         udp_receive_errors=get_udp_receive_errors(),
+        **get_loop_lag(),
     )
 
 

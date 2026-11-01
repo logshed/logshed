@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Settings, LogOut, Radio, Database, ArrowUpCircle, Bell, AlertTriangle, ExternalLink } from 'lucide-react';
 import { LogShedLogo } from './LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
@@ -44,6 +44,18 @@ export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse,
   return `Maintenance window active - alerts silenced until ${untilFormatted}`;
 };
 
+// The health dot turns amber once the 95th percentile loop lag stays at or above this for this long
+export const LOOP_LAG_WARNING_MS = 250;
+export const LOOP_LAG_WARNING_DURATION_MS = 30000;
+
+export const getRateTooltip = (health: HealthResponse): string => {
+  if (typeof health.loop_lag_p95_ms !== 'number') return 'Ingestion Rate';
+  return (
+    `Ingestion Rate\nEvent loop lag (last 60 s): ${health.loop_lag_ms ?? 0} ms now, ` +
+    `${health.loop_lag_p95_ms} ms 95th percentile, ${health.loop_lag_max_ms ?? 0} ms max`
+  );
+};
+
 interface NavbarProps {
   activeTab: AppTab;
   onTabChange: (tab: AppTab) => void;
@@ -57,6 +69,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { logout } = useAuth();
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [nearLimit, setNearLimit] = useState(false);
+  const lagHighSince = useRef<number | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse | null>(null);
   const [migrationBannerDismissed, setMigrationBannerDismissed] = useState(false);
@@ -67,8 +81,19 @@ export const Navbar: React.FC<NavbarProps> = ({
     try {
       const res = await fetchHealth();
       setHealth(res);
+      const p95 = res.loop_lag_p95_ms;
+      if (typeof p95 === 'number' && p95 >= LOOP_LAG_WARNING_MS) {
+        const now = Date.now();
+        if (lagHighSince.current === null) lagHighSince.current = now;
+        setNearLimit(now - lagHighSince.current >= LOOP_LAG_WARNING_DURATION_MS);
+      } else {
+        lagHighSince.current = null;
+        setNearLimit(false);
+      }
     } catch {
       setHealth({ status: 'degraded' });
+      lagHighSince.current = null;
+      setNearLimit(false);
     }
   };
 
@@ -151,7 +176,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Ingestion & Queue Health */}
           {health && (
             <div className="flex items-center space-x-2.5 sm:space-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-2.5 sm:pl-4">
-              {health.status !== 'ok' && (
+              {health.status !== 'ok' ? (
                 <span
                   role="img"
                   aria-label="Health degraded"
@@ -159,8 +184,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   data-testid="health-degraded"
                   className="inline-block w-2 h-2 rounded-full bg-amber-400"
                 />
+              ) : nearLimit && (
+                <span
+                  role="img"
+                  aria-label="Near processing limit"
+                  title={`LogShed is near its processing limit: its event loop has been running at least ${LOOP_LAG_WARNING_MS} ms late (95th percentile) for ${LOOP_LAG_WARNING_DURATION_MS / 1000} seconds, so syslog may be read late and UDP messages lost. Reduce the log volume or the number of rules, or send over TCP.`}
+                  data-testid="health-near-limit"
+                  className="inline-block w-2 h-2 rounded-full bg-amber-400"
+                />
               )}
-              <span title="Ingestion Rate" className="text-[11px] sm:text-xs">
+              <span title={getRateTooltip(health)} className="text-[11px] sm:text-xs">
                 <span className="hidden sm:inline">Rate:{' '}</span>
                 <span className="text-slate-200">
                   {(health.ingest_rate ?? 0).toFixed(1)} logs/s

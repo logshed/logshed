@@ -1804,6 +1804,9 @@ class TestMCPStdioUdpReceiveErrors:
         stdio_metrics = await create_mcp_server(stdio=True)._tool_manager._tools["get_system_metrics"].fn()
         assert stdio_metrics["live_counters_available"] is False
         assert stdio_metrics["udp_receive_errors"] is None
+        # Event loop lag is measured in the web process too
+        for key in ("loop_lag_ms", "loop_lag_p95_ms", "loop_lag_max_ms"):
+            assert stdio_metrics[key] is None
 
         with mcp_access_context(McpAccess(scopes=("system:read",), token_id=1, token_name="t")):
             http_metrics = await create_mcp_server()._tool_manager._tools["get_system_metrics"].fn()

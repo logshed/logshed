@@ -124,6 +124,10 @@ export interface HealthResponse {
   /** Syslog UDP datagrams the kernel dropped (receive buffer full); null when unknown. Separate from dropped_logs. */
   udp_receive_errors?: number | null;
   ingest_rate?: number;
+  /** Event loop wake-up lag in ms over the last 60 s (latest, 95th percentile, maximum); null before the first sample. */
+  loop_lag_ms?: number | null;
+  loop_lag_p95_ms?: number | null;
+  loop_lag_max_ms?: number | null;
 }
 
 export interface PruneResponse {

@@ -1881,3 +1881,42 @@ class TestHealthUdpReceiveErrors:
         data = (await client.get("/api/health")).json()
         assert "udp_receive_errors" in data
         assert data["udp_receive_errors"] is None
+
+
+class TestHealthLoopLag:
+    """The authenticated health response reports event loop lag over the last 60 s."""
+
+    @pytest.mark.asyncio
+    async def test_health_reports_loop_lag_to_signed_in_callers_only(self, client: AsyncClient, auth_cookie: dict):
+        import time
+
+        from app.core.loop_lag import get_loop_lag_monitor
+
+        monitor = get_loop_lag_monitor()
+        monitor.reset()
+        try:
+            now = time.monotonic()
+            monitor.record(0.012, now=now)
+            monitor.record(0.4, now=now)
+            monitor.record(0.003, now=now)
+
+            assert (await client.get("/api/health")).json() == {"status": "ok"}
+
+            client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+            data = (await client.get("/api/health")).json()
+            assert data["loop_lag_ms"] == 3.0
+            assert data["loop_lag_p95_ms"] == 400.0
+            assert data["loop_lag_max_ms"] == 400.0
+        finally:
+            monitor.reset()
+
+    @pytest.mark.asyncio
+    async def test_health_reports_null_before_the_first_sample(self, client: AsyncClient, auth_cookie: dict):
+        from app.core.loop_lag import get_loop_lag_monitor
+
+        get_loop_lag_monitor().reset()
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        data = (await client.get("/api/health")).json()
+        for key in ("loop_lag_ms", "loop_lag_p95_ms", "loop_lag_max_ms"):
+            assert key in data
+            assert data[key] is None
