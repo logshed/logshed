@@ -27,6 +27,7 @@ from app.core.regex_validator import (
     safe_regex_search,
     user_pattern_search,
 )
+from app.core.rule_index import RuleIndex, entry_key, exact_match_key
 from app.core.utils import match_wildcard
 from app.services.rule_auto_disable import AutoDisableQueue
 
@@ -115,6 +116,17 @@ class CompiledDropRule:
         return True
 
 
+def _drop_rule_exact_keys(rule: CompiledDropRule) -> Optional[tuple[str, tuple[str, ...]]]:
+    """The exact app (or else source) a drop rule requires, or None when it must see every entry."""
+    app = exact_match_key(rule.app_pattern)
+    if app:
+        return ("app", (app,))
+    source = exact_match_key(rule.source_pattern)
+    if source:
+        return ("source", (source,))
+    return None
+
+
 def match_message(
     candidate: Union[CompiledDropRule, str],
     message: Optional[str] = None,
@@ -152,6 +164,8 @@ class DropFilter:
     def __init__(self, db_path: Optional[Union[str, Path]] = None):
         self.db_path = Path(db_path) if db_path else None
         self._rules: list[CompiledDropRule] = []
+        # Built from self._rules on first use after each change of the list
+        self._index: Optional[RuleIndex[CompiledDropRule]] = None
         self._pending_counts: dict[int, int] = {}
         self._lock = threading.Lock()
         # Automatic disabling of rules whose pattern keeps timing out.
@@ -176,10 +190,15 @@ class DropFilter:
         """
         with self._lock:
             rules = self._rules
-        if not rules:
-            return None
+            if not rules:
+                return None
+            index = self._index
+            if index is None or index.source is not rules:
+                index = self._index = RuleIndex(rules, _drop_rule_exact_keys)
 
-        for rule in rules:
+        # Only the rules for this app or source, and those without an exact app or source, can match
+        lookups = (("app", entry_key(app_name)), ("source", entry_key(source_alias)), ("source", entry_key(source_ip)))
+        for rule in index.candidates(lookups):
             try:
                 if rule.matches(source_alias, source_ip, app_name, message, severity):
                     with self._lock:

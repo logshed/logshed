@@ -4,6 +4,7 @@
 - Run backend tests: `.venv/bin/pytest backend/tests/ -v`
 - Run single test file: `.venv/bin/pytest backend/tests/test_schema.py -v`
 - Run end-to-end tests (excluded by default; may build Docker images or call live AI providers with keys from `.env`): `.venv/bin/pytest backend/tests/ -m e2e -v`
+- Run timing benchmarks (excluded by default; they print figures to compare before and after a change on the same machine): `.venv/bin/pytest backend/tests/ -m benchmark -s`
 - Run frontend tests: `cd frontend && npm test`
 - Build frontend: `cd frontend && npm run build`
 - Python Environment: Always execute Python tools using `.venv/bin/python` or `.venv/bin/pytest` (or prefix shell commands with `source .venv/bin/activate && ...`). Never use the global system Python.

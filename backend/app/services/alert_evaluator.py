@@ -30,6 +30,7 @@ from app.core.regex_validator import (
     describe_rule_timeout_limit,
     user_pattern_search,
 )
+from app.core.rule_index import RuleIndex, entry_key, exact_match_key
 from app.core.utils import match_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
@@ -223,6 +224,16 @@ class CompiledAlertRule:
         return True
 
 
+def _alert_rule_exact_keys(rule: CompiledAlertRule) -> Optional[tuple[str, tuple[str, ...]]]:
+    """The exact apps an alert rule is limited to, or None when it must see every entry."""
+    if not rule._filter_apps:
+        return None
+    apps = tuple(exact_match_key(app) for app in rule._filter_apps)
+    if not all(apps):
+        return None
+    return ("app", apps)
+
+
 class AlertEvaluator:
     """
     In-memory evaluation engine for alert rules.
@@ -239,6 +250,8 @@ class AlertEvaluator:
             except Exception:
                 self.db_path = None
         self._rules: list[CompiledAlertRule] = []
+        # Built from self._rules on first use after each change of the list
+        self._index: Optional[RuleIndex[CompiledAlertRule]] = None
         self._windows: dict[int, deque[tuple[float, dict[str, Any]]]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self._lock = threading.Lock()
@@ -363,9 +376,18 @@ class AlertEvaluator:
 
         with self._lock:
             rules = list(self._rules)
+            index = self._index
+            if index is None or index.source is not self._rules:
+                index = self._index = RuleIndex(self._rules, _alert_rule_exact_keys)
 
         if not rules:
             return
+
+        # Entries per rule with an exact app filter, in batch order; other rules see the whole batch
+        entries_by_rule: dict[int, list[dict[str, Any]]] = {}
+        for entry in batch:
+            for candidate in index.keyed_candidates((("app", entry_key(entry.get("app_name"))),)):
+                entries_by_rule.setdefault(id(candidate), []).append(entry)
 
         now_iso = now_utc.isoformat()
         min_epoch = now_epoch - 86400.0
@@ -391,8 +413,9 @@ class AlertEvaluator:
                 window_cutoff = now_epoch - rule.window_seconds
                 needed = (rule.threshold_count * rule.window_seconds) if rule.rule_type == "rate" else rule.threshold_count
                 max_window_size = max(500, min(20000, needed * 2)) if rule.rule_type == "rate" else rule.threshold_count * 2
+                rule_entries = batch if index.is_always(rule) else entries_by_rule.get(id(rule), ())
 
-                for entry in batch:
+                for entry in rule_entries:
                     try:
                         if not rule.matches(entry):
                             continue
