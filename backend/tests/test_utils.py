@@ -5,7 +5,13 @@ Unit tests for shared core utility functions.
 import datetime
 import pytest
 
-from app.core.utils import match_wildcard, parse_iso_to_epoch, parse_iso_to_utc_datetime
+from app.core.utils import (
+    compile_wildcard,
+    match_wildcard,
+    parse_iso_to_epoch,
+    parse_iso_to_utc_datetime,
+    wildcard_text_key,
+)
 
 
 class TestMatchWildcard:
@@ -33,6 +39,19 @@ class TestMatchWildcard:
         assert match_wildcard("*error*", "critical error occurred") is True
         assert match_wildcard("app-?-prod", "app-1-prod") is True
         assert match_wildcard("app-?-prod", "app-12-prod") is False
+
+    def test_compiled_pattern_matches_like_match_wildcard(self):
+        patterns = [None, "", "  ", "nginx", " NGINX ", "ngin*", "*", "?", "web-0?", "*.local", "a[b]c", "x*y?z", "post*"]
+        texts = [None, "", " ", "nginx", "Nginx ", "nginx-proxy", "web-01", "web-1", "host.local", "a[b]c", "abc", "xAAyBz", "postgres"]
+        for pattern in patterns:
+            compiled = compile_wildcard(pattern)
+            for text in texts:
+                key = wildcard_text_key(text)
+                if compiled is None:
+                    actual = True
+                else:
+                    actual = key is not None and compiled(key)
+                assert actual == match_wildcard(pattern, text), (pattern, text)
 
 
 class TestParseIsoToEpoch:

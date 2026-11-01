@@ -25,6 +25,8 @@ pytestmark = pytest.mark.benchmark
 
 ENTRY_COUNT = 20000
 BATCH_SIZE = 500
+# The queue consumer's largest batch, as stored when ingestion is saturated
+FULL_BATCH_SIZE = 5000
 APPS = ["nginx", "sshd", "kernel", "dockerd", "postgres", "valkey", "systemd", "envoy"]
 HOSTS = ["edge-gw-01", "k8s-worker-01", "db-primary", "nas-storage-01"]
 MESSAGES = [
@@ -153,11 +155,42 @@ def test_rule_matching_throughput(tmp_path: Path):
 
     alert_seconds = asyncio.run(_evaluate())
 
+    async def _evaluate_full_batches() -> tuple[float, float]:
+        """Seconds for full batches, and the longest time the event loop could not run meanwhile."""
+        full_evaluator = AlertEvaluator(db_file)
+        longest_pause = 0.0
+        running = True
+
+        async def _ticker() -> None:
+            nonlocal longest_pause
+            last = time.perf_counter()
+            while running:
+                await asyncio.sleep(0.001)
+                now = time.perf_counter()
+                longest_pause = max(longest_pause, now - last)
+                last = now
+
+        ticker = asyncio.create_task(_ticker())
+        await asyncio.sleep(0.01)
+        begin = time.perf_counter()
+        for offset in range(0, len(kept), FULL_BATCH_SIZE):
+            await full_evaluator.evaluate_batch(kept[offset:offset + FULL_BATCH_SIZE])
+            # The queue consumer awaits the next insert between batches, so the loop runs meanwhile
+            await asyncio.sleep(0.005)
+        seconds = time.perf_counter() - begin
+        running = False
+        await ticker
+        return seconds, longest_pause
+
+    full_seconds, longest_pause = asyncio.run(_evaluate_full_batches())
+
     print(
         f"\nRule matching benchmark ({len(DROP_RULES)} drop rules, {len(ALERT_RULES)} alert rules):\n"
         f"  drop filter : {len(entries):,} entries in {drop_seconds * 1000:.0f} ms "
         f"({len(entries) / drop_seconds:,.0f} entries/s), {len(entries) - len(kept):,} dropped\n"
         f"  alert rules : {len(kept):,} entries in {alert_seconds * 1000:.0f} ms "
-        f"({len(kept) / alert_seconds:,.0f} entries/s)"
+        f"({len(kept) / alert_seconds:,.0f} entries/s)\n"
+        f"  alert rules : {len(kept):,} entries in batches of {FULL_BATCH_SIZE:,} in {full_seconds * 1000:.0f} ms, "
+        f"longest event loop pause {longest_pause * 1000:.0f} ms"
     )
     assert 0 < len(kept) < len(entries)

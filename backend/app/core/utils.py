@@ -6,8 +6,9 @@ import datetime
 import fnmatch
 import functools
 import os
+import re
 import zoneinfo
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 @functools.lru_cache(maxsize=8)
@@ -89,6 +90,25 @@ def match_wildcard(pattern: Optional[str], text: Optional[str]) -> bool:
     if "*" in p or "?" in p:
         return fnmatch.fnmatchcase(t, p)
     return p == t
+
+
+def wildcard_text_key(text: Optional[str]) -> Optional[str]:
+    """The form of text that match_wildcard compares (lowercased, stripped), or None for empty text."""
+    return text.lower().strip() if text else None
+
+
+def compile_wildcard(pattern: Optional[str]) -> Optional[Callable[[str], bool]]:
+    """
+    match_wildcard for one pattern, prepared once: a function of wildcard_text_key(text) (never
+    None) that gives the same result, or None when the pattern is empty and matches any text.
+    """
+    if not pattern or not pattern.strip():
+        return None
+    p = pattern.lower().strip()
+    if "*" in p or "?" in p:
+        match = re.compile(fnmatch.translate(p)).match
+        return lambda t: match(t) is not None
+    return lambda t: t == p
 
 
 def parse_iso_to_utc_datetime(val: Any) -> Optional[datetime.datetime]:

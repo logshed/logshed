@@ -27,8 +27,8 @@ from app.core.regex_validator import (
     safe_regex_search,
     user_pattern_search,
 )
-from app.core.rule_index import RuleIndex, entry_key, exact_match_key
-from app.core.utils import match_wildcard
+from app.core.rule_index import RuleIndex, exact_match_key
+from app.core.utils import compile_wildcard, wildcard_text_key
 from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,25 @@ class CompiledDropRule:
     display_order: int = 0
     # Set by DropFilter so pattern timeouts count towards disabling the rule automatically
     on_pattern_timeout: Optional[Callable[[], None]] = field(default=None, repr=False, compare=False)
+    # Prepared from the patterns once, so each log is not lowercased and compared per rule
+    _source_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
+    _app_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
+    _message_text_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._source_match = compile_wildcard(self.source_pattern)
+        self._app_match = compile_wildcard(self.app_pattern)
+        if self.message_pattern and not self.is_regex:
+            pattern = self.message_pattern.strip().lower()
+            if "*" in pattern or "?" in pattern:
+                if not pattern.startswith("*"):
+                    pattern = f"*{pattern}"
+                if not pattern.endswith("*"):
+                    pattern = f"{pattern}*"
+                match = re.compile(fnmatch.translate(pattern)).match
+                self._message_text_match = lambda text: match(text) is not None
+            else:
+                self._message_text_match = lambda text: pattern in text
 
     def match_message(self, message: str) -> bool:
         """
@@ -55,6 +74,10 @@ class CompiledDropRule:
         Ensures regular expression matching handles candidate strings safely
         without hanging the asyncio event loop thread.
         """
+        return self._match_message(message, message.lower() if not self.is_regex and message is not None else None)
+
+    def _match_message(self, message: str, message_lower: Optional[str]) -> bool:
+        """match_message with the message already lowercased (only read by plain text patterns)."""
         if not self.message_pattern or self.message_pattern.strip() == "*":
             return True
 
@@ -66,16 +89,9 @@ class CompiledDropRule:
             return user_pattern_search(
                 self.compiled_regex, message, rule_label=f"drop rule {self.id}", on_timeout=self.on_pattern_timeout
             )
-        else:
-            pattern = self.message_pattern.strip()
-            if "*" in pattern or "?" in pattern:
-                wildcard_pat = pattern.lower()
-                if not wildcard_pat.startswith("*"):
-                    wildcard_pat = f"*{wildcard_pat}"
-                if not wildcard_pat.endswith("*"):
-                    wildcard_pat = f"{wildcard_pat}*"
-                return fnmatch.fnmatchcase(message.lower(), wildcard_pat)
-            return pattern.lower() in message.lower()
+        if message_lower is None:
+            return False
+        return self._message_text_match(message_lower)
 
     def matches(
         self,
@@ -86,26 +102,43 @@ class CompiledDropRule:
         severity: Optional[int] = None,
     ) -> bool:
         """Check if incoming log fields match this rule's criteria."""
+        return self._matches_keys(
+            wildcard_text_key(source_alias),
+            wildcard_text_key(source_ip),
+            wildcard_text_key(app_name),
+            message,
+            message.lower() if isinstance(message, str) else None,
+            severity,
+        )
+
+    def _matches_keys(
+        self,
+        alias_key: Optional[str],
+        ip_key: Optional[str],
+        app_key: Optional[str],
+        message: str,
+        message_lower: Optional[str],
+        severity: Optional[int],
+    ) -> bool:
+        """matches() with the fields already in wildcard_text_key form and the message lowercased."""
         if not self.is_enabled:
             return False
 
         # 1. Source matching (matches either source_alias or source_ip)
-        if self.source_pattern and self.source_pattern.strip():
-            matched_source = False
-            if source_alias and match_wildcard(self.source_pattern, source_alias):
-                matched_source = True
-            elif source_ip and match_wildcard(self.source_pattern, source_ip):
-                matched_source = True
-            if not matched_source:
+        if self._source_match is not None:
+            if not (
+                (alias_key is not None and self._source_match(alias_key))
+                or (ip_key is not None and self._source_match(ip_key))
+            ):
                 return False
 
         # 2. App name matching
-        if self.app_pattern and self.app_pattern.strip():
-            if not app_name or not match_wildcard(self.app_pattern, app_name):
+        if self._app_match is not None:
+            if app_key is None or not self._app_match(app_key):
                 return False
 
         # 3. Message pattern matching
-        if not self.match_message(message):
+        if not self._match_message(message, message_lower):
             return False
 
         # 4. Severity threshold check
@@ -197,10 +230,17 @@ class DropFilter:
                 index = self._index = RuleIndex(rules, _drop_rule_exact_keys)
 
         # Only the rules for this app or source, and those without an exact app or source, can match
-        lookups = (("app", entry_key(app_name)), ("source", entry_key(source_alias)), ("source", entry_key(source_ip)))
-        for rule in index.candidates(lookups):
+        alias_key = wildcard_text_key(source_alias)
+        ip_key = wildcard_text_key(source_ip)
+        app_key = wildcard_text_key(app_name)
+        lookups = (("app", app_key or ""), ("source", alias_key or ""), ("source", ip_key or ""))
+        candidates = index.candidates(lookups)
+        if not candidates:
+            return None
+        message_lower = message.lower() if isinstance(message, str) else None
+        for rule in candidates:
             try:
-                if rule.matches(source_alias, source_ip, app_name, message, severity):
+                if rule._matches_keys(alias_key, ip_key, app_key, message, message_lower, severity):
                     with self._lock:
                         self._pending_counts[rule.id] = self._pending_counts.get(rule.id, 0) + 1
                     return rule.id

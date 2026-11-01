@@ -31,7 +31,7 @@ from app.core.regex_validator import (
     user_pattern_search,
 )
 from app.core.rule_index import RuleIndex, entry_key, exact_match_key
-from app.core.utils import match_wildcard, parse_iso_to_epoch
+from app.core.utils import compile_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
 from app.services.rule_auto_disable import AutoDisableQueue
@@ -125,6 +125,7 @@ class CompiledAlertRule:
             )
         else:
             self._filter_apps = ()
+        self._filter_app_matches = tuple(compile_wildcard(p) for p in self._filter_apps)
 
         self.compiled_regex: Optional[regex.Pattern] = None
         self._match_pattern_lower: Optional[str] = None
@@ -133,6 +134,7 @@ class CompiledAlertRule:
         self._invalid: bool = False
         # Set by AlertEvaluator so pattern timeouts count towards disabling the rule automatically
         self.on_pattern_timeout: Optional[Callable[[], None]] = None
+        self._timeout_label = f"alert rule {self.id} ({self.name})"
         if self.match_pattern and self.match_pattern.strip() and self.match_pattern.strip() != "*":
             clean_pat = self.match_pattern.strip()
             self._match_pattern_lower = clean_pat.lower()
@@ -185,8 +187,11 @@ class CompiledAlertRule:
 
         # 1. App filter check (supports pre-split comma-separated apps from multi-select)
         if self._filter_apps:
-            app_name = entry.get("app_name") or ""
-            if not any(match_wildcard(p, app_name) for p in self._filter_apps):
+            app_name = entry.get("app_name")
+            if not app_name:
+                return False
+            app_key = app_name.lower().strip()
+            if not any(match(app_key) for match in self._filter_app_matches):
                 return False
 
         # 2. Severity filter check (syslog 0-7, lower is more severe)
@@ -211,7 +216,7 @@ class CompiledAlertRule:
             else:
                 if self.compiled_regex is None:
                     return False
-                label = f"alert rule {self.id} ({self.name})"
+                label = self._timeout_label
                 on_timeout = self.on_pattern_timeout
                 if user_pattern_search(self.compiled_regex, message, rule_label=label, on_timeout=on_timeout):
                     return True
@@ -363,6 +368,30 @@ class AlertEvaluator:
         Schedules background alert dispatch tasks when thresholds are reached.
         Internal LogShed logs marked with SKIP_ALERT_RULES_KEY (alerting, notification and AI logs)
         are never evaluated, so a rule cannot re-trigger itself through the logs its own actions write.
+
+        The matching runs in a worker thread, so the event loop keeps reading syslog sockets and
+        serving requests meanwhile. Entries must not change while it runs (the queue consumer
+        broadcasts them before calling this); alert dispatch then starts on the event loop.
+        """
+        fired_events = await asyncio.to_thread(self._match_batch, batch)
+
+        # Store automatic disables off the hot path
+        if self._auto_disables.has_queued():
+            store_task = asyncio.create_task(asyncio.to_thread(self._store_auto_disabled_rules))
+            self._pending_tasks.add(store_task)
+            store_task.add_done_callback(self._pending_tasks.discard)
+
+        # Process fired alert events outside lock
+        for rule, logs in fired_events:
+            # Dispatch alert notification asynchronously in background with lifecycle tracking
+            task = asyncio.create_task(self._dispatch_alert(rule, logs))
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._pending_tasks.discard)
+
+    def _match_batch(self, batch: list[dict[str, Any]]) -> list[tuple[CompiledAlertRule, list[dict[str, Any]]]]:
+        """
+        Blocking part of evaluate_batch: update the rule windows with the batch and return the
+        rules that fired, in rule order, each with its triggering logs.
         """
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         now_epoch = now_utc.timestamp()
@@ -372,7 +401,7 @@ class AlertEvaluator:
 
         batch = [entry for entry in batch if not entry.get(SKIP_ALERT_RULES_KEY)]
         if not batch:
-            return
+            return []
 
         with self._lock:
             rules = list(self._rules)
@@ -381,7 +410,7 @@ class AlertEvaluator:
                 index = self._index = RuleIndex(self._rules, _alert_rule_exact_keys)
 
         if not rules:
-            return
+            return []
 
         # Entries per rule with an exact app filter, in batch order; other rules see the whole batch
         entries_by_rule: dict[int, list[dict[str, Any]]] = {}
@@ -493,18 +522,7 @@ class AlertEvaluator:
                         logger.debug(f"Error evaluating rule {rule.id}: {e}")
                         continue
 
-        # Store automatic disables off the hot path
-        if self._auto_disables.has_queued():
-            store_task = asyncio.create_task(asyncio.to_thread(self._store_auto_disabled_rules))
-            self._pending_tasks.add(store_task)
-            store_task.add_done_callback(self._pending_tasks.discard)
-
-        # Process fired alert events outside lock
-        for rule, logs in fired_events:
-            # Dispatch alert notification asynchronously in background with lifecycle tracking
-            task = asyncio.create_task(self._dispatch_alert(rule, logs))
-            self._pending_tasks.add(task)
-            task.add_done_callback(self._pending_tasks.discard)
+        return fired_events
 
     def _make_timeout_callback(self, rule: CompiledAlertRule) -> Callable[[], None]:
         """Return the callback a rule calls each time its pattern times out."""

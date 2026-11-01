@@ -10,6 +10,7 @@ import datetime
 import itertools
 from collections import Counter
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -95,13 +96,13 @@ class TestDropRuleCandidates:
         flt = _drop_filter(tmp_path)
         names = {rule.id: (rule.app_pattern, rule.source_pattern) for rule in flt._rules}
         evaluated: list[int] = []
-        original = CompiledDropRule.matches
+        original = CompiledDropRule._matches_keys
 
         def counting_matches(self, *args, **kwargs):
             evaluated.append(self.id)
             return original(self, *args, **kwargs)
 
-        monkeypatch.setattr(CompiledDropRule, "matches", counting_matches)
+        monkeypatch.setattr(CompiledDropRule, "_matches_keys", counting_matches)
 
         assert flt.should_drop("web-01", "10.0.0.7", "postgres", "nothing to see", 6) is None
         # Only the rules with a wildcard or no app or source filter: ngin*, nas-*, the bare regex
@@ -186,14 +187,28 @@ class TestAlertRuleCandidates:
         evaluated: list[int] = []
         original = CompiledAlertRule.matches
 
-        def counting_matches(self, entry):
+        def counting_matches(self, *args, **kwargs):
             evaluated.append(self.id)
-            return original(self, entry)
+            return original(self, *args, **kwargs)
 
         monkeypatch.setattr(CompiledAlertRule, "matches", counting_matches)
 
         await ev.evaluate_batch([{"id": 1, "app_name": "postgres", "message": "fine", "timestamp": NOW_ISO}])
         assert [names[i] for i in evaluated] == ["ngin*", None, "postgres", "sshd,ngin?"]
+
+    @pytest.mark.asyncio
+    async def test_matching_runs_off_the_event_loop_thread(self, tmp_path: Path, monkeypatch):
+        ev = _alert_evaluator(tmp_path)
+        threads: list[int] = []
+        original = ev._match_batch
+
+        def recording_match_batch(batch):
+            threads.append(threading.get_ident())
+            return original(batch)
+
+        monkeypatch.setattr(ev, "_match_batch", recording_match_batch)
+        await ev.evaluate_batch([{"id": 1, "app_name": "postgres", "message": "fine", "timestamp": NOW_ISO}])
+        assert threads and threads[0] != threading.get_ident()
 
     @pytest.mark.asyncio
     async def test_a_reload_rebuilds_the_lookup(self, tmp_path: Path):
