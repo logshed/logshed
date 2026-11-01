@@ -11,6 +11,7 @@ import socket
 import sqlite3
 import sys
 import threading
+import time
 import weakref
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -37,6 +38,29 @@ _MONTH_MAP = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
+
+# Patterns of the syslog parser, compiled once
+_RE_PRI = re.compile(r"^<(\d{1,3})>")
+_RE_TAG_PID_COLON = re.compile(r"^([^:\s\[]+?)(?:\[\d+\])?:\s*(.*)")
+_RE_TAG_PID_SPACE = re.compile(r"^([^:\s\[]+)\[\d+\]\s+(.*)")
+_RE_BRACKETED_TAG = re.compile(r"^\[([^\]]+)\]:?\s*(.*)")
+_RE_TAG_SPACE = re.compile(r"^([^:\s]+)\s+(.*)")
+_RE_RFC3164_TIMESTAMP = re.compile(r"^([A-Z][a-z]{2})\s+(\d+)\s+(\d{2}):(\d{2}):(\d{2})\s+")
+_ISO_TIMESTAMP = r"(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s+(?:UTC|GMT|CET|EET|WET|MSK|[A-Z]{1,2}[SD]T)(?:[+-]\d{1,4})?|Z|[+-]\d{2}:?\d{2})?)"
+_RE_BRACKETED_ISO_TIMESTAMP = re.compile(r"^\[" + _ISO_TIMESTAMP + r"\]\s*")
+_RE_ISO_TIMESTAMP = re.compile(r"^" + _ISO_TIMESTAMP + r"\s+")
+_RE_HOST_APP_ENVELOPE = re.compile(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)")
+_RE_BRACKETED_HOST = re.compile(r"^\[([^\]]+)\]\s*(.*)")
+_RE_VALKEY = re.compile(r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)")
+_VALKEY_SEVERITY = {"#": 4, "*": 5, ".": 7, "-": 7}
+_RE_APP_PIPE = re.compile(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)")
+_RE_BRACKETED_LEVEL = re.compile(r"^\[([a-zA-Z]+)\]\s*(.*)")
+_RE_LOGFMT = re.compile(r"""^(?:time|ts)=["']?([^"'\s]+)["']?\s+(.*)""")
+_RE_LOGFMT_LEVEL = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""")
+_RE_LOGFMT_MSG = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
+_RE_UTC_SUFFIX = re.compile(r"\s+(?:UTC|GMT)\b", flags=re.IGNORECASE)
+_RE_ZONE_ABBREVIATION = re.compile(r"\s+[A-Z]{2,5}(?=$|[+-])")
+_RE_OCTET_COUNTED_FRAME = re.compile(rb"^(\d+) <\d+>")
 
 def _correct_future_timestamp(dt_utc: datetime.datetime, now: datetime.datetime) -> datetime.datetime:
     """
@@ -121,9 +145,9 @@ def _parse_iso_or_datetime(
 ) -> str:
     """Parse an ISO 8601, RFC 3339, or standard datetime string to UTC ISO format."""
     ts_clean = ts_str.strip().replace("Z", "+00:00").replace("/", "-")
-    ts_clean = re.sub(r"\s+(?:UTC|GMT)\b", "+00:00", ts_clean, flags=re.IGNORECASE)
+    ts_clean = _RE_UTC_SUFFIX.sub("+00:00", ts_clean)
     # Strip any remaining timezone abbreviations like BST, EST, PDT
-    ts_clean = re.sub(r"\s+[A-Z]{2,5}(?=$|[+-])", "", ts_clean)
+    ts_clean = _RE_ZONE_ABBREVIATION.sub("", ts_clean)
     if "," in ts_clean:
         ts_clean = ts_clean.replace(",", ".")
     if " " in ts_clean and "T" not in ts_clean:
@@ -142,6 +166,68 @@ def _parse_iso_or_datetime(
         return _correct_future_timestamp(dt_utc, now).isoformat()
     except Exception:
         return ts_str
+
+
+def _parse_msg_into_app_and_content(result: dict[str, Any], msg_part: str) -> None:
+    """Split a syslog MSG part into the app (tag) and the message text, setting both on result."""
+    # 1. TAG[PID]: CONTENT or TAG: CONTENT
+    m = _RE_TAG_PID_COLON.match(msg_part)
+    if m:
+        result["app_name"] = m.group(1)
+        result["message"] = m.group(2)
+        return
+    # 2. TAG[PID] CONTENT (PID without colon)
+    m = _RE_TAG_PID_SPACE.match(msg_part)
+    if m:
+        result["app_name"] = m.group(1)
+        result["message"] = m.group(2)
+        return
+    # 3. [TAG]: CONTENT or [TAG] CONTENT (bracketed process tag, e.g. [kernel])
+    m = _RE_BRACKETED_TAG.match(msg_part)
+    if m:
+        if m.group(1).lower() not in SEVERITY_LEVEL_MAP:
+            result["app_name"] = m.group(1)
+            result["message"] = m.group(2)
+            return
+    # 4. TAG CONTENT (space-separated, no colon)
+    m = _RE_TAG_SPACE.match(msg_part)
+    if m:
+        if m.group(1).lower() not in SEVERITY_LEVEL_MAP:
+            result["app_name"] = m.group(1)
+            result["message"] = m.group(2)
+            return
+    # 5. Fallback: single word or unparsed
+    result["message"] = msg_part
+
+
+# The local time zone for timestamps that carry no offset, read again at most once a second (it is a
+# fixed UTC offset, so a clock change applies within a second) or when time.tzset() changes the zone.
+_local_tz_cache: Optional[tuple[float, tuple[str, str], datetime.tzinfo]] = None
+
+
+def _current_local_tz() -> datetime.tzinfo:
+    global _local_tz_cache
+    now = time.monotonic()
+    cached = _local_tz_cache
+    if cached is not None and now < cached[0] and cached[1] == time.tzname:
+        return cached[2]
+    local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+    _local_tz_cache = (now + 1.0, time.tzname, local_tz)
+    return local_tz
+
+
+def _rfc3164_datetime(
+    year: int, mon_str: str, day_str: str, hour_str: str, minute_str: str, second_str: str
+) -> datetime.datetime:
+    """
+    The naive datetime of an RFC 3164 timestamp (Mmm dd HH:MM:SS) in the given year, as
+    strptime("%Y %b %d %H:%M:%S") reads it. Raises ValueError for an unknown month or an
+    impossible date or time.
+    """
+    month = _MONTH_MAP.get(mon_str.lower())
+    if month is None or len(day_str) > 2:
+        raise ValueError(f"not an RFC 3164 timestamp: {mon_str} {day_str}")
+    return datetime.datetime(year, month, int(day_str), int(hour_str), int(minute_str), int(second_str))
 
 
 def parse_syslog_message(
@@ -166,11 +252,12 @@ def parse_syslog_message(
         now = now.astimezone(datetime.timezone.utc)
 
     if local_tz is None:
-        local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
-    
+        local_tz = _current_local_tz()
+
+    now_iso = now.isoformat()
     result = {
-        "timestamp": now.isoformat(),
-        "received_at": now.isoformat(),
+        "timestamp": now_iso,
+        "received_at": now_iso,
         "source_ip": source_ip,
         "source_alias": source_ip,
         "app_name": "unknown",
@@ -185,44 +272,13 @@ def parse_syslog_message(
     # Parse PRI
     has_pri = False
     explicit_severity = False
-    pri_match = re.match(r"^<(\d{1,3})>", content)
+    pri_match = _RE_PRI.match(content)
     if pri_match:
         has_pri = True
         pri = int(pri_match.group(1))
         result["facility"] = pri // 8
         result["severity"] = pri % 8
         content = content[pri_match.end():]
-        
-    def _parse_msg_into_app_and_content(msg_part: str) -> None:
-        # 1. TAG[PID]: CONTENT or TAG: CONTENT
-        m = re.match(r"^([^:\s\[]+?)(?:\[\d+\])?:\s*(.*)", msg_part)
-        if m:
-            result["app_name"] = m.group(1)
-            result["message"] = m.group(2)
-            return
-        # 2. TAG[PID] CONTENT (PID without colon)
-        m = re.match(r"^([^:\s\[]+)\[\d+\]\s+(.*)", msg_part)
-        if m:
-            result["app_name"] = m.group(1)
-            result["message"] = m.group(2)
-            return
-        # 3. [TAG]: CONTENT or [TAG] CONTENT (bracketed process tag, e.g. [kernel])
-        m = re.match(r"^\[([^\]]+)\]:?\s*(.*)", msg_part)
-        if m:
-            if m.group(1).lower() not in SEVERITY_LEVEL_MAP:
-                result["app_name"] = m.group(1)
-                result["message"] = m.group(2)
-                return
-        # 4. TAG CONTENT (space-separated, no colon)
-        m = re.match(r"^([^:\s]+)\s+(.*)", msg_part)
-        if m:
-            if m.group(1).lower() not in SEVERITY_LEVEL_MAP:
-                result["app_name"] = m.group(1)
-                result["message"] = m.group(2)
-                return
-        # 5. Fallback: single word or unparsed
-        result["message"] = msg_part
-
     # Check RFC 5424: version MUST be exactly '1' followed by a space, followed by a valid timestamp or '-'
     # This prevents misidentifying Valkey/Redis messages like '1:M ...' or other numbers.
     if content.startswith("1 ") and not content.startswith("1:"):
@@ -298,17 +354,14 @@ def parse_syslog_message(
         else:
             # Not enough fields for valid 5424 - treat as unparsed
             pass
-    elif (ts_match := re.match(r"^([A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+", content)):
+    elif (ts_match := _RE_RFC3164_TIMESTAMP.match(content)):
         # RFC 3164: Mmm dd HH:MM:SS or Mmm  d HH:MM:SS
-        ts_str = ts_match.group(1)
         content = content[ts_match.end():]
-        
+
         # Try to parse timestamp
         try:
             # Add current year since RFC 3164 doesn't include it
-            # Handle space-padded day
-            ts_str_clean = re.sub(r'\s+', ' ', ts_str)
-            dt = datetime.datetime.strptime(f"{now.year} {ts_str_clean}", "%Y %b %d %H:%M:%S")
+            dt = _rfc3164_datetime(now.year, *ts_match.groups())
             parsed_month = dt.month
             # Year boundary heuristic: if parsed month is ahead of current month,
             # the message likely came from the previous year.
@@ -356,28 +409,28 @@ def parse_syslog_message(
 
         if is_valid_hostname:
             result["hostname"] = first_token
-            _parse_msg_into_app_and_content(parts[1])
+            _parse_msg_into_app_and_content(result, parts[1])
         elif is_nil_hostname:
-            _parse_msg_into_app_and_content(parts[1])
+            _parse_msg_into_app_and_content(result, parts[1])
         else:
-            _parse_msg_into_app_and_content(content)
-    elif (m_bracket := re.match(r"^\[(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s+(?:UTC|GMT|CET|EET|WET|MSK|[A-Z]{1,2}[SD]T)(?:[+-]\d{1,4})?|Z|[+-]\d{2}:?\d{2})?)\]\s*", content)):
+            _parse_msg_into_app_and_content(result, content)
+    elif (m_bracket := _RE_BRACKETED_ISO_TIMESTAMP.match(content)):
         # Bracketed timestamp envelope: [TIMESTAMP] [HOST] [APP] MSG or [TIMESTAMP] MSG
         result["timestamp"] = _parse_iso_or_datetime(m_bracket.group(1), now, local_tz)
         rem = content[m_bracket.end():]
-        m_env = re.match(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)", rem)
+        m_env = _RE_HOST_APP_ENVELOPE.match(rem)
         if m_env:
             result["hostname"] = m_env.group(1)
             result["app_name"] = m_env.group(2)
             result["message"] = m_env.group(3)
         else:
-            m_host = re.match(r"^\[([^\]]+)\]\s*(.*)", rem)
+            m_host = _RE_BRACKETED_HOST.match(rem)
             if m_host and m_host.group(1).lower() not in SEVERITY_LEVEL_MAP:
                 result["hostname"] = m_host.group(1)
-                _parse_msg_into_app_and_content(m_host.group(2))
+                _parse_msg_into_app_and_content(result, m_host.group(2))
             else:
-                _parse_msg_into_app_and_content(rem)
-    elif (m_iso := re.match(r"^(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s+(?:UTC|GMT|CET|EET|WET|MSK|[A-Z]{1,2}[SD]T)(?:[+-]\d{1,4})?|Z|[+-]\d{2}:?\d{2})?)\s+", content)):
+                _parse_msg_into_app_and_content(result, rem)
+    elif (m_iso := _RE_ISO_TIMESTAMP.match(content)):
         # Unbracketed ISO 8601 / RFC 3339 / standard datetime: TIMESTAMP HOSTNAME TAG: MSG
         result["timestamp"] = _parse_iso_or_datetime(m_iso.group(1), now, local_tz)
         rem = content[m_iso.end():]
@@ -394,44 +447,43 @@ def parse_syslog_message(
         )
         if is_valid_hostname:
             result["hostname"] = first_token
-            _parse_msg_into_app_and_content(parts[1])
+            _parse_msg_into_app_and_content(result, parts[1])
         elif len(parts) == 2 and first_token == "-":
-            _parse_msg_into_app_and_content(parts[1])
+            _parse_msg_into_app_and_content(result, parts[1])
         else:
-            _parse_msg_into_app_and_content(rem)
-    elif (m_valkey := re.match(r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)", content)):
+            _parse_msg_into_app_and_content(result, rem)
+    elif (m_valkey := _RE_VALKEY.match(content)):
         # Valkey / Redis server format: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
         result["timestamp"] = _parse_valkey_datetime(
             m_valkey.group(2), m_valkey.group(3), m_valkey.group(4), m_valkey.group(5), now, local_tz
         )
         level_char = m_valkey.group(6)
-        valkey_sev_map = {"#": 4, "*": 5, ".": 7, "-": 7}
-        result["severity"] = valkey_sev_map.get(level_char, 6)
+        result["severity"] = _VALKEY_SEVERITY.get(level_char, 6)
         explicit_severity = True
         result["message"] = m_valkey.group(7)
-    elif (m_app_pipe := re.match(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)", content)):
+    elif (m_app_pipe := _RE_APP_PIPE.match(content)):
         # Application-prefixed pipe format: [maintainerr] | 03/10/2026 16:00:33 [INFO] ...
         result["app_name"] = m_app_pipe.group(1)
         result["timestamp"] = _parse_dmy_or_datetime(
             m_app_pipe.group(2), m_app_pipe.group(3), now, local_tz
         )
         rem = m_app_pipe.group(4)
-        m_level = re.match(r"^\[([a-zA-Z]+)\]\s*(.*)", rem)
+        m_level = _RE_BRACKETED_LEVEL.match(rem)
         if m_level and m_level.group(1).lower() in SEVERITY_LEVEL_MAP:
             result["severity"] = SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
             explicit_severity = True
             result["message"] = m_level.group(2)
         else:
             result["message"] = rem
-    elif (m_logfmt := re.match(r"""^(?:time|ts)=["']?([^"'\s]+)["']?\s+(.*)""", content)):
+    elif (m_logfmt := _RE_LOGFMT.match(content)):
         # Logfmt format: time="2026-10-03T14:56:31Z" level=info msg="..."
         result["timestamp"] = _parse_iso_or_datetime(m_logfmt.group(1), now, local_tz)
         rem = m_logfmt.group(2)
-        m_level = re.search(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""", rem)
+        m_level = _RE_LOGFMT_LEVEL.search(rem)
         if m_level and m_level.group(1).lower() in SEVERITY_LEVEL_MAP:
             result["severity"] = SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
             explicit_severity = True
-        m_msg = re.search(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""", rem)
+        m_msg = _RE_LOGFMT_MSG.search(rem)
         if m_msg:
             result["message"] = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
         else:
@@ -654,7 +706,9 @@ def get_udp_receive_errors() -> Optional[int]:
     return max(0, current - baseline)
 
 
-NUM_PARSER_WORKERS = 4
+# Parsing never waits, so a worker runs each message to the end before the next starts: more
+# workers per socket add no concurrency, only wake-ups.
+NUM_PARSER_WORKERS = 1
 # How long stop() waits for parser workers to finish the queued messages before cancelling them.
 WORKER_DRAIN_TIMEOUT = 2.0
 
@@ -940,7 +994,7 @@ class SyslogTCPProtocol(asyncio.Protocol):
                     break
 
             # RFC 6587 octet counting: <MSG-LEN> SP <MSG> (verifying priority header prefix)
-            match = re.match(rb"^(\d+) <\d+>", self.buffer)
+            match = _RE_OCTET_COUNTED_FRAME.match(self.buffer)
             if match:
                 msg_len = int(match.group(1))
                 header_len = len(match.group(1)) + 1

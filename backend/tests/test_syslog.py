@@ -1849,6 +1849,73 @@ class TestSyslogFutureTimestampWindow:
         assert parsed["timestamp"] == (self.NOW + datetime.timedelta(minutes=2)).isoformat()
 
 
+class TestSyslogTimestampHelpers:
+    """The parser's own date reading and its cached local time zone."""
+
+    def test_rfc3164_date_reads_like_strptime(self):
+        from app.collectors.syslog import _rfc3164_datetime
+
+        months = ["Jan", "Feb", "Jun", "Dec", "Foo"]
+        days = ["1", "01", "9", "10", "28", "29", "30", "31", "0", "00", "32", "001", "123"]
+        times = [("00", "00", "00"), ("23", "59", "59"), ("24", "00", "00"), ("12", "60", "00"), ("12", "00", "60"), ("12", "00", "61")]
+        checked = 0
+        for year in (2024, 2026):
+            for mon in months:
+                for day in days:
+                    for hour, minute, second in times:
+                        try:
+                            expected = datetime.datetime.strptime(
+                                f"{year} {mon} {day} {hour}:{minute}:{second}", "%Y %b %d %H:%M:%S"
+                            )
+                        except ValueError:
+                            expected = None
+                        try:
+                            actual = _rfc3164_datetime(year, mon, day, hour, minute, second)
+                        except ValueError:
+                            actual = None
+                        assert actual == expected, (year, mon, day, hour, minute, second)
+                        checked += expected is not None
+        assert checked > 0
+
+    def test_local_time_zone_follows_a_zone_change_at_once(self, monkeypatch):
+        import os
+        import time
+
+        from app.collectors.syslog import _current_local_tz
+
+        original = os.environ.get("TZ")
+        try:
+            monkeypatch.setenv("TZ", "UTC")
+            time.tzset()
+            assert datetime.datetime(2026, 1, 15, tzinfo=_current_local_tz()).utcoffset() == datetime.timedelta(0)
+            monkeypatch.setenv("TZ", "Asia/Kolkata")
+            time.tzset()
+            assert _current_local_tz().utcoffset(None) == datetime.timedelta(hours=5, minutes=30)
+            raw = b"<14>Oct 19 17:30:00 host app: local time"
+            now = datetime.datetime(2026, 10, 19, 12, 0, 5, tzinfo=datetime.timezone.utc)
+            assert parse_syslog_message(raw, "10.0.0.1", now=now)["timestamp"].startswith("2026-10-19T12:00:00")
+        finally:
+            if original is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original
+            time.tzset()
+
+    def test_local_time_zone_is_read_again_after_a_second(self, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+
+        clock = [1000.0]
+        monkeypatch.setattr(syslog_mod.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(syslog_mod, "_local_tz_cache", None)
+        first = syslog_mod._current_local_tz()
+        fake = datetime.timezone(datetime.timedelta(hours=3))
+        monkeypatch.setattr(syslog_mod, "_local_tz_cache", (1001.0, syslog_mod.time.tzname, fake))
+        clock[0] = 1000.5
+        assert syslog_mod._current_local_tz() is fake
+        clock[0] = 1001.0
+        assert syslog_mod._current_local_tz() == first
+
+
 class TestSyslogTcpDisconnectDrain:
     """Frames read before a sender disconnects are still parsed, and stop() waits for that."""
 

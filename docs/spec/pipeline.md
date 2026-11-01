@@ -17,6 +17,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Implementation Reference:** [backend/app/collectors/syslog.py](../../backend/app/collectors/syslog.py)
 - **Protocols & Ports:** Asynchronous UDP and TCP listeners on port `1514` (configurable via `SYSLOG_PORT`).
 - **Parsing Standards:** Complete parsing for RFC 3164 (BSD syslog) and RFC 5424 (IETF syslog with structured data).
+- **Parser Tasks and Local Time:** Each UDP socket and each TCP connection parses its messages in one task, in arrival order. A timestamp without a UTC offset is read at the server's current UTC offset (or as UTC, whichever is closer to the received time); the offset is looked up at most once a second, so a daylight saving change applies within a second.
 - **TCP Framing:** Implements RFC 6587 octet-counted framing and newline-delimited framing for stream separation.
 - **Connection Ceilings:** Default TCP connection ceiling is 250 concurrent connections (configurable via `SYSLOG_MAX_TCP_CONNECTIONS`). TCP keepalive is enabled (`SO_KEEPALIVE`).
 - **Per-IP Connection Cap:** One source IP may hold at most 20 concurrent TCP connections (`SYSLOG_MAX_TCP_CONNECTIONS_PER_IP`, environment only, values below 1 or not a number fall back to 20), so one host cannot use every slot. Extra connections are refused with a warning.

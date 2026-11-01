@@ -610,6 +610,22 @@ class TestDetectSeverity:
         assert _detect_severity("DHCP Server leased IP 172.22.2.161 to Wii") == 6
         assert _detect_severity("") == 6
 
+    def test_long_lines_read_like_the_whole_cleaned_line(self, monkeypatch):
+        """Cleaning only the head of a long line gives the severity that cleaning all of it gives."""
+        import app.core.pipeline as pipeline_mod
+
+        starts = ["", " " * 900, "\x00\x01" * 450, "\t\n" * 520, "x" * 210, "\x1b[31m" * 120, "\x1b]0;title" + "y" * 1100]
+        levels = ["ERROR: disk full", "[WARN] slow", "level=debug", '"severity": "crit"', "plain text", "  "]
+        ends = ["", " " * 2000, "z" * 2000, " \x1b\\ error: " + "w" * 1500, "\x07[ERROR] later"]
+        lines = [start + level + end for start in starts for level in levels for end in ends]
+        lines += ["a" * 1020 + "\x1b[1m" + "b" * 500, " " * 1023 + "error: at the cut " + "c" * 900]
+
+        fast = [_detect_severity(line) for line in lines]
+        monkeypatch.setattr(pipeline_mod, "_SEVERITY_CLEAN_CHARS", 10**9)
+        full = [_detect_severity(line) for line in lines]
+        assert fast == full
+        assert {3, 4, 6, 7} <= set(full)
+
 
 # ===================================================================
 # 7. Accurate Resume on Docker Reconnect (Item 2)

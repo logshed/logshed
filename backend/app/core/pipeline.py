@@ -428,13 +428,27 @@ _RE_AFTER_TS = re.compile(
 )
 
 
+# detect_severity reads the first _SEVERITY_HEADER_CHARS of the cleaned line. A longer line is
+# cleaned only up to _SEVERITY_CLEAN_CHARS when that gives the same start.
+_SEVERITY_HEADER_CHARS = 200
+_SEVERITY_CLEAN_CHARS = 1024
+
+
 def detect_severity(raw_line: str) -> int:
     """
     Detect log severity from line content, falling back to RFC Info (severity 6).
     Inspects common log formats (logfmt, JSON, brackets, prefix: colon, timestamps)
     without misinterpreting informational messages emitted on Docker stderr.
     """
-    clean = clean_log_text(raw_line).strip()
+    clean = None
+    # An escape sequence can run past the cut, so only a head without one cleans like the whole line,
+    # and only when enough text is left that the end of the line cannot change the start
+    if len(raw_line) > _SEVERITY_CLEAN_CHARS and "\x1b" not in raw_line[:_SEVERITY_CLEAN_CHARS]:
+        clean = clean_log_text(raw_line[:_SEVERITY_CLEAN_CHARS]).strip()
+        if len(clean) <= _SEVERITY_HEADER_CHARS:
+            clean = None
+    if clean is None:
+        clean = clean_log_text(raw_line).strip()
     if not clean:
         return 6
 
@@ -443,9 +457,19 @@ def detect_severity(raw_line: str) -> int:
     if clean.startswith("panic:"):
         return 2
 
-    header = clean[:200]
+    header = clean[:_SEVERITY_HEADER_CHARS]
 
-    for regex in (_RE_KV, _RE_JSON, _RE_BRACKET, _RE_COLON, _RE_AFTER_TS):
+    # Each pattern needs its literal text in the header, so the others are skipped
+    has_key = "level" in header or "lvl" in header or "severity" in header
+    for regex, applies in (
+        (_RE_KV, has_key),
+        (_RE_JSON, has_key),
+        (_RE_BRACKET, "[" in header),
+        (_RE_COLON, ":" in header),
+        (_RE_AFTER_TS, True),
+    ):
+        if not applies:
+            continue
         for m in regex.finditer(header):
             lvl = m.group(1).lower()
             if lvl in SEVERITY_LEVEL_MAP:
