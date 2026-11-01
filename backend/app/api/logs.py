@@ -205,27 +205,37 @@ async def stream_logs(
 
                 try:
                     entry = await asyncio.wait_for(queue.get(), timeout=SSE_PING_INTERVAL_SECONDS)
+                    # Every entry already queued goes out in one chunk: a send per event costs
+                    # far more than the event itself when logs arrive by the thousand
+                    entries = [entry]
+                    while not queue.empty():
+                        entries.append(queue.get_nowait())
 
-                    # Apply optional stream filters
-                    if severity_max is not None and entry.get("severity", 6) > severity_max:
-                        continue
-                    if parsed_sources:
-                        entry_alias = (entry.get("source_alias") or "").strip()
-                        entry_ip = (entry.get("source_ip") or "").strip()
-                        is_docker_entry = entry_ip == "docker" or entry_alias in docker_aliases
-                        if is_docker_entry:
-                            if entry_alias not in parsed_sources:
-                                continue
-                        else:
-                            if entry_alias not in parsed_sources and entry_ip not in parsed_sources:
-                                continue
-                    if parsed_apps and entry.get("app_name") not in parsed_apps:
-                        continue
+                    events = []
+                    for entry in entries:
+                        if max_events is not None and sent >= max_events:
+                            break
+                        # Apply optional stream filters
+                        if severity_max is not None and entry.get("severity", 6) > severity_max:
+                            continue
+                        if parsed_sources:
+                            entry_alias = (entry.get("source_alias") or "").strip()
+                            entry_ip = (entry.get("source_ip") or "").strip()
+                            is_docker_entry = entry_ip == "docker" or entry_alias in docker_aliases
+                            if is_docker_entry:
+                                if entry_alias not in parsed_sources:
+                                    continue
+                            else:
+                                if entry_alias not in parsed_sources and entry_ip not in parsed_sources:
+                                    continue
+                        if parsed_apps and entry.get("app_name") not in parsed_apps:
+                            continue
 
-                    # Pre-encoded once per entry by the broadcaster, without private keys
-                    data = entry.data
-                    sent += 1
-                    yield f"event: log\ndata: {data}\n\n"
+                        # Pre-encoded once per entry by the broadcaster, without private keys
+                        events.append(f"event: log\ndata: {entry.data}\n\n")
+                        sent += 1
+                    if events:
+                        yield "".join(events)
                 except asyncio.TimeoutError:
                     # A disconnect while events flow surfaces as a failed send; while idle it
                     # is checked here, once per ping.

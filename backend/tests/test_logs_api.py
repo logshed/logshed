@@ -1424,6 +1424,50 @@ class TestSseLimitsAndPayload:
         assert payload["message"] == "internal keys test"
         assert not [k for k in payload if k.startswith("_")]
 
+    @pytest.mark.asyncio
+    async def test_queued_entries_are_sent_together_filtered_and_in_order(self, auth_cookie: dict):
+        import json as json_mod
+
+        app = create_app()
+        bodies: list[bytes] = []
+
+        async def recording_app(scope, receive, send):
+            async def recording_send(message):
+                if message["type"] == "http.response.body" and message.get("body"):
+                    bodies.append(message["body"])
+                await send(message)
+
+            await app(scope, receive, recording_send)
+
+        client = AsyncClient(
+            transport=ASGITransport(app=recording_app),
+            base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+            cookies=auth_cookie,
+        )
+        batch = [
+            {"id": n, "source_ip": "10.0.0.1", "source_alias": "srv1", "app_name": app, "severity": 6, "message": f"m{n}"}
+            for n, app in enumerate(["web", "db", "web", "web", "db", "web"], start=1)
+        ]
+
+        async def _broadcast():
+            for _ in range(50):
+                if sse_manager.subscriber_count() > 0:
+                    break
+                await asyncio.sleep(0.01)
+            await sse_manager.broadcast_batch(batch)
+
+        task = asyncio.create_task(_broadcast())
+        async with client:
+            response = await client.get("/api/logs/stream", params={"max_events": 3, "app_name": "web"})
+        await task
+
+        body = response.text
+        ids = [json_mod.loads(line[len("data: "):])["id"] for line in body.splitlines() if line.startswith("data: ")]
+        assert ids == [1, 3, 4]
+        assert body.count("event: log\n") == 3
+        assert len([b for b in bodies if b"event: log" in b]) == 1
+
     def test_ping_interval_is_15_seconds(self):
         from app.api import logs as logs_mod
 

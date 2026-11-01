@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 # Each stream holds a queue of up to 500 entries and its own HTTP connection.
 MAX_SSE_SUBSCRIBERS = 20
 
+# Shared by every event: json.dumps(default=str) would build a new encoder for each one
+_EVENT_ENCODER = json.JSONEncoder(default=str)
+
 
 class SSESubscriberLimitError(Exception):
     """Raised when a new stream would exceed MAX_SSE_SUBSCRIBERS."""
@@ -28,9 +31,25 @@ class SSELogEvent(dict):
 
     @classmethod
     def from_entry(cls, entry: dict) -> "SSELogEvent":
-        event = cls((k, v) for k, v in entry.items() if not (isinstance(k, str) and k.startswith("_")))
-        event.data = json.dumps(event, default=str)
+        event = cls(entry)
+        for key in [k for k in event if isinstance(k, str) and k.startswith("_")]:
+            del event[key]
+        event.data = _EVENT_ENCODER.encode(event)
         return event
+
+
+def _put_newest(q: asyncio.Queue, events: list[SSELogEvent]) -> None:
+    """
+    Queue the events, dropping the oldest queued ones when the queue is full: a slow subscriber
+    keeps the newest entries, the same as putting each event and dropping the oldest when full,
+    without moving the entries that would be dropped again within the same batch.
+    """
+    if q.maxsize > 0:
+        events = events[-q.maxsize:]
+        for _ in range(q.qsize() + len(events) - q.maxsize):
+            q.get_nowait()
+    for event in events:
+        q.put_nowait(event)
 
 
 class SSEBroadcaster:
@@ -75,17 +94,10 @@ class SSEBroadcaster:
 
         async with self._lock:
             for q in list(self._subscribers):
-                for event in events:
-                    try:
-                        q.put_nowait(event)
-                    except asyncio.QueueFull:
-                        try:
-                            q.get_nowait()
-                            q.put_nowait(event)
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        logger.debug(f"Error broadcasting batch to subscriber: {e}")
+                try:
+                    _put_newest(q, events)
+                except Exception as e:
+                    logger.debug(f"Error broadcasting batch to subscriber: {e}")
 
     async def broadcast(self, log_entry: dict) -> None:
         """

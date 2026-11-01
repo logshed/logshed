@@ -5,6 +5,7 @@ Tests for KeyedMultilineAssembler, bounded queue, dropped counter, live ingestio
 import asyncio
 import concurrent.futures
 import datetime
+import json
 from pathlib import Path
 import pytest
 
@@ -961,6 +962,37 @@ class TestQueueConsumer:
             await sse_manager.broadcast_batch([])
         finally:
             await sse_manager.unsubscribe(sse_q)
+
+    @pytest.mark.asyncio
+    async def test_sse_broadcast_keeps_the_newest_entries_like_one_put_at_a_time(self):
+        """A full subscriber queue ends with the same entries as dropping the oldest for each new one."""
+        from app.core.sse import SSEBroadcaster
+
+        for maxsize, queued, batch_size in [(5, 0, 3), (5, 0, 5), (5, 0, 12), (5, 3, 1), (5, 3, 2), (5, 3, 4),
+                                            (5, 5, 1), (5, 5, 9), (1, 1, 3), (0, 4, 6)]:
+            broadcaster = SSEBroadcaster()
+            q = await broadcaster.subscribe(maxsize=maxsize)
+            expected: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
+            for n in range(queued):
+                q.put_nowait({"id": -1 - n})
+                expected.put_nowait({"id": -1 - n})
+            batch = [{"id": n, "_epoch_ts": 1.0, "message": f"m{n}"} for n in range(batch_size)]
+            for entry in batch:
+                event = {k: v for k, v in entry.items() if not k.startswith("_")}
+                try:
+                    expected.put_nowait(event)
+                except asyncio.QueueFull:
+                    expected.get_nowait()
+                    expected.put_nowait(event)
+
+            await broadcaster.broadcast_batch(batch)
+
+            got = [q.get_nowait() for _ in range(q.qsize())]
+            want = [expected.get_nowait() for _ in range(expected.qsize())]
+            assert [dict(e) for e in got] == want, (maxsize, queued, batch_size)
+            for event in got:
+                if event["id"] >= 0:
+                    assert json.loads(event.data) == {"id": event["id"], "message": f"m{event['id']}"}
 
 
 class TestKeyedMultilineAssemblerLimits:
