@@ -13,6 +13,13 @@ interface UsePullToRefreshOptions {
   disabled?: boolean;
 }
 
+/** Finger travel (px) before a gesture is read as a pull or as something else. */
+export const PULL_DEAD_ZONE_PX = 16;
+/** A pull must move at least this many times further down than sideways. */
+const PULL_MIN_STEEPNESS = 2;
+
+type GestureMode = 'undecided' | 'pull' | 'ignore';
+
 export function usePullToRefresh({
   onRefresh,
   threshold = 60,
@@ -21,14 +28,18 @@ export function usePullToRefresh({
   const [pullDistance, setPullDistance] = useState<number>(0);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const startYRef = useRef<number | null>(null);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef<boolean>(false);
+  // Decided once per gesture, so a sideways swipe (such as scrolling the quick filter chips)
+  // that drifts down later never turns into a pull
+  const modeRef = useRef<GestureMode>('undecided');
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
       if (disabled || isRefreshing) return;
       if (e.touches.length !== 1) return;
-      startYRef.current = e.touches[0].clientY;
+      startRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      modeRef.current = 'undecided';
       isDraggingRef.current = true;
     },
     [disabled, isRefreshing]
@@ -36,15 +47,28 @@ export function usePullToRefresh({
 
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
-      if (disabled || isRefreshing || !isDraggingRef.current || startYRef.current === null) {
+      if (disabled || isRefreshing || !isDraggingRef.current || startRef.current === null) {
         return;
       }
-      const currentY = e.touches[0].clientY;
-      const rawDelta = currentY - startYRef.current;
+      if (e.touches.length !== 1) {
+        modeRef.current = 'ignore';
+        setPullDistance(0);
+        return;
+      }
+      const dx = e.touches[0].clientX - startRef.current.x;
+      const dy = e.touches[0].clientY - startRef.current.y;
 
-      if (rawDelta > 0) {
+      if (modeRef.current === 'undecided') {
+        if (Math.hypot(dx, dy) < PULL_DEAD_ZONE_PX) return;
+        modeRef.current = dy > 0 && dy >= Math.abs(dx) * PULL_MIN_STEEPNESS ? 'pull' : 'ignore';
+      }
+      if (modeRef.current !== 'pull') return;
+
+      // Measured from the end of the dead zone, so the indicator starts at 0
+      const pulled = dy - PULL_DEAD_ZONE_PX;
+      if (pulled > 0) {
         // Apply dampening resistance
-        const dampened = Math.min(rawDelta * 0.45, threshold + 25);
+        const dampened = Math.min(pulled * 0.45, threshold + 25);
         setPullDistance(dampened);
       } else {
         setPullDistance(0);
@@ -56,7 +80,8 @@ export function usePullToRefresh({
   const handleTouchEnd = useCallback(async () => {
     if (disabled || isRefreshing || !isDraggingRef.current) return;
     isDraggingRef.current = false;
-    startYRef.current = null;
+    startRef.current = null;
+    modeRef.current = 'undecided';
 
     if (pullDistance >= threshold) {
       setIsRefreshing(true);
@@ -89,7 +114,8 @@ export function usePullToRefresh({
       onTouchEnd: handleTouchEnd,
       onTouchCancel: () => {
         isDraggingRef.current = false;
-        startYRef.current = null;
+        startRef.current = null;
+        modeRef.current = 'undecided';
         setPullDistance(0);
       },
     },

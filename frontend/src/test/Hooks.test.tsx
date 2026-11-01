@@ -138,13 +138,13 @@ describe('Custom Hooks (useEscapeKey & useClipboard)', () => {
 
       act(() => {
         result.current.touchHandlers.onTouchStart({
-          touches: [{ clientY: 100 }],
+          touches: [{ clientX: 0, clientY: 100 }],
         } as any);
       });
 
       act(() => {
         result.current.touchHandlers.onTouchMove({
-          touches: [{ clientY: 180 }],
+          touches: [{ clientX: 0, clientY: 180 }],
         } as any);
       });
 
@@ -158,13 +158,13 @@ describe('Custom Hooks (useEscapeKey & useClipboard)', () => {
 
       act(() => {
         result.current.touchHandlers.onTouchStart({
-          touches: [{ clientY: 100 }],
+          touches: [{ clientX: 0, clientY: 100 }],
         } as any);
       });
 
       act(() => {
         result.current.touchHandlers.onTouchMove({
-          touches: [{ clientY: 250 }],
+          touches: [{ clientX: 0, clientY: 250 }],
         } as any);
       });
 
@@ -183,13 +183,13 @@ describe('Custom Hooks (useEscapeKey & useClipboard)', () => {
 
       act(() => {
         result.current.touchHandlers.onTouchStart({
-          touches: [{ clientY: 100 }],
+          touches: [{ clientX: 0, clientY: 100 }],
         } as any);
       });
 
       act(() => {
         result.current.touchHandlers.onTouchMove({
-          touches: [{ clientY: 120 }], // only 20px
+          touches: [{ clientX: 0, clientY: 120 }], // only 20px
         } as any);
       });
 
@@ -205,3 +205,71 @@ describe('Custom Hooks (useEscapeKey & useClipboard)', () => {
   });
 });
 
+
+describe('usePullToRefresh only reacts to a deliberate downward pull', () => {
+  const touch = (x: number, y: number) => ({ touches: [{ clientX: x, clientY: y }] }) as any;
+
+  const startGesture = (threshold = 55) => {
+    const onRefresh = vi.fn();
+    const hook = renderHook(() => usePullToRefresh({ onRefresh, threshold }));
+    act(() => hook.result.current.touchHandlers.onTouchStart(touch(100, 100)));
+    return { hook, onRefresh };
+  };
+
+  it('ignores a small downward drift', () => {
+    const { hook } = startGesture();
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(100, 101)));
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(100, 110)));
+    expect(hook.result.current.isPulling).toBe(false);
+  });
+
+  it('starts the indicator from zero once past the dead zone', () => {
+    const { hook } = startGesture();
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(100, 116)));
+    expect(hook.result.current.pullDistance).toBe(0);
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(100, 140)));
+    expect(hook.result.current.isPulling).toBe(true);
+  });
+
+  it('never pulls during a sideways swipe that drifts down later', async () => {
+    const { hook, onRefresh } = startGesture();
+    // Scrolling the chips to the left
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(60, 104)));
+    // The finger then slides well down while still on the bar
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(40, 400)));
+    expect(hook.result.current.isPulling).toBe(false);
+    await act(async () => {
+      await hook.result.current.touchHandlers.onTouchEnd();
+    });
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it('ignores a diagonal swipe', () => {
+    const { hook } = startGesture();
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(140, 160)));
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(160, 300)));
+    expect(hook.result.current.isPulling).toBe(false);
+  });
+
+  it('pulls and refreshes for a mostly vertical drag with a little sideways movement', async () => {
+    const { hook, onRefresh } = startGesture();
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(106, 130)));
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(112, 300)));
+    expect(hook.result.current.hasReachedThreshold).toBe(true);
+    await act(async () => {
+      await hook.result.current.touchHandlers.onTouchEnd();
+    });
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('decides afresh for the next gesture', async () => {
+    const { hook } = startGesture();
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(40, 100)));
+    await act(async () => {
+      await hook.result.current.touchHandlers.onTouchEnd();
+    });
+    act(() => hook.result.current.touchHandlers.onTouchStart(touch(100, 100)));
+    act(() => hook.result.current.touchHandlers.onTouchMove(touch(100, 200)));
+    expect(hook.result.current.isPulling).toBe(true);
+  });
+});

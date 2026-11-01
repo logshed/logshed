@@ -423,7 +423,7 @@ describe('LogSearchBar search button, drawer and syntax help', () => {
     const help = screen.getByRole('button', { name: 'Search syntax help' });
     const clear = screen.getByRole('button', { name: 'Clear search query' });
     expect(help.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(help.parentElement!.className).toContain('right-7');
+    expect(help.className).toContain('right-7');
   });
 });
 
@@ -451,5 +451,49 @@ describe('LogSearchBar capped-list note follows the server limit', () => {
     await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={vi.fn()} facetsTruncated />);
     fireEvent.click(screen.getByText('All Hosts'));
     expect(screen.getByText('Showing only some hosts. Type a name to add others.')).toBeInTheDocument();
+  });
+});
+
+describe('LogSearchBar phone layout', () => {
+  const renderBar = async (filters: LogFilterParams = {}) => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+    await renderSettled(
+      <LogSearchBar filters={filters} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} totalCount={110} />
+    );
+  };
+
+  /** The smallest element holding both a and b. */
+  const commonParent = (a: Element, b: Element): Element => {
+    let node: Element | null = a.parentElement;
+    while (node && !node.contains(b)) node = node.parentElement;
+    return node!;
+  };
+
+  it('gives the search input a line shared only with the search button', async () => {
+    await renderBar({ query: 'disk', severity_max: 3 });
+    const input = screen.getByLabelText('Search logs');
+    const inputLine = commonParent(input, screen.getByRole('button', { name: 'Search now' }));
+    expect(inputLine).not.toContainElement(screen.getByLabelText('Open filters drawer'));
+    expect(inputLine).not.toContainElement(screen.getByRole('button', { name: 'Reset all active filters' }));
+    expect(inputLine).not.toContainElement(screen.getByTestId('search-bar-total-count'));
+    // Stacked on phones, one row from the md breakpoint
+    expect(inputLine.parentElement!.className).toContain('flex-col');
+    expect(inputLine.parentElement!.className).toContain('md:flex-row');
+  });
+
+  it('shows the Reset label on phones too', async () => {
+    await renderBar({ query: 'disk' });
+    const reset = screen.getByRole('button', { name: 'Reset all active filters' });
+    expect(within(reset).getByText('Reset').className).not.toContain('hidden');
+  });
+
+  it('places the syntax help across the input, not off the edge of a narrow screen', async () => {
+    await renderBar({ query: 'disk' });
+    fireEvent.click(screen.getByRole('button', { name: 'Search syntax help' }));
+    const popover = screen.getByRole('dialog', { name: 'Search syntax' });
+    // Its containing block is the input's wrapper, so it spans the input on phones
+    expect(popover.className).toContain('inset-x-0');
+    expect(popover.parentElement!.className).toBe('');
+    expect(commonParent(popover, screen.getByLabelText('Search logs')).className).toContain('relative');
   });
 });

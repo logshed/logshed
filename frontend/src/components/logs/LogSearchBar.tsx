@@ -218,123 +218,127 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
   return (
     <div className="bg-dark-950 border-b border-dark-700 p-2.5 flex flex-col gap-2 select-none text-xs shrink-0">
-      {/* Top Row: Search Input & Primary Search Actions */}
-      <div className="flex items-center gap-2">
-        {/* FTS Search Input */}
-        <div className="relative flex-1 min-w-0">
-          <input
-            type="text"
-            value={filters.query || ''}
-            onChange={(e) => onFilterChange({ ...filters, query: e.target.value })}
-            onKeyDown={(e) => e.key === 'Enter' && onSearch()}
-            placeholder={SEARCH_PLACEHOLDER}
-            aria-label="Search logs"
-            className={`w-full bg-dark-900 border border-dark-700 rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
-          />
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
-          {/* Search syntax help, left of the clear button */}
-          <div
-            ref={helpRef}
-            onBlur={handleHelpBlur}
-            className={`absolute top-1.5 ${filters.query ? 'right-7' : 'right-2'}`}
-          >
-            <button
-              ref={helpButtonRef}
-              type="button"
-              onClick={() => setIsHelpOpen((prev) => !prev)}
-              className={`block transition cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-slate-500 hover:text-slate-300'}`}
-              title="Search syntax"
-              aria-label="Search syntax help"
-              aria-expanded={isHelpOpen}
-              aria-controls="search-syntax-help"
-            >
-              <CircleHelp className="w-3.5 h-3.5" />
-            </button>
-            {isHelpOpen && (
-              <div
-                id="search-syntax-help"
-                role="dialog"
-                aria-label="Search syntax"
-                tabIndex={-1}
-                className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-dark-900 border border-dark-700 rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-hidden"
+      {/* Top Row: Search Input & Primary Search Actions. On phones the input and the search
+          button get a line of their own, so the query stays readable while typing. */}
+      <div className="flex flex-col md:flex-row md:items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {/* FTS Search Input */}
+          <div className="relative flex-1 min-w-0">
+            <input
+              type="text"
+              value={filters.query || ''}
+              onChange={(e) => onFilterChange({ ...filters, query: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+              placeholder={SEARCH_PLACEHOLDER}
+              aria-label="Search logs"
+              enterKeyHint="search"
+              className={`w-full bg-dark-900 border border-dark-700 rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
+            />
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
+            {/* Search syntax help, left of the clear button. The wrapper is not positioned, so the
+                popover is placed against the input (full input width on phones), not the icon. */}
+            <div ref={helpRef} onBlur={handleHelpBlur}>
+              <button
+                ref={helpButtonRef}
+                type="button"
+                onClick={() => setIsHelpOpen((prev) => !prev)}
+                className={`absolute top-1.5 ${filters.query ? 'right-7' : 'right-2'} block transition cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-slate-500 hover:text-slate-300'}`}
+                title="Search syntax"
+                aria-label="Search syntax help"
+                aria-expanded={isHelpOpen}
+                aria-controls="search-syntax-help"
               >
-                <p className="font-semibold text-slate-200 mb-2">Search syntax</p>
-                <ul className="space-y-1.5">
-                  {SEARCH_SYNTAX_HELP.map((item) => (
-                    <li key={item.example} className="flex flex-col gap-0.5">
-                      <code className="font-mono text-accent-300">{item.example}</code>
-                      <span className="text-slate-400 leading-snug">{item.text}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                <CircleHelp className="w-3.5 h-3.5" />
+              </button>
+              {isHelpOpen && (
+                <div
+                  id="search-syntax-help"
+                  role="dialog"
+                  aria-label="Search syntax"
+                  tabIndex={-1}
+                  className="absolute inset-x-0 md:left-auto md:w-80 top-full mt-2 bg-dark-900 border border-dark-700 rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-hidden"
+                >
+                  <p className="font-semibold text-slate-200 mb-2">Search syntax</p>
+                  <ul className="space-y-1.5">
+                    {SEARCH_SYNTAX_HELP.map((item) => (
+                      <li key={item.example} className="flex flex-col gap-0.5">
+                        <code className="font-mono text-accent-300">{item.example}</code>
+                        <span className="text-slate-400 leading-snug">{item.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            {filters.query && (
+              <button
+                onClick={() => onFilterChange({ ...filters, query: '' })}
+                className="absolute right-2 top-1.5 text-slate-500 hover:text-slate-300"
+                title="Clear search query"
+                aria-label="Clear search query"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
-          {filters.query && (
-            <button
-              onClick={() => onFilterChange({ ...filters, query: '' })}
-              className="absolute right-2 top-1.5 text-slate-500 hover:text-slate-300"
-              title="Clear search query"
-              aria-label="Clear search query"
+
+          {/* Search now (filters already apply as they change; Enter does the same) */}
+          <button
+            type="button"
+            onClick={() => onSearch()}
+            title="Search now (Enter)"
+            aria-label="Search now"
+            className="flex items-center px-2.5 py-1.5 rounded bg-dark-900 border border-dark-700 text-slate-300 hover:text-white hover:border-slate-600 transition shrink-0 cursor-pointer"
+          >
+            <Search className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Second line on phones: filters drawer, match count and reset */}
+        <div className="flex items-center gap-2 md:contents">
+          {/* Mobile Filters Drawer Trigger Button */}
+          <button
+            onClick={() => setIsMobileDrawerOpen(true)}
+            className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-dark-900 border border-dark-700 text-slate-300 hover:text-white shrink-0 cursor-pointer"
+            title="Open filters drawer"
+            aria-label="Open filters drawer"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="bg-accent-600 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          {/* Capped or Matched Count Indicator */}
+          {hasActiveFilters && totalCount !== undefined && totalCount !== null && (
+            <span
+              className="text-slate-400 font-mono text-[11px] shrink-0"
+              data-testid="search-bar-total-count"
+              title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} logs matched`}
             >
-              <X className="w-3.5 h-3.5" />
+              {totalCapped ? '1,000+ logs' : `${totalCount.toLocaleString()} log${totalCount === 1 ? '' : 's'}`}
+            </span>
+          )}
+
+          {/* Conditional Prominent Reset Button with Active Filter Count Indicator */}
+          {hasActiveFilters && (
+            <button
+              onClick={handleResetFilters}
+              title="Reset all active filters"
+              aria-label="Reset all active filters"
+              className="bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-600/70 px-2.5 py-1.5 rounded flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0 ml-auto md:ml-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>Reset</span>
+              <span className="bg-amber-500/30 text-amber-200 border border-amber-500/50 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-bold leading-none">
+                {activeFilterCount}
+              </span>
             </button>
           )}
         </div>
-
-        {/* Mobile Filters Drawer Trigger Button */}
-        <button
-          onClick={() => setIsMobileDrawerOpen(true)}
-          className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-dark-900 border border-dark-700 text-slate-300 hover:text-white shrink-0 cursor-pointer"
-          title="Open filters drawer"
-          aria-label="Open filters drawer"
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" />
-          <span>Filters</span>
-          {activeFilterCount > 0 && (
-            <span className="bg-accent-600 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
-              {activeFilterCount}
-            </span>
-          )}
-        </button>
-
-        {/* Search now (filters already apply as they change; Enter does the same) */}
-        <button
-          type="button"
-          onClick={() => onSearch()}
-          title="Search now (Enter)"
-          aria-label="Search now"
-          className="flex items-center px-2.5 py-1.5 rounded bg-dark-900 border border-dark-700 text-slate-300 hover:text-white hover:border-slate-600 transition shrink-0 cursor-pointer"
-        >
-          <Search className="w-3.5 h-3.5" />
-        </button>
-
-        {/* Capped or Matched Count Indicator */}
-        {hasActiveFilters && totalCount !== undefined && totalCount !== null && (
-          <span
-            className="text-slate-400 font-mono text-[11px] shrink-0"
-            data-testid="search-bar-total-count"
-            title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} logs matched`}
-          >
-            {totalCapped ? '1,000+ logs' : `${totalCount.toLocaleString()} log${totalCount === 1 ? '' : 's'}`}
-          </span>
-        )}
-
-        {/* Conditional Prominent Reset Button with Active Filter Count Indicator */}
-        {hasActiveFilters && (
-          <button
-            onClick={handleResetFilters}
-            title="Reset all active filters"
-            aria-label="Reset all active filters"
-            className="bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-600/70 px-2.5 py-1.5 rounded flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Reset</span>
-            <span className="bg-amber-500/30 text-amber-200 border border-amber-500/50 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-bold leading-none">
-              {activeFilterCount}
-            </span>
-          </button>
-        )}
       </div>
 
       {/* Second Row: Desktop Cohesive Filter Dimension Row (hidden on mobile) */}
