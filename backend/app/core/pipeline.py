@@ -488,13 +488,31 @@ _CHAINED_EXCEPTION_PHRASES = (
 )
 
 
+_RE_TRACEBACK_EXCEPTION_LINE = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_.]*):(?:\s|$)")
+
+
+def _traceback_markers(text: str) -> tuple[bool, bool]:
+    """
+    What _continues_entry needs to know about the text buffered so far: whether it mentions
+    "traceback", and whether it holds a Python traceback header or frame (`File "`).
+    """
+    lower = text.lower()
+    return "traceback" in lower, "traceback (most recent call last):" in lower or 'file "' in lower
+
+
 def _is_continuation(line: str, buffered_text: Optional[str] = None) -> bool:
     """
     Checks if a line is a continuation line for multi-line logs.
     """
+    saw_traceback, saw_python_traceback = _traceback_markers(buffered_text) if buffered_text else (False, False)
+    return _continues_entry(line, saw_traceback, saw_python_traceback)
+
+
+def _continues_entry(line: str, saw_traceback: bool, saw_python_traceback: bool) -> bool:
+    """_is_continuation with the buffered text already reduced to its _traceback_markers."""
     if not line:
-        return bool(buffered_text and "traceback" in buffered_text.lower())
-        
+        return saw_traceback
+
     if line[0] in (' ', '\t'):
         return True
         
@@ -518,13 +536,11 @@ def _is_continuation(line: str, buffered_text: Optional[str] = None) -> bool:
     if _RE_PYTHON_EXCEPTION.match(stripped):
         return True
 
-    if buffered_text:
-        lower_buf = buffered_text.lower()
-        if "traceback (most recent call last):" in lower_buf or 'file "' in lower_buf:
-            m = re.match(r"^([a-zA-Z_][a-zA-Z0-9_.]*):(?:\s|$)", stripped)
-            if m and m.group(1).lower() not in SEVERITY_LEVEL_MAP:
-                return True
-        
+    if saw_python_traceback:
+        m = _RE_TRACEBACK_EXCEPTION_LINE.match(stripped)
+        if m and m.group(1).lower() not in SEVERITY_LEVEL_MAP:
+            return True
+
     return False
 
 MAX_STREAM_LINES = 500
@@ -562,6 +578,13 @@ class KeyedMultilineAssembler:
         self._stream_bytes: dict[str, int] = {}
         # Maps stream_key to the merged [message, raw] length in characters, joining newlines included
         self._stream_chars: dict[str, list[int]] = {}
+        # Maps stream_key to the _traceback_markers of its buffered messages, kept up to date line by line
+        self._stream_markers: dict[str, tuple[bool, bool]] = {}
+        # Maps stream_key to the loop time its flush timer is due; a later line moves it forward
+        self._flush_deadlines: dict[str, float] = {}
+        # Maps the part of each buffered stream key before its first ':' (a syslog stream's source IP)
+        # to those keys, in the order their buffers started
+        self._keys_by_head: dict[str, dict[str, None]] = {}
         self._flush_timeout = flush_timeout
         self.max_entry_chars = max_entry_chars
         self.max_stream_lines = max_stream_lines
@@ -576,6 +599,19 @@ class KeyedMultilineAssembler:
             return ""
         return "\n".join(e.get("message", "") for e in buffered)
 
+    def _buffered_markers(self, stream_key: str) -> tuple[bool, bool]:
+        markers = self._stream_markers.get(stream_key)
+        if markers is not None:
+            return markers
+        if self._buffers.get(stream_key):
+            # A buffer filled without feed()
+            return _traceback_markers(self.get_buffered_text(stream_key))
+        return False, False
+
+    def continues_stream(self, stream_key: str, line: str) -> bool:
+        """True when line continues the entry buffered for stream_key (as _is_continuation with its text)."""
+        return _continues_entry(line, *self._buffered_markers(stream_key))
+
     def get_stream_parent_entry(self, stream_key: str) -> Optional[dict]:
         """Returns the first (parent) entry for the active stream, if present."""
         buffered = self._buffers.get(stream_key)
@@ -588,9 +624,12 @@ class KeyedMultilineAssembler:
         Check if there is an active (unflushed) multiline buffer originating from source_ip.
         Prefers active named application streams over ':unknown' streams.
         """
+        prefix = f"{source_ip}:"
+        # An IPv6 address holds ':' itself, so its keys cannot be found by their head
+        keys = self._buffers if ":" in source_ip else self._keys_by_head.get(source_ip, ())
         named_candidates = [
-            k for k in self._buffers
-            if k.startswith(f"{source_ip}:") and not k.endswith(":unknown") and self._buffers[k]
+            k for k in keys
+            if k.startswith(prefix) and not k.endswith(":unknown") and self._buffers.get(k)
         ]
         if named_candidates:
             if len(named_candidates) == 1:
@@ -613,8 +652,7 @@ class KeyedMultilineAssembler:
         facility, severity, message, raw
         """
         message = entry.get('message', '')
-        buffered_text = self.get_buffered_text(stream_key)
-        is_cont = _is_continuation(message, buffered_text)
+        is_cont = self.continues_stream(stream_key, message)
 
         # If it's NOT a continuation, but we have buffered content for this stream,
         # we should flush the existing buffer before starting a new one.
@@ -654,6 +692,7 @@ class KeyedMultilineAssembler:
                     break
                 self._flush_stream_internal(oldest_key)
             self._buffers[stream_key] = []
+            self._keys_by_head.setdefault(stream_key.partition(":")[0], {})[stream_key] = None
             self._stream_start_times[stream_key] = now
             self._stream_bytes[stream_key] = 0
 
@@ -662,11 +701,18 @@ class KeyedMultilineAssembler:
         chars[0] += 1 + msg_chars
         chars[1] += 1 + raw_chars
 
-        # Calculate entry bytes
-        msg_bytes = len(message.encode("utf-8"))
+        # Calculate entry bytes (an ASCII string has one byte per character)
+        msg_bytes = len(message) if message.isascii() else len(message.encode("utf-8"))
         raw_str = entry.get("raw") or ""
-        raw_bytes = len(raw_str.encode("utf-8"))
+        raw_bytes = len(raw_str) if raw_str.isascii() else len(raw_str.encode("utf-8"))
         entry_bytes = max(msg_bytes, raw_bytes)
+
+        # Keep the markers of the buffered text current instead of joining it again for each line
+        markers = self._buffered_markers(stream_key)
+        if message and not all(markers):
+            line_markers = _traceback_markers(message)
+            markers = (markers[0] or line_markers[0], markers[1] or line_markers[1])
+        self._stream_markers[stream_key] = markers
 
         # Add to buffer
         self._buffers[stream_key].append(entry)
@@ -680,10 +726,7 @@ class KeyedMultilineAssembler:
             self._flush_stream_internal(stream_key)
             return
 
-        # Reset timer
-        if stream_key in self._timers:
-            self._timers[stream_key].cancel()
-
+        # Move the flush deadline
         elapsed = now - self._stream_start_times.get(stream_key, now)
         remaining_lifetime = self.max_stream_lifetime - elapsed
         timeout = min(self._flush_timeout, max(0.0, remaining_lifetime))
@@ -693,11 +736,25 @@ class KeyedMultilineAssembler:
             return
 
         loop = asyncio.get_running_loop()
-        self._timers[stream_key] = loop.call_later(
-            timeout,
-            self._flush_stream_internal,
-            stream_key
-        )
+        deadline = loop.time() + timeout
+        self._flush_deadlines[stream_key] = deadline
+        # Deadlines only move later, so a running timer is kept and waits out the rest when it fires
+        timer = self._timers.get(stream_key)
+        if timer is None or timer.when() > deadline:
+            if timer is not None:
+                timer.cancel()
+            self._timers[stream_key] = loop.call_at(deadline, self._on_flush_timer, stream_key)
+
+    def _on_flush_timer(self, stream_key: str) -> None:
+        """Flush a stream once its latest deadline has passed, or wait again until it does."""
+        deadline = self._flush_deadlines.get(stream_key)
+        if deadline is not None:
+            loop = asyncio.get_running_loop()
+            # A deadline less than a millisecond away counts as reached, so the timer is not set again for it
+            if deadline - loop.time() > 0.001:
+                self._timers[stream_key] = loop.call_at(deadline, self._on_flush_timer, stream_key)
+                return
+        self._flush_stream_internal(stream_key)
 
     def flush_stream(self, stream_key: str) -> None:
         """Immediately flush the buffered multiline entry for stream_key into the shared queue."""
@@ -715,6 +772,14 @@ class KeyedMultilineAssembler:
         self._stream_start_times.pop(stream_key, None)
         self._stream_bytes.pop(stream_key, None)
         self._stream_chars.pop(stream_key, None)
+        self._stream_markers.pop(stream_key, None)
+        self._flush_deadlines.pop(stream_key, None)
+        head = stream_key.partition(":")[0]
+        head_keys = self._keys_by_head.get(head)
+        if head_keys is not None:
+            head_keys.pop(stream_key, None)
+            if not head_keys:
+                del self._keys_by_head[head]
 
         buffered = self._buffers.pop(stream_key, None)
         if not buffered:

@@ -1086,6 +1086,88 @@ class TestKeyedMultilineAssemblerLimits:
         item = q.get_nowait()
         assert "Traceback (most recent call last):" in item["message"]
 
+    @pytest.mark.asyncio
+    async def test_continuation_check_matches_the_joined_buffer_text(self):
+        """The markers kept line by line decide like _is_continuation with the whole buffered text."""
+        import random
+
+        rng = random.Random(3)
+        lines = [
+            "Traceback (most recent call last):", '  File "/app/x.py", line 3, in run', "    run()",
+            "ValueError: bad", "KeyError: 'x'", "requests.exceptions.ConnectionError: refused", "error: disk",
+            "plain message", "", "TRACEBACK follows", 'see FILE "notes"', "During handling of the above exception",
+            "Caused by: java.io.IOException", "goroutine 7 [running]:", "custom.Thing: detail",
+        ]
+        asm = KeyedMultilineAssembler(flush_timeout=10.0)
+        q = get_queue()
+        for _ in range(400):
+            key = rng.choice(["10.0.0.1:app", "10.0.0.1:other", "10.0.0.2:app"])
+            text = asm.get_buffered_text(key)
+            for probe in lines:
+                assert asm.continues_stream(key, probe) == _is_continuation(probe, text), (key, probe, text)
+            await asm.feed(key, _make_entry(message=rng.choice(lines)))
+        await asm.flush_all()
+        while not q.empty():
+            q.get_nowait()
+
+    @pytest.mark.asyncio
+    async def test_active_stream_for_source_matches_a_scan_of_every_key(self):
+        """Looking keys up by source gives what scanning every buffered key gives, IPv6 included."""
+
+        def scan(asm, source_ip):
+            named = [k for k in asm._buffers if k.startswith(f"{source_ip}:") and not k.endswith(":unknown") and asm._buffers[k]]
+            if named:
+                return named[0] if len(named) == 1 else max(named, key=lambda k: asm._buffers[k][-1].get("received_at", ""))
+            return f"{source_ip}:unknown" if asm._buffers.get(f"{source_ip}:unknown") else None
+
+        asm = KeyedMultilineAssembler(flush_timeout=10.0)
+        q = get_queue()
+        keys = [
+            ("10.0.0.1:nginx", "2026-01-01T00:00:01"), ("10.0.0.1:unknown", "2026-01-01T00:00:02"),
+            ("10.0.0.10:nginx", "2026-01-01T00:00:03"), ("10.0.0.1:sshd", "2026-01-01T00:00:01"),
+            ("fe80::1:app", "2026-01-01T00:00:04"), ("fe80::1:5:app", "2026-01-01T00:00:05"),
+            ("docker:1:abc", "2026-01-01T00:00:06"), ("10.0.0.2:unknown", "2026-01-01T00:00:07"),
+        ]
+        sources = ["10.0.0.1", "10.0.0.10", "10.0.0.2", "10.0.0.3", "fe80::1", "fe80::1:5", "docker"]
+        for key, received in keys:
+            await asm.feed(key, _make_entry(message="  continued", received_at=received))
+            for source in sources:
+                assert asm.get_active_stream_key_for_source(source) == scan(asm, source), (key, source)
+        for key, _ in keys:
+            asm.flush_stream(key)
+            for source in sources:
+                assert asm.get_active_stream_key_for_source(source) == scan(asm, source), (key, source)
+        assert asm._keys_by_head == {}
+        while not q.empty():
+            q.get_nowait()
+
+    @pytest.mark.asyncio
+    async def test_each_line_moves_the_flush_deadline(self):
+        """A stream flushes flush_timeout after its last line, however many lines came before."""
+        asm = KeyedMultilineAssembler(flush_timeout=0.06)
+        q = get_queue()
+        await asm.feed("s1:app", _make_entry(message="Traceback (most recent call last):"))
+        for line in ("  File a", "  File b", "  File c"):
+            await asyncio.sleep(0.03)
+            await asm.feed("s1:app", _make_entry(message=line))
+        # 0.09 s after the first line, 0.03 s after the last: still open
+        await asyncio.sleep(0.03)
+        assert q.empty()
+        await asyncio.sleep(0.06)
+        assert q.get_nowait()["message"].count("\n") == 3
+        assert asm._timers == {} and asm._flush_deadlines == {}
+
+    @pytest.mark.asyncio
+    async def test_byte_limit_counts_utf8_bytes_of_non_ascii_text(self):
+        asm = KeyedMultilineAssembler(flush_timeout=10.0, max_stream_bytes=100)
+        q = get_queue()
+        await asm.feed("s1:app", _make_entry(message="Traceback " + "\u00e9" * 30))
+        assert q.empty()
+        # 60 bytes per line in UTF-8 (30 characters): the second line reaches the limit
+        await asm.feed("s1:app", _make_entry(message="  " + "\u00e9" * 30))
+        assert not q.empty()
+        q.get_nowait()
+
 
 class TestQueueConsumerPersistentConnection:
     """Unit tests for persistent SQLite connection reuse in QueueConsumer."""

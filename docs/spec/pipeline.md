@@ -58,6 +58,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
   - A **150ms per-stream timeout** window expiring without new continuation fragments.
   - Receipt of a new RFC-compliant timestamped header for that stream key.
 - **Entry Size Limit (64 KB):** A merged entry never exceeds 65,536 characters in `message` or `raw` (joining newlines included). A continuation line that would push either past the limit ends the current entry and starts the next one on the same stream key, so later continuation lines keep following it. No lines are lost, and the later parts keep the stream and the most severe level seen so far.
+- **Cost per Line:** Each stream keeps what the continuation checks need from its buffered text (whether it mentions a traceback, and whether it holds a Python traceback header or `File "` frame) and updates it as lines arrive, so a line costs the same at the end of a 500-line traceback as at its start. Buffered syslog streams are indexed by source IP for the lookup of an app-less line's stream (IPv6 sources still scan every stream). Byte counts use the character count for ASCII text and the UTF-8 length otherwise, and the 150 ms timer of a stream is moved forward rather than replaced for each line.
 
 ---
 

@@ -28,6 +28,10 @@ from app.services.drop_filter import init_drop_filter
 pytestmark = pytest.mark.benchmark
 
 MESSAGE_COUNT = 20000
+# Python tracebacks of LONG_TRACEBACK_LINES lines from one app, each line its own TCP frame (one joins
+# the next, as a new traceback continues the entry before it, up to the 500-line limit)
+LONG_TRACEBACKS = 40
+LONG_TRACEBACK_LINES = 400
 HOSTS = ["edge-gw-01", "k8s-worker-01", "db-primary", "nas-storage-01"]
 APPS = [("nginx", 134), ("sshd", 131), ("kernel", 132), ("dockerd", 134), ("postgres", 133), ("valkey", 134)]
 SINGLE_LINES = [
@@ -86,6 +90,18 @@ def _make_messages() -> list[str]:
     return messages
 
 
+def _make_long_tracebacks() -> list[bytes]:
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%b %d %H:%M:%S")
+    lines = []
+    for n in range(LONG_TRACEBACKS):
+        lines.append(f"<131>{now} k8s-worker-01 worker[{1000 + n}]: Traceback (most recent call last):".encode())
+        for depth in range((LONG_TRACEBACK_LINES - 2) // 2):
+            lines.append(f'  File "/app/jobs/step_{depth}.py", line {depth + 10}, in run_{depth}'.encode())
+            lines.append(f"    result = step_{depth + 1}(payload, attempt={n})".encode())
+        lines.append(b"RecursionError: maximum recursion depth exceeded")
+    return lines
+
+
 async def _dispatch_all(frames: list[bytes], alias_cache: AliasCache) -> tuple[float, int]:
     """Seconds to dispatch every frame from one source, and the number of entries queued."""
     assembler = KeyedMultilineAssembler()
@@ -112,16 +128,17 @@ def test_syslog_receive_throughput(tmp_path: Path, monkeypatch):
     messages = _make_messages()
     datagrams = [m.encode() for m in messages]
     tcp_lines = [line.encode() for m in messages for line in m.split("\n")]
+    long_lines = _make_long_tracebacks()
 
     start = time.perf_counter()
     for datagram in datagrams:
         parse_syslog_message(datagram, "172.22.2.10")
     parse_seconds = time.perf_counter() - start
 
-    async def _run() -> tuple[tuple[float, int], tuple[float, int]]:
-        return await _dispatch_all(datagrams, alias_cache), await _dispatch_all(tcp_lines, alias_cache)
+    async def _run() -> list[tuple[float, int]]:
+        return [await _dispatch_all(frames, alias_cache) for frames in (datagrams, tcp_lines, long_lines)]
 
-    (udp_seconds, udp_queued), (tcp_seconds, tcp_queued) = asyncio.run(_run())
+    (udp_seconds, udp_queued), (tcp_seconds, tcp_queued), (long_seconds, long_queued) = asyncio.run(_run())
     monkeypatch.setattr(pipeline_mod, "_log_queue", None)
 
     print(
@@ -131,8 +148,11 @@ def test_syslog_receive_throughput(tmp_path: Path, monkeypatch):
         f"  UDP dispatch   : {len(datagrams):,} datagrams in {udp_seconds * 1000:.0f} ms "
         f"({len(datagrams) / udp_seconds:,.0f} messages/s), {udp_queued:,} entries\n"
         f"  TCP dispatch   : {len(tcp_lines):,} lines in {tcp_seconds * 1000:.0f} ms "
-        f"({len(tcp_lines) / tcp_seconds:,.0f} lines/s), {tcp_queued:,} entries"
+        f"({len(tcp_lines) / tcp_seconds:,.0f} lines/s), {tcp_queued:,} entries\n"
+        f"  TCP tracebacks : {len(long_lines):,} lines in {long_seconds * 1000:.0f} ms "
+        f"({len(long_lines) / long_seconds:,.0f} lines/s), {long_queued:,} entries"
     )
     # An exception line counts as a continuation, so it can join the entry before it
     assert 0 < tcp_queued <= len(messages)
     assert 0 < udp_queued <= len(messages)
+    assert long_queued > 0

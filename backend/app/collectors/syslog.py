@@ -24,7 +24,6 @@ from app.core.pipeline import (
     KeyedMultilineAssembler,
     detect_severity,
     SEVERITY_LEVEL_MAP,
-    _is_continuation,
     _RE_PYTHON_EXCEPTION,
 )
 from app.core.utils import load_docker_source_aliases
@@ -772,12 +771,12 @@ async def dispatch_syslog_message(
         ):
             active_key = assembler.get_active_stream_key_for_source(source_ip)
             if active_key:
-                buf_text = assembler.get_buffered_text(active_key)
                 check_text = parsed.get("message", "")
                 raw_text = parsed.get("raw", "")
-                if _is_continuation(check_text, buf_text) or _is_continuation(raw_text, buf_text):
+                message_continues = assembler.continues_stream(active_key, check_text)
+                if message_continues or assembler.continues_stream(active_key, raw_text):
                     stream_key = active_key
-                    if not _is_continuation(check_text, buf_text) and _is_continuation(raw_text, buf_text):
+                    if not message_continues:
                         parsed["message"] = raw_text
                     parent = assembler.get_stream_parent_entry(active_key)
                     if parent:
