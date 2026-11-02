@@ -126,6 +126,11 @@ class StorageMetricsWorker:
     """
     Async background worker that samples storage metrics hourly and on manual trigger.
     """
+    # Seconds between samples, and the wait after an error (doubling up to the maximum)
+    SAMPLE_INTERVAL = 3600.0
+    ERROR_BACKOFF = 5.0
+    ERROR_BACKOFF_MAX = 300.0
+
     def __init__(self, db_path: str | Path):
         self._db_path = Path(db_path)
         self._running = False
@@ -137,15 +142,15 @@ class StorageMetricsWorker:
         """Main loop: sample hourly, with exponential backoff on errors."""
         self._running = True
         logger.info("StorageMetricsWorker started.")
-        backoff = 5.0
+        backoff = self.ERROR_BACKOFF
         loop = asyncio.get_running_loop()
         
         while self._running:
             try:
                 # Record metrics
                 await asyncio.to_thread(record_metrics, self._db_path)
-                self._next_sample_time = loop.time() + 3600.0
-                backoff = 5.0
+                self._next_sample_time = loop.time() + self.SAMPLE_INTERVAL
+                backoff = self.ERROR_BACKOFF
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -154,7 +159,7 @@ class StorageMetricsWorker:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=backoff)
                     break
                 except asyncio.TimeoutError:
-                    backoff = min(backoff * 2.0, 300.0)
+                    backoff = min(backoff * 2.0, self.ERROR_BACKOFF_MAX)
                     continue
             
             # Wait until next scheduled sample time or stop signal
@@ -163,7 +168,7 @@ class StorageMetricsWorker:
                 if delay <= 0:
                     break
                 try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=min(delay, 3600.0))
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=min(delay, self.SAMPLE_INTERVAL))
                     # Stop event was signaled
                     break
                 except asyncio.TimeoutError:
@@ -182,7 +187,7 @@ class StorageMetricsWorker:
         metrics = await asyncio.to_thread(record_metrics, self._db_path)
         try:
             loop = asyncio.get_running_loop()
-            self._next_sample_time = loop.time() + 3600.0
+            self._next_sample_time = loop.time() + self.SAMPLE_INTERVAL
         except RuntimeError:
             pass
         return metrics

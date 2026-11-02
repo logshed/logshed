@@ -397,6 +397,10 @@ class DailyDigestWorker:
     Evaluates periodically whether 24 hours have elapsed since the last run
     when daily digest is enabled and active notification targets exist.
     """
+    # Seconds between schedule checks, and the wait after an error (doubling up to the maximum)
+    CHECK_INTERVAL = 30.0
+    ERROR_BACKOFF = 5.0
+    ERROR_BACKOFF_MAX = 3600.0
 
     def __init__(self, db_path: Union[str, Path]):
         self._db_path = Path(db_path)
@@ -414,7 +418,7 @@ class DailyDigestWorker:
         """Main loop: check hourly or on trigger for daily digest execution."""
         self._running = True
         logger.info("DailyDigestWorker started.")
-        backoff = 5.0
+        backoff = self.ERROR_BACKOFF
 
         while self._running:
             try:
@@ -429,7 +433,7 @@ class DailyDigestWorker:
 
                 if should_run:
                     await run_daily_digest(self._db_path, force=triggered_manually)
-                    backoff = 5.0
+                    backoff = self.ERROR_BACKOFF
 
             except asyncio.CancelledError:
                 break
@@ -439,16 +443,16 @@ class DailyDigestWorker:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=backoff)
                     break
                 except asyncio.TimeoutError:
-                    backoff = min(backoff * 2.0, 3600.0)
+                    backoff = min(backoff * 2.0, self.ERROR_BACKOFF_MAX)
                     continue
 
             if not self._running:
                 break
 
-            # Check every 30 seconds or wake on stop/manual trigger
+            # Check every CHECK_INTERVAL seconds or wake on stop/manual trigger
             self._wake_event.clear()
             try:
-                await asyncio.wait_for(self._wake_event.wait(), timeout=30.0)
+                await asyncio.wait_for(self._wake_event.wait(), timeout=self.CHECK_INTERVAL)
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
@@ -530,8 +534,9 @@ class DailyDigestWorker:
             conn.close()
 
     async def stop(self) -> None:
-        """Signal graceful shutdown."""
+        """Signal graceful shutdown, ending the wait for the next schedule check."""
         self._running = False
         self._stop_event.set()
+        self._wake_event.set()
         self._wake_event.set()
         logger.info("DailyDigestWorker stopping.")

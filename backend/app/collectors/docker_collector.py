@@ -1344,7 +1344,12 @@ class DockerTailer:
                     f"Docker connection error at {target_desc} ({self.name}): {e}. Reconnecting in {backoff:.0f}s..."
                 )
                 await self._cleanup_tailers()
-                await asyncio.sleep(backoff)
+                # Wait before reconnecting, but end at once when stop() is called
+                try:
+                    await asyncio.wait_for(self._cancel_event.wait(), timeout=backoff)
+                    break
+                except asyncio.TimeoutError:
+                    pass
                 backoff = min(backoff * _BACKOFF_FACTOR, _MAX_BACKOFF)
 
     async def stop(self) -> None:
