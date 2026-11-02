@@ -1,6 +1,12 @@
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Navbar, getMaintenanceBannerText, LOOP_LAG_WARNING_MS } from '../components/common/Navbar.tsx';
+import {
+  Navbar,
+  getMaintenanceBannerText,
+  getNearLimitTooltip,
+  LOOP_LAG_WARNING_MS,
+  QUEUE_WARNING_DEPTH,
+} from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
 import * as alertsApi from '../api/alerts.ts';
 
@@ -613,6 +619,93 @@ describe('Navbar event loop lag', () => {
       expect(screen.queryByTestId('health-near-limit')).toBeNull();
       await advancePolls(1);
       expect(await screen.findByTestId('health-near-limit')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Navbar full queue warning', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+  });
+
+  const health = (queueDepth: number, droppedLogs: number, p95 = 5) => ({
+    status: 'ok',
+    db: 'ok',
+    queue_depth: queueDepth,
+    dropped_logs: droppedLogs,
+    ingest_rate: 1.0,
+    loop_lag_ms: 1,
+    loop_lag_p95_ms: p95,
+    loop_lag_max_ms: 20,
+  });
+
+  const advancePolls = async (count: number) => {
+    for (let i = 0; i < count; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+    }
+  };
+
+  it('shows the dot when the queue stays at least half full for 30 s, and clears it when the queue drains', async () => {
+    const fetchSpy = vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(health(QUEUE_WARNING_DEPTH, 0));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+      await screen.findByText('1.0 logs/s');
+      await advancePolls(2);
+      expect(screen.queryByTestId('health-near-limit')).toBeNull();
+
+      await advancePolls(1);
+      const dot = await screen.findByTestId('health-near-limit');
+      expect(dot.getAttribute('title')).toBe(getNearLimitTooltip('queue'));
+      expect(dot.getAttribute('title')).toContain('ingestion queue has held at least 5,000 logs');
+
+      fetchSpy.mockResolvedValue(health(QUEUE_WARNING_DEPTH - 1, 0));
+      await advancePolls(1);
+      await waitFor(() => expect(screen.queryByTestId('health-near-limit')).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the dot when Lost keeps growing although the queue looks short, and not for a Lost count that stays put', async () => {
+    let dropped = 100;
+    const fetchSpy = vi.spyOn(systemApi, 'fetchHealth').mockImplementation(async () => health(10, dropped));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+      await screen.findByText('1.0 logs/s');
+      await advancePolls(5);
+      expect(screen.queryByTestId('health-near-limit')).toBeNull();
+
+      fetchSpy.mockImplementation(async () => {
+        dropped += 500;
+        return health(10, dropped);
+      });
+      await advancePolls(3);
+      expect(screen.queryByTestId('health-near-limit')).toBeNull();
+      await advancePolls(1);
+      expect(await screen.findByTestId('health-near-limit')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('names both causes when the loop lag and the queue are both high', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(health(10000, 0, LOOP_LAG_WARNING_MS));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+      await screen.findByText('1.0 logs/s');
+      await advancePolls(3);
+      const dot = await screen.findByTestId('health-near-limit');
+      expect(dot.getAttribute('title')).toBe(getNearLimitTooltip('both'));
+      expect(dot.getAttribute('title')).toContain('event loop has been running');
+      expect(dot.getAttribute('title')).toContain('ingestion queue has held');
     } finally {
       vi.useRealTimers();
     }

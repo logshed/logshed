@@ -1,4 +1,4 @@
-"""The frontend's copies of backend field limits and token scopes match the backend."""
+"""The frontend's copies of backend field limits, token scopes and the queue size match the backend."""
 
 import re
 from pathlib import Path
@@ -76,3 +76,11 @@ def test_frontend_scope_catalog_lists_the_backend_scopes():
     text = (FRONTEND_SRC / "components" / "settings" / "tokenScopes.ts").read_text(encoding="utf-8")
     catalog = text.split("export const SCOPE_CATALOG", 1)[1].split("];", 1)[0]
     assert set(re.findall(r"scope: '([a-z]+:[a-z]+)'", catalog)) == set(KNOWN_SCOPES)
+
+
+def test_navbar_queue_warning_is_half_the_ingestion_queue():
+    from app.core.pipeline import _QUEUE_MAXSIZE
+
+    text = (FRONTEND_SRC / "components" / "common" / "Navbar.tsx").read_text(encoding="utf-8")
+    depth = int(re.search(r"export const QUEUE_WARNING_DEPTH = (\d+);", text).group(1))
+    assert depth == _QUEUE_MAXSIZE // 2

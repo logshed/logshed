@@ -44,9 +44,22 @@ export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse,
   return `Maintenance window active - alerts silenced until ${untilFormatted}`;
 };
 
-// The health dot turns amber once the 95th percentile loop lag stays at or above this for this long
+// The health dot turns amber once, on every poll for NEAR_LIMIT_DURATION_MS, the 95th percentile loop lag
+// is at or above LOOP_LAG_WARNING_MS, or the ingestion queue holds at least QUEUE_WARNING_DEPTH logs (half
+// of the server's 10,000) or Lost has grown since the previous poll
 export const LOOP_LAG_WARNING_MS = 50;
-export const LOOP_LAG_WARNING_DURATION_MS = 30000;
+export const QUEUE_WARNING_DEPTH = 5000;
+export const NEAR_LIMIT_DURATION_MS = 30000;
+
+export type NearLimitReason = 'loop' | 'queue' | 'both';
+
+export const getNearLimitTooltip = (reason: NearLimitReason): string => {
+  const seconds = NEAR_LIMIT_DURATION_MS / 1000;
+  const loop = `its event loop has been running at least ${LOOP_LAG_WARNING_MS} ms late (95th percentile) for ${seconds} seconds, so syslog may be read late and UDP messages lost`;
+  const queue = `its ingestion queue has held at least ${QUEUE_WARNING_DEPTH.toLocaleString('en-US')} logs, or lost logs because it was full, for ${seconds} seconds, so logs arrive faster than they can be stored`;
+  const cause = reason === 'loop' ? loop : reason === 'queue' ? queue : `${loop}, and ${queue}`;
+  return `LogShed is near its processing limit: ${cause}. Reduce the log volume or the number of rules, drop noisy logs with drop rules, or send over TCP.`;
+};
 
 export const getRateTooltip = (health: HealthResponse): string => {
   if (typeof health.loop_lag_p95_ms !== 'number') return 'Ingestion Rate';
@@ -69,8 +82,10 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { logout } = useAuth();
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [nearLimit, setNearLimit] = useState(false);
+  const [nearLimit, setNearLimit] = useState<NearLimitReason | null>(null);
   const lagHighSince = useRef<number | null>(null);
+  const queueHighSince = useRef<number | null>(null);
+  const lastDroppedLogs = useRef<number | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse | null>(null);
   const [migrationBannerDismissed, setMigrationBannerDismissed] = useState(false);
@@ -81,19 +96,25 @@ export const Navbar: React.FC<NavbarProps> = ({
     try {
       const res = await fetchHealth();
       setHealth(res);
+      const now = Date.now();
       const p95 = res.loop_lag_p95_ms;
-      if (typeof p95 === 'number' && p95 >= LOOP_LAG_WARNING_MS) {
-        const now = Date.now();
-        if (lagHighSince.current === null) lagHighSince.current = now;
-        setNearLimit(now - lagHighSince.current >= LOOP_LAG_WARNING_DURATION_MS);
-      } else {
-        lagHighSince.current = null;
-        setNearLimit(false);
-      }
+      const lagHigh = typeof p95 === 'number' && p95 >= LOOP_LAG_WARNING_MS;
+      const dropped = res.dropped_logs ?? 0;
+      const losing = lastDroppedLogs.current !== null && dropped > lastDroppedLogs.current;
+      lastDroppedLogs.current = dropped;
+      const queueHigh = (res.queue_depth ?? 0) >= QUEUE_WARNING_DEPTH || losing;
+      lagHighSince.current = lagHigh ? (lagHighSince.current ?? now) : null;
+      queueHighSince.current = queueHigh ? (queueHighSince.current ?? now) : null;
+      const held = (since: number | null) => since !== null && now - since >= NEAR_LIMIT_DURATION_MS;
+      const lagHeld = held(lagHighSince.current);
+      const queueHeld = held(queueHighSince.current);
+      setNearLimit(lagHeld && queueHeld ? 'both' : lagHeld ? 'loop' : queueHeld ? 'queue' : null);
     } catch {
       setHealth({ status: 'degraded' });
       lagHighSince.current = null;
-      setNearLimit(false);
+      queueHighSince.current = null;
+      lastDroppedLogs.current = null;
+      setNearLimit(null);
     }
   };
 
@@ -188,7 +209,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span
                   role="img"
                   aria-label="Near processing limit"
-                  title={`LogShed is near its processing limit: its event loop has been running at least ${LOOP_LAG_WARNING_MS} ms late (95th percentile) for ${LOOP_LAG_WARNING_DURATION_MS / 1000} seconds, so syslog may be read late and UDP messages lost. Reduce the log volume or the number of rules, or send over TCP.`}
+                  title={getNearLimitTooltip(nearLimit)}
                   data-testid="health-near-limit"
                   className="inline-block w-2 h-2 rounded-full bg-amber-400"
                 />
