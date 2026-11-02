@@ -145,7 +145,8 @@ class ApiTokenRateLimiter(SlidingWindowLimiter):
         window = self._prune(key, now)
         used = len(window) if window else 0
         oldest = window[0] if window else now
-        reset_seconds = max(1, math.ceil(oldest + self.window_seconds - now))
+        # window minus the elapsed time: "oldest + window - now" can round to just above the window
+        reset_seconds = max(1, math.ceil(self.window_seconds - (now - oldest)))
         if used >= self.max_requests:
             return RateLimitStatus(self.max_requests, 0, reset_seconds, False)
         self._append(key, now)

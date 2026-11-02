@@ -258,3 +258,11 @@ class TestRetryAfter:
         assert limiter.begin("ip") is not None
         assert limiter.begin("ip") is None
         assert limiter.retry_after("ip") == 1
+
+    def test_a_single_event_waits_exactly_the_window_whatever_the_clock_reads(self):
+        # now + 60 - now is not always 60.0 in floating point, which once gave 61
+        for i in range(1000):
+            clock = FakeClock(1000.0 + i * 0.37)
+            limiter = SlidingWindowLimiter(1, 60.0, clock=clock)
+            limiter.record("k")
+            assert limiter.retry_after("k") == 60, clock.now

@@ -137,6 +137,15 @@ class TestApiTokenUnit:
         # Empty requirement allows any token
         assert has_scope_permission(scopes, []) is True
 
+    def test_rate_limit_reset_of_a_first_request_is_the_window_whatever_the_clock_reads(self):
+        """X-RateLimit-Reset of a token's first request is 60, never 61 from floating point rounding."""
+        from app.core.api_tokens import ApiTokenRateLimiter
+
+        for start in [1000.0 + i * 0.37 for i in range(500)] + [1782254706.0 + i * 0.37 for i in range(500)]:
+            limiter = ApiTokenRateLimiter(max_requests=3, window_seconds=60.0, clock=lambda: start)
+            assert limiter.check_request("token_1").reset_seconds == 60, start
+            assert limiter.check_request("token_1").reset_seconds == 60, start
+
     def test_rate_limiter_status_remaining_and_reset(self):
         """check_request reports remaining quota and the wait until the oldest request leaves the window."""
         from app.core.api_tokens import ApiTokenRateLimiter

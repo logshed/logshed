@@ -95,7 +95,8 @@ class SlidingWindowLimiter:
         window = self._prune(key, now)
         if not window:
             return 1
-        return max(1, math.ceil(window[0] + self.window_seconds - now))
+        # window minus the elapsed time: "oldest + window - now" can round to just above the window
+        return max(1, math.ceil(self.window_seconds - (now - window[0])))
 
     def is_rate_limited(self, key: str) -> bool:
         return self.count(key) >= self.max_requests
