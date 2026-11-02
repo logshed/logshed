@@ -194,3 +194,33 @@ def test_rule_matching_throughput(tmp_path: Path):
         f"longest event loop pause {longest_pause * 1000:.0f} ms"
     )
     assert 0 < len(kept) < len(entries)
+
+
+def test_broad_rate_rule_throughput(tmp_path: Path):
+    """One rate rule that every log matches (as the log storm preset does), set high enough never to fire."""
+    db_file = tmp_path / "logs.db"
+    run_migrations(db_file)
+    conn = get_connection(db_file)
+    conn.execute(
+        "INSERT INTO alert_rules (name, rule_type, threshold_count, window_seconds, cooldown_seconds, is_enabled, "
+        "display_order, created_at) VALUES ('Storm', 'rate', 100000, 60, 300, 1, 1, ?)",
+        (datetime.datetime.now(datetime.timezone.utc).isoformat(),),
+    )
+    conn.commit()
+    conn.close()
+    entries = _make_entries()
+    evaluator = AlertEvaluator(db_file)
+
+    async def _evaluate() -> float:
+        begin = time.perf_counter()
+        for offset in range(0, len(entries), FULL_BATCH_SIZE):
+            await evaluator.evaluate_batch(entries[offset:offset + FULL_BATCH_SIZE])
+        return time.perf_counter() - begin
+
+    seconds = asyncio.run(_evaluate())
+    print(
+        f"\nBroad rate rule benchmark:\n"
+        f"  rate rule   : {len(entries):,} entries in batches of {FULL_BATCH_SIZE:,} in {seconds * 1000:.0f} ms "
+        f"({len(entries) / seconds:,.0f} entries/s)"
+    )
+    assert evaluator._rules[0].trigger_count == 0

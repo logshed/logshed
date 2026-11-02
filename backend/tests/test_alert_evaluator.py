@@ -1849,7 +1849,7 @@ class TestAlertEvaluatorWindowPruningAndLightweightRecords:
 
         window = evaluator._windows[rule_id]
         assert len(window) == 1
-        stored_ts, stored_entry = window[0]
+        stored_entry = window.samples[0]
         assert isinstance(stored_entry, dict)
         assert "arbitrary_heavy_metadata" not in stored_entry
         assert "raw" not in stored_entry
@@ -2418,3 +2418,173 @@ class TestAlertAiContextRedactionOffLoop:
         assert observed["batch_size"] == 2
         assert observed["on_event_loop_thread"] is False
         assert captured["prompt_override"] == baseline_prompt
+
+
+class TestRateRuleCountsInsteadOfStoring:
+    """Rate rules count their matches, so any threshold and window the form allows can fire."""
+
+    @pytest.fixture
+    def test_db(self, tmp_path: Path):
+        db_path = tmp_path / "test_rate_counts.db"
+        run_migrations(db_path)
+        return db_path
+
+    @staticmethod
+    def _insert_rate_rule(db_file: Path, threshold: int, window: int) -> int:
+        conn = get_connection(db_file)
+        cur = conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES ('Busy Storm', 'rate', ?, ?, 300, 0, 1, ?)
+            """,
+            (threshold, window, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        rule_id = cur.lastrowid
+        conn.close()
+        return rule_id
+
+    @staticmethod
+    def _storm(count: int, start: datetime, spread_seconds: float) -> list[dict]:
+        """count logs spread evenly from start: 60% storm-app, 75% from edge-01, storm-app always the same text."""
+        logs = []
+        for i in range(count):
+            storm = i % 5 < 3
+            logs.append({
+                "id": i + 1,
+                "app_name": "storm-app" if storm else "quiet-app",
+                "source_alias": "edge-02" if i % 4 == 0 else "edge-01",
+                "message": "connection pool exhausted" if storm else f"tick {i}",
+                "raw": "R" * 2000,
+                "timestamp": (start + timedelta(seconds=i * spread_seconds / count)).isoformat(),
+            })
+        return logs
+
+    @staticmethod
+    async def _feed(evaluator: AlertEvaluator, logs: list[dict]) -> None:
+        for offset in range(0, len(logs), 5000):
+            await evaluator.evaluate_batch(logs[offset:offset + 5000])
+
+    @pytest.mark.asyncio
+    async def test_rule_needing_more_than_twenty_thousand_matches_fires_with_its_culprits(self, test_db: Path, monkeypatch):
+        rule_id = self._insert_rate_rule(test_db, threshold=100, window=300)
+        notifications = []
+
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            notifications.append({"title": title, "body": body})
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        logs = self._storm(30000, datetime.now(timezone.utc) - timedelta(seconds=290), 289.0)
+
+        await self._feed(evaluator, logs[:-1])
+        await evaluator.stop()
+        assert notifications == []
+
+        await self._feed(evaluator, logs[-1:])
+        await evaluator.stop()
+
+        conn = get_connection(test_db)
+        rows = conn.execute(
+            "SELECT trigger_count, incident_summary, sample_log, sample_log_id FROM alert_history WHERE rule_id = ?",
+            (rule_id,),
+        ).fetchall()
+        conn.close()
+        assert len(rows) == 1
+        trigger_count, summary, sample_log, sample_log_id = rows[0]
+        assert trigger_count == 30000
+        assert "30000 logs in 300s (100.0 logs/s)" in summary
+        assert "storm-app (18000/30000, 60%)" in summary
+        assert "edge-01 (22500/30000, 75%)" in summary
+        assert "connection pool exhausted (x18000, 60%)" in summary
+        # The sample is the newest log of the top app
+        assert sample_log == "connection pool exhausted"
+        assert sample_log_id == 29998
+
+        assert len(notifications) == 1
+        assert "(100.0 logs/s)" in notifications[0]["title"]
+        assert "storm-app (18000/30000, 60%)" in notifications[0]["body"]
+
+    @pytest.mark.asyncio
+    async def test_window_memory_stays_bounded_whatever_the_count(self, test_db: Path):
+        from app.services.rate_window import COUNT_BUCKETS, CULPRIT_SPANS, MAX_CULPRIT_KEYS, SAMPLE_SIZE
+
+        rule_id = self._insert_rate_rule(test_db, threshold=1000, window=60)
+        evaluator = AlertEvaluator(test_db)
+        await self._feed(evaluator, self._storm(50000, datetime.now(timezone.utc) - timedelta(seconds=59), 58.0))
+
+        window = evaluator._windows[rule_id]
+        assert len(window) == 50000
+        assert len(window._counts) <= COUNT_BUCKETS + 1
+        assert len(window._spans) <= CULPRIT_SPANS + 1
+        assert len(window.samples) == SAMPLE_SIZE
+        assert all(len(span.messages) <= MAX_CULPRIT_KEYS for span in window._spans)
+        assert all("raw" not in payload for payload in window.samples)
+        assert window.samples[-1]["id"] == 50000
+
+    @pytest.mark.asyncio
+    async def test_matches_leave_the_count_as_they_leave_the_window(self, test_db: Path):
+        rule_id = self._insert_rate_rule(test_db, threshold=1000, window=300)
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc)
+        await self._feed(evaluator, self._storm(5000, now - timedelta(seconds=250), 10.0))
+        await self._feed(evaluator, self._storm(5000, now - timedelta(seconds=100), 10.0))
+        assert len(evaluator._windows[rule_id]) == 10000
+
+        evaluator.prune_expired_windows(now.timestamp() + 100)
+        assert len(evaluator._windows[rule_id]) == 5000
+        evaluator.prune_expired_windows(now.timestamp() + 250)
+        assert len(evaluator._windows[rule_id]) == 0
+
+    @pytest.mark.asyncio
+    async def test_window_keeps_counting_through_the_cooldown_and_fires_after_it(self, test_db: Path, monkeypatch):
+        rule_id = self._insert_rate_rule(test_db, threshold=10, window=60)
+
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc)
+        await self._feed(evaluator, self._storm(600, now - timedelta(seconds=50), 40.0))
+        await evaluator.stop()
+        assert evaluator._rules[0].trigger_count == 1
+        assert len(evaluator._windows[rule_id]) == 0
+
+        await self._feed(evaluator, self._storm(700, now - timedelta(seconds=50), 40.0))
+        assert evaluator._rules[0].trigger_count == 1
+        assert len(evaluator._windows[rule_id]) == 700
+
+        evaluator._rules[0].suppress_until_epoch = None
+        await self._feed(evaluator, self._storm(1, now, 0.0))
+        await evaluator.stop()
+        assert evaluator._rules[0].trigger_count == 2
+
+        conn = get_connection(test_db)
+        counts = [row[0] for row in conn.execute("SELECT trigger_count FROM alert_history ORDER BY id")]
+        conn.close()
+        assert counts == [600, 701]
+
+    @pytest.mark.asyncio
+    async def test_a_new_threshold_keeps_the_count_and_a_new_window_length_starts_again(self, test_db: Path):
+        rule_id = self._insert_rate_rule(test_db, threshold=1000, window=60)
+        evaluator = AlertEvaluator(test_db)
+        await self._feed(evaluator, self._storm(100, datetime.now(timezone.utc) - timedelta(seconds=10), 5.0))
+
+        conn = get_connection(test_db)
+        conn.execute("UPDATE alert_rules SET threshold_count = 2000 WHERE id = ?", (rule_id,))
+        conn.commit()
+        evaluator.reload_rules()
+        assert len(evaluator._windows[rule_id]) == 100
+
+        conn.execute("UPDATE alert_rules SET window_seconds = 120 WHERE id = ?", (rule_id,))
+        conn.commit()
+        conn.close()
+        evaluator.reload_rules()
+        assert len(evaluator._windows[rule_id]) == 0

@@ -50,6 +50,7 @@ LogShed provides three distinct rule evaluation types:
   - Detects sudden surges in log velocity measured in logs per second over rolling time windows.
   - Designed for runaway debug loops, broken network equipment packet flooding, and unexpected log storms across your infrastructure.
   - Calculates moving log velocity over the configured window duration without waiting for full window expiration.
+  - Fires when the window holds threshold times window duration matching logs (for example, 100 logs/second over 300 seconds fires at 30,000 logs). The matches are counted rather than kept, so every threshold and window the form allows works and memory use does not grow with them.
   - Automatically activates in-memory top-culprit analysis during storm events.
 
 ### Form Fields & Configuration
@@ -119,11 +120,12 @@ When enabled, LogShed automatically masks sensitive data (passwords, tokens, API
 When a rate spike or log storm occurs, diagnosing which container, virtual machine, or script went wild can be tedious. LogShed solves this with zero disk I/O overhead using in-memory culprit frequency analysis.
 
 #### How It Works
-- During an active storm, the alert engine inspects the collected in-memory window using frequency counters.
-- It calculates:
+- While counting a rate rule's matches, the alert engine keeps frequency counters for their apps, hosts and message starts, plus the newest 50 matches. A storm of any size uses the same small amount of memory.
+- When the rule fires, it calculates:
   - **Top Service / Container**: Identifies the primary offending service and its percentage share of total burst volume (for example, `unbound (1820/2000, 91%)`).
   - **Top Originating Host**: Pinpoints the host IP or alias producing the surge.
   - **Repeated Message Signature**: Isolates the most frequent repeating message pattern causing the storm.
+- The figures cover every match in the window. Each span of a sixtieth of the window counts at most 100 different apps, hosts and message starts (further ones in that span are left out of the figures, but not out of the rate), and they may include matches from up to a sixtieth of a window before it. The notification sample is the newest match of the top service, and AI enrichment reads the newest 50 matches.
 - This attribution is immediately embedded into the alert notification payload sent to your mobile phone or chat channel, giving you immediate clarity on which container or daemon to check without having to query the database.
 
 #### Canary Preset Example: Log Storm Detection

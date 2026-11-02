@@ -1,8 +1,8 @@
 """
 Alert Engine Service for LogShed.
 
-Provides in-memory sliding-window timestamp deques for threshold rules,
-regex and keyword pattern matching, and cooldown flap dampening (suppress_until).
+Provides in-memory sliding-window timestamp deques for threshold rules, match counts for
+rate rules (rate_window.py), regex and keyword pattern matching, and cooldown flap dampening (suppress_until).
 Integrates with QueueConsumer batch processing, redactor, AI diagnosis, and notifier.
 """
 
@@ -34,6 +34,7 @@ from app.core.rule_index import RuleIndex, entry_key, exact_match_key
 from app.core.utils import compile_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
 from app.services.alert_presets import extract_ip_from_message
+from app.services.rate_window import RateSnapshot, RateWindow, culprit_values
 from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,18 @@ def _log_id(entry: dict[str, Any]) -> Optional[int]:
     """The stored id of a log entry (set by the queue consumer after its insert), or None."""
     value = entry.get("id")
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _rate_payload(entry: dict[str, Any]) -> dict[str, Any]:
+    """The light record a rate rule keeps of a match, instead of the whole log entry."""
+    return {
+        "id": entry.get("id"),
+        "timestamp": entry.get("timestamp"),
+        "app_name": entry.get("app_name"),
+        "source_alias": entry.get("source_alias"),
+        "source_ip": entry.get("source_ip"),
+        "message": str(entry.get("message") or entry.get("raw") or "")[:200],
+    }
 
 
 def format_sample_log_for_alert(raw_msg: str, max_lines: int = 5, max_chars: int = 500) -> str:
@@ -257,7 +270,8 @@ class AlertEvaluator:
         self._rules: list[CompiledAlertRule] = []
         # Built from self._rules on first use after each change of the list
         self._index: Optional[RuleIndex[CompiledAlertRule]] = None
-        self._windows: dict[int, deque[tuple[float, dict[str, Any]]]] = {}
+        # A deque of (epoch, entry) per threshold rule, a RateWindow per rate rule
+        self._windows: dict[int, Union[deque[tuple[float, dict[str, Any]]], RateWindow]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self._lock = threading.Lock()
         # Automatic disabling of rules whose pattern keeps timing out.
@@ -335,8 +349,17 @@ class AlertEvaluator:
                 del self._windows[rid]
 
             for rule in compiled:
-                if rule.id not in self._windows:
-                    self._windows[rule.id] = deque()
+                self._window_for(rule)
+
+    def _window_for(self, rule: CompiledAlertRule) -> Union[deque[tuple[float, dict[str, Any]]], RateWindow]:
+        """The rule's window, new when the rule is new or its type or rate window length changed."""
+        window = self._windows.get(rule.id)
+        if rule.rule_type == "rate":
+            if not isinstance(window, RateWindow) or window.window_seconds != rule.window_seconds:
+                window = self._windows[rule.id] = RateWindow(rule.window_seconds)
+        elif not isinstance(window, deque):
+            window = self._windows[rule.id] = deque()
+        return window
 
     def prune_expired_windows(self, now_epoch: float) -> None:
         """
@@ -354,6 +377,9 @@ class AlertEvaluator:
             if not rule:
                 continue
             window_cutoff = now_epoch - rule.window_seconds
+            if isinstance(window, RateWindow):
+                window.prune(window_cutoff)
+                continue
             while window:
                 first = window[0]
                 entry_epoch = first[0] if isinstance(first, (tuple, list)) else first
@@ -382,16 +408,19 @@ class AlertEvaluator:
             store_task.add_done_callback(self._pending_tasks.discard)
 
         # Process fired alert events outside lock
-        for rule, logs in fired_events:
+        for rule, logs, rate in fired_events:
             # Dispatch alert notification asynchronously in background with lifecycle tracking
-            task = asyncio.create_task(self._dispatch_alert(rule, logs))
+            task = asyncio.create_task(self._dispatch_alert(rule, logs, rate))
             self._pending_tasks.add(task)
             task.add_done_callback(self._pending_tasks.discard)
 
-    def _match_batch(self, batch: list[dict[str, Any]]) -> list[tuple[CompiledAlertRule, list[dict[str, Any]]]]:
+    def _match_batch(
+        self, batch: list[dict[str, Any]]
+    ) -> list[tuple[CompiledAlertRule, list[dict[str, Any]], Optional[RateSnapshot]]]:
         """
         Blocking part of evaluate_batch: update the rule windows with the batch and return the
-        rules that fired, in rule order, each with its triggering logs.
+        rules that fired, in rule order, each with its triggering logs (for a rate rule, the
+        newest matches) and, for a rate rule, the counts its window held.
         """
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         now_epoch = now_utc.timestamp()
@@ -433,16 +462,24 @@ class AlertEvaluator:
                 entry_epoch = max_epoch
             entry["_epoch_ts"] = entry_epoch
 
-        fired_events: list[tuple[CompiledAlertRule, list[dict[str, Any]]]] = []
+        fired_events: list[tuple[CompiledAlertRule, list[dict[str, Any]], Optional[RateSnapshot]]] = []
 
         with self._lock:
             for rule in rules:
-                window = self._windows.setdefault(rule.id, deque())
+                window = self._window_for(rule)
                 # Compute window cutoff using now_epoch - rule.window_seconds
                 window_cutoff = now_epoch - rule.window_seconds
-                needed = (rule.threshold_count * rule.window_seconds) if rule.rule_type == "rate" else rule.threshold_count
-                max_window_size = max(500, min(20000, needed * 2)) if rule.rule_type == "rate" else rule.threshold_count * 2
                 rule_entries = batch if index.is_always(rule) else entries_by_rule.get(id(rule), ())
+
+                if isinstance(window, RateWindow):
+                    snapshot = self._count_rate_matches(rule, window, rule_entries, window_cutoff, now_epoch)
+                    if snapshot is not None:
+                        self._mark_fired(rule, now_utc, now_iso)
+                        fired_events.append((rule, snapshot.samples, snapshot))
+                    continue
+
+                needed = rule.threshold_count
+                max_window_size = rule.threshold_count * 2
 
                 for entry in rule_entries:
                     try:
@@ -464,29 +501,15 @@ class AlertEvaluator:
                         if entry_epoch < window_cutoff:
                             continue
 
-                        if rule.rule_type == "rate":
-                            # For rate rules that only track log counts, store lightweight records
-                            # rather than holding entire log payload dictionaries in memory.
-                            payload = {
-                                "id": entry.get("id"),
-                                "timestamp": entry.get("timestamp"),
-                                "app_name": entry.get("app_name"),
-                                "source_alias": entry.get("source_alias"),
-                                "source_ip": entry.get("source_ip"),
-                                "message": str(entry.get("message") or entry.get("raw") or "")[:200],
-                            }
-                        else:
-                            payload = entry
-
                         # Append entry preserving chronological order under timestamp jitter
                         if not window or entry_epoch >= (window[-1][0] if isinstance(window[-1], (tuple, list)) else window[-1]):
-                            window.append((entry_epoch, payload))
+                            window.append((entry_epoch, entry))
                         else:
                             # Backwards linear search for insertion index to avoid full deque sorting
                             idx = len(window)
                             while idx > 0 and (window[idx - 1][0] if isinstance(window[idx - 1], (tuple, list)) else window[idx - 1]) > entry_epoch:
                                 idx -= 1
-                            window.insert(idx, (entry_epoch, payload))
+                            window.insert(idx, (entry_epoch, entry))
 
                         # Bound maximum deque size
                         while len(window) > max_window_size:
@@ -494,12 +517,7 @@ class AlertEvaluator:
 
                         # Check threshold condition
                         if len(window) >= needed:
-                            # Verify cooldown dampening via cached epoch
-                            is_suppressed = bool(
-                                rule.suppress_until_epoch and now_epoch < rule.suppress_until_epoch
-                            )
-
-                            if is_suppressed:
+                            if self._is_suppressed(rule, now_epoch):
                                 # Cap window to needed during cooldown to avoid memory expansion
                                 while len(window) > needed:
                                     window.popleft()
@@ -507,15 +525,8 @@ class AlertEvaluator:
                                 # Trigger alert firing
                                 triggering_logs = [item[1] for item in list(window)]
                                 window.clear()
-
-                                # Update cooldown dampening in memory
-                                rule.trigger_count += 1
-                                rule.last_triggered_at = now_iso
-                                suppress_end = now_utc + datetime.timedelta(seconds=rule.cooldown_seconds)
-                                rule.suppress_until = suppress_end.isoformat()
-                                rule.suppress_until_epoch = suppress_end.timestamp()
-
-                                fired_events.append((rule, triggering_logs))
+                                self._mark_fired(rule, now_utc, now_iso)
+                                fired_events.append((rule, triggering_logs, None))
                                 break  # Break out of batch loop for this rule
 
                     except Exception as e:
@@ -523,6 +534,52 @@ class AlertEvaluator:
                         continue
 
         return fired_events
+
+    def _count_rate_matches(
+        self,
+        rule: CompiledAlertRule,
+        window: RateWindow,
+        entries: Any,
+        window_cutoff: float,
+        now_epoch: float,
+    ) -> Optional[RateSnapshot]:
+        """
+        Count the rule's matches among entries; when the window reaches threshold_count logs/s
+        outside the cooldown, return what it held and empty it. The rest of the batch is then
+        not counted, as for threshold rules. During the cooldown the window keeps counting, so
+        the rule fires again at the first match after it while the rate stays high.
+        """
+        needed = rule.threshold_count * rule.window_seconds
+        for entry in entries:
+            try:
+                if not rule.matches(entry):
+                    continue
+                entry_epoch = entry.get("_epoch_ts", now_epoch)
+                # Skip entries that fall outside the active sliding window
+                if entry_epoch < window_cutoff:
+                    continue
+                window.add(entry_epoch, _rate_payload(entry))
+                if window.total >= needed and not self._is_suppressed(rule, now_epoch):
+                    snapshot = window.snapshot()
+                    window.clear()
+                    return snapshot
+            except Exception as e:
+                logger.debug(f"Error evaluating rule {rule.id}: {e}")
+        return None
+
+    @staticmethod
+    def _is_suppressed(rule: CompiledAlertRule, now_epoch: float) -> bool:
+        """True during the rule's cooldown (cached epoch)."""
+        return bool(rule.suppress_until_epoch and now_epoch < rule.suppress_until_epoch)
+
+    @staticmethod
+    def _mark_fired(rule: CompiledAlertRule, now_utc: datetime.datetime, now_iso: str) -> None:
+        """Count the trigger and start the cooldown in memory (stored by the dispatch)."""
+        rule.trigger_count += 1
+        rule.last_triggered_at = now_iso
+        suppress_end = now_utc + datetime.timedelta(seconds=rule.cooldown_seconds)
+        rule.suppress_until = suppress_end.isoformat()
+        rule.suppress_until_epoch = suppress_end.timestamp()
 
     def _make_timeout_callback(self, rule: CompiledAlertRule) -> Callable[[], None]:
         """Return the callback a rule calls each time its pattern times out."""
@@ -607,6 +664,7 @@ class AlertEvaluator:
         self,
         rule: CompiledAlertRule,
         triggering_logs: list[dict[str, Any]],
+        rate: Optional[RateSnapshot] = None,
     ) -> None:
         """
         Process alert firing:
@@ -656,46 +714,55 @@ class AlertEvaluator:
         culprit_msg: Optional[str] = None
         measured_rate: Optional[float] = None
 
+        # A rate rule's window counts its matches and keeps only the newest as triggering_logs
+        log_count = rate.total if rate is not None else len(triggering_logs)
+
         if triggering_logs:
-            total_logs = len(triggering_logs)
-            app_counter: Counter[str] = Counter()
-            host_counter: Counter[str] = Counter()
-            msg_counter: Counter[str] = Counter()
-
-            for log_entry in triggering_logs:
-                if not isinstance(log_entry, dict):
-                    continue
-                app_val = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
-                host_val = log_entry.get("source_alias") or log_entry.get("source_ip") or log_entry.get("host") or "unknown"
-                msg_val = str(log_entry.get("message") or log_entry.get("raw") or "")[:150].strip()
-
-                app_counter[str(app_val)] += 1
-                host_counter[str(host_val)] += 1
-                if msg_val:
-                    msg_counter[msg_val] += 1
+            total_logs = log_count
+            if rate is not None:
+                app_counter, host_counter, msg_counter = rate.apps, rate.hosts, rate.messages
+            else:
+                app_counter = Counter()
+                host_counter = Counter()
+                msg_counter = Counter()
+                for log_entry in triggering_logs:
+                    if not isinstance(log_entry, dict):
+                        continue
+                    app_val, host_val, msg_val = culprit_values(log_entry)
+                    app_counter[app_val] += 1
+                    host_counter[host_val] += 1
+                    if msg_val:
+                        msg_counter[msg_val] += 1
 
             if app_counter:
                 top_app, app_count = app_counter.most_common(1)[0]
+                # Counters of a rate window may include a little of the time just before the window
+                app_count = min(app_count, total_logs)
                 app_pct = round((app_count / total_logs) * 100)
                 culprit_app = f"{top_app} ({app_count}/{total_logs}, {app_pct}%)"
                 if rule.rule_type == "rate":
                     extracted_app = top_app
-                    for log_entry in reversed(triggering_logs):
-                        if not isinstance(log_entry, dict):
-                            continue
-                        cand_app = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag") or "unknown"
-                        if str(cand_app) == str(top_app):
-                            sample_log = str(log_entry.get("message") or log_entry.get("raw") or "")
-                            sample_log_id = _log_id(log_entry)
-                            break
+                    top_app_entry = rate.newest_by_app.get(top_app) if rate is not None else next(
+                        (
+                            log_entry
+                            for log_entry in reversed(triggering_logs)
+                            if isinstance(log_entry, dict) and culprit_values(log_entry)[0] == top_app
+                        ),
+                        None,
+                    )
+                    if top_app_entry is not None:
+                        sample_log = str(top_app_entry.get("message") or top_app_entry.get("raw") or "")
+                        sample_log_id = _log_id(top_app_entry)
             if host_counter:
                 top_host, host_count = host_counter.most_common(1)[0]
+                host_count = min(host_count, total_logs)
                 host_pct = round((host_count / total_logs) * 100)
                 culprit_host = f"{top_host} ({host_count}/{total_logs}, {host_pct}%)"
                 if rule.rule_type == "rate":
                     extracted_host = top_host
             if msg_counter:
                 top_msg, msg_count = msg_counter.most_common(1)[0]
+                msg_count = min(msg_count, total_logs)
                 msg_pct = round((msg_count / total_logs) * 100)
                 culprit_msg = f"{top_msg} (x{msg_count}, {msg_pct}%)"
 
@@ -727,14 +794,14 @@ class AlertEvaluator:
                     ai_success = False
                     if rule.rule_type == "rate":
                         incident_summary = (
-                            f"Log storm detected: {len(triggering_logs)} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
+                            f"Log storm detected: {log_count} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
                             f"### Primary Culprits\n"
                             f"- Top Service / App: {culprit_app or 'Unknown'}\n"
                             f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
                             f"- Top Pattern: {culprit_msg or 'N/A'}"
                         )
                     else:
-                        incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
+                        incident_summary = f"Alert triggered with {log_count} matching event(s)."
                 else:
                     ai_provider = provider_settings["provider"]
                     ai_model = provider_settings["model"]
@@ -796,7 +863,7 @@ class AlertEvaluator:
                         source_alias=triggering_logs[0].get("source_alias") or "alert",
                         app_name=triggering_logs[0].get("app_name") or "alert",
                         redacted_logs=redacted_text,
-                        log_count=len(triggering_logs),
+                        log_count=log_count,
                         prompt_override=prompt,
                         fallback_models=fallback_models,
                         timeout=provider_settings["ai_timeout"],
@@ -851,7 +918,7 @@ class AlertEvaluator:
                         saved_audit_id = await save_diagnosis_audit(
                             source_alias=audit_source_alias,
                             app_name=audit_app_name,
-                            log_count=len(triggering_logs),
+                            log_count=log_count,
                             user_context=f"Alert Rule: {rule.name}",
                             actual_model=actual_ai_model,
                             prompt_sent=prompt_sent or prompt,
@@ -882,14 +949,14 @@ class AlertEvaluator:
         else:
             if rule.rule_type == "rate":
                 incident_summary = (
-                    f"Log storm detected: {len(triggering_logs)} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
+                    f"Log storm detected: {log_count} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
                     f"### Primary Culprits\n"
                     f"- Top Service / App: {culprit_app or 'Unknown'}\n"
                     f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
                     f"- Top Pattern: {culprit_msg or 'N/A'}"
                 )
             else:
-                incident_summary = f"Alert triggered with {len(triggering_logs)} matching event(s)."
+                incident_summary = f"Alert triggered with {log_count} matching event(s)."
 
         # Record event in alert_history table via worker thread
         def _execute_insert(conn: sqlite3.Connection) -> None:
@@ -903,7 +970,7 @@ class AlertEvaluator:
                     rule.id,
                     rule.name,
                     rule.channel_id,
-                    len(triggering_logs),
+                    log_count,
                     sample_log[:1000],
                     sample_log_id,
                     incident_summary,
