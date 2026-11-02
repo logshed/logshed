@@ -193,6 +193,15 @@ def _epoch_to_utc(value: float) -> Optional[datetime.datetime]:
         return None
 
 
+def _single_json_object(body: str) -> Optional[dict[str, Any]]:
+    """The body as one JSON object, or None when it is not exactly one (for example NDJSON)."""
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _parse_entry_timestamp(value: Any) -> Optional[datetime.datetime]:
     """
     An entry timestamp as a UTC datetime, or None when it cannot be used. Accepts an ISO 8601
@@ -298,15 +307,9 @@ async def ingest_logs(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON array.")
         except json.JSONDecodeError as err:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON payload: {err}")
-    elif body_str.startswith("{") and "\n" not in body_str:
-        try:
-            parsed = json.loads(body_str)
-            if isinstance(parsed, dict):
-                raw_entries = [parsed]
-            else:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON object.")
-        except json.JSONDecodeError as err:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON payload: {err}")
+    elif body_str.startswith("{") and (single := _single_json_object(body_str)) is not None:
+        # One object, also when it is spread over several lines (pretty-printed)
+        raw_entries = [single]
     else:
         # Parse newline-delimited JSON (NDJSON) or mixed split lines
         for idx, line in enumerate(body_str.splitlines()):

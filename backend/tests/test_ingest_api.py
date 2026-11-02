@@ -993,3 +993,76 @@ class TestIngestLoneSurrogates:
         assert resp.status_code == 200
         [entry] = _queued_entries()
         assert entry["message"] == "ok \U0001F600"
+
+
+@pytest.mark.usefixtures("isolated_filters")
+class TestIngestMalformedPayloads:
+    """Bodies the parser must refuse, and fields it must fall back on."""
+
+    @staticmethod
+    async def _post(client, token: str, body: str):
+        return await client.post(
+            "/api/v1/ingest",
+            content=body,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body, detail",
+        [
+            ('[{"message": "a"},', "Invalid JSON payload:"),
+            ('[{"message": "a"}] trailing', "Invalid JSON payload:"),
+            ('{"message": "a"', "Invalid JSON payload on line 1:"),
+            ('{"message": "a"}\n{"message": "b"', "Invalid JSON payload on line 2:"),
+            ('{"message": "a"}\nnot json at all\n{"message": "c"}', "Invalid JSON payload on line 2:"),
+        ],
+        ids=["unclosed array", "array then text", "unclosed object", "bad last ndjson line", "bad middle ndjson line"],
+    )
+    async def test_malformed_body_is_refused_and_nothing_is_stored(self, client, write_token, body, detail):
+        resp = await self._post(client, write_token, body)
+        assert resp.status_code == 400
+        assert resp.json()["detail"].startswith(detail)
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", ["42", '"just text"', "null", "true", "[1, 2, null]", "\n\n"])
+    async def test_a_body_with_no_objects_accepts_nothing(self, client, write_token, body):
+        resp = await self._post(client, write_token, body)
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "accepted": 0, "dropped": 0}
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    async def test_a_pretty_printed_single_object_is_accepted(self, client, write_token):
+        body = json.dumps({"message": "pretty printed", "app_name": "shipper"}, indent=2)
+        assert "\n" in body
+        resp = await self._post(client, write_token, body)
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == 1
+        assert [(e["message"], e["app_name"]) for e in _queued_entries()] == [("pretty printed", "shipper")]
+
+    @pytest.mark.asyncio
+    async def test_ndjson_lines_may_hold_arrays_and_skip_non_objects(self, client, write_token):
+        body = '{"message": "one"}\n[{"message": "two"}, {"message": "three"}, 7]\n"ignored"\n\n{"message": "four"}'
+        resp = await self._post(client, write_token, body)
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] == 4
+        assert [e["message"] for e in _queued_entries()] == ["one", "two", "three", "four"]
+
+    @pytest.mark.asyncio
+    async def test_bad_facility_and_severity_fall_back_and_msg_is_read(self, client, write_token):
+        records = [
+            {"msg": "from msg", "facility": "local0", "severity": "loud"},
+            {"message": "clamped", "facility": 99, "level": "error"},
+            {"message": "negative", "facility": -4, "severity": None},
+            {"message": "named", "facility": "16", "severity": "WARNING"},
+        ]
+        resp = await self._post(client, write_token, json.dumps(records))
+        assert resp.status_code == 200
+        entries = {e["message"]: e for e in _queued_entries()}
+        assert (entries["from msg"]["facility"], entries["from msg"]["severity"]) == (1, 6)
+        assert (entries["clamped"]["facility"], entries["clamped"]["severity"]) == (23, 3)
+        assert (entries["negative"]["facility"], entries["negative"]["severity"]) == (0, 6)
+        assert (entries["named"]["facility"], entries["named"]["severity"]) == (16, 4)
+        assert entries["from msg"]["raw"] == "from msg"

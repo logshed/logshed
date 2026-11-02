@@ -339,8 +339,10 @@ Create an API token in **Settings > API & MCP Access** with the `logs:write` sco
 
 `POST /api/v1/ingest` with a JSON body in one of three shapes:
 - a JSON array of entries: `[{"message": "a"}, {"message": "b"}]`;
-- a single JSON object: `{"message": "a"}`;
-- newline-delimited JSON (NDJSON), one entry per line.
+- a single JSON object: `{"message": "a"}`, on one line or spread over several (pretty-printed);
+- newline-delimited JSON (NDJSON), one entry per line (a line may also hold an array of entries).
+
+A malformed body is refused with `400` naming the line, and nothing from it is stored. Values that are not objects (numbers, strings, `null`) are skipped.
 
 | Field | Meaning | Default |
 |---|---|---|
