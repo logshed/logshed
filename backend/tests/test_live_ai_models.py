@@ -79,8 +79,8 @@ async def test_live_openai_models():
 
 
 @pytest.mark.asyncio
-# A model with no shutdown date in GET /v1/models on 2026-11-02 (o4-mini shut down on 2026-10-23, gpt-5-mini shuts down on 2026-12-11)
-@pytest.mark.parametrize("model", ["gpt-5.6-luna"])
+# Models with no shutdown date in GET /v1/models on 2026-11-02 (o4-mini shut down on 2026-10-23, gpt-5-mini shuts down on 2026-12-11)
+@pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6.1-terra"])
 async def test_live_openai_reasoning_model_runs_an_analysis(model):
     """A reasoning model as the only model (no fallback) completes an analysis."""
     from app.services.ai_engine import execute_ai_analysis
@@ -102,7 +102,8 @@ async def test_live_openai_reasoning_model_runs_an_analysis(model):
         timeout=120,
     )
     summary, model_used, fallback_attempts = result[0], result[9], result[10]
-    print(f"\n{model}: {summary[:200]!r}")
+    tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
+    print(f"\n{model}: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {summary[:200]!r}")
     assert summary.strip()
     assert model_used == model
     assert fallback_attempts == []
