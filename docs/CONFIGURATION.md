@@ -166,7 +166,7 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
 | `LOGSHED_AI_TIMEOUT` | `45.0` | Web UI or Compose | Outbound HTTP request timeout in seconds for AI analysis requests to Gemini, OpenAI, Anthropic, or OpenAI-compatible endpoints such as Ollama and vLLM. | 1.1.0 |
-| `LOGSHED_AI_THINKING_BUDGET` | `1024` | Web UI or Compose | Reasoning token budget for extended thinking models (for example, `gemini-2.5-pro` or compatible models; `0` disables). | 1.1.0 |
+| `LOGSHED_AI_THINKING_BUDGET` | `1024` | Web UI or Compose | Reasoning token budget for extended thinking models (for example, `gemini-2.5-pro` or compatible models; `0` disables). Claude 4.6 and later models turn it into an effort level: low up to 2,048, medium up to 8,192, high above that; with `0`, Claude 4.7 and later run at low effort. | 1.1.0 |
 
 ---
 

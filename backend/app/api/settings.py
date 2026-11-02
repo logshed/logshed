@@ -56,7 +56,7 @@ SENSITIVE_KEYS = {
 DEFAULT_AI_MODELS: dict[str, str] = {
     "gemini": DEFAULT_AI_MODEL,
     "openai": "gpt-4o",
-    "anthropic": "claude-sonnet-4-6",
+    "anthropic": "claude-sonnet-5-5",
     "openai_compatible": "llama3.2",
 }
 

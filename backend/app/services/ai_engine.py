@@ -880,6 +880,41 @@ async def call_openai(
             await _close_sdk_client(client)
 
 
+# claude-<family>-<major>[-<minor>] (claude-opus-4-8, claude-sonnet-5), or claude-<major>-<minor>-<family>
+# (claude-3-7-sonnet); an 8-digit date suffix is not a minor version
+_CLAUDE_VERSION = re.compile(r"claude-(?:[a-z]+-)?(\d{1,2})(?:[.-](\d{1,2}))?(?!\d)")
+
+
+def _claude_version(model: str) -> Optional[tuple[int, int]]:
+    """(major, minor) of a Claude model name, or None when the name carries no version."""
+    match = _CLAUDE_VERSION.search(model.lower())
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2) or 0)
+
+
+def _claude_effort(thinking_budget: Optional[int]) -> str:
+    """The effort level that stands in for a thinking budget on Claude 4.6 and later."""
+    if not thinking_budget or thinking_budget <= 2048:
+        return "low"
+    if thinking_budget <= 8192:
+        return "medium"
+    return "high"
+
+
+def _anthropic_text(response: Any) -> str:
+    """The text of an Anthropic message, failing clearly when the model declined the request."""
+    text = "\n".join(
+        block.text for block in getattr(response, "content", []) or []
+        if getattr(block, "type", "") == "text" or hasattr(block, "text")
+    ).strip()
+    if not text:
+        if getattr(response, "stop_reason", None) == "refusal":
+            raise RuntimeError("Anthropic model declined the request (stop_reason: refusal).")
+        raise RuntimeError("Anthropic endpoint returned empty response content.")
+    return text
+
+
 def _anthropic_request_kwargs(
     model: str,
     system_prompt: str,
@@ -894,6 +929,18 @@ def _anthropic_request_kwargs(
     }
 
     effective_budget = thinking_budget if thinking_budget is not None else DEFAULT_AI_THINKING_BUDGET
+    version = _claude_version(model)
+    if version is not None and version >= (4, 6):
+        thinking_on = bool(effective_budget and effective_budget > 0)
+        if thinking_on or version >= (4, 7):
+            # Adaptive thinking with an effort level replaces the token budget (refused from 4.7 on).
+            # From 4.7 on, temperature is refused and some models cannot turn thinking off, so
+            # a budget of 0 sends the lowest effort and leaves thinking at the model's default.
+            if thinking_on:
+                create_kwargs["thinking"] = {"type": "adaptive"}
+            create_kwargs["output_config"] = {"effort": _claude_effort(effective_budget)}
+            create_kwargs["max_tokens"] = 16000
+            return create_kwargs
     if supports_claude_thinking(model) and effective_budget is not None and effective_budget > 0:
         create_kwargs["thinking"] = {
             "type": "enabled",
@@ -949,15 +996,7 @@ async def call_anthropic(
 
     try:
         response = await client.messages.create(**create_kwargs)
-
-        text_parts: list[str] = []
-        for block in getattr(response, "content", []):
-            if getattr(block, "type", "") == "text" or hasattr(block, "text"):
-                text_parts.append(block.text)
-
-        text = "\n".join(text_parts).strip()
-        if not text:
-            raise RuntimeError("Anthropic endpoint returned empty response content.")
+        text = _anthropic_text(response)
 
         usage = getattr(response, "usage", None)
         tokens_in = getattr(usage, "input_tokens", 0) or 0
@@ -1092,7 +1131,7 @@ async def execute_ai_analysis(
         )
 
     norm_provider = (provider or "gemini").lower()
-    primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-4o" if norm_provider == "openai" else ("claude-sonnet-4-6" if norm_provider == "anthropic" else "llama3.2")))
+    primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-4o" if norm_provider == "openai" else ("claude-sonnet-5-5" if norm_provider == "anthropic" else "llama3.2")))
 
     dispatch = _analysis_dispatcher(norm_provider)
     if dispatch is None:
@@ -1362,6 +1401,8 @@ async def dispatch_multi_turn_anthropic(
 
         text = "".join(chunks).strip()
         if not text:
+            if getattr(final_message, "stop_reason", None) == "refusal":
+                raise RuntimeError("Anthropic model declined the request (stop_reason: refusal).")
             raise RuntimeError("Anthropic endpoint returned empty response content.")
 
         usage = getattr(final_message, "usage", None)

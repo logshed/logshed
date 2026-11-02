@@ -376,7 +376,8 @@ Multiple transaction queries deadlock on shared index.
             assert "Thinking summary" in text
             assert tokens_thoughts == 30
             create_kwargs = mock_create.call_args[1]
-            assert create_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+            assert create_kwargs["thinking"] == {"type": "adaptive"}
+            assert create_kwargs["output_config"] == {"effort": "low"}
             assert "temperature" not in create_kwargs
 
     @pytest.mark.asyncio
@@ -3681,3 +3682,68 @@ class TestOpenAiReasoningModelsGetNoTemperature:
     async def test_reasoning_effort_is_sent_only_to_the_o_series(self, model, effort):
         for kwargs in (await self._single_turn_kwargs(model), await self._multi_turn_kwargs(model)):
             assert kwargs.get("reasoning_effort") == effort
+
+
+class TestAnthropicRequestsPerModelFamily:
+    """Claude 4.6 and later take adaptive thinking with an effort level; 4.7 and later refuse temperature."""
+
+    BUDGET_MODELS = ["claude-haiku-4-5-20251001", "claude-opus-4-5-20251101", "claude-sonnet-4-20250514", "claude-3-7-sonnet-20250219"]
+    ADAPTIVE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"]
+    NO_SAMPLING_MODELS = [
+        "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-5", "claude-opus-5", "claude-fable-5",
+        "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1",
+    ]
+
+    @staticmethod
+    def _kwargs(model: str, budget):
+        return ai_engine._anthropic_request_kwargs(model, "SYS", [{"role": "user", "content": "logs"}], budget)
+
+    @pytest.mark.parametrize("model", BUDGET_MODELS)
+    def test_older_models_keep_the_thinking_budget(self, model):
+        kwargs = self._kwargs(model, 1024)
+        assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+        assert "temperature" not in kwargs
+        assert "output_config" not in kwargs
+
+    @pytest.mark.parametrize("model", ADAPTIVE_MODELS + NO_SAMPLING_MODELS)
+    def test_newer_models_think_adaptively_at_an_effort_level(self, model):
+        kwargs = self._kwargs(model, 1024)
+        assert kwargs["thinking"] == {"type": "adaptive"}
+        assert kwargs["output_config"] == {"effort": "low"}
+        assert "temperature" not in kwargs
+        assert kwargs["max_tokens"] >= 16000
+
+    @pytest.mark.parametrize("model", BUDGET_MODELS + ADAPTIVE_MODELS + ["claude-3-5-haiku-20241022"])
+    def test_without_thinking_models_up_to_four_six_keep_the_low_temperature(self, model):
+        kwargs = self._kwargs(model, 0)
+        assert kwargs["temperature"] == 0.2
+        assert "thinking" not in kwargs
+        assert "output_config" not in kwargs
+
+    @pytest.mark.parametrize("model", NO_SAMPLING_MODELS)
+    def test_without_thinking_newer_models_get_no_temperature_and_the_lowest_effort(self, model):
+        kwargs = self._kwargs(model, 0)
+        assert "temperature" not in kwargs
+        assert "thinking" not in kwargs
+        assert kwargs["output_config"] == {"effort": "low"}
+
+    @pytest.mark.parametrize("budget, effort", [(None, "low"), (1024, "low"), (2048, "low"), (4096, "medium"), (8192, "medium"), (16384, "high")])
+    def test_the_thinking_budget_sets_the_effort(self, budget, effort):
+        assert self._kwargs("claude-sonnet-5-5", budget)["output_config"] == {"effort": effort}
+
+    @pytest.mark.asyncio
+    async def test_a_declined_request_says_so(self):
+        response = MagicMock(content=[], stop_reason="refusal", usage=MagicMock(input_tokens=10, output_tokens=0))
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            client = MagicMock()
+            client.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = client
+            with pytest.raises(RuntimeError, match="declined"):
+                await ai_engine.call_anthropic(api_key="key", model="claude-sonnet-5-5", prompt="logs")
+
+    def test_default_claude_model_is_sonnet_five_five(self):
+        from app.api.settings import DEFAULT_AI_MODELS
+        from app.services.ai_service import resolve_ai_provider_settings
+
+        assert DEFAULT_AI_MODELS["anthropic"] == "claude-sonnet-5-5"
+        assert resolve_ai_provider_settings({"ai_provider": "anthropic"})["model"] == "claude-sonnet-5-5"

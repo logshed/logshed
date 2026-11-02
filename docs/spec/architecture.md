@@ -59,7 +59,7 @@ Settings updates apply dynamically to in-memory workers (`SyslogServer`, `Docker
 The runtime operational and advanced settings are:
 - `enable_mcp`: Master toggle for the embedded Model Context Protocol (MCP) server (Env: `LOGSHED_ENABLE_MCP`, default: `False`). Managed via the API & MCP Access tab.
 - `ai_timeout`: Outbound AI request timeout in seconds (Env: `LOGSHED_AI_TIMEOUT`, default: `45.0`).
-- `ai_thinking_budget`: Reasoning token budget for extended thinking models (Env: `LOGSHED_AI_THINKING_BUDGET`, default: `1024`, 0 disables).
+- `ai_thinking_budget`: Reasoning token budget for extended thinking models (Env: `LOGSHED_AI_THINKING_BUDGET`, default: `1024`, 0 disables). Claude 4.6 and later use it as an effort level instead (see `ai-engine.md` section 4).
 - `app_url`: Public base instance URL for action links in push notifications (Env: `APP_URL`, legacy alias: `app_url`, default: `""`).
 - `allow_private_notification_targets`: Permit notification webhooks to target LAN/RFC1918 IPs and `.local`/`.internal`/`.lan` hosts (Env: `ALLOW_PRIVATE_NOTIFICATION_TARGETS`, default: `True`).
 - `enable_docker`: Switch for the local Docker host (endpoint 1, "Primary Docker"), kept in step with that endpoint's `enabled` flag (Env: `ENABLE_DOCKER`, default: `True`; `false` in the environment keeps endpoint 1 off whatever is stored). It does not affect other Docker hosts, which each follow their own `enabled` flag.

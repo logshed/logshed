@@ -33,7 +33,7 @@ import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   gemini: DEFAULT_AI_MODEL,
   openai: 'gpt-4o',
-  anthropic: 'claude-sonnet-4-6',
+  anthropic: 'claude-sonnet-5-5',
   openai_compatible: 'llama3.2',
 };
 
@@ -76,7 +76,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
     gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
     openai: { hasKey: false, model: 'gpt-4o', fallbackModels: '' },
-    anthropic: { hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '' },
+    anthropic: { hasKey: false, model: 'claude-sonnet-5-5', fallbackModels: '' },
     openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
   });
 
@@ -295,7 +295,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       const configs: Record<string, ProviderLocalState> = {
         gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
         openai: { hasKey: false, model: 'gpt-4o', fallbackModels: '' },
-        anthropic: { hasKey: false, model: 'claude-sonnet-4-6', fallbackModels: '' },
+        anthropic: { hasKey: false, model: 'claude-sonnet-5-5', fallbackModels: '' },
         openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
       };
 
@@ -967,7 +967,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         type="text"
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-4-6' : 'llama3.2'}
+                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-4o' : provider === 'anthropic' ? 'claude-sonnet-5-5' : 'llama3.2'}
                         className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
                       />
                     )}

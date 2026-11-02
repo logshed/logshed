@@ -252,7 +252,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-400">
-            The timeout applies to every AI provider. The thinking budget applies to Gemini and Claude models that support thinking (OpenAI reasoning models use a fixed low effort). Set the budget to 0 to turn thinking off.
+            The timeout applies to every AI provider. The thinking budget applies to Gemini and Claude models that support thinking (OpenAI reasoning models use a fixed low effort). Claude 4.6 and later models use an effort level instead: low up to 2,048 tokens, medium up to 8,192, high above that. Set the budget to 0 to turn thinking off; Claude 4.7 and later then run at low effort, and some of them always think.
           </p>
         </div>
 
