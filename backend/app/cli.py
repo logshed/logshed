@@ -13,9 +13,8 @@ import datetime
 import getpass
 import sys
 
-from argon2 import PasswordHasher
-
 from app.core.migrations import get_connection, run_migrations
+from app.core.security import hash_password
 
 # Default database path inside the container
 _DEFAULT_DB_PATH = "/data/logs.db"
@@ -39,8 +38,7 @@ def reset_admin(password: str, db_path: str = _DEFAULT_DB_PATH) -> None:
     # Ensure the database and schema exist
     run_migrations(db_path)
 
-    ph = PasswordHasher()
-    password_hash = ph.hash(password)
+    password_hash = hash_password(password)
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     conn = get_connection(db_path)

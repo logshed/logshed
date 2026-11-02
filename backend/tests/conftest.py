@@ -14,7 +14,7 @@ from app.api.ingest import clear_ingest_token_cache
 
 # Building the FastAPI app costs ~0.12s (route schema generation) and ~330 tests build one, so
 # share instances. Swapped in before test modules run `from app.main import create_app`.
-# The app only varies by CORS origins and the presence of the built frontend; lifespan and
+# The app only varies by CORS origins, ENABLE_API_DOCS and the presence of the built frontend; lifespan and
 # request handling keep no per-app state. Use `create_app.uncached()` for a fresh instance.
 _STATIC_DIR = Path(main_mod.__file__).resolve().parent / "static"
 _uncached_create_app = main_mod.create_app
@@ -22,7 +22,7 @@ _app_cache: dict = {}
 
 
 def _cached_create_app():
-    key = (tuple(get_cors_origins()), _STATIC_DIR.exists(), (_STATIC_DIR / "assets").exists())
+    key = (tuple(get_cors_origins()), main_mod._api_docs_enabled(), _STATIC_DIR.exists(), (_STATIC_DIR / "assets").exists())
     if key not in _app_cache:
         _app_cache[key] = _uncached_create_app()
     return _app_cache[key]

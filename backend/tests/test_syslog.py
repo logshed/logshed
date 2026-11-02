@@ -1142,8 +1142,7 @@ class TestSyslogMultilineTracebackAssembly:
             await proto.process_message(pkt, "172.22.2.100")
             await asyncio.sleep(0.01)
 
-        # Wait for assembler flush timeout (150ms)
-        await asyncio.sleep(0.25)
+        await assembler.flush_all()
 
         q = get_queue()
         items = []
@@ -1185,7 +1184,7 @@ class TestSyslogMultilineTracebackAssembly:
             await proto.process_message(pkt, "172.22.2.100")
             await asyncio.sleep(0.01)
 
-        await asyncio.sleep(0.25)
+        await assembler.flush_all()
 
         q = get_queue()
         items = []
@@ -1226,7 +1225,7 @@ class TestSyslogMultilineTracebackAssembly:
             await proto.process_message(pkt, "10.0.0.50")
             await asyncio.sleep(0.01)
 
-        await asyncio.sleep(0.25)
+        await assembler.flush_all()
 
         q = get_queue()
         items = []
@@ -1253,7 +1252,7 @@ class TestSyslogMultilineTracebackAssembly:
         proto = SyslogUDPProtocol(assembler, alias_cache)
 
         await proto.process_message(b"Just an isolated text line from legacy script", "192.168.1.88")
-        await asyncio.sleep(0.25)
+        await assembler.flush_all()
 
         q = get_queue()
         items = []
@@ -1428,7 +1427,7 @@ class TestSyslogTCPConnectionLimitsAndTimeout:
 
         data = b"<14>Jan 15 10:00:00 host01 my-daemon[42]: process started successfully"
         await dispatch_syslog_message(data, "10.0.0.99", alias_cache, assembler)
-        await asyncio.sleep(0.25)
+        await assembler.flush_all()
 
         assert not q.empty()
         item = q.get_nowait()

@@ -42,6 +42,15 @@ def db_path(tmp_path: Path) -> Path:
     return p
 
 
+@pytest.fixture
+def short_retry_backoff(monkeypatch):
+    """Batch insert retries wait milliseconds instead of the production 0.5 s to 10 s (0.05 s to 1 s during shutdown)."""
+    monkeypatch.setattr(QueueConsumer, "RETRY_BACKOFF", 0.01)
+    monkeypatch.setattr(QueueConsumer, "RETRY_BACKOFF_MAX", 0.02)
+    monkeypatch.setattr(QueueConsumer, "SHUTDOWN_RETRY_BACKOFF", 0.001)
+    monkeypatch.setattr(QueueConsumer, "SHUTDOWN_RETRY_BACKOFF_MAX", 0.002)
+
+
 @pytest.fixture(autouse=True)
 def reset_pipeline_state():
     """Reset the global queue, drop counter, and ingest rate between tests."""
@@ -114,12 +123,16 @@ class TestMultilineAssembly:
 
     @pytest.mark.asyncio
     async def test_single_line_flushes(self):
-        asm = KeyedMultilineAssembler()
+        """A buffered line is flushed by the timer once the stream stays quiet for flush_timeout."""
+        asm = KeyedMultilineAssembler(flush_timeout=0.02)
         entry = _make_entry(message="single line")
         await asm.feed("s1:app", entry)
-        await asyncio.sleep(0.3)
 
         q = get_queue()
+        for _ in range(100):
+            if not q.empty():
+                break
+            await asyncio.sleep(0.01)
         assert not q.empty()
         item = q.get_nowait()
         assert item["message"] == "single line"
@@ -132,7 +145,7 @@ class TestMultilineAssembly:
         await asm.feed("s1:app", _make_entry(message="  at com.example.Foo.bar(Foo.java:10)", severity=6))
         await asm.feed("s1:app", _make_entry(message="Caused by: IOException", severity=4))
 
-        await asyncio.sleep(0.3)
+        await asm.flush_all()
 
         q = get_queue()
         assert not q.empty()
@@ -149,7 +162,7 @@ class TestMultilineAssembly:
         await asm.feed("s1:app", _make_entry(message="First log line"))
         await asm.feed("s1:app", _make_entry(message="Second log line"))
 
-        await asyncio.sleep(0.3)
+        await asm.flush_all()
 
         q = get_queue()
         items = []
@@ -189,7 +202,7 @@ class TestDockerMultilineAssembly:
 
         entry = _make_entry(message="Java exception")
         await asm.feed(stream_key, entry)
-        await asyncio.sleep(0.3)
+        await asm.flush_all()
 
         q = get_queue()
         assert not q.empty()
@@ -222,7 +235,7 @@ class TestDockerMultilineAssembly:
             severity=6,
         ))
 
-        await asyncio.sleep(0.3)
+        await asm.flush_all()
 
         q = get_queue()
         assert not q.empty()
@@ -256,7 +269,7 @@ class TestDockerMultilineAssembly:
             severity=3,
         ))
 
-        await asyncio.sleep(0.3)
+        await asm.flush_all()
 
         q = get_queue()
         items = []
@@ -286,7 +299,7 @@ class TestDockerMultilineAssembly:
             app_name="nginx",
         ))
 
-        await asyncio.sleep(0.3)
+        await asm.flush_all()
 
         q = get_queue()
         items = []
@@ -527,7 +540,7 @@ class TestQueueConsumer:
             await sse_manager.unsubscribe(sse_q)
 
     @pytest.mark.asyncio
-    async def test_queue_consumer_batch_insert_retry_succeeds(self, db_path: Path):
+    async def test_queue_consumer_batch_insert_retry_succeeds(self, db_path: Path, short_retry_backoff):
         """Transient SQLite error during _insert_batch is retried with backoff and succeeds without dropping logs."""
         consumer = QueueConsumer(db_path)
         q = get_queue()
@@ -567,7 +580,7 @@ class TestQueueConsumer:
         assert count == 5
 
     @pytest.mark.asyncio
-    async def test_queue_consumer_retries_without_dropping_and_does_not_drain_queue(self, db_path: Path):
+    async def test_queue_consumer_retries_without_dropping_and_does_not_drain_queue(self, db_path: Path, short_retry_backoff):
         """
         When database is locked or failing, QueueConsumer retains the batch in memory,
         retries without incrementing dropped log counter, and does NOT pop subsequent queue items.
@@ -600,8 +613,13 @@ class TestQueueConsumer:
         # While consumer is retrying batch 1, enqueue a second item
         q.put_nowait(_make_entry(message="batch_2_msg"))
 
-        # Wait during retry backoff
-        await asyncio.sleep(0.3)
+        # Let the consumer retry batch 1 a few more times
+        first_retry = attempts
+        for _ in range(100):
+            if attempts >= first_retry + 3:
+                break
+            await asyncio.sleep(0.01)
+        assert attempts >= first_retry + 3
 
         # batch_2_msg must NOT have been popped/drained from queue
         assert q.qsize() == 1
@@ -893,7 +911,7 @@ class TestQueueConsumer:
         assert get_dropped_count() == 0
 
     @pytest.mark.asyncio
-    async def test_shutdown_queue_drain_exits_cleanly_when_db_permanently_fails(self, db_path: Path):
+    async def test_shutdown_queue_drain_exits_cleanly_when_db_permanently_fails(self, db_path: Path, short_retry_backoff):
         """
         If database fails permanently during shutdown, all items are marked done,
         queue is cleared, and the consumer exits cleanly without deadlocking.

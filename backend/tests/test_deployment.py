@@ -601,7 +601,7 @@ class TestHttpPerimeterHeaders:
     async def test_api_docs_are_served_by_default_with_a_docs_policy(self, perimeter_env):
         from app.core.security import SESSION_COOKIE_NAME, create_session_token
 
-        async with self._client(create_app.uncached()) as ac:
+        async with self._client(create_app()) as ac:
             ac.cookies.set(SESSION_COOKIE_NAME, create_session_token(user_id=1))
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
@@ -620,7 +620,7 @@ class TestHttpPerimeterHeaders:
     @pytest.mark.parametrize("value", ["false", "0", "no", "off"])
     async def test_api_docs_can_be_turned_off(self, perimeter_env, monkeypatch, value):
         monkeypatch.setenv("ENABLE_API_DOCS", value)
-        async with self._client(create_app.uncached()) as ac:
+        async with self._client(create_app()) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
             spec = await ac.get("/openapi.json")
@@ -688,7 +688,7 @@ class TestApiDocsAccess:
 
     @pytest.mark.asyncio
     async def test_anonymous_docs_pages_redirect_to_the_login(self, docs_env):
-        async with self._client(create_app.uncached()) as ac:
+        async with self._client(create_app()) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
         for res in (docs, redoc):
@@ -698,14 +698,14 @@ class TestApiDocsAccess:
 
     @pytest.mark.asyncio
     async def test_anonymous_openapi_json_is_refused(self, docs_env):
-        async with self._client(create_app.uncached()) as ac:
+        async with self._client(create_app()) as ac:
             res = await ac.get("/openapi.json")
         assert res.status_code == 401
         assert "paths" not in res.text
 
     @pytest.mark.asyncio
     async def test_logged_in_user_gets_all_three_with_the_docs_policy(self, docs_env):
-        async with self._client(create_app.uncached(), logged_in=True) as ac:
+        async with self._client(create_app(), logged_in=True) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
             spec = await ac.get("/openapi.json")
@@ -724,7 +724,7 @@ class TestApiDocsAccess:
         import base64
         import hashlib
 
-        async with self._client(create_app.uncached(), logged_in=True) as ac:
+        async with self._client(create_app(), logged_in=True) as ac:
             docs = await ac.get("/docs")
         csp = docs.headers["Content-Security-Policy"]
         assert "cdn.jsdelivr.net" not in csp
@@ -745,7 +745,7 @@ class TestApiDocsAccess:
     async def test_docs_html_references_only_local_assets(self, docs_env):
         import re
 
-        async with self._client(create_app.uncached(), logged_in=True) as ac:
+        async with self._client(create_app(), logged_in=True) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
         for res in (docs, redoc):
@@ -763,7 +763,7 @@ class TestApiDocsAccess:
 
     @pytest.mark.asyncio
     async def test_any_valid_api_token_reads_openapi_json(self, docs_env):
-        async with self._client(create_app.uncached(), logged_in=True) as ac:
+        async with self._client(create_app(), logged_in=True) as ac:
             created = await ac.post(
                 "/api/tokens",
                 json={"name": "Docs reader", "scopes": ["logs:read"]},
@@ -772,7 +772,7 @@ class TestApiDocsAccess:
         assert created.status_code in (200, 201)
         raw_token = created.json()["raw_token"]
 
-        async with self._client(create_app.uncached()) as ac:
+        async with self._client(create_app()) as ac:
             ok = await ac.get("/openapi.json", headers={"Authorization": f"Bearer {raw_token}"})
             lower = await ac.get("/openapi.json", headers={"Authorization": f"bearer {raw_token}"})
             bad = await ac.get("/openapi.json", headers={"Authorization": "Bearer ls_live_bogus"})
@@ -785,7 +785,7 @@ class TestApiDocsAccess:
 
     @pytest.mark.asyncio
     async def test_invalid_token_is_not_rescued_by_the_session_cookie(self, docs_env):
-        async with self._client(create_app.uncached(), logged_in=True) as ac:
+        async with self._client(create_app(), logged_in=True) as ac:
             res = await ac.get("/openapi.json", headers={"Authorization": "Bearer ls_live_bogus"})
         assert res.status_code == 401
 
@@ -793,7 +793,7 @@ class TestApiDocsAccess:
     @pytest.mark.parametrize("value", ["false", "0"])
     async def test_docs_turned_off_stay_off_with_a_session(self, docs_env, monkeypatch, value):
         monkeypatch.setenv("ENABLE_API_DOCS", value)
-        async with self._client(create_app.uncached(), logged_in=True) as ac:
+        async with self._client(create_app(), logged_in=True) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
             spec = await ac.get("/openapi.json")
@@ -809,7 +809,7 @@ class TestApiDocsAccess:
         asset = STATIC_DIR / "docs-assets" / name
         if not asset.is_file():
             pytest.skip("frontend is not built (run `cd frontend && npm run build`)")
-        async with self._client(create_app.uncached()) as ac:
+        async with self._client(create_app()) as ac:
             res = await ac.get(f"/docs-assets/{name}")
         assert res.status_code == 200
         expected = "text/css" if name.endswith(".css") else "javascript"

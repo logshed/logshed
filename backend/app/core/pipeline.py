@@ -826,6 +826,13 @@ class QueueConsumer:
     """
     Background task that drains the shared queue and batch-inserts into SQLite.
     """
+    # Seconds to wait before retrying a failed batch insert, doubling up to the maximum; during
+    # shutdown the wait starts shorter so the drain finishes quickly
+    RETRY_BACKOFF = 0.5
+    RETRY_BACKOFF_MAX = 10.0
+    SHUTDOWN_RETRY_BACKOFF = 0.05
+    SHUTDOWN_RETRY_BACKOFF_MAX = 1.0
+
     def __init__(
         self,
         db_path: str | Path,
@@ -991,7 +998,7 @@ class QueueConsumer:
         inserted = False
         # The entries that reached the database (all of them, unless some could not be stored)
         stored_batch = batch
-        backoff = 0.05 if (not self._running or self._stopping) else 0.5
+        backoff = self.SHUTDOWN_RETRY_BACKOFF if (not self._running or self._stopping) else self.RETRY_BACKOFF
         shutdown_retries = 0
         max_shutdown_retries = 5
 
@@ -1022,7 +1029,7 @@ class QueueConsumer:
                 if not self._running or self._stopping:
                     if shutdown_retries == 0:
                         # Shutdown may begin mid-retry; drop the steady-state backoff for a fast drain
-                        backoff = 0.05
+                        backoff = self.SHUTDOWN_RETRY_BACKOFF
                     shutdown_retries += 1
                     if shutdown_retries >= max_shutdown_retries:
                         logger.error(
@@ -1033,7 +1040,7 @@ class QueueConsumer:
                         f"Retry {shutdown_retries}/{max_shutdown_retries} during shutdown for batch of {len(batch)} logs: {e}. Retrying in {backoff:.2f}s..."
                     )
                     await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2.0, 1.0)
+                    backoff = min(backoff * 2.0, self.SHUTDOWN_RETRY_BACKOFF_MAX)
                 else:
                     logger.warning(
                         f"Error inserting batch of {len(batch)} logs: {e}. Retrying in {backoff:.1f}s..."
@@ -1047,7 +1054,7 @@ class QueueConsumer:
                             break
                         except Exception:
                             raise
-                    backoff = min(backoff * 2.0, 10.0)
+                    backoff = min(backoff * 2.0, self.RETRY_BACKOFF_MAX)
 
         if inserted:
             record_ingest(len(stored_batch))
