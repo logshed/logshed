@@ -168,15 +168,18 @@ class AiProviderConfig(BaseModel):
     @field_validator("ai_base_url")
     @classmethod
     def validate_ai_base_url(cls, v: Optional[str]) -> Optional[str]:
-        """Same rule as the top-level ai_base_url: empty clears it, otherwise http(s) only."""
+        """Empty clears it; otherwise http(s) only, and never a link-local or cloud metadata IP address."""
         if v is not None:
             v_clean = v.strip()
             if not v_clean:
                 return ""
             from urllib.parse import urlparse
+            from app.core.net_guard import AI_PROVIDERS, is_blocked_address
             parsed = urlparse(v_clean)
             if parsed.scheme not in ("http", "https") or not parsed.netloc:
                 raise ValueError("ai_base_url must be a valid HTTP or HTTPS URL")
+            if parsed.hostname and is_blocked_address(parsed.hostname, AI_PROVIDERS):
+                raise ValueError("ai_base_url must not point to a link-local or cloud metadata address")
             return v_clean
         return v
 
@@ -352,16 +355,7 @@ class SettingsUpdateRequest(BaseModel):
     @field_validator("ai_base_url")
     @classmethod
     def validate_ai_base_url(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            v_clean = v.strip()
-            if not v_clean:
-                return ""
-            from urllib.parse import urlparse
-            parsed = urlparse(v_clean)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                raise ValueError("ai_base_url must be a valid HTTP or HTTPS URL")
-            return v_clean
-        return v
+        return AiProviderConfig.validate_ai_base_url(v)
 
     @field_validator("retention_days")
     @classmethod

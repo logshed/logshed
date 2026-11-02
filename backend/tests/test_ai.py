@@ -7,13 +7,14 @@ import datetime
 import json
 import sqlite3
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
 from app.core.migrations import run_migrations
+from app.core.net_guard import GuardedOpenAIHttpClient
 from app.core.rate_limiter import ai_rate_limiter, login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -293,7 +294,9 @@ Multiple transaction queries deadlock on shared index.
                 api_key="sk-test",
                 base_url="http://localhost:11434/v1",
                 timeout=DEFAULT_AI_TIMEOUT,
+                http_client=ANY,
             )
+            assert isinstance(mock_openai_cls.call_args.kwargs["http_client"], GuardedOpenAIHttpClient)
 
     @pytest.mark.asyncio
     async def test_dispatch_openai_reasoning_model_sets_effort(self):

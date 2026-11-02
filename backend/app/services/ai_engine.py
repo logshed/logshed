@@ -21,9 +21,10 @@ from anthropic import (
 )
 from google import genai
 from google.genai import types as genai_types
-from openai import AsyncOpenAI, APITimeoutError
+from openai import APIConnectionError, AsyncOpenAI, APITimeoutError
 
 from app.core.config import DEFAULT_AI_MODEL, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET, is_debug_or_dev
+from app.core.net_guard import GuardedOpenAIHttpClient
 from app.core.redactor import redact
 from app.core.utils import format_utc_offset
 
@@ -366,7 +367,11 @@ async def fetch_available_models(
             await _close_sdk_client(client)
 
     elif clean_provider == "openai_compatible":
-        client = AsyncOpenAI(api_key=api_key or "no-key", base_url=base_url or "http://localhost:11434/v1")
+        client = AsyncOpenAI(
+            api_key=api_key or "no-key",
+            base_url=base_url or "http://localhost:11434/v1",
+            http_client=GuardedOpenAIHttpClient(),
+        )
         try:
             paginator = client.models.list()
             async for m in paginator:
@@ -804,7 +809,11 @@ async def call_gemini(
 
 def _openai_error(e: Exception) -> Exception:
     """Translate an openai SDK failure into a redacted AiServiceUnavailableError or RuntimeError."""
-    clean_err = str(redact(str(e)[:500]))
+    raw_err = str(e)
+    if isinstance(e, APIConnectionError) and e.__cause__ is not None:
+        # "Connection error." alone hides why, for example a refused or blocked address
+        raw_err = f"{raw_err} {e.__cause__}"
+    clean_err = str(redact(raw_err[:500]))
     err_msg = f"OpenAI endpoint error: {clean_err}"
     _log_provider_failure(clean_err)
     err_code = getattr(e, "code", None) or getattr(e, "status_code", None)
@@ -844,6 +853,7 @@ async def call_openai(
             api_key=api_key or "not-needed",
             base_url=effective_base_url,
             timeout=timeout,
+            http_client=GuardedOpenAIHttpClient(),
         )
 
         create_kwargs: dict[str, Any] = {
@@ -1325,6 +1335,7 @@ async def dispatch_multi_turn_openai(
             api_key=api_key or "not-needed",
             base_url=effective_base_url,
             timeout=timeout,
+            http_client=GuardedOpenAIHttpClient(),
         )
 
         create_kwargs: dict[str, Any] = {

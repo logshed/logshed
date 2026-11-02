@@ -25,6 +25,15 @@ import apprise
 import requests
 import requests.sessions
 
+from app.core.net_guard import (
+    CLOUD_METADATA,
+    LINK_LOCAL,
+    LOOPBACK,
+    NOTIFICATION_TARGETS,
+    PRIVATE,
+    blocked_address_class,
+    notification_policy,
+)
 from app.core.security import decrypt_value, encrypt_value
 
 logger = logging.getLogger(__name__)
@@ -54,67 +63,25 @@ def shutdown_notifier_executor(wait: bool = True) -> None:
         _notification_executor.shutdown(wait=wait)
 
 
-# Blocked metadata, loopback, and private IP networks
-_METADATA_NETWORKS = [
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("fe80::/10"),
-]
-_LOOPBACK_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("::/128"),
-]
-_PRIVATE_NETWORKS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("fc00::/7"),
-]
-_IPV4_COMPATIBLE_NETWORK = ipaddress.ip_network("::/96")
-_BLOCKED_PORTS = {2375, 2376}
+_BLOCKED_PORTS = NOTIFICATION_TARGETS.blocked_ports
 _DANGEROUS_SCHEMES = {"file", "attach"}
+_BLOCKED_ADDRESS_MESSAGES = {
+    CLOUD_METADATA: "Target IP {ip} is a blocked cloud metadata service address.",
+    LINK_LOCAL: "Target IP {ip} is within blocked link-local and cloud metadata ranges (169.254.0.0/16, fe80::/10).",
+    LOOPBACK: "Target IP {ip} is within blocked container loopback ranges (127.0.0.0/8, ::1).",
+    PRIVATE: "Target IP {ip} is within private network ranges and private targets are disabled.",
+}
 
 
 def _check_ip_address_safety(
     ip_addr: Union[ipaddress.IPv4Address, ipaddress.IPv6Address],
     allow_private: bool,
 ) -> Tuple[bool, Optional[str]]:
-    """Verify an IP address against blocked metadata, loopback, and private ranges."""
-    # Unwrap IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
-    if isinstance(ip_addr, ipaddress.IPv6Address) and ip_addr.ipv4_mapped:
-        ip_addr = ip_addr.ipv4_mapped
-
-    # Check for IPv4-compatible IPv6 addresses (e.g., ::127.0.0.1, ::169.254.169.254)
-    if isinstance(ip_addr, ipaddress.IPv6Address) and ip_addr in _IPV4_COMPATIBLE_NETWORK:
-        unwrapped_v4 = ipaddress.IPv4Address(ip_addr.packed[-4:])
-        is_safe, err = _check_ip_address_safety(unwrapped_v4, allow_private)
-        if not is_safe:
-            return False, err
-
-    # 1. Cloud instance metadata
-    for net in _METADATA_NETWORKS:
-        if ip_addr in net:
-            return False, f"Target IP {ip_addr} is within blocked cloud metadata ranges (169.254.0.0/16, fe80::/10)."
-    if ip_addr.is_link_local:
-        return False, f"Target IP {ip_addr} is within link-local metadata ranges."
-
-    # 2. Container loopback
-    for net in _LOOPBACK_NETWORKS:
-        if ip_addr in net:
-            return False, f"Target IP {ip_addr} is within blocked container loopback ranges (127.0.0.0/8, ::1)."
-    if ip_addr.is_loopback or ip_addr.is_unspecified:
-        return False, f"Target IP {ip_addr} is a blocked loopback address."
-
-    # 3. Private subnets (blocked if ALLOW_PRIVATE_NOTIFICATION_TARGETS is false)
-    if not allow_private:
-        for net in _PRIVATE_NETWORKS:
-            if ip_addr in net:
-                return False, f"Target IP {ip_addr} is within private network ranges and private targets are disabled."
-        if ip_addr.is_private:
-            return False, f"Target IP {ip_addr} is a private network target and private targets are disabled."
-
-    return True, None
+    """Check an IP address against the notification policy (net_guard): metadata, link-local, loopback, private."""
+    address_class = blocked_address_class(ip_addr, notification_policy(allow_private))
+    if address_class is None:
+        return True, None
+    return False, _BLOCKED_ADDRESS_MESSAGES[address_class].format(ip=ip_addr)
 
 
 def mask_notification_url(raw_url: str) -> str:

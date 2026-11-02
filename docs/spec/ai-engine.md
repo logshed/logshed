@@ -53,7 +53,7 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
 - **Supported Providers & SDKs:**
   - Google Gemini via the `google-genai` SDK.
   - Anthropic Claude via the `anthropic` SDK.
-  - OpenAI-compatible endpoints via the `openai` SDK (with configurable `base_url` supporting self-hosted engines such as Ollama, vLLM, or LocalAI).
+  - OpenAI-compatible endpoints via the `openai` SDK (with configurable `base_url` supporting self-hosted engines such as Ollama, vLLM, or LocalAI). The SDK client connects through the outbound address check (`GuardedOpenAIHttpClient` in `backend/app/core/net_guard.py`), which refuses cloud metadata and link-local addresses and allows private and loopback ones; see the SSRF policy in [security.md](security.md).
 - **Model Configuration:** Configurable default model per provider (such as `gemini-3.7-flash`, `gpt-4o`, `claude-sonnet-5-5`, `llama3.2`), with fallback model lists and optional per-request overrides in the UI modal.
 - **Dynamic Model Discovery & Refresh Worker:**
   - Queries provider endpoints live to discover available models from the configured provider, cached in SQLite for 24 hours.
