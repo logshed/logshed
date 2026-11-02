@@ -107,3 +107,36 @@ async def test_live_openai_reasoning_model_runs_an_analysis(model):
     assert summary.strip()
     assert model_used == model
     assert fallback_attempts == []
+
+
+@pytest.mark.asyncio
+# claude-sonnet-5-5 is the default Claude model (listed by GET /v1/models on 2026-11-02). Claude 4.6 and
+# later think adaptively: a budget up to 2,048 sends low effort, and 0 also runs at low effort (4.7 and later)
+@pytest.mark.parametrize("thinking_budget", [1024, 0])
+async def test_live_claude_runs_an_analysis_at_a_thinking_budget(thinking_budget):
+    """The default Claude model completes an analysis with the default budget and with thinking turned off."""
+    from app.services.ai_engine import execute_ai_analysis
+
+    keys = load_env_keys()
+    claude_key = keys.get("CLAUDE_API_KEY") or keys.get("ANTHROPIC_API_KEY")
+    if not claude_key:
+        pytest.skip("CLAUDE_API_KEY not configured in .env or environment")
+
+    result = await execute_ai_analysis(
+        provider="anthropic",
+        model="claude-sonnet-5-5",
+        api_key=claude_key,
+        base_url=None,
+        source_alias="nas-01",
+        app_name="smartd",
+        redacted_logs="2026-11-02T10:00:00Z nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors",
+        log_count=1,
+        timeout=120,
+        thinking_budget=thinking_budget,
+    )
+    summary, model_used, fallback_attempts = result[0], result[9], result[10]
+    tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
+    print(f"\nclaude-sonnet-5-5 budget {thinking_budget}: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {summary[:160]!r}")
+    assert summary.strip()
+    assert model_used == "claude-sonnet-5-5"
+    assert fallback_attempts == []
