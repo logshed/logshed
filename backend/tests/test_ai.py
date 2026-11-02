@@ -1443,6 +1443,40 @@ class TestDefaultModelFallback:
         assert res.json()["ai_providers_config"]["openai"]["ai_model"] == "gpt-6.1-sol"
 
     @pytest.mark.asyncio
+    async def test_saving_default_models_keeps_them_following_the_default(self, populated_db, auth_client, tmp_path, monkeypatch):
+        """Save sends every provider's model; a default stored as-is would freeze when the default changes."""
+        res = await auth_client.post("/api/settings", json={
+            "ai_provider": "gemini",
+            "ai_model": "gemini-3.7-flash",
+            "ai_providers_config": {
+                "gemini": {"ai_model": "gemini-3.7-flash"},
+                "openai": {"ai_model": "gpt-6.1-sol"},
+                "anthropic": {"ai_model": "claude-opus-5"},
+                "openai_compatible": {"ai_model": "llama3.2"},
+            },
+        })
+        assert res.status_code == 200
+
+        conn = sqlite3.connect(str(tmp_path / "logs.db"))
+        stored = dict(conn.execute("SELECT key, value FROM system_settings WHERE key LIKE 'ai_model%' AND key NOT LIKE 'ai_models_cache%'").fetchall())
+        conn.close()
+        assert stored == {
+            "ai_model": "",
+            "ai_model_gemini": "",
+            "ai_model_openai": "",
+            "ai_model_anthropic": "claude-opus-5",
+            "ai_model_openai_compatible": "",
+        }
+
+        from app.api import settings as settings_api
+        monkeypatch.setitem(settings_api.DEFAULT_AI_MODELS, "openai", "gpt-7-next")
+        res = await auth_client.get("/api/settings")
+        config = res.json()["ai_providers_config"]
+        assert config["openai"]["ai_model"] == "gpt-7-next"
+        assert config["anthropic"]["ai_model"] == "claude-opus-5"
+        assert res.json()["ai_model"] == "gemini-3.7-flash"
+
+    @pytest.mark.asyncio
     async def test_execute_ai_analysis_openai_fallback_when_model_is_none(self):
         with patch("app.services.ai_engine.call_openai", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = ("Summary", 10, 10, 0, 20)

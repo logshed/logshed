@@ -61,6 +61,15 @@ DEFAULT_AI_MODELS: dict[str, str] = {
 }
 
 
+def _model_to_store(provider: str, model: str) -> str:
+    """
+    The value stored for a provider's model. The settings page sends every provider's model on
+    Save, including defaults nobody chose, so the default is stored as "" (follow LogShed's
+    default) and a later change of the default reaches that provider.
+    """
+    return "" if model.strip() == DEFAULT_AI_MODELS.get(provider, DEFAULT_AI_MODEL) else model
+
+
 def persist_retention_override(conn) -> bool:
     """
     Save MAX_RETENTION_DAYS as the stored retention when the variable is set.
@@ -270,8 +279,8 @@ async def update_settings(
             updates.append(("ai_provider", target_provider, 0))
 
         if req.ai_model is not None:
-            updates.append(("ai_model", req.ai_model, 0))
-            updates.append((f"ai_model_{target_provider}", req.ai_model, 0))
+            updates.append(("ai_model", _model_to_store(target_provider, req.ai_model), 0))
+            updates.append((f"ai_model_{target_provider}", _model_to_store(target_provider, req.ai_model), 0))
 
         if req.ai_fallback_models is not None:
             updates.append(("ai_fallback_models", req.ai_fallback_models, 0))
@@ -290,9 +299,9 @@ async def update_settings(
                 if not p_clean:
                     continue
                 if p_cfg.ai_model is not None:
-                    updates.append((f"ai_model_{p_clean}", p_cfg.ai_model, 0))
+                    updates.append((f"ai_model_{p_clean}", _model_to_store(p_clean, p_cfg.ai_model), 0))
                     if p_clean == target_provider and req.ai_model is None:
-                        updates.append(("ai_model", p_cfg.ai_model, 0))
+                        updates.append(("ai_model", _model_to_store(p_clean, p_cfg.ai_model), 0))
                 if p_cfg.ai_fallback_models is not None:
                     updates.append((f"ai_fallback_models_{p_clean}", p_cfg.ai_fallback_models, 0))
                     if p_clean == target_provider and req.ai_fallback_models is None:

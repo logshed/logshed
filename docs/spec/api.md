@@ -14,6 +14,7 @@ The OpenAPI document (`/openapi.json`, `/docs`) declares an HTTP Bearer security
 - Optional filter or pattern fields clear the stored value when they are sent as `null` or `""`: alert rule `filter_app`, `filter_severity`, `match_pattern` and `channel_id`, and drop rule `source_pattern`, `app_pattern` and `severity_threshold`. Required fields of a rule (name, type, thresholds, window, cooldown, switches) treat `null` as "unchanged".
 - Docker host `ca_cert`, `client_cert` and `client_key` keep the stored value when absent or `null`, and clear it when sent as `""`.
 - Settings: `ai_base_url` can be cleared by sending `""`. A masked secret (`"********"`) means "keep the stored value", so a client can send back what `GET /api/settings` returned without overwriting a key.
+- Settings: an `ai_model` (top level or in `ai_providers_config`) equal to that provider's default model is stored as `""`, which means "use the default", so the provider follows LogShed's default when it changes; `GET /api/settings` returns the default model for it.
 
 ## 2. Query Pagination & Evaluation Capping
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:

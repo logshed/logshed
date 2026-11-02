@@ -444,6 +444,8 @@ def migrate_v3(conn: sqlite3.Connection) -> None:
     - Ensure persistent server_name and instance_id in system_settings.
     - Make saved view names unique ignoring case and add idx_saved_views_name_nocase
       (dedupe_saved_view_names).
+    - Remove a stored OpenAI model gpt-4o (the 1.2.x default, shut down by OpenAI on 2027-01-14), so
+      OpenAI uses the current default model.
     """
     logger.info("Running migration v3...")
     cur = conn.execute("PRAGMA table_info(drop_rules);")
@@ -567,6 +569,19 @@ VALUES ('server_name', 'LogShed', datetime('now'), 0);
             "INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('instance_id', ?, datetime('now'), 0);",
             (inst_id,),
         )
+
+    # gpt-4o was the default OpenAI model up to 1.2.x, and saving the settings page stored it even
+    # when nobody had chosen it. OpenAI shuts it down on 2027-01-14, so a stored gpt-4o is removed
+    # once and OpenAI follows LogShed's current default model.
+    cleared = conn.execute(
+        "DELETE FROM system_settings WHERE key = 'ai_model_openai' AND value = 'gpt-4o';"
+    ).rowcount
+    cleared += conn.execute(
+        "DELETE FROM system_settings WHERE key = 'ai_model' AND value = 'gpt-4o' "
+        "AND (SELECT value FROM system_settings WHERE key = 'ai_provider') = 'openai';"
+    ).rowcount
+    if cleared:
+        logger.info("Removed the stored OpenAI model gpt-4o (OpenAI shuts it down on 2027-01-14); OpenAI now uses the default model.")
 
     dedupe_saved_view_names(conn)
 

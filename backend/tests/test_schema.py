@@ -1441,3 +1441,71 @@ class TestSavedViewNameDedupe:
                 "INSERT INTO saved_views (name, query_params, created_at) VALUES ('ERRORS', '{}', datetime('now'))"
             )
         conn.close()
+
+
+def _seed_settings(path: Path, values: dict[str, str]) -> None:
+    conn = get_connection(path)
+    for key, value in values.items():
+        conn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, datetime('now'), 0)",
+            (key, value),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _settings(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
+    conn = get_connection(path)
+    rows = conn.execute(
+        f"SELECT key, value FROM system_settings WHERE key IN ({', '.join('?' for _ in keys)})", keys
+    ).fetchall()
+    conn.close()
+    return dict(rows)
+
+
+class TestRetiredOpenAiDefaultModel:
+    """gpt-4o, the 1.2.x default that saving the settings page stored, is removed once on upgrade."""
+
+    KEYS = ("ai_provider", "ai_model", "ai_model_openai", "ai_model_openai_compatible", "ai_model_gemini")
+
+    def test_upgrade_from_v2_removes_a_stored_gpt_4o(self, tmp_path: Path, monkeypatch, caplog):
+        p = tmp_path / "v2_openai.db"
+        _migrate_to(p, 2, monkeypatch)
+        _seed_settings(p, {
+            "ai_provider": "openai",
+            "ai_model": "gpt-4o",
+            "ai_model_openai": "gpt-4o",
+            "ai_model_openai_compatible": "gpt-4o",
+            "ai_model_gemini": "gemini-3.7-flash",
+        })
+        caplog.set_level(logging.INFO, logger="app.core.migrations")
+
+        run_migrations(p)
+
+        assert _settings(p, self.KEYS) == {
+            "ai_provider": "openai",
+            "ai_model_openai_compatible": "gpt-4o",
+            "ai_model_gemini": "gemini-3.7-flash",
+        }
+        assert any("Removed the stored OpenAI model gpt-4o" in r.getMessage() for r in caplog.records)
+
+    def test_other_choices_are_kept(self, tmp_path: Path, monkeypatch, caplog):
+        p = tmp_path / "v2_other.db"
+        _migrate_to(p, 2, monkeypatch)
+        seeded = {"ai_provider": "gemini", "ai_model": "gpt-4o", "ai_model_openai": "gpt-4.1"}
+        _seed_settings(p, seeded)
+        caplog.set_level(logging.INFO, logger="app.core.migrations")
+
+        run_migrations(p)
+
+        assert _settings(p, self.KEYS) == seeded
+        assert not any("Removed the stored OpenAI model" in r.getMessage() for r in caplog.records)
+
+    def test_a_v3_database_keeps_gpt_4o_chosen_after_the_upgrade(self, tmp_path: Path):
+        p = tmp_path / "v3_openai.db"
+        run_migrations(p)
+        _seed_settings(p, {"ai_provider": "openai", "ai_model_openai": "gpt-4o"})
+
+        run_migrations(p)
+
+        assert _settings(p, ("ai_model_openai",)) == {"ai_model_openai": "gpt-4o"}
