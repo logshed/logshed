@@ -3628,3 +3628,56 @@ class TestAiRequestTextLimits:
     async def test_preview_refuses_an_oversized_context_with_422(self, auth_client):
         res = await auth_client.post("/api/ai/preview", json={"log_ids": [1], "user_context": "x" * 20_001})
         assert res.status_code == 422
+
+
+class TestOpenAiReasoningModelsGetNoTemperature:
+    """OpenAI reasoning models refuse a temperature other than the default, so LogShed sends none to them."""
+
+    REASONING_MODELS = ["o3-mini", "o4-mini", "gpt-5", "gpt-5-mini", "gpt-5.5", "gpt-5.6-luna", "gpt-6-astra", "gpt-6.1-sol", "openai/gpt-5-mini"]
+    OTHER_MODELS = ["gpt-4o-mini", "gpt-4.1", "gpt-5-chat-latest", "gpt-5.3-chat-latest", "llama3.1:8b", "gpt-oss:20b"]
+
+    @staticmethod
+    async def _single_turn_kwargs(model: str) -> dict:
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nF"
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5, completion_tokens_details=None)
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            client = MagicMock()
+            client.chat.completions.create = AsyncMock(return_value=mock_resp)
+            mock_cls.return_value = client
+            await ai_engine.call_openai(api_key="key", model=model, prompt="logs")
+        return client.chat.completions.create.call_args.kwargs
+
+    @staticmethod
+    async def _multi_turn_kwargs(model: str) -> dict:
+        from types import SimpleNamespace
+
+        chunks = [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Answer"))], usage=None)]
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            client = MagicMock()
+            client.chat.completions.create = AsyncMock(return_value=_aiter(chunks))
+            mock_cls.return_value = client
+            await ai_engine.dispatch_multi_turn_openai(
+                api_key="key", model=model, messages=[{"role": "user", "content": "q"}], system_prompt="SYS"
+            )
+        return client.chat.completions.create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model", REASONING_MODELS)
+    async def test_reasoning_models_get_no_temperature(self, model):
+        for kwargs in (await self._single_turn_kwargs(model), await self._multi_turn_kwargs(model)):
+            assert "temperature" not in kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model", OTHER_MODELS)
+    async def test_other_models_keep_the_low_temperature(self, model):
+        for kwargs in (await self._single_turn_kwargs(model), await self._multi_turn_kwargs(model)):
+            assert kwargs["temperature"] == 0.2
+            assert "reasoning_effort" not in kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model, effort", [("o3-mini", "low"), ("o4-mini", "low"), ("gpt-5-mini", None), ("gpt-6-astra", None)])
+    async def test_reasoning_effort_is_sent_only_to_the_o_series(self, model, effort):
+        for kwargs in (await self._single_turn_kwargs(model), await self._multi_turn_kwargs(model)):
+            assert kwargs.get("reasoning_effort") == effort

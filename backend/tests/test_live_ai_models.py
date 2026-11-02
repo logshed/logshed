@@ -76,3 +76,33 @@ async def test_live_openai_models():
     for m in filtered_models:
         print(f"  + {m['id']}")
     assert len(filtered_models) > 0
+
+
+@pytest.mark.asyncio
+# A model with no shutdown date in GET /v1/models on 2026-11-02 (o4-mini shut down on 2026-10-23, gpt-5-mini shuts down on 2026-12-11)
+@pytest.mark.parametrize("model", ["gpt-5.6-luna"])
+async def test_live_openai_reasoning_model_runs_an_analysis(model):
+    """A reasoning model as the only model (no fallback) completes an analysis."""
+    from app.services.ai_engine import execute_ai_analysis
+
+    keys = load_env_keys()
+    openai_key = keys.get("OPENAI_API_KEY")
+    if not openai_key:
+        pytest.skip("OPENAI_API_KEY not configured in .env or environment")
+
+    result = await execute_ai_analysis(
+        provider="openai",
+        model=model,
+        api_key=openai_key,
+        base_url=None,
+        source_alias="nas-01",
+        app_name="smartd",
+        redacted_logs="2026-11-02T10:00:00Z nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors",
+        log_count=1,
+        timeout=120,
+    )
+    summary, model_used, fallback_attempts = result[0], result[9], result[10]
+    print(f"\n{model}: {summary[:200]!r}")
+    assert summary.strip()
+    assert model_used == model
+    assert fallback_attempts == []

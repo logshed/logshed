@@ -131,6 +131,31 @@ def supports_openai_reasoning(model_name: str) -> bool:
     return bool(re.search(r"(?:^|[-_])o\d", m) or "reason" in m)
 
 
+# GPT-5 and later (also behind a provider prefix such as openai/), except the non-reasoning chat variants
+_OPENAI_GPT_REASONING = re.compile(r"(?:^|[/_-])gpt-(?:[5-9]|1\d)(?!\d)")
+
+
+def openai_model_takes_temperature(model_name: str) -> bool:
+    """
+    False for OpenAI reasoning models (o-series, GPT-5 and later), which refuse any temperature
+    but the default unless their reasoning effort is none.
+    """
+    m = model_name.lower()
+    if supports_openai_reasoning(m):
+        return False
+    return not (_OPENAI_GPT_REASONING.search(m) and "chat" not in m)
+
+
+def _openai_sampling_kwargs(model: str) -> dict[str, Any]:
+    """The temperature or reasoning effort LogShed sends with an OpenAI or OpenAI-compatible request."""
+    kwargs: dict[str, Any] = {}
+    if openai_model_takes_temperature(model):
+        kwargs["temperature"] = 0.2
+    if supports_openai_reasoning(model):
+        kwargs["reasoning_effort"] = "low"
+    return kwargs
+
+
 def supports_claude_thinking(model_name: str) -> bool:
     """Returns True if the Claude model supports extended thinking / reasoning budgets."""
     m = model_name.lower()
@@ -827,10 +852,8 @@ async def call_openai(
                 {"role": "system", "content": effective_system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0.2,
+            **_openai_sampling_kwargs(model),
         }
-        if supports_openai_reasoning(model):
-            create_kwargs["reasoning_effort"] = "low"
 
         response = await client.chat.completions.create(**create_kwargs)
 
@@ -1268,12 +1291,10 @@ async def dispatch_multi_turn_openai(
         create_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "system", "content": system_prompt}] + messages,
-            "temperature": 0.2,
+            **_openai_sampling_kwargs(model),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if supports_openai_reasoning(model):
-            create_kwargs["reasoning_effort"] = "low"
 
         chunks: list[str] = []
         usage = None

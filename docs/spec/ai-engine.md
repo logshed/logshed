@@ -96,6 +96,7 @@ The model response is formatted in Markdown with three designated sections, pars
   - `supports_gemini_thinking`: Automatically detected for Gemini 2.5, 3.x, and thinking-designated models. Configures `thinking_config` with the designated thinking budget.
   - `supports_claude_thinking`: Automatically detected for Claude 3.7+ models. Configures `thinking={"type": "enabled", "budget_tokens": ...}` with the designated thinking budget.
   - `supports_openai_reasoning`: Automatically detected for OpenAI o-series models (such as `o1`, `o3`, `o3-mini`). Configures `reasoning_effort` accordingly.
+  - `openai_model_takes_temperature`: OpenAI and OpenAI-compatible requests use `temperature: 0.2`, except for OpenAI reasoning models: the o-series and GPT-5 and later (`gpt-5`, `gpt-5-mini`, `gpt-5.5`, `gpt-6-astra`, also behind a provider prefix such as `openai/`), which refuse any temperature but the default while their reasoning effort is not `none`. Those get no `temperature`. The non-reasoning chat variants (names containing `chat`, such as `gpt-5-chat-latest`) keep `0.2`. GPT-5 and later get no `reasoning_effort` either, so they run at their own default effort, because the values each accepts differ by model.
 - **Token Accounting:** Safe token count extraction extracts `tokens_in` (prompt), `tokens_out` (candidate completion), and `tokens_thoughts` (reasoning/thought tokens), recording them accurately in `ai_audit_log` and `alert_history`.
 
 ---
