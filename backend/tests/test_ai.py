@@ -3863,6 +3863,23 @@ class TestOpenAiCompatibleProviders:
         assert ai_engine.supports_openai_reasoning(model) is False
 
 
+class TestGeminiLatestAliasesThink:
+    """gemini-flash-latest and the other aliases follow Google's current models, which all think."""
+
+    @pytest.mark.parametrize(
+        "model", ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest", "models/gemini-pro-latest"]
+    )
+    def test_aliases_get_the_thinking_budget(self, model):
+        assert ai_engine.supports_gemini_thinking(model) is True
+        config = ai_engine._gemini_generation_config(model, "SYS", 1024)
+        assert config.thinking_config.thinking_budget == 1024
+
+    @pytest.mark.parametrize("model", ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemma-latest"])
+    def test_older_models_and_other_aliases_do_not(self, model):
+        assert ai_engine.supports_gemini_thinking(model) is False
+        assert ai_engine._gemini_generation_config(model, "SYS", 1024).thinking_config is None
+
+
 class TestAnthropicRequestsPerModelFamily:
     """Claude 4.6 and later take adaptive thinking with an effort level; 4.7 and later refuse temperature."""
 

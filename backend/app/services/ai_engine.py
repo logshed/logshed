@@ -124,7 +124,10 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
 def supports_gemini_thinking(model_name: str) -> bool:
     """Returns True if the Gemini model family supports reasoning/thinking budgets."""
     m = model_name.lower()
-    return any(v in m for v in ("2.5", "3.", "3-", "4.", "4-", "5.", "thinking", "think"))
+    if any(v in m for v in ("2.5", "3.", "3-", "4.", "4-", "5.", "thinking", "think")):
+        return True
+    # Aliases that follow Google's current release (gemini-flash-latest and so on); all of them think
+    return bool(re.search(r"(?:^|/)gemini-(?:flash|flash-lite|pro)-latest$", m))
 
 
 # GPT-5 and later (also behind a provider prefix such as openai/), except the non-reasoning chat variants
