@@ -7,9 +7,11 @@ import datetime
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any, Optional
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
+import openai
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
@@ -3681,10 +3683,101 @@ class TestOpenAiReasoningModelsGetNoTemperature:
             assert "reasoning_effort" not in kwargs
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("model, effort", [("o3-mini", "low"), ("o4-mini", "low"), ("gpt-5-mini", None), ("gpt-6-astra", None)])
-    async def test_reasoning_effort_is_sent_only_to_the_o_series(self, model, effort):
+    @pytest.mark.parametrize("model", REASONING_MODELS)
+    async def test_reasoning_models_get_low_reasoning_effort(self, model):
         for kwargs in (await self._single_turn_kwargs(model), await self._multi_turn_kwargs(model)):
-            assert kwargs.get("reasoning_effort") == effort
+            assert kwargs["reasoning_effort"] == "low"
+
+
+def _bad_request(message: str, param: Optional[str] = None) -> openai.BadRequestError:
+    import httpx2
+
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    body = {"error": {"message": message, "type": "invalid_request_error", "param": param, "code": "unsupported_value"}}
+    return openai.BadRequestError(message, response=httpx2.Response(400, request=request), body=body["error"])
+
+
+class TestOpenAiReasoningEffortFallback:
+    """Accepted reasoning efforts differ by model, so a refused one is retried once without it."""
+
+    REFUSED = "Unsupported value: 'reasoning_effort' does not support 'low' with this model. Supported values are: 'high'."
+
+    @staticmethod
+    def _mock_client(first_error: Exception, success: Any) -> MagicMock:
+        client = MagicMock()
+        client.close = AsyncMock()
+        client.chat.completions.create = AsyncMock(side_effect=[first_error, success])
+        return client
+
+    @staticmethod
+    def _response() -> MagicMock:
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nF"
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5, completion_tokens_details=None)
+        return mock_resp
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("param", ["reasoning_effort", None])
+    async def test_analysis_is_retried_without_a_refused_effort(self, param):
+        client = self._mock_client(_bad_request(self.REFUSED, param), self._response())
+        with patch("app.services.ai_engine.AsyncOpenAI", return_value=client):
+            text, *_ = await ai_engine.call_openai(api_key="key", model="gpt-5.5-pro", prompt="logs")
+
+        assert text.startswith("## Summary")
+        first, second = (c.kwargs for c in client.chat.completions.create.call_args_list)
+        assert first["reasoning_effort"] == "low"
+        assert "reasoning_effort" not in second
+        assert "temperature" not in second
+        assert first["messages"] == second["messages"]
+
+    @pytest.mark.asyncio
+    async def test_follow_up_is_retried_without_a_refused_effort(self):
+        from types import SimpleNamespace
+
+        chunks = [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Answer"))], usage=None)]
+        client = self._mock_client(_bad_request(self.REFUSED, "reasoning_effort"), _aiter(chunks))
+        with patch("app.services.ai_engine.AsyncOpenAI", return_value=client):
+            text, *_ = await ai_engine.dispatch_multi_turn_openai(
+                api_key="key", model="gpt-6.1-sol", messages=[{"role": "user", "content": "q"}], system_prompt="SYS"
+            )
+
+        assert text == "Answer"
+        second = client.chat.completions.create.call_args_list[1].kwargs
+        assert "reasoning_effort" not in second
+        assert second["stream"] is True
+
+    @pytest.mark.asyncio
+    async def test_other_bad_requests_are_not_retried(self):
+        client = self._mock_client(_bad_request("Invalid model 'gpt-5.5-typo'.", "model"), self._response())
+        with patch("app.services.ai_engine.AsyncOpenAI", return_value=client):
+            with pytest.raises(RuntimeError, match="Invalid model"):
+                await ai_engine.call_openai(api_key="key", model="gpt-5.5-typo", prompt="logs")
+        assert client.chat.completions.create.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_second_refusal_is_reported(self):
+        client = MagicMock()
+        client.close = AsyncMock()
+        client.chat.completions.create = AsyncMock(side_effect=[_bad_request(self.REFUSED, "reasoning_effort")] * 2)
+        with patch("app.services.ai_engine.AsyncOpenAI", return_value=client):
+            with pytest.raises(RuntimeError, match="reasoning_effort"):
+                await ai_engine.call_openai(api_key="key", model="gpt-5.5-pro", prompt="logs")
+        assert client.chat.completions.create.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_model_list_marks_gpt_5_and_later_as_thinking_models(self):
+        from types import SimpleNamespace
+
+        ids = ["gpt-6.1-sol", "gpt-5.5", "gpt-5.3-chat-latest", "gpt-4.1", "o3"]
+        client = MagicMock()
+        client.close = AsyncMock()
+        client.models.list = MagicMock(return_value=_aiter([SimpleNamespace(id=i) for i in ids]))
+        with patch("app.services.ai_engine.AsyncOpenAI", return_value=client):
+            models = await ai_engine.fetch_available_models("openai", api_key="key")
+
+        thinking = {m["id"]: m["supports_thinking"] for m in models}
+        assert thinking == {"gpt-6.1-sol": True, "gpt-5.5": True, "gpt-5.3-chat-latest": False, "gpt-4.1": False, "o3": True}
 
 
 class TestOpenAiCompatibleProviders:

@@ -22,7 +22,7 @@ from anthropic import (
 )
 from google import genai
 from google.genai import types as genai_types
-from openai import APIConnectionError, AsyncOpenAI, APITimeoutError
+from openai import APIConnectionError, AsyncOpenAI, APITimeoutError, BadRequestError
 
 from app.core.config import DEFAULT_AI_MODEL, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET, is_debug_or_dev
 from app.core.net_guard import GuardedOpenAIHttpClient
@@ -127,14 +127,19 @@ def supports_gemini_thinking(model_name: str) -> bool:
     return any(v in m for v in ("2.5", "3.", "3-", "4.", "4-", "5.", "thinking", "think"))
 
 
-def supports_openai_reasoning(model_name: str) -> bool:
-    """Returns True if the OpenAI/compatible model supports reasoning_effort parameter."""
-    m = model_name.lower()
-    return bool(re.search(r"(?:^|[-_/])o\d", m) or "reason" in m)
-
-
 # GPT-5 and later (also behind a provider prefix such as openai/), except the non-reasoning chat variants
 _OPENAI_GPT_REASONING = re.compile(r"(?:^|[/_-])gpt-(?:[5-9]|1\d)(?!\d)")
+
+
+def supports_openai_reasoning(model_name: str) -> bool:
+    """
+    True for OpenAI and compatible reasoning models: the o-series, GPT-5 and later (except their
+    chat variants) and names containing "reason". They take reasoning_effort and no temperature.
+    """
+    m = model_name.lower()
+    if re.search(r"(?:^|[-_/])o\d", m) or "reason" in m:
+        return True
+    return bool(_OPENAI_GPT_REASONING.search(m) and "chat" not in m)
 
 
 def openai_model_takes_temperature(model_name: str) -> bool:
@@ -142,10 +147,7 @@ def openai_model_takes_temperature(model_name: str) -> bool:
     False for OpenAI reasoning models (o-series, GPT-5 and later), which refuse any temperature
     but the default unless their reasoning effort is none.
     """
-    m = model_name.lower()
-    if supports_openai_reasoning(m):
-        return False
-    return not (_OPENAI_GPT_REASONING.search(m) and "chat" not in m)
+    return not supports_openai_reasoning(model_name)
 
 
 def _openai_sampling_kwargs(model: str) -> dict[str, Any]:
@@ -156,6 +158,26 @@ def _openai_sampling_kwargs(model: str) -> dict[str, Any]:
     if supports_openai_reasoning(model):
         kwargs["reasoning_effort"] = "low"
     return kwargs
+
+
+async def _create_chat_completion(client: AsyncOpenAI, create_kwargs: dict[str, Any]) -> Any:
+    """
+    Send the chat completion request. The accepted reasoning efforts differ by model (some accept
+    only high), so when the endpoint refuses reasoning_effort the request is sent once more
+    without it, at the model's own default effort.
+    """
+    try:
+        return await client.chat.completions.create(**create_kwargs)
+    except BadRequestError as e:
+        refused_effort = getattr(e, "param", None) == "reasoning_effort" or "reasoning_effort" in str(e)
+        if "reasoning_effort" not in create_kwargs or not refused_effort:
+            raise
+        logger.info(
+            f"Model {create_kwargs.get('model')} refused reasoning_effort {create_kwargs['reasoning_effort']!r}; "
+            "retrying at its default effort."
+        )
+        retry_kwargs = {k: v for k, v in create_kwargs.items() if k != "reasoning_effort"}
+        return await client.chat.completions.create(**retry_kwargs)
 
 
 def supports_claude_thinking(model_name: str) -> bool:
@@ -879,7 +901,7 @@ async def call_openai(
             **_openai_sampling_kwargs(model),
         }
 
-        response = await client.chat.completions.create(**create_kwargs)
+        response = await _create_chat_completion(client, create_kwargs)
 
         choice = response.choices[0]
         text = choice.message.content
@@ -1358,7 +1380,7 @@ async def dispatch_multi_turn_openai(
         chunks: list[str] = []
         usage = None
         async with asyncio.timeout(timeout):
-            stream = await client.chat.completions.create(**create_kwargs)
+            stream = await _create_chat_completion(client, create_kwargs)
             async for chunk in stream:
                 if getattr(chunk, "usage", None):
                     usage = chunk.usage
