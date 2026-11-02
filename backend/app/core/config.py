@@ -134,12 +134,14 @@ def get_docker_additional_hosts() -> list[dict[str, Any]]:
         return []
 
     results: list[dict[str, Any]] = []
-    for item in parsed:
+    for position, item in enumerate(parsed, start=1):
         if not isinstance(item, dict):
+            logger.warning(f"DOCKER_ADDITIONAL_HOSTS entry {position} is not a JSON object and is skipped.")
             continue
         name = str(item.get("name", "")).strip()
         url = str(item.get("url", "")).strip()
         if not name or not url:
+            logger.warning(f"DOCKER_ADDITIONAL_HOSTS entry {position} has no name or url and is skipped.")
             continue
         results.append({
             "name": name,

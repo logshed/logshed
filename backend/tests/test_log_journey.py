@@ -36,23 +36,8 @@ from app.main import create_app, lifespan
 WAIT_SECONDS = 10.0
 
 
-def _free_port() -> int:
-    """A port number that is free for both TCP and UDP on 127.0.0.1."""
-    for _ in range(20):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
-            tcp.bind(("127.0.0.1", 0))
-            port = tcp.getsockname()[1]
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
-                try:
-                    udp.bind(("127.0.0.1", port))
-                except OSError:
-                    continue
-        return port
-    raise RuntimeError("no free port for both TCP and UDP")
-
-
 @pytest.fixture
-def journey_env(tmp_path: Path, monkeypatch):
+def journey_env(tmp_path: Path, monkeypatch, free_syslog_port):
     pipeline_mod._log_queue = None
     pipeline_mod._dropped_logs_total = 0
     login_rate_limiter.reset()
@@ -64,12 +49,11 @@ def journey_env(tmp_path: Path, monkeypatch):
 
     db_file = tmp_path / "logs.db"
     key_file = tmp_path / ".secret_key"
-    port = _free_port()
+    port = free_syslog_port
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DB_PATH", str(db_file))
     monkeypatch.setenv("SECRET_KEY_PATH", str(key_file))
     monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
-    monkeypatch.setenv("SYSLOG_PORT", str(port))
     monkeypatch.setenv("ENABLE_DOCKER", "false")
     run_migrations(db_file)
     get_or_create_master_key(key_file)

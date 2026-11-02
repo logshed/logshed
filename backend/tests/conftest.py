@@ -73,3 +73,22 @@ def reset_shared_app_overrides():
     yield
     for app in _app_cache.values():
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def free_syslog_port(monkeypatch) -> int:
+    """Set SYSLOG_PORT to a port that is free for both TCP and UDP on 127.0.0.1, for tests that run the lifespan."""
+    import socket
+
+    for _ in range(20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
+            tcp.bind(("127.0.0.1", 0))
+            port = tcp.getsockname()[1]
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                try:
+                    udp.bind(("127.0.0.1", port))
+                except OSError:
+                    continue
+        monkeypatch.setenv("SYSLOG_PORT", str(port))
+        return port
+    raise RuntimeError("no free port for both TCP and UDP")
