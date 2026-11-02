@@ -168,7 +168,7 @@ def resolve_ai_provider_settings(
     """
     active_db_provider = (settings.get("ai_provider") or "gemini").lower()
     provider = (provider_override or active_db_provider).lower()
-    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-4o" if provider == "openai" else ("claude-sonnet-5-5" if provider == "anthropic" else "llama3.2"))
+    default_model = DEFAULT_AI_MODEL if provider == "gemini" else ("gpt-6.1-sol" if provider == "openai" else ("claude-sonnet-5-5" if provider == "anthropic" else "llama3.2"))
     model = model_override or settings.get(f"ai_model_{provider}") or (settings.get("ai_model") if provider == active_db_provider else None) or default_model
     api_key = (
         settings.get(f"ai_api_key_{provider}")

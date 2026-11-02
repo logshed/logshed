@@ -1369,7 +1369,7 @@ class TestDefaultModelFallback:
 
         res = await auth_client.post("/api/ai/preview", json={"log_ids": [1, 2]})
         assert res.status_code == 200
-        assert res.json()["model"] == "gpt-4o"
+        assert res.json()["model"] == "gpt-6.1-sol"
 
     @pytest.mark.asyncio
     async def test_diagnose_fallback_when_not_in_db_and_no_override(self, populated_db, auth_client, tmp_path):
@@ -1428,6 +1428,35 @@ class TestDefaultModelFallback:
                 log_count=1,
             )
             assert mock_dispatch.call_args[1]["model"] == "gemini-3.7-flash"
+
+    @pytest.mark.asyncio
+    async def test_get_settings_openai_default_model_when_none_saved(self, populated_db, auth_client, tmp_path):
+        """The OpenAI default model is gpt-6.1-sol (gpt-4o shuts down on 2027-01-14)."""
+        db_file = tmp_path / "logs.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("DELETE FROM system_settings WHERE key IN ('ai_model', 'ai_model_openai')")
+        conn.commit()
+        conn.close()
+
+        res = await auth_client.get("/api/settings")
+        assert res.status_code == 200
+        assert res.json()["ai_providers_config"]["openai"]["ai_model"] == "gpt-6.1-sol"
+
+    @pytest.mark.asyncio
+    async def test_execute_ai_analysis_openai_fallback_when_model_is_none(self):
+        with patch("app.services.ai_engine.call_openai", new_callable=AsyncMock) as mock_dispatch:
+            mock_dispatch.return_value = ("Summary", 10, 10, 0, 20)
+            await ai_engine.execute_ai_analysis(
+                provider="openai",
+                model=None,
+                api_key="key",
+                base_url=None,
+                source_alias="router",
+                app_name="app",
+                redacted_logs="log text",
+                log_count=1,
+            )
+            assert mock_dispatch.call_args[1]["model"] == "gpt-6.1-sol"
 
 
 # ===================================================================

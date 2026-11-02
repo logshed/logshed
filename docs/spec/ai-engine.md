@@ -54,7 +54,7 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
   - Google Gemini via the `google-genai` SDK.
   - Anthropic Claude via the `anthropic` SDK.
   - OpenAI-compatible endpoints via the `openai` SDK (with configurable `base_url`: routers and hosted APIs such as OpenRouter, Groq, Mistral and DeepSeek, and self-hosted engines such as Ollama, LM Studio, vLLM or LocalAI; the Settings base URL field offers presets for the common ones). Requests to an `openrouter.ai` base URL carry OpenRouter's attribution headers `HTTP-Referer: https://logshed.dev` and `X-OpenRouter-Title: LogShed` (never the configured `APP_URL`). Routed model IDs such as `openai/o3` are treated like the bare IDs. The SDK client connects through the outbound address check (`GuardedOpenAIHttpClient` in `backend/app/core/net_guard.py`), which refuses cloud metadata and link-local addresses and allows private and loopback ones; see the SSRF policy in [security.md](security.md).
-- **Model Configuration:** Configurable default model per provider (such as `gemini-3.7-flash`, `gpt-4o`, `claude-sonnet-5-5`, `llama3.2`), with fallback model lists and optional per-request overrides in the UI modal.
+- **Model Configuration:** Configurable default model per provider (such as `gemini-3.7-flash`, `gpt-6.1-sol`, `claude-sonnet-5-5`, `llama3.2`), with fallback model lists and optional per-request overrides in the UI modal.
 - **Dynamic Model Discovery & Refresh Worker:**
   - Queries provider endpoints live to discover available models from the configured provider, cached in SQLite for 24 hours.
   - Non-text models (such as speech, audio transcription, image generation, video, embeddings, and safety moderation) are filtered out automatically using keyword detection.

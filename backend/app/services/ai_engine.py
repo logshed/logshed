@@ -1177,7 +1177,7 @@ async def execute_ai_analysis(
         )
 
     norm_provider = (provider or "gemini").lower()
-    primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-4o" if norm_provider == "openai" else ("claude-sonnet-5-5" if norm_provider == "anthropic" else "llama3.2")))
+    primary_model = model or (DEFAULT_AI_MODEL if norm_provider == "gemini" else ("gpt-6.1-sol" if norm_provider == "openai" else ("claude-sonnet-5-5" if norm_provider == "anthropic" else "llama3.2")))
 
     dispatch = _analysis_dispatcher(norm_provider)
     if dispatch is None:

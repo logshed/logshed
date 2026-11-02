@@ -1347,7 +1347,7 @@ describe('SettingsPanel Component', () => {
         expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
       });
       // Switching provider alone is a change; edit the model, then return to the saved provider.
-      fireEvent.change(screen.getByPlaceholderText('gpt-4o'), { target: { value: 'gpt-4.1' } });
+      fireEvent.change(screen.getByPlaceholderText('gpt-6.1-sol'), { target: { value: 'gpt-4.1' } });
       fireEvent.change(screen.getByDisplayValue('OpenAI'), { target: { value: 'gemini' } });
       await waitFor(() => {
         expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();

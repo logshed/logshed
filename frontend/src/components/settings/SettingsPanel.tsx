@@ -85,7 +85,7 @@ type ProviderId = 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
 
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   gemini: DEFAULT_AI_MODEL,
-  openai: 'gpt-4o',
+  openai: 'gpt-6.1-sol',
   anthropic: 'claude-sonnet-5-5',
   openai_compatible: 'llama3.2',
 };
@@ -237,7 +237,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // Form states
   const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
     gemini: { apiKey: '', hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '', baseUrl: '' },
-    openai: { apiKey: '', hasKey: false, model: 'gpt-4o', fallbackModels: '', baseUrl: '' },
+    openai: { apiKey: '', hasKey: false, model: 'gpt-6.1-sol', fallbackModels: '', baseUrl: '' },
     anthropic: { apiKey: '', hasKey: false, model: 'claude-sonnet-5-5', fallbackModels: '', baseUrl: '' },
     openai_compatible: { apiKey: '', hasKey: true, model: 'llama3.2', fallbackModels: '', baseUrl: '' },
   });
@@ -1183,7 +1183,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="text"
                   value={aiModel}
                   onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                  placeholder={aiProvider === 'gemini' ? DEFAULT_AI_MODEL : aiProvider === 'openai' ? 'gpt-4o' : aiProvider === 'anthropic' ? 'claude-sonnet-5-5' : 'llama3.2'}
+                  placeholder={aiProvider === 'gemini' ? DEFAULT_AI_MODEL : aiProvider === 'openai' ? 'gpt-6.1-sol' : aiProvider === 'anthropic' ? 'claude-sonnet-5-5' : 'llama3.2'}
                   className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
                 />
               )}
