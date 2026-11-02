@@ -3687,6 +3687,60 @@ class TestOpenAiReasoningModelsGetNoTemperature:
             assert kwargs.get("reasoning_effort") == effort
 
 
+class TestOpenAiCompatibleProviders:
+    """Routers such as OpenRouter work through the OpenAI-compatible provider."""
+
+    @staticmethod
+    async def _client_kwargs_per_call(base_url: str) -> list[dict]:
+        from types import SimpleNamespace
+
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nF"
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5, completion_tokens_details=None)
+        chunks = [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Answer"))], usage=None)]
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            client = MagicMock()
+            client.close = AsyncMock()
+            client.models.list = MagicMock(return_value=_aiter([]))
+            client.chat.completions.create = AsyncMock(return_value=mock_resp)
+            mock_cls.return_value = client
+            await ai_engine.fetch_available_models("openai_compatible", api_key="key", base_url=base_url)
+            await ai_engine.call_openai(api_key="key", model="m", prompt="logs", base_url=base_url)
+            client.chat.completions.create = AsyncMock(return_value=_aiter(chunks))
+            await ai_engine.dispatch_multi_turn_openai(
+                api_key="key", model="m", messages=[{"role": "user", "content": "q"}], system_prompt="SYS", base_url=base_url
+            )
+        return [c.kwargs for c in mock_cls.call_args_list]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("base_url", ["https://openrouter.ai/api/v1", "https://OpenRouter.ai/api/v1/"])
+    async def test_openrouter_requests_carry_the_project_attribution(self, base_url):
+        calls = await self._client_kwargs_per_call(base_url)
+        assert len(calls) == 3
+        for kwargs in calls:
+            assert kwargs["default_headers"] == {"HTTP-Referer": "https://logshed.dev", "X-OpenRouter-Title": "LogShed"}
+            assert isinstance(kwargs["http_client"], GuardedOpenAIHttpClient)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "base_url",
+        ["http://host.docker.internal:11434/v1", "https://api.groq.com/openai/v1", "https://openrouter.ai.example.com/v1"],
+    )
+    async def test_other_servers_get_no_attribution_headers(self, base_url):
+        for kwargs in await self._client_kwargs_per_call(base_url):
+            assert "default_headers" not in kwargs
+
+    @pytest.mark.parametrize("model", ["openai/o3", "openai/o4-mini", "openai/o1-pro"])
+    def test_routed_o_series_ids_are_reasoning_models(self, model):
+        assert ai_engine.supports_openai_reasoning(model) is True
+        assert ai_engine._openai_sampling_kwargs(model) == {"reasoning_effort": "low"}
+
+    @pytest.mark.parametrize("model", ["openai/gpt-4o", "meta-llama/llama-3.3-70b-instruct", "qwen/qwen3-32b"])
+    def test_other_routed_ids_are_not(self, model):
+        assert ai_engine.supports_openai_reasoning(model) is False
+
+
 class TestAnthropicRequestsPerModelFamily:
     """Claude 4.6 and later take adaptive thinking with an effort level; 4.7 and later refuse temperature."""
 

@@ -11,6 +11,7 @@ import asyncio
 import datetime
 import logging
 import re
+import urllib.parse
 from typing import Any, Callable, Optional, Sequence
 
 import httpx
@@ -129,7 +130,7 @@ def supports_gemini_thinking(model_name: str) -> bool:
 def supports_openai_reasoning(model_name: str) -> bool:
     """Returns True if the OpenAI/compatible model supports reasoning_effort parameter."""
     m = model_name.lower()
-    return bool(re.search(r"(?:^|[-_])o\d", m) or "reason" in m)
+    return bool(re.search(r"(?:^|[-_/])o\d", m) or "reason" in m)
 
 
 # GPT-5 and later (also behind a provider prefix such as openai/), except the non-reasoning chat variants
@@ -252,6 +253,28 @@ async def _close_gemini_client(client: genai.Client) -> None:
         logger.debug(f"Failed to close Gemini client: {exc}")
 
 
+# OpenRouter's optional app attribution. Every install reports the project site, so nothing about
+# the administrator's own setup (such as APP_URL) is sent.
+OPENROUTER_ATTRIBUTION_HEADERS = {"HTTP-Referer": "https://logshed.dev", "X-OpenRouter-Title": "LogShed"}
+
+
+def _is_openrouter_url(base_url: Optional[str]) -> bool:
+    host = (urllib.parse.urlsplit(base_url).hostname or "").lower() if base_url else ""
+    return host == "openrouter.ai" or host.endswith(".openrouter.ai")
+
+
+def _openai_client(api_key: str, base_url: str, timeout: Optional[float] = None) -> AsyncOpenAI:
+    """openai SDK client for a base URL: connects through the outbound address check, and adds
+    OpenRouter's attribution headers when the base URL is OpenRouter's."""
+    kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    kwargs["http_client"] = GuardedOpenAIHttpClient()
+    if _is_openrouter_url(base_url):
+        kwargs["default_headers"] = dict(OPENROUTER_ATTRIBUTION_HEADERS)
+    return AsyncOpenAI(**kwargs)
+
+
 async def _close_sdk_client(client: Any) -> None:
     """Release the HTTP connection pool of a per-call openai or anthropic async client. Close failures are only logged."""
     try:
@@ -367,11 +390,7 @@ async def fetch_available_models(
             await _close_sdk_client(client)
 
     elif clean_provider == "openai_compatible":
-        client = AsyncOpenAI(
-            api_key=api_key or "no-key",
-            base_url=base_url or "http://localhost:11434/v1",
-            http_client=GuardedOpenAIHttpClient(),
-        )
+        client = _openai_client(api_key or "no-key", base_url or "http://localhost:11434/v1")
         try:
             paginator = client.models.list()
             async for m in paginator:
@@ -849,12 +868,7 @@ async def call_openai(
 
     client = None
     try:
-        client = AsyncOpenAI(
-            api_key=api_key or "not-needed",
-            base_url=effective_base_url,
-            timeout=timeout,
-            http_client=GuardedOpenAIHttpClient(),
-        )
+        client = _openai_client(api_key or "not-needed", effective_base_url, timeout)
 
         create_kwargs: dict[str, Any] = {
             "model": model,
@@ -1331,12 +1345,7 @@ async def dispatch_multi_turn_openai(
 
     client = None
     try:
-        client = AsyncOpenAI(
-            api_key=api_key or "not-needed",
-            base_url=effective_base_url,
-            timeout=timeout,
-            http_client=GuardedOpenAIHttpClient(),
-        )
+        client = _openai_client(api_key or "not-needed", effective_base_url, timeout)
 
         create_kwargs: dict[str, Any] = {
             "model": model,

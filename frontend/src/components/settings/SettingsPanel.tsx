@@ -90,6 +90,23 @@ const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   openai_compatible: 'llama3.2',
 };
 
+// Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
+// Docker host, which the LogShed container reaches as host.docker.internal.
+const OPENAI_COMPATIBLE_PRESETS: { label: string; url: string }[] = [
+  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  { label: 'Ollama (Docker host)', url: 'http://host.docker.internal:11434/v1' },
+  { label: 'LM Studio (Docker host)', url: 'http://host.docker.internal:1234/v1' },
+  { label: 'Groq', url: 'https://api.groq.com/openai/v1' },
+  { label: 'Mistral', url: 'https://api.mistral.ai/v1' },
+  { label: 'DeepSeek', url: 'https://api.deepseek.com' },
+];
+
+/** The preset URL the base URL matches (ignoring a trailing slash), or '' for a custom URL. */
+function matchBaseUrlPreset(baseUrl: string): string {
+  const clean = baseUrl.trim().replace(/\/+$/, '');
+  return OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === clean)?.url ?? '';
+}
+
 interface ProviderLocalState {
   apiKey: string;
   hasKey: boolean;
@@ -992,7 +1009,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <option value="gemini">Google Gemini</option>
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic Claude</option>
-                <option value="openai_compatible">OpenAI-Compatible (Ollama / vLLM / LocalAI)</option>
+                <option value="openai_compatible">OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)</option>
               </select>
             </div>
 
@@ -1017,16 +1034,36 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             {aiProvider === 'openai_compatible' && (
               <div className="sm:col-span-2">
-                <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                <label htmlFor="ai-base-url" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                   Custom Base URL (Optional)
                 </label>
-                <input
-                  type="text"
-                  value={aiBaseUrl}
-                  onChange={(e) => setAiBaseUrl(e.target.value)}
-                  placeholder="http://host.docker.internal:11434/v1"
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-                />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    aria-label="Base URL preset"
+                    value={matchBaseUrlPreset(aiBaseUrl)}
+                    onChange={(e) => {
+                      const preset = OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === e.target.value);
+                      if (preset) setAiBaseUrl(preset.url);
+                    }}
+                    className="sm:w-56 shrink-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
+                  >
+                    <option value="">Custom</option>
+                    {OPENAI_COMPATIBLE_PRESETS.map((p) => (
+                      <option key={p.url} value={p.url}>{p.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    id="ai-base-url"
+                    type="text"
+                    value={aiBaseUrl}
+                    onChange={(e) => setAiBaseUrl(e.target.value)}
+                    placeholder="http://host.docker.internal:11434/v1"
+                    className="w-full min-w-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Any server that accepts OpenAI-style requests works. Leave empty to use http://localhost:11434/v1.
+                </p>
               </div>
             )}
 

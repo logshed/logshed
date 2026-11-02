@@ -908,7 +908,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       <option value="gemini">Google Gemini</option>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic Claude</option>
-                      <option value="openai_compatible">OpenAI-Compatible (Ollama / LocalAI)</option>
+                      <option value="openai_compatible">OpenAI-Compatible (OpenRouter, Ollama, ...)</option>
                     </select>
                   </div>
 

@@ -1190,7 +1190,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel onDirtyChange={onDirtyChange} />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI-Compatible (Ollama / vLLM / LocalAI)')).toBeInTheDocument();
+        expect(screen.getByDisplayValue('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)')).toBeInTheDocument();
       });
 
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
@@ -1215,7 +1215,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI-Compatible (Ollama / vLLM / LocalAI)')).toBeInTheDocument();
+        expect(screen.getByDisplayValue('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)')).toBeInTheDocument();
       });
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
 
@@ -1229,11 +1229,32 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI-Compatible (Ollama / vLLM / LocalAI)')).toBeInTheDocument();
+        expect(screen.getByDisplayValue('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)')).toBeInTheDocument();
       });
       const keyInput = screen.getByPlaceholderText(/API key/i);
       fireEvent.change(keyInput, { target: { value: 'typed-key' } });
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+    });
+
+    it('a base URL preset fills in the base URL, and a typed preset URL selects it', async () => {
+      vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
+      render(<SettingsPanel />);
+
+      const preset = (await screen.findByLabelText('Base URL preset')) as HTMLSelectElement;
+      const baseUrl = screen.getByLabelText(/Custom Base URL/i) as HTMLInputElement;
+      expect(preset.value).toBe('');
+      expect(screen.getByDisplayValue('Custom')).toBe(preset);
+
+      fireEvent.change(preset, { target: { value: 'https://openrouter.ai/api/v1' } });
+      expect(baseUrl.value).toBe('https://openrouter.ai/api/v1');
+      expect(screen.getByDisplayValue('OpenRouter')).toBe(preset);
+      expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
+
+      fireEvent.change(baseUrl, { target: { value: 'https://api.groq.com/openai/v1/' } });
+      expect(preset.value).toBe('https://api.groq.com/openai/v1');
+
+      fireEvent.change(baseUrl, { target: { value: 'http://gpu-box.lan:8000/v1' } });
+      expect(preset.value).toBe('');
     });
 
     it('emptying the base URL saves an empty string instead of null', async () => {

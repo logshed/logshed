@@ -168,6 +168,24 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | `LOGSHED_AI_TIMEOUT` | `45.0` | Web UI or Compose | Outbound HTTP request timeout in seconds for AI analysis requests to Gemini, OpenAI, Anthropic, or OpenAI-compatible endpoints such as Ollama and vLLM. | 1.1.0 |
 | `LOGSHED_AI_THINKING_BUDGET` | `1024` | Web UI or Compose | Reasoning token budget for extended thinking models (for example, `gemini-2.5-pro` or compatible models; `0` disables). Claude 4.6 and later models turn it into an effort level: low up to 2,048, medium up to 8,192, high above that; with `0`, Claude 4.7 and later run at low effort. | 1.1.0 |
 
+### OpenAI-Compatible Providers
+
+Choose **OpenAI-Compatible** in **Settings > Application** for any service or server that accepts OpenAI-style requests, then set its base URL (the preset list next to the field fills in the common ones) and its API key, if it needs one. With no base URL, LogShed uses `http://localhost:11434/v1`.
+
+| Provider | Base URL | Notes |
+|---|---|---|
+| OpenRouter | `https://openrouter.ai/api/v1` | One key for models from many providers. Model IDs carry the provider name, for example `meta-llama/llama-3.3-70b-instruct`. LogShed identifies itself to OpenRouter as `LogShed` (`https://logshed.dev`); your own LogShed address is not sent. |
+| Ollama | `http://host.docker.internal:11434/v1` | Ollama on the Docker host. No key needed. |
+| LM Studio | `http://host.docker.internal:1234/v1` | LM Studio's server on the Docker host. No key needed. |
+| Groq | `https://api.groq.com/openai/v1` | |
+| Mistral | `https://api.mistral.ai/v1` | |
+| DeepSeek | `https://api.deepseek.com` | |
+| vLLM, LocalAI, llama.cpp | `http://<host>:<port>/v1` | Self-hosted servers on your network. |
+
+On Linux, `host.docker.internal` works only when the LogShed service has `extra_hosts: ["host.docker.internal:host-gateway"]`; otherwise use the host's LAN address. Cloud metadata and link-local addresses are refused as base URLs; private and loopback addresses are allowed.
+
+**Privacy with routers:** OpenRouter and similar routers pass each prompt (logs redacted by LogShed) on to whichever provider serves the chosen model, and that provider's data policy then applies. Check the router's privacy and data retention settings (on OpenRouter, in your account settings) before sending logs.
+
 ---
 
 ## Model Context Protocol (MCP)
@@ -212,7 +230,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 
 | Feature | Where to Find in Web UI | Details |
 |---|---|---|
-| **AI Provider & API Key** | **Settings > Application** | Select provider (`Google Gemini` or `OpenAI / Custom`), enter API key, and configure primary/fallback model tags. Stored encrypted at rest. |
+| **AI Provider & API Key** | **Settings > Application** | Select provider (Google Gemini, OpenAI, Anthropic Claude or OpenAI-Compatible, see [OpenAI-Compatible Providers](#openai-compatible-providers)), enter API key, and configure primary/fallback model tags. Stored encrypted at rest. |
 | **Notification Targets** | **Settings > Application** | Add Apprise webhook URLs (Discord, Pushover, Gotify, Telegram, Slack, Email). URLs with sensitive tokens are masked and stored encrypted. |
 | **Active Retention Slider** | **Storage** page | Adjust the retention window for logs and alert history (1 to `MAX_RETENTION_DAYS`, default 14 days; fixed while `MAX_RETENTION_DAYS` is set). Lowering it shows what would be deleted and lets you delete now or at the next daily cleanup. |
 | **Host Aliases** | **Settings > Host Aliases** | Map IP addresses (e.g. `192.168.1.1`) to friendly names (`router`). Applies dynamically to log streams. |
