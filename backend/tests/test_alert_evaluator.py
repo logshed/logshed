@@ -2515,7 +2515,9 @@ class TestRateRuleCountsInsteadOfStoring:
 
         rule_id = self._insert_rate_rule(test_db, threshold=1000, window=60)
         evaluator = AlertEvaluator(test_db)
-        await self._feed(evaluator, self._storm(50000, datetime.now(timezone.utc) - timedelta(seconds=59), 58.0))
+        # Centred in the window (timestamps up to 5 minutes ahead are kept), so a slow machine cannot
+        # push the oldest logs out of it while the batches are fed
+        await self._feed(evaluator, self._storm(50000, datetime.now(timezone.utc) - timedelta(seconds=30), 58.0))
 
         window = evaluator._windows[rule_id]
         assert len(window) == 50000
