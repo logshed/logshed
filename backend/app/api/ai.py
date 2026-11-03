@@ -13,7 +13,7 @@ from app.api.deps import get_current_user, run_db_query
 from app.core.config import is_debug_or_dev
 from app.core.rate_limiter import ai_rate_limiter
 from app.core.redactor import redact
-from app.core.security import SESSION_COOKIE_NAME
+from app.core.security import SESSION_COOKIE_NAME, keeps_stored_secret
 from app.models import (
     AiConversationHistoryResponse,
     AiConversationMessage,
@@ -246,7 +246,7 @@ async def refresh_available_models(
     foreign_base_url = payload_base_url is not None and payload_base_url.rstrip("/") != (stored_base_url or "").strip().rstrip("/")
 
     key_from_payload = False
-    if payload and payload.api_key and payload.api_key != "********" and payload.api_key.strip():
+    if payload and not keeps_stored_secret(payload.api_key) and payload.api_key.strip():
         api_key = payload.api_key.strip()
         key_from_payload = True
     elif foreign_base_url:

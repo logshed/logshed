@@ -30,6 +30,7 @@ from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
     create_session_token,
+    decrypt_value,
     get_or_create_master_key,
     reset_crypto_cache,
 )
@@ -932,6 +933,32 @@ class TestSettingsAiBaseUrlAndKey:
         assert res.json().get("ai_api_key_cleared") in (None, False)
         stored = _stored_settings(tmp_path)
         assert stored["ai_api_key_openai"] not in ("", before)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("through_provider_config", [False, True])
+    async def test_masked_key_keeps_empty_key_clears_and_new_key_replaces(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, through_provider_config: bool
+    ):
+        """The three answers a settings form can give for a stored key, at the top level and per provider."""
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+
+        def body(key):
+            if through_provider_config:
+                return {"ai_provider": "anthropic", "ai_providers_config": {"anthropic": {"ai_api_key": key}}}
+            return {"ai_provider": "anthropic", "ai_api_key": key}
+
+        assert (await client.post("/api/settings", json=body("sk-ant-first-key"))).status_code == 200
+        first = _stored_settings(tmp_path)["ai_api_key_anthropic"]
+        assert decrypt_value(first) == "sk-ant-first-key"
+
+        assert (await client.post("/api/settings", json=body("********"))).status_code == 200
+        assert _stored_settings(tmp_path)["ai_api_key_anthropic"] == first
+
+        assert (await client.post("/api/settings", json=body("sk-ant-second-key"))).status_code == 200
+        assert decrypt_value(_stored_settings(tmp_path)["ai_api_key_anthropic"]) == "sk-ant-second-key"
+
+        assert (await client.post("/api/settings", json=body(""))).status_code == 200
+        assert _stored_settings(tmp_path)["ai_api_key_anthropic"] == ""
 
     @pytest.mark.asyncio
     async def test_docker_source_alias_is_stored_without_surrounding_whitespace(

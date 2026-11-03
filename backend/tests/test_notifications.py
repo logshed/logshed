@@ -367,6 +367,39 @@ class TestNotificationsApi:
         assert not any(c["id"] == channel_id for c in list_res2.json())
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sent_url", [None, "********", " ******** "])
+    async def test_update_without_a_new_url_keeps_the_stored_url(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path, sent_url
+    ):
+        """No URL or the mask sent back keeps the stored URL; a new URL replaces it."""
+        res = await client.post(
+            "/api/notifications/channels",
+            json={"name": "Ops", "url": "discord://123456789/kept_token"},
+            headers=auth_headers,
+        )
+        channel_id = res.json()["id"]
+        payload = {"name": "Ops renamed"} if sent_url is None else {"name": "Ops renamed", "url": sent_url}
+
+        res = await client.put(f"/api/notifications/channels/{channel_id}", json=payload, headers=auth_headers)
+        assert res.status_code == 200
+        assert "kept_token" not in res.json()["url"]
+        assert self._stored_url(tmp_path, channel_id) == "discord://123456789/kept_token"
+
+        res = await client.put(
+            f"/api/notifications/channels/{channel_id}",
+            json={"url": "discord://123456789/new_token"},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200
+        assert self._stored_url(tmp_path, channel_id) == "discord://123456789/new_token"
+
+    @staticmethod
+    def _stored_url(tmp_path: Path, channel_id: int) -> str:
+        with get_connection(tmp_path / "logs.db") as conn:
+            row = conn.execute("SELECT url FROM notification_channels WHERE id = ?", (channel_id,)).fetchone()
+        return decrypt_channel_url(row[0])
+
+    @pytest.mark.asyncio
     async def test_create_channel_invalid_url_returns_400(self, client: AsyncClient, auth_headers: dict):
         payload = {
             "name": "Bad Target",

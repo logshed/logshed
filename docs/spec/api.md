@@ -13,9 +13,16 @@ The OpenAPI document (`/openapi.json`, `/docs`) declares an HTTP Bearer security
 `PUT` updates and `POST /api/settings` change only the fields that are sent: a field that is absent from the JSON body keeps its stored value. How a field that is present but `null` or `""` is treated depends on the field:
 - Optional filter or pattern fields clear the stored value when they are sent as `null` or `""`: alert rule `filter_app`, `filter_severity`, `match_pattern` and `channel_id`, and drop rule `source_pattern`, `app_pattern` and `severity_threshold`. Required fields of a rule (name, type, thresholds, window, cooldown, switches) treat `null` as "unchanged".
 - Docker host `ca_cert`, `client_cert` and `client_key` keep the stored value when absent or `null`, and clear it when sent as `""`.
-- Settings: `ai_base_url` can be cleared by sending `""`. A masked secret (`"********"`) means "keep the stored value", so a client can send back what `GET /api/settings` returned without overwriting a key.
+- Settings: `ai_base_url` can be cleared by sending `""`. A masked secret (`"********"`) means "keep the stored value", so a client can send back what `GET /api/settings` returned without overwriting a key (section 1.2).
 - Settings: an `ai_model` (top level or in `ai_providers_config`) equal to that provider's default model is stored as `""`, which means "use the default", so the provider follows LogShed's default when it changes; `GET /api/settings` returns the default model for it.
 - Settings: `ai_thinking_level` is `off`, `low`, `medium` or `high` (`422` otherwise). It replaced the token budget `ai_thinking_budget` in 1.3.0, which `GET /api/settings` no longer returns and `POST` ignores. These routes serve only the web UI; `/api/v1` and MCP never had the setting.
+
+### 1.2 Stored Secrets in Forms
+The web UI never receives a stored secret in clear text. Forms keep, clear or replace one in these ways:
+- **Masked placeholder (settings AI keys, notification URLs):** where a secret is stored, `GET` returns `"********"` (`MASKED_SECRET` in `backend/app/core/security.py` and `frontend/src/api/settings.ts`). Sending it back, or leaving the field out, keeps the stored value (`keeps_stored_secret`). An AI key sent as `""` is cleared; a notification URL cannot be cleared. Notification URLs are listed partly masked (for example `discord://123456789/********`), and the web UI leaves the URL out of the update when it is unchanged.
+- **Absent keeps, empty clears (Docker hosts):** `ca_cert`, `client_cert` and `client_key` as in section 1.1. The client key is never returned; `has_client_key` says whether one is stored.
+- **Connection tests:** `POST /api/ai/models/refresh` uses the stored key when the key is blank or masked, and `POST /api/docker/hosts/test` uses the stored certificates and key for blank fields unless `use_stored_secrets` is `false`; both only for the stored base URL or Docker URL, so a stored secret never goes to a different host. `POST /api/notifications/test` tests the stored URL when given `channel_id`.
+- **New forms** follow the Docker host convention: never return the secret (return `has_<field>` instead), keep it when the field is absent or `null`, clear it on `""` and replace it otherwise. It needs no placeholder string that a real secret could equal.
 
 ## 2. Query Pagination & Evaluation Capping
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:

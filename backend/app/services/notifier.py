@@ -34,7 +34,7 @@ from app.core.net_guard import (
     blocked_address_class,
     notification_policy,
 )
-from app.core.security import decrypt_value, encrypt_value
+from app.core.security import MASKED_SECRET, decrypt_value, encrypt_value
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ def mask_notification_url(raw_url: str) -> str:
             _, h = remainder.rsplit("@", 1)
             remainder = f"***:***@{h}"
         return f"{scheme}://{remainder}"
-    return "********"
+    return MASKED_SECRET
 
 
 def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:

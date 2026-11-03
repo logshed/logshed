@@ -1,6 +1,9 @@
 import { apiFetch } from './client.ts';
 import { SystemSettings } from '../types.ts';
 
+/** Sent by the server in place of a stored secret; sending it back unchanged keeps the stored value. */
+export const MASKED_SECRET = '********';
+
 export interface SettingsResponseData extends SystemSettings {
   has_ai_api_key: boolean;
   server_timezone?: string | null;

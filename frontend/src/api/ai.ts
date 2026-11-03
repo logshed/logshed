@@ -1,4 +1,5 @@
 import { apiFetch, ApiError, toApiError } from './client.ts';
+import { MASKED_SECRET } from './settings.ts';
 import {
   AiConversationHistoryResponse,
   AiDiagnosisRequest,
@@ -159,7 +160,7 @@ export async function getAiModels(
   let res: AiModelsResponse;
   if (refresh) {
     const payload: Record<string, string> = {};
-    if (apiKey && apiKey !== '********' && apiKey.trim()) {
+    if (apiKey && apiKey !== MASKED_SECRET && apiKey.trim()) {
       payload.api_key = apiKey.trim();
     }
     if (baseUrl && baseUrl.trim()) {

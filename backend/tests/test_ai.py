@@ -3453,6 +3453,19 @@ class TestAiModelRefreshStoredKeyScope:
         assert kwargs["api_key"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sent_key", ["********", "", "   "])
+    async def test_refresh_with_masked_or_blank_key_uses_stored_key(self, auth_client, sent_key):
+        await self._store_compat(auth_client)
+        mock_fetch = AsyncMock(return_value=[{"id": "m1", "name": "m1", "supports_thinking": False}])
+        with patch("app.api.ai.fetch_available_models", new=mock_fetch):
+            res = await auth_client.post(
+                "/api/ai/models/refresh?provider=openai_compatible",
+                json={"api_key": sent_key},
+            )
+        assert res.status_code == 200
+        assert mock_fetch.await_args.kwargs["api_key"] == "stored-secret-key-123"
+
+    @pytest.mark.asyncio
     async def test_refresh_with_stored_or_absent_base_url_uses_stored_key(self, auth_client):
         await self._store_compat(auth_client)
         mock_fetch = AsyncMock(return_value=[{"id": "m1", "name": "m1", "supports_thinking": False}])

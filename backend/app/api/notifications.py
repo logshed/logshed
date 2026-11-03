@@ -11,6 +11,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
+from app.core.security import MASKED_SECRET, keeps_stored_secret
 from app.models import (
     DailyDigestRunResponse,
     MessageResponse,
@@ -56,7 +57,7 @@ async def list_notification_channels(user: dict = Depends(get_current_user)) -> 
                 decrypted = decrypt_channel_url(encrypted_url)
                 masked = mask_notification_url(decrypted)
             except Exception:
-                masked = "********"
+                masked = MASKED_SECRET
 
             results.append(
                 NotificationChannelResponse(
@@ -152,7 +153,8 @@ async def update_notification_channel(
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # Determine whether URL is being updated
-    if channel_in.url is not None and channel_in.url.strip() and channel_in.url.strip() != "********":
+    submitted_url = channel_in.url.strip() if channel_in.url is not None else None
+    if submitted_url and not keeps_stored_secret(submitted_url):
         valid, err_msg = await asyncio.to_thread(validate_notification_url, channel_in.url)
         if not valid:
             raise HTTPException(
@@ -166,7 +168,7 @@ async def update_notification_channel(
         try:
             display_url = mask_notification_url(decrypt_channel_url(current_enc_url))
         except Exception:
-            display_url = "********"
+            display_url = MASKED_SECRET
 
     def _update(conn):
         cur = conn.cursor()

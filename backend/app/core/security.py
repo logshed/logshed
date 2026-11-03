@@ -161,11 +161,20 @@ def decrypt_value(cipher_text: str, key: Optional[bytes] = None) -> str:
         raise ValueError("Decryption failed: invalid key or corrupted payload.")
 
 
+# Shown in place of a stored secret. A form that sends it back unchanged keeps the stored value.
+MASKED_SECRET = "********"
+
+
 def mask_secret(value: Optional[str]) -> str:
-    """Returns '********' if value is non-empty, otherwise empty string."""
+    """Returns MASKED_SECRET if value is non-empty, otherwise empty string."""
     if value and len(value.strip()) > 0:
-        return "********"
+        return MASKED_SECRET
     return ""
+
+
+def keeps_stored_secret(submitted: Optional[str]) -> bool:
+    """True when a submitted secret field asks to keep the stored value: not sent, or sent back as MASKED_SECRET."""
+    return submitted is None or submitted == MASKED_SECRET
 
 
 def create_session_token(

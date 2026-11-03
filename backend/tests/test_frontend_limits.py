@@ -78,6 +78,13 @@ def test_frontend_scope_catalog_lists_the_backend_scopes():
     assert set(re.findall(r"scope: '([a-z]+:[a-z]+)'", catalog)) == set(KNOWN_SCOPES)
 
 
+
+def test_frontend_masked_secret_matches_the_backend():
+    from app.core.security import MASKED_SECRET
+
+    text = (FRONTEND_SRC / "api" / "settings.ts").read_text(encoding="utf-8")
+    assert re.search(r"export const MASKED_SECRET = '([^']+)';", text).group(1) == MASKED_SECRET
+
 def test_navbar_queue_warning_is_half_the_ingestion_queue():
     from app.core.pipeline import _QUEUE_MAXSIZE
 

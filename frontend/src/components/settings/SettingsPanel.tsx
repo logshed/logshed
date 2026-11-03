@@ -22,7 +22,7 @@ import {
   Key,
 } from 'lucide-react';
 import { AiModelInfo, VersionInfo, SettingsSubTab } from '../../types.ts';
-import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
+import { fetchSettings, updateSettings, SettingsResponseData, MASKED_SECRET } from '../../api/settings.ts';
 import { fetchVersion } from '../../api/system.ts';
 import { getAiModels } from '../../api/ai.ts';
 import { changePassword } from '../../api/auth.ts';
@@ -118,7 +118,7 @@ interface ProviderLocalState {
 /**
  * Builds the per-provider form state from a settings response. The same function produces the
  * baseline the dirty check compares against, so loading and comparing can never disagree.
- * The '********' placeholder only appears when the server says a key is stored: a keyless
+ * The MASKED_SECRET placeholder only appears when the server says a key is stored: a keyless
  * OpenAI-compatible provider has an empty key field and an empty baseline.
  */
 const buildProviderStates = (
@@ -402,12 +402,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setModelsCachedAt(res.cached_at || null);
 
       if (res.has_api_key && customApiKey) {
-        setAiApiKey('********');
+        setAiApiKey(MASKED_SECRET);
         setProviderConfigs((prev) => ({
           ...prev,
           [provider]: {
             ...prev[provider],
-            apiKey: '********',
+            apiKey: MASKED_SECRET,
             hasKey: true,
           },
         }));
@@ -555,7 +555,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleRefreshModels = async () => {
-    const keyToSend = (aiApiKey && aiApiKey !== '********') ? aiApiKey.trim() : undefined;
+    const keyToSend = (aiApiKey && aiApiKey !== MASKED_SECRET) ? aiApiKey.trim() : undefined;
     const urlToSend = aiBaseUrl ? aiBaseUrl.trim() : undefined;
     await loadModels(aiProvider, true, keyToSend, urlToSend);
   };
@@ -1027,7 +1027,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     handleApiKeyEnter();
                   }
                 }}
-                placeholder={hasApiKeyForProvider ? 'Enter new API key or leave ******** to preserve' : 'Enter API key'}
+                placeholder={hasApiKeyForProvider ? `Enter new API key or leave ${MASKED_SECRET} to preserve` : 'Enter API key'}
                 className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>

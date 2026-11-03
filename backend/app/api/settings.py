@@ -23,7 +23,7 @@ from app.core.config import (
     get_cached_setting,
     parse_bool,
 )
-from app.core.security import decrypt_value, encrypt_value, mask_secret
+from app.core.security import decrypt_value, encrypt_value, keeps_stored_secret, mask_secret
 from app.core.utils import get_server_timezone_name, parse_iso_to_utc_datetime
 
 from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest, AiProviderConfig
@@ -105,7 +105,7 @@ def persist_retention_override(conn) -> bool:
 async def get_settings(user: dict = Depends(get_current_user)) -> SettingsResponse:
     """
     Retrieve application configuration.
-    Sensitive secrets (API keys) are masked with '********' and never returned decrypted.
+    Sensitive secrets (API keys) are masked with MASKED_SECRET and never returned decrypted.
     """
     stored = await run_db_query(get_all_system_settings)
 
@@ -239,7 +239,7 @@ async def update_settings(
     """
     Update application configuration.
     Sensitive keys are encrypted at rest with Fernet.
-    Masked strings ('********') are preserved without overwriting existing secrets.
+    A key sent back as MASKED_SECRET keeps the stored key; an empty key clears it.
     """
     if req.retention_days is not None:
         max_days = get_max_retention_days()
@@ -311,10 +311,8 @@ async def update_settings(
                     updates.append((f"ai_base_url_{p_clean}", p_cfg.ai_base_url, 0))
                     if p_clean == target_provider and req.ai_base_url is None:
                         updates.append(("ai_base_url", p_cfg.ai_base_url, 0))
-                if p_cfg.ai_api_key is not None:
-                    if p_cfg.ai_api_key == "********":
-                        pass
-                    elif p_cfg.ai_api_key == "":
+                if not keeps_stored_secret(p_cfg.ai_api_key):
+                    if p_cfg.ai_api_key == "":
                         updates.append((f"ai_api_key_{p_clean}", "", 1))
                         if p_clean == target_provider and req.ai_api_key is None:
                             updates.append(("ai_api_key", "", 1))
@@ -416,10 +414,8 @@ async def update_settings(
                 updates.append(("maintenance_until", stored_iso, 0))
 
         # Handle sensitive fields
-        if req.ai_api_key is not None:
-            if req.ai_api_key == "********":
-                pass
-            elif req.ai_api_key == "":
+        if not keeps_stored_secret(req.ai_api_key):
+            if req.ai_api_key == "":
                 updates.append(("ai_api_key", "", 1))
                 updates.append((f"ai_api_key_{target_provider}", "", 1))
             else:
