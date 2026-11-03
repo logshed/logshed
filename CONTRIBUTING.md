@@ -43,6 +43,7 @@ cd ..
 - **Dependencies:** Do not add new third-party Python or npm dependencies without discussing them in an issue first.
 - **Testing:** New or changed backend code should include unit or integration tests in `backend/tests/`. Tests must run offline and deterministically without real sleep delays; tests that require live Docker builds or external services must be marked with `@pytest.mark.e2e`.
 - **Style & Copy:** Keep UI text and documentation clear and concise. Avoid em dashes (` - ` with spaces instead) and prefer words with identical US and British English spellings in user-facing text.
+- **AI Coding Agents:** If you use an AI coding agent, point it at [`AGENTS.md`](AGENTS.md), which holds the project rules. End-to-end tests (`-m e2e`) build Docker images and call paid AI providers with your own keys, so run only the ones your keys and plans cover.
 
 ## Submitting a Pull Request
 
