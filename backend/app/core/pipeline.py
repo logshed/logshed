@@ -71,6 +71,9 @@ class InternalLogHandler(logging.Handler):
         self._thread_local = threading.local()
         self._is_disabled = False
         self.alias_cache = alias_cache
+        # The event loop that owns the queue; records from any other thread are handed to it.
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self.bind_running_loop()
         if level is not None:
             self.set_internal_level(level)
         else:
@@ -80,6 +83,13 @@ class InternalLogHandler(logging.Handler):
                 self._is_disabled = True
             else:
                 self.setLevel(configured_level)
+
+    def bind_running_loop(self) -> None:
+        """Remember the calling thread's running event loop, if it has one, as the queue's loop."""
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
 
     def set_alias_cache(self, alias_cache: Optional[Any]) -> None:
         """Dynamically attach or update the shared AliasCache."""
@@ -201,16 +211,22 @@ class InternalLogHandler(logging.Handler):
                 except Exception as e:
                     logger.debug("Internal log entry could not be queued: %s", e)
 
+            # asyncio.Queue is not thread-safe: from a worker thread (asyncio.to_thread has no
+            # running loop) the record goes through the queue's loop. Direct only on that loop's
+            # own thread, or when no loop is known (tests, CLI).
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-
-                if loop is not None and threading.current_thread() is not threading.main_thread():
-                    loop.call_soon_threadsafe(_enqueue, log_entry)
-                else:
+                loop = self._loop
+                if loop is None or loop.is_closed():
                     _enqueue(log_entry)
+                else:
+                    try:
+                        running = asyncio.get_running_loop()
+                    except RuntimeError:
+                        running = None
+                    if running is loop:
+                        _enqueue(log_entry)
+                    else:
+                        loop.call_soon_threadsafe(_enqueue, log_entry)
             except Exception as e:
                 logger.debug("Internal log entry could not be scheduled: %s", e)
         finally:

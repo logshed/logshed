@@ -162,6 +162,7 @@ Read these before updating from 1.2.x. The first start migrates the database to 
 - **Mobile Layout and Touch Targets**: "Select All" and the mobile card layout switch at the same screen width (768px). The mobile AI button, Quick Filter chips and the icon buttons in the Docker hosts, host aliases and notification tables have larger touch targets on phones; desktop density is unchanged.
 - **Readable Helper Text**: Helper text, field labels, empty-state messages and secondary metadata are brighter on the dark theme (WCAG AA contrast), and small helper text is no longer 10px.
 - **Docker First Log Lines**: The first lines a container writes after it starts are no longer lost. LogShed reads a container that starts or restarts while it is running from the moment of its start event; containers already running when LogShed starts are still read from the end of their log.
+- **Internal Logs from Worker Threads**: LogShed's own log records written from a worker thread (for example when alert matching disables a slow rule or a rule pattern times out) are handed to the event loop before they are queued, instead of being put on the queue from the worker thread, which is not safe and could delay them by up to 0.2 seconds.
 
 ### Security
 - **Regex Denial of Service**: Alert and drop rule patterns run on the `regex` package with a real per-match time limit (50 ms). In 1.2.1 the time limit could not stop a match that was already running, so one bad pattern could freeze ingestion. Saving a rule also refuses more backtracking-prone patterns. See the upgrade notes.

@@ -7,6 +7,7 @@ environment variable configuration, and settings API integration.
 import asyncio
 import concurrent.futures
 import logging
+import threading
 from pathlib import Path
 import pytest
 import pytest_asyncio
@@ -426,6 +427,54 @@ class TestInternalLogHandler:
             concurrent.futures.wait(futures)
 
         assert q.qsize() == 20
+
+    @pytest.mark.asyncio
+    async def test_worker_thread_record_is_queued_on_the_loop_thread(self, monkeypatch):
+        """A record from asyncio.to_thread reaches the queue through the loop, not from the worker."""
+        handler = configure_internal_log_handler("WARNING")
+        assert handler is not None
+        loop_thread = threading.get_ident()
+        calls: list[tuple[int, str]] = []
+        real_enqueue = pipeline_mod.enqueue_entry
+
+        def _recording_enqueue(entry: dict) -> bool:
+            calls.append((threading.get_ident(), entry["message"]))
+            return real_enqueue(entry)
+
+        monkeypatch.setattr(pipeline_mod, "enqueue_entry", _recording_enqueue)
+        worker_thread: list[int] = []
+
+        def _worker() -> None:
+            worker_thread.append(threading.get_ident())
+            handler.emit(self._make_record(level=logging.WARNING, msg="From a worker"))
+
+        await asyncio.to_thread(_worker)
+        item = await asyncio.wait_for(get_queue().get(), timeout=5)
+
+        assert item["message"] == "From a worker"
+        assert worker_thread[0] != loop_thread
+        assert calls == [(loop_thread, "From a worker")]
+
+    @pytest.mark.asyncio
+    async def test_handler_created_off_the_loop_binds_it_when_reconfigured(self, monkeypatch):
+        """A handler first configured with no running loop learns the loop on a later reconfigure."""
+        handler = await asyncio.to_thread(configure_internal_log_handler, "WARNING")
+        assert handler is not None
+        configure_internal_log_handler("ERROR")
+        loop_thread = threading.get_ident()
+        calls: list[int] = []
+        real_enqueue = pipeline_mod.enqueue_entry
+
+        def _recording_enqueue(entry: dict) -> bool:
+            calls.append(threading.get_ident())
+            return real_enqueue(entry)
+
+        monkeypatch.setattr(pipeline_mod, "enqueue_entry", _recording_enqueue)
+        await asyncio.to_thread(handler.emit, self._make_record(level=logging.ERROR, msg="Later"))
+        item = await asyncio.wait_for(get_queue().get(), timeout=5)
+
+        assert item["message"] == "Later"
+        assert calls == [loop_thread]
 
     def test_queue_full_drop_is_counted_without_loop(self):
         """An internal log dropped because the queue is full counts towards the dropped total."""

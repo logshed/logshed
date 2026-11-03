@@ -134,6 +134,7 @@ def configure_internal_log_handler(
             app_logger.addHandler(_internal_log_handler)
     else:
         _internal_log_handler.set_internal_level(parsed)
+        _internal_log_handler.bind_running_loop()
         if alias_cache is not None:
             _internal_log_handler.set_alias_cache(alias_cache)
         if _internal_log_handler not in app_logger.handlers:
