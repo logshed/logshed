@@ -436,6 +436,48 @@ class TestSyslogParsing:
         assert result["severity"] == 4  # '#' maps to warning / 4
         assert "Warning: No config file specified, using the default config." in result["message"]
 
+    _LINES = 'Traceback (most recent call last):\n  File "/app/run.py", line 1, in <module>\nRuntimeError: disk failed'
+
+    @pytest.mark.parametrize(
+        "prefix, app, host",
+        [
+            ("<134>Nov  1 12:00:00 host1 app[1]: ", "app", "host1"),
+            ("<134>Nov  1 12:00:00 host1 app[1] ", "app", "host1"),
+            ("<134>Nov  1 12:00:00 host1 app ", "app", "host1"),
+            ("<134>Nov  1 12:00:00 host1 [app] ", "app", "host1"),
+            ("<134>Nov  1 12:00:00 app: ", "app", None),
+            ("<134>Nov  1 12:00:00 - app: ", "app", None),
+            ("<134>2026-11-01T12:00:00Z host1 app[1]: ", "app", "host1"),
+            ("<134>[2026-11-01 12:00:00] [host1] [app] ", "app", "host1"),
+            ("<134>[2026-11-01 12:00:00] [host1] app: ", "app", "host1"),
+            ("<134>[2026-11-01 12:00:00] app: ", "app", None),
+            ("<134>[app] | 01/11/2026 12:00:00 [INFO] ", "app", None),
+            ("<134>[app] | 01/11/2026 12:00:00 ", "app", None),
+        ],
+    )
+    def test_multiline_datagram_keeps_every_line_in_message(self, prefix, app, host):
+        """A datagram with several lines keeps all of them in message, not only the first."""
+        result = parse_syslog_message((prefix + self._LINES).encode(), "10.0.0.1", local_tz=datetime.timezone.utc)
+        assert result["message"] == self._LINES
+        assert result["app_name"] == app
+        assert result.get("hostname") == host
+        assert result["raw"].endswith("RuntimeError: disk failed")
+
+    def test_multiline_datagram_severity_reads_every_line(self):
+        """Severity detection sees the later lines of a multi-line datagram too."""
+        result = parse_syslog_message(
+            b"<134>Nov  1 12:00:00 host1 app[1]: starting job\n  step 2\nERROR: disk failed",
+            "10.0.0.1",
+            local_tz=datetime.timezone.utc,
+        )
+        assert result["message"].endswith("ERROR: disk failed")
+        assert result["severity"] == 3
+
+    def test_multiline_valkey_line_keeps_every_line(self):
+        raw = b"1:M 02 Oct 2026 11:47:57.745 # first line\nsecond line"
+        result = parse_syslog_message(raw, "10.0.0.1", local_tz=datetime.timezone.utc)
+        assert result["message"] == "first line\nsecond line"
+
 
 # ===================================================================
 # 2. Network Listeners & Protocols

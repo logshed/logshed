@@ -40,21 +40,23 @@ _MONTH_MAP = {
 
 # Patterns of the syslog parser, compiled once
 _RE_PRI = re.compile(r"^<(\d{1,3})>")
-_RE_TAG_PID_COLON = re.compile(r"^([^:\s\[]+?)(?:\[\d+\])?:\s*(.*)")
-_RE_TAG_PID_SPACE = re.compile(r"^([^:\s\[]+)\[\d+\]\s+(.*)")
-_RE_BRACKETED_TAG = re.compile(r"^\[([^\]]+)\]:?\s*(.*)")
-_RE_TAG_SPACE = re.compile(r"^([^:\s]+)\s+(.*)")
+# Patterns that end in (.*) take the rest of the text with re.DOTALL, so a datagram
+# with several lines keeps all of them in the message, as RFC 5424 messages do.
+_RE_TAG_PID_COLON = re.compile(r"^([^:\s\[]+?)(?:\[\d+\])?:\s*(.*)", re.DOTALL)
+_RE_TAG_PID_SPACE = re.compile(r"^([^:\s\[]+)\[\d+\]\s+(.*)", re.DOTALL)
+_RE_BRACKETED_TAG = re.compile(r"^\[([^\]]+)\]:?\s*(.*)", re.DOTALL)
+_RE_TAG_SPACE = re.compile(r"^([^:\s]+)\s+(.*)", re.DOTALL)
 _RE_RFC3164_TIMESTAMP = re.compile(r"^([A-Z][a-z]{2})\s+(\d+)\s+(\d{2}):(\d{2}):(\d{2})\s+")
 _ISO_TIMESTAMP = r"(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s+(?:UTC|GMT|CET|EET|WET|MSK|[A-Z]{1,2}[SD]T)(?:[+-]\d{1,4})?|Z|[+-]\d{2}:?\d{2})?)"
 _RE_BRACKETED_ISO_TIMESTAMP = re.compile(r"^\[" + _ISO_TIMESTAMP + r"\]\s*")
 _RE_ISO_TIMESTAMP = re.compile(r"^" + _ISO_TIMESTAMP + r"\s+")
-_RE_HOST_APP_ENVELOPE = re.compile(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)")
-_RE_BRACKETED_HOST = re.compile(r"^\[([^\]]+)\]\s*(.*)")
-_RE_VALKEY = re.compile(r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)")
+_RE_HOST_APP_ENVELOPE = re.compile(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)", re.DOTALL)
+_RE_BRACKETED_HOST = re.compile(r"^\[([^\]]+)\]\s*(.*)", re.DOTALL)
+_RE_VALKEY = re.compile(r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)", re.DOTALL)
 _VALKEY_SEVERITY = {"#": 4, "*": 5, ".": 7, "-": 7}
-_RE_APP_PIPE = re.compile(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)")
-_RE_BRACKETED_LEVEL = re.compile(r"^\[([a-zA-Z]+)\]\s*(.*)")
-_RE_LOGFMT = re.compile(r"""^(?:time|ts)=["']?([^"'\s]+)["']?\s+(.*)""")
+_RE_APP_PIPE = re.compile(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)", re.DOTALL)
+_RE_BRACKETED_LEVEL = re.compile(r"^\[([a-zA-Z]+)\]\s*(.*)", re.DOTALL)
+_RE_LOGFMT = re.compile(r"""^(?:time|ts)=["']?([^"'\s]+)["']?\s+(.*)""", re.DOTALL)
 _RE_LOGFMT_LEVEL = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""")
 _RE_LOGFMT_MSG = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
 _RE_UTC_SUFFIX = re.compile(r"\s+(?:UTC|GMT)\b", flags=re.IGNORECASE)
