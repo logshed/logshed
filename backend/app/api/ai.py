@@ -393,6 +393,74 @@ async def preview_ai_prompt(
     )
 
 
+async def _prepare_diagnosis(req: AiDiagnosisRequest) -> dict:
+    """Build the diagnosis context for the selected logs and check that AI is enabled."""
+    ctx = await build_diagnosis_context(
+        log_ids=req.log_ids,
+        user_context=req.user_context,
+        prompt_override=req.prompt_override,
+        system_prompt_override=req.system_prompt_override,
+        provider_override=req.provider,
+        model_override=req.model,
+        fallback_models_override=req.fallback_models,
+        client_timezone=req.client_timezone,
+        client_utc_offset_minutes=req.client_utc_offset_minutes,
+    )
+    _require_ai_enabled(ctx)
+    return ctx
+
+
+async def _run_diagnosis(ctx: dict, on_progress=None) -> AiDiagnosisResponse:
+    """Run the analysis with failover, then save it to the AI audit log."""
+    result = await execute_ai_analysis(
+        provider=ctx["provider"],
+        model=ctx["model"],
+        api_key=ctx["api_key"],
+        base_url=ctx["base_url"],
+        source_alias=ctx["source_alias"],
+        app_name=ctx["app_name"],
+        redacted_logs=ctx["redacted_logs"],
+        log_count=len(ctx["rows"]),
+        user_context=ctx["redacted_user_context"],
+        host_notes=ctx["redacted_host_notes"],
+        prompt_override=ctx["redacted_prompt_override"],
+        system_prompt=ctx["system_prompt"],
+        fallback_models=ctx["fallback_models"],
+        on_progress=on_progress,
+        timeout=ctx.get("ai_timeout", 45.0),
+        thinking_level=ctx.get("ai_thinking_level"),
+    )
+
+    audit_id = await save_diagnosis_audit(
+        source_alias=ctx["source_alias"],
+        app_name=ctx["app_name"],
+        log_count=len(ctx["rows"]),
+        user_context=ctx["redacted_user_context"],
+        actual_model=result.model_used,
+        prompt_sent=result.prompt_sent,
+        raw_response=result.raw_response,
+        tokens_in=result.tokens_in,
+        tokens_out=result.tokens_out,
+        tokens_thoughts=result.tokens_thoughts,
+        tokens_used=result.tokens_used,
+        system_prompt=ctx["system_prompt"],
+    )
+
+    return AiDiagnosisResponse(
+        summary=result.summary,
+        root_cause=result.root_cause,
+        remediation=result.remediation,
+        model_used=result.model_used,
+        fallback_used=(result.model_used != ctx["model"]),
+        fallback_attempts=result.fallback_attempts,
+        tokens_in=result.tokens_in,
+        tokens_out=result.tokens_out,
+        tokens_thoughts=result.tokens_thoughts,
+        tokens_used=result.tokens_used,
+        audit_id=audit_id,
+    )
+
+
 @router.post("/diagnose", response_model=AiDiagnosisResponse)
 async def diagnose_logs(
     req: AiDiagnosisRequest,
@@ -407,73 +475,8 @@ async def diagnose_logs(
     _check_ai_rate_limit(request, user)
 
     try:
-        ctx = await build_diagnosis_context(
-            log_ids=req.log_ids,
-            user_context=req.user_context,
-            prompt_override=req.prompt_override,
-            system_prompt_override=req.system_prompt_override,
-            provider_override=req.provider,
-            model_override=req.model,
-            fallback_models_override=req.fallback_models,
-            client_timezone=req.client_timezone,
-            client_utc_offset_minutes=req.client_utc_offset_minutes,
-        )
-
-        _require_ai_enabled(ctx)
-
-        ai_res = await execute_ai_analysis(
-            provider=ctx["provider"],
-            model=ctx["model"],
-            api_key=ctx["api_key"],
-            base_url=ctx["base_url"],
-            source_alias=ctx["source_alias"],
-            app_name=ctx["app_name"],
-            redacted_logs=ctx["redacted_logs"],
-            log_count=len(ctx["rows"]),
-            user_context=ctx["redacted_user_context"],
-            host_notes=ctx["redacted_host_notes"],
-            prompt_override=ctx["redacted_prompt_override"],
-            system_prompt=ctx["system_prompt"],
-            fallback_models=ctx["fallback_models"],
-            timeout=ctx.get("ai_timeout", 45.0),
-            thinking_level=ctx.get("ai_thinking_level"),
-        )
-
-        if len(ai_res) == 11:
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res
-        else:
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = ai_res[:9]
-            actual_model = ctx["model"]
-            fallback_attempts = []
-
-        audit_id = await save_diagnosis_audit(
-            source_alias=ctx["source_alias"],
-            app_name=ctx["app_name"],
-            log_count=len(ctx["rows"]),
-            user_context=ctx["redacted_user_context"],
-            actual_model=actual_model,
-            prompt_sent=prompt_sent,
-            raw_response=raw_response,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            tokens_thoughts=tokens_thoughts,
-            tokens_used=tokens_used,
-            system_prompt=ctx["system_prompt"],
-        )
-
-        return AiDiagnosisResponse(
-            summary=summary,
-            root_cause=root_cause,
-            remediation=remediation,
-            model_used=actual_model,
-            fallback_used=(actual_model != ctx["model"]),
-            fallback_attempts=fallback_attempts,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            tokens_thoughts=tokens_thoughts,
-            tokens_used=tokens_used,
-            audit_id=audit_id,
-        )
+        ctx = await _prepare_diagnosis(req)
+        return await _run_diagnosis(ctx)
     except HTTPException:
         raise
     except Exception as exc:
@@ -492,20 +495,7 @@ async def diagnose_logs_stream(
     Enforces rate limiting (10 req/min per user/session).
     """
     _check_ai_rate_limit(request, user)
-
-    ctx = await build_diagnosis_context(
-        log_ids=req.log_ids,
-        user_context=req.user_context,
-        prompt_override=req.prompt_override,
-        system_prompt_override=req.system_prompt_override,
-        provider_override=req.provider,
-        model_override=req.model,
-        fallback_models_override=req.fallback_models,
-        client_timezone=req.client_timezone,
-        client_utc_offset_minutes=req.client_utc_offset_minutes,
-    )
-
-    _require_ai_enabled(ctx)
+    ctx = await _prepare_diagnosis(req)
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
@@ -523,60 +513,7 @@ async def diagnose_logs_stream(
 
         async def worker():
             try:
-                ai_res = await execute_ai_analysis(
-                    provider=ctx["provider"],
-                    model=ctx["model"],
-                    api_key=ctx["api_key"],
-                    base_url=ctx["base_url"],
-                    source_alias=ctx["source_alias"],
-                    app_name=ctx["app_name"],
-                    redacted_logs=ctx["redacted_logs"],
-                    log_count=len(ctx["rows"]),
-                    user_context=ctx["redacted_user_context"],
-                    host_notes=ctx["redacted_host_notes"],
-                    prompt_override=ctx["redacted_prompt_override"],
-                    system_prompt=ctx["system_prompt"],
-                    fallback_models=ctx["fallback_models"],
-                    on_progress=on_progress,
-                    timeout=ctx.get("ai_timeout", 45.0),
-                    thinking_level=ctx.get("ai_thinking_level"),
-                )
-
-                if len(ai_res) == 11:
-                    summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res
-                else:
-                    summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = ai_res[:9]
-                    actual_model = ctx["model"]
-                    fallback_attempts = []
-
-                audit_id = await save_diagnosis_audit(
-                    source_alias=ctx["source_alias"],
-                    app_name=ctx["app_name"],
-                    log_count=len(ctx["rows"]),
-                    user_context=ctx["redacted_user_context"],
-                    actual_model=actual_model,
-                    prompt_sent=prompt_sent,
-                    raw_response=raw_response,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    tokens_thoughts=tokens_thoughts,
-                    tokens_used=tokens_used,
-                    system_prompt=ctx["system_prompt"],
-                )
-
-                resp = AiDiagnosisResponse(
-                    summary=summary,
-                    root_cause=root_cause,
-                    remediation=remediation,
-                    model_used=actual_model,
-                    fallback_used=(actual_model != ctx["model"]),
-                    fallback_attempts=fallback_attempts,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    tokens_thoughts=tokens_thoughts,
-                    tokens_used=tokens_used,
-                    audit_id=audit_id,
-                )
+                resp = await _run_diagnosis(ctx, on_progress=on_progress)
                 await queue.put({
                     "stage": "complete",
                     "result": resp.model_dump(),

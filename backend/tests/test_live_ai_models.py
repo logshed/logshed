@@ -101,8 +101,8 @@ async def test_live_openai_reasoning_model_runs_an_analysis(model):
         log_count=1,
         timeout=120,
     )
-    summary, model_used, fallback_attempts = result[0], result[9], result[10]
-    tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
+    summary, model_used, fallback_attempts = result.summary, result.model_used, result.fallback_attempts
+    tokens_in, tokens_out, tokens_thoughts = result.tokens_in, result.tokens_out, result.tokens_thoughts
     print(f"\n{model}: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {summary[:200]!r}")
     assert summary.strip()
     assert model_used == model
@@ -134,8 +134,8 @@ async def test_live_claude_runs_an_analysis_at_a_thinking_level(thinking_level):
         timeout=120,
         thinking_level=thinking_level,
     )
-    summary, model_used, fallback_attempts = result[0], result[9], result[10]
-    tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
+    summary, model_used, fallback_attempts = result.summary, result.model_used, result.fallback_attempts
+    tokens_in, tokens_out, tokens_thoughts = result.tokens_in, result.tokens_out, result.tokens_thoughts
     print(f"\nclaude-sonnet-5-5 level {thinking_level}: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {summary[:160]!r}")
     assert summary.strip()
     assert model_used == "claude-sonnet-5-5"
@@ -173,8 +173,8 @@ async def test_live_thinking_off_runs_an_analysis(provider, key_name, model, cap
             timeout=120,
             thinking_level="off",
         )
-    summary, model_used, fallback_attempts = result[0], result[9], result[10]
-    tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
+    summary, model_used, fallback_attempts = result.summary, result.model_used, result.fallback_attempts
+    tokens_in, tokens_out, tokens_thoughts = result.tokens_in, result.tokens_out, result.tokens_thoughts
     retries = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
     print(f"\n{model} off: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}, retries {retries}: {summary[:160]!r}")
     assert summary.strip()

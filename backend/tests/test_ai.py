@@ -32,6 +32,27 @@ from app.core.sse import sse_manager
 from app.main import create_app
 from app.models import SettingsResponse, SettingsUpdate, SettingsUpdateRequest
 from app.services import ai_engine
+from app.services.ai_engine import AiAnalysisResult
+
+
+def _first_model_answers(
+    summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used
+):
+    """A stand-in for execute_ai_analysis whose first model answers with these values."""
+    async def _analysis(**kwargs):
+        return AiAnalysisResult(
+            summary=summary,
+            root_cause=root_cause,
+            remediation=remediation,
+            raw_response=raw_response,
+            prompt_sent=prompt_sent,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            tokens_thoughts=tokens_thoughts,
+            tokens_used=tokens_used,
+            model_used=kwargs["model"],
+        )
+    return _analysis
 
 
 @pytest.fixture(autouse=True)
@@ -423,7 +444,7 @@ Multiple transaction queries deadlock on shared index.
                 0,
                 150,
             )
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = (
+            result = (
                 await ai_engine.execute_ai_analysis(
                     provider="gemini",
                     model="gemini-3.7-flash",
@@ -435,7 +456,8 @@ Multiple transaction queries deadlock on shared index.
                     log_count=1,
                     prompt_override="Operator explicitly edited prompt payload",
                 )
-            )[:9]
+            )
+            summary, prompt_sent = result.summary, result.prompt_sent
             assert prompt_sent == "Operator explicitly edited prompt payload"
             mock_dispatch.assert_called_once_with(
                 api_key="key",
@@ -456,7 +478,7 @@ Multiple transaction queries deadlock on shared index.
                 0,
                 160,
             )
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = (
+            result = (
                 await ai_engine.execute_ai_analysis(
                     provider="openai",
                     model="gpt-4o",
@@ -468,7 +490,8 @@ Multiple transaction queries deadlock on shared index.
                     log_count=1,
                     timeout=45.0,
                 )
-            )[:9]
+            )
+            summary, prompt_sent = result.summary, result.prompt_sent
             assert summary == "OpenAI summary"
             mock_dispatch.assert_called_once_with(
                 api_key="sk-test",
@@ -490,7 +513,7 @@ Multiple transaction queries deadlock on shared index.
                 0,
                 160,
             )
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = (
+            result = (
                 await ai_engine.execute_ai_analysis(
                     provider="anthropic",
                     model="claude-sonnet-4-6",
@@ -502,7 +525,8 @@ Multiple transaction queries deadlock on shared index.
                     log_count=1,
                     timeout=45.0,
                 )
-            )[:9]
+            )
+            summary, prompt_sent = result.summary, result.prompt_sent
             assert summary == "Claude summary"
             mock_dispatch.assert_called_once_with(
                 api_key="sk-ant-test",
@@ -526,7 +550,7 @@ Multiple transaction queries deadlock on shared index.
                 0,
                 150,
             )
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = (
+            result = (
                 await ai_engine.execute_ai_analysis(
                     provider="gemini",
                     model="gemini-3.7-flash",
@@ -537,7 +561,8 @@ Multiple transaction queries deadlock on shared index.
                     redacted_logs=massive_logs_text,
                     log_count=700,
                 )
-            )[:9]
+            )
+            summary, prompt_sent = result.summary, result.prompt_sent
             assert "[... Truncated older logs to fit token budget ...]" in prompt_sent
             call_prompt = mock_dispatch.call_args[1]["prompt"]
             assert "[... Truncated older logs to fit token budget ...]" in call_prompt
@@ -683,7 +708,7 @@ Multiple transaction queries deadlock on shared index.
                 0,
                 130,
             )
-            summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used = (
+            result = (
                 await ai_engine.execute_ai_analysis(
                     provider="openai_compatible",
                     model="llama3.2",
@@ -694,7 +719,8 @@ Multiple transaction queries deadlock on shared index.
                     redacted_logs="test log",
                     log_count=1,
                 )
-            )[:9]
+            )
+            summary, prompt_sent = result.summary, result.prompt_sent
             assert summary == "Llama summary"
             mock_dispatch.assert_called_once_with(
                 api_key="ollama-key",
@@ -773,7 +799,7 @@ class TestAiPreviewAndGating:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Multi-host issue detected across router and proxmox.",
                 "Cross-host communication failure.",
                 "Verify network connectivity between hosts.",
@@ -955,7 +981,7 @@ class TestAiDiagnoseWorkflow:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Summary.",
                 "Root cause.",
                 "Remediation.",
@@ -988,7 +1014,7 @@ class TestAiDiagnoseWorkflow:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "DNS server encountered authentication failure and upstream connection timeouts.",
                 "Invalid Bearer token supplied by client combined with unreachable upstream DNS resolver 1.1.1.1.",
                 "1. Verify client authentication headers.\n2. Check firewall outbound UDP/TCP port 53 to 1.1.1.1.",
@@ -1049,7 +1075,7 @@ class TestAiDiagnoseWorkflow:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Ollama local model diagnosis.",
                 "DNS timeout.",
                 "Restart.",
@@ -1098,7 +1124,7 @@ class TestAiDiagnoseWorkflow:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Overridden prompt summary.",
                 "Overridden prompt cause.",
                 "Overridden prompt remediation.",
@@ -1168,7 +1194,7 @@ class TestAiDiagnoseWorkflow:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Test summary",
                 "Test cause",
                 "Test fix",
@@ -1224,7 +1250,7 @@ class TestAiDiagnoseWorkflow:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Summary.",
                 "Root cause.",
                 "Remediation.",
@@ -1384,7 +1410,7 @@ class TestDefaultModelFallback:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=("Summary", "Cause", "Fix", "raw", "prompt", 100, 50, 0, 150),
+            side_effect=_first_model_answers("Summary", "Cause", "Fix", "raw", "prompt", 100, 50, 0, 150),
         ) as mock_exec:
             res = await auth_client.post("/api/ai/diagnose", json={"log_ids": [1, 2]})
             assert res.status_code == 200
@@ -1405,7 +1431,7 @@ class TestDefaultModelFallback:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=("Summary", "Cause", "Fix", "raw", "prompt", 100, 50, 0, 150),
+            side_effect=_first_model_answers("Summary", "Cause", "Fix", "raw", "prompt", 100, 50, 0, 150),
         ) as mock_exec:
             res = await auth_client.post("/api/ai/diagnose", json={"log_ids": [1, 2]})
             assert res.status_code == 200
@@ -1529,7 +1555,7 @@ class TestAiFastFailoverAndFallback:
                 log_count=1,
                 fallback_models=["gemini-2.5-flash"],
             )
-            summary, root_cause, remediation, raw_resp, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts = res
+            summary, model_used, fallback_attempts = res.summary, res.model_used, res.fallback_attempts
             assert model_used == "gemini-2.5-flash"
             assert summary == "Fallback summary"
             assert calls == ["gemini-3.7-flash", "gemini-2.5-flash"]
@@ -1565,7 +1591,7 @@ class TestAiFastFailoverAndFallback:
                 log_count=1,
                 fallback_models=["gemini-2.5-flash"],
             )
-            summary, root_cause, remediation, raw_resp, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts = res
+            summary, model_used, fallback_attempts = res.summary, res.model_used, res.fallback_attempts
             assert model_used == "gemini-2.5-flash"
             assert summary == "Timeout fallback summary"
             assert calls == ["gemini-3.7-flash", "gemini-2.5-flash"]
@@ -1604,7 +1630,7 @@ class TestAiFastFailoverAndFallback:
                 log_count=1,
                 fallback_models=["gemini-3.7-flash"],
             )
-            summary, root_cause, remediation, raw_resp, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts = res
+            summary, model_used, fallback_attempts = res.summary, res.model_used, res.fallback_attempts
             assert model_used == "gemini-3.7-flash"
             assert summary == "504 fallback summary"
             assert calls == ["gemini-3.8-flash", "gemini-3.7-flash"]
@@ -1644,7 +1670,7 @@ class TestAiFastFailoverAndFallback:
                 log_count=1,
                 fallback_models=["gemini-3.7-flash"],
             )
-            summary, root_cause, remediation, raw_resp, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts = res
+            summary, model_used, fallback_attempts = res.summary, res.model_used, res.fallback_attempts
             assert model_used == "gemini-3.7-flash"
             assert summary == "404 fallback summary"
             assert calls == ["nonexistent-model", "gemini-3.7-flash"]
@@ -2174,7 +2200,7 @@ class TestAiRateLimiting:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Summary",
                 "Cause",
                 "Remediation",
@@ -2202,7 +2228,7 @@ class TestAiRateLimiting:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=(
+            side_effect=_first_model_answers(
                 "Summary",
                 "Cause",
                 "Remediation",
@@ -3105,7 +3131,7 @@ class TestAiFollowUpApi:
         with patch(
             "app.api.ai.execute_ai_analysis",
             new_callable=AsyncMock,
-            return_value=("S", "C", "R", "Raw", "Prompt", 1, 1, 0, 2),
+            side_effect=_first_model_answers("S", "C", "R", "Raw", "Prompt", 1, 1, 0, 2),
         ):
             for _ in range(10):
                 assert (await auth_client.post("/api/ai/diagnose", json={"log_ids": [1]})).status_code == 200

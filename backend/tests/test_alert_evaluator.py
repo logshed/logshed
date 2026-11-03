@@ -11,6 +11,7 @@ import pytest
 
 from app.core.migrations import run_migrations, get_connection
 from app.core.pipeline import SKIP_ALERT_RULES_KEY
+from app.services.ai_engine import AiAnalysisResult
 from app.services.alert_evaluator import AlertEvaluator, CompiledAlertRule
 from app.services.alert_presets import extract_ip_from_message, get_security_presets
 
@@ -406,18 +407,17 @@ class TestAlertEvaluatorEngine:
         # Mock AI analysis engine
         async def mock_execute_ai_analysis(**kwargs):
             captured_ai_kwargs.update(kwargs)
-            return (
-                "Automated SSH brute-force attack detected.",
-                "External host attempted repetitive dictionary login.",
-                "Block offending IP at firewall: iptables -A INPUT -s 192.168.1.105 -j DROP",
-                "raw response text",
-                "prompt text",
-                100,
-                50,
-                0,
-                150,
-                "gemini-2.5-flash",
-                [],
+            return AiAnalysisResult(
+                summary="Automated SSH brute-force attack detected.",
+                root_cause="External host attempted repetitive dictionary login.",
+                remediation="Block offending IP at firewall: iptables -A INPUT -s 192.168.1.105 -j DROP",
+                raw_response="raw response text",
+                prompt_sent="prompt text",
+                tokens_in=100,
+                tokens_out=50,
+                tokens_thoughts=0,
+                tokens_used=150,
+                model_used="gemini-2.5-flash",
             )
 
         import app.services.ai_engine as ai_engine
@@ -499,16 +499,17 @@ class TestAlertEvaluatorEngine:
         monkeypatch.setattr(NotifierService, "send_notification", mock_send)
 
         async def mock_execute_ai_analysis(*args, **kwargs):
-            return (
-                "Test incident diagnosis",
-                "Take action",
-                "prompt text",
-                100,
-                50,
-                0,
-                150,
-                "gemini-2.5-flash",
-                [],
+            return AiAnalysisResult(
+                summary="Test incident diagnosis",
+                root_cause="Take action",
+                remediation="",
+                raw_response="raw",
+                prompt_sent="prompt text",
+                tokens_in=100,
+                tokens_out=50,
+                tokens_thoughts=0,
+                tokens_used=150,
+                model_used="gemini-2.5-flash",
             )
 
         import app.services.ai_engine as ai_engine
@@ -1179,11 +1180,17 @@ class TestQueueConsumerAlertIntegration:
 
         # Mock AI analysis returning sensitive tokens
         async def mock_ai(*args, **kwargs):
-            return (
-                "Suspicious token usage api_key=AIzaSyD1234567890abcdef discovered.",
-                "Plaintext password leaked in stack trace",
-                "Revoke key immediately",
-                1, 2, 3, 4, 5, 6, "gemini-test", [],
+            return AiAnalysisResult(
+                summary="Suspicious token usage api_key=AIzaSyD1234567890abcdef discovered.",
+                root_cause="Plaintext password leaked in stack trace",
+                remediation="Revoke key immediately",
+                raw_response="raw",
+                prompt_sent="prompt",
+                tokens_in=3,
+                tokens_out=4,
+                tokens_thoughts=5,
+                tokens_used=6,
+                model_used="gemini-test",
             )
 
         monkeypatch.setattr("app.services.ai_engine.execute_ai_analysis", mock_ai)
@@ -1521,11 +1528,17 @@ class TestQueueConsumerAlertIntegration:
         async def mock_ai(**kwargs):
             nonlocal captured_prompt
             captured_prompt = kwargs.get("prompt_override")
-            return (
-                "Rate spike diagnosis",
-                "Culprit storm service flooded pool",
-                "Restart service and scale replicas",
-                1, 2, 3, 4, 5, 6, "mock-model", [],
+            return AiAnalysisResult(
+                summary="Rate spike diagnosis",
+                root_cause="Culprit storm service flooded pool",
+                remediation="Restart service and scale replicas",
+                raw_response="raw",
+                prompt_sent="prompt",
+                tokens_in=3,
+                tokens_out=4,
+                tokens_thoughts=5,
+                tokens_used=6,
+                model_used="mock-model",
             )
 
         monkeypatch.setattr("app.services.ai_engine.execute_ai_analysis", mock_ai)
@@ -1895,7 +1908,18 @@ class TestAlertEnrichmentAiSettings:
 
         async def mock_execute_ai_analysis(**kwargs):
             captured.update(kwargs)
-            return ("summary", "", "", "raw", "prompt", 1, 1, 0, 2, kwargs.get("model"), [])
+            return AiAnalysisResult(
+                summary="summary",
+                root_cause="",
+                remediation="",
+                raw_response="raw",
+                prompt_sent="prompt",
+                tokens_in=1,
+                tokens_out=1,
+                tokens_thoughts=0,
+                tokens_used=2,
+                model_used=kwargs.get("model"),
+            )
 
         import app.services.ai_engine as ai_engine
         monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_execute_ai_analysis)
@@ -2317,7 +2341,18 @@ class TestAlertAiContextRedactionOffLoop:
     def _patch_ai_and_notifier(monkeypatch, captured: dict) -> None:
         async def mock_execute_ai_analysis(**kwargs):
             captured.update(kwargs)
-            return ("Summary.", "Cause.", "Fix.", "raw", "prompt", 1, 1, 0, 2, "gemini-2.5-flash", [])
+            return AiAnalysisResult(
+                summary="Summary.",
+                root_cause="Cause.",
+                remediation="Fix.",
+                raw_response="raw",
+                prompt_sent="prompt",
+                tokens_in=1,
+                tokens_out=1,
+                tokens_thoughts=0,
+                tokens_used=2,
+                model_used="gemini-2.5-flash",
+            )
 
         import app.services.ai_engine as ai_engine
         from app.services.notifier import NotifierService

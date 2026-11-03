@@ -35,6 +35,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+from app.services.ai_engine import AiAnalysisResult
 from app.services.notifier import validate_notification_url
 from app.services.alert_evaluator import AlertEvaluator
 from app.collectors.syslog import SyslogServer
@@ -596,16 +597,17 @@ class TestSubsystemIntegrations:
         monkeypatch.setattr(NotifierService, "send_notification", mock_send)
 
         async def mock_execute_ai_analysis(*args, **kwargs):
-            return (
-                "Incident diagnosis",
-                "Take action",
-                "prompt text",
-                100,
-                50,
-                0,
-                150,
-                "gemini-2.5-flash",
-                [],
+            return AiAnalysisResult(
+                summary="Incident diagnosis",
+                root_cause="Take action",
+                remediation="",
+                raw_response="raw",
+                prompt_sent="prompt text",
+                tokens_in=100,
+                tokens_out=50,
+                tokens_thoughts=0,
+                tokens_used=150,
+                model_used="gemini-2.5-flash",
             )
 
         import app.services.ai_engine as ai_engine

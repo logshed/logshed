@@ -855,7 +855,7 @@ class AlertEvaluator:
                         f"and fallback models {fallback_models}"
                     )
 
-                    ai_res = await execute_ai_analysis(
+                    ai_result = await execute_ai_analysis(
                         provider=ai_provider,
                         model=ai_model,
                         api_key=ai_key,
@@ -869,34 +869,22 @@ class AlertEvaluator:
                         timeout=provider_settings["ai_timeout"],
                         thinking_level=provider_settings["ai_thinking_level"],
                     )
-                    if len(ai_res) == 11:
-                        summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res
-                    else:
-                        summary, root_cause, remediation = ai_res[:3]
-                        raw_response = ""
-                        prompt_sent = prompt
-                        tokens_in = 0
-                        tokens_out = 0
-                        tokens_thoughts = 0
-                        tokens_used = 0
-                        actual_model = ai_model
-                        fallback_attempts = []
+                    actual_ai_model = ai_result.model_used
 
-                    actual_ai_model = actual_model
-
-                    if fallback_attempts:
+                    if ai_result.fallback_attempts:
                         logger.info(
-                            f"AI enrichment for alert '{rule.name}' succeeded via fallback model '{actual_model}' "
-                            f"after failovers: {fallback_attempts}"
+                            f"AI enrichment for alert '{rule.name}' succeeded via fallback model '{actual_ai_model}' "
+                            f"after failovers: {ai_result.fallback_attempts}"
                         )
 
+                    summary = ai_result.summary
                     diag_parts = []
                     if summary and summary.strip():
                         diag_parts.append(summary.strip())
-                    if root_cause and root_cause.strip():
-                        diag_parts.append(f"### Root Cause\n{root_cause.strip()}")
-                    if remediation and remediation.strip():
-                        diag_parts.append(f"### Remediation\n{remediation.strip()}")
+                    if ai_result.root_cause and ai_result.root_cause.strip():
+                        diag_parts.append(f"### Root Cause\n{ai_result.root_cause.strip()}")
+                    if ai_result.remediation and ai_result.remediation.strip():
+                        diag_parts.append(f"### Remediation\n{ai_result.remediation.strip()}")
                     incident_summary = "\n\n".join(diag_parts) if diag_parts else (summary or "Incident review complete.")
                     ai_success = True
 
@@ -921,12 +909,12 @@ class AlertEvaluator:
                             log_count=log_count,
                             user_context=f"Alert Rule: {rule.name}",
                             actual_model=actual_ai_model,
-                            prompt_sent=prompt_sent or prompt,
-                            raw_response=incident_summary or raw_response,
-                            tokens_in=tokens_in or 0,
-                            tokens_out=tokens_out or 0,
-                            tokens_thoughts=tokens_thoughts or 0,
-                            tokens_used=tokens_used or 0,
+                            prompt_sent=ai_result.prompt_sent or prompt,
+                            raw_response=incident_summary or ai_result.raw_response,
+                            tokens_in=ai_result.tokens_in or 0,
+                            tokens_out=ai_result.tokens_out or 0,
+                            tokens_thoughts=ai_result.tokens_thoughts or 0,
+                            tokens_used=ai_result.tokens_used or 0,
                             system_prompt=ai_settings.get("ai_system_prompt") or None,
                             trigger_source="alert",
                             custom_db_path=self.db_path,

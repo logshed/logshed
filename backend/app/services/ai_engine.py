@@ -12,6 +12,7 @@ import datetime
 import logging
 import re
 import urllib.parse
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Sequence, TypeVar
 
 import httpx
@@ -1238,6 +1239,22 @@ def _describe_failover_error(exc: Exception) -> str:
     return raw_str[:300].strip()
 
 
+@dataclass
+class AiAnalysisResult:
+    """A finished analysis: the parsed diagnosis, the exchange with the model, its token counts and the model that answered."""
+    summary: str
+    root_cause: str
+    remediation: str
+    raw_response: str
+    prompt_sent: str
+    tokens_in: int
+    tokens_out: int
+    tokens_thoughts: int
+    tokens_used: int
+    model_used: str
+    fallback_attempts: list[str] = field(default_factory=list)
+
+
 async def execute_ai_analysis(
     provider: str,
     model: str,
@@ -1255,11 +1272,10 @@ async def execute_ai_analysis(
     fallback_models: Optional[list[str]] = None,
     on_progress: Optional[Callable[[dict], Any]] = None,
     thinking_level: Optional[str] = None,
-) -> tuple[str, str, str, str, str, int, int, int, int, str, list[str]]:
+) -> AiAnalysisResult:
     """
     Unified entrypoint to run on-demand AI analysis with automatic multi-model failover.
     Attempts primary model first; if it fails with 503 or timeout, attempts configured fallback models.
-    Returns (summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts).
     """
     redacted_logs = truncate_logs_to_budget(redacted_logs)
 
@@ -1318,18 +1334,18 @@ async def execute_ai_analysis(
             raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch(**dispatch_kwargs)
 
             summary, root_cause, remediation = parse_structured_ai_response(raw_text)
-            return (
-                summary,
-                root_cause,
-                remediation,
-                raw_text,
-                prompt,
-                tokens_in,
-                tokens_out,
-                tokens_thoughts,
-                tokens_used,
-                current_model,
-                fallback_attempts,
+            return AiAnalysisResult(
+                summary=summary,
+                root_cause=root_cause,
+                remediation=remediation,
+                raw_response=raw_text,
+                prompt_sent=prompt,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                tokens_thoughts=tokens_thoughts,
+                tokens_used=tokens_used,
+                model_used=current_model,
+                fallback_attempts=fallback_attempts,
             )
 
         except Exception as exc:
