@@ -16,7 +16,7 @@ import httpx
 from httpx import ASGITransport, AsyncClient
 
 from app.core.migrations import run_migrations
-from app.main import create_app
+from app.main import _api_docs_enabled, create_app
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 DOCKERFILE_PATH = REPO_ROOT / "Dockerfile"
@@ -616,10 +616,16 @@ class TestHttpPerimeterHeaders:
             assert "object-src 'none'" in csp
             assert res.headers.get("X-Frame-Options") == "DENY"
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", ["false", "0", "no", "off"])
-    async def test_api_docs_can_be_turned_off(self, perimeter_env, monkeypatch, value):
+    @pytest.mark.parametrize("value, enabled", [("false", False), ("0", False), ("no", False), ("off", False), ("true", True)])
+    def test_api_docs_setting_reads_yes_no_words(self, monkeypatch, value, enabled):
         monkeypatch.setenv("ENABLE_API_DOCS", value)
+        assert _api_docs_enabled() is enabled
+        monkeypatch.delenv("ENABLE_API_DOCS")
+        assert _api_docs_enabled() is True
+
+    @pytest.mark.asyncio
+    async def test_api_docs_can_be_turned_off(self, perimeter_env, monkeypatch):
+        monkeypatch.setenv("ENABLE_API_DOCS", "off")
         async with self._client(create_app()) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")
@@ -790,9 +796,8 @@ class TestApiDocsAccess:
         assert res.status_code == 401
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", ["false", "0"])
-    async def test_docs_turned_off_stay_off_with_a_session(self, docs_env, monkeypatch, value):
-        monkeypatch.setenv("ENABLE_API_DOCS", value)
+    async def test_docs_turned_off_stay_off_with_a_session(self, docs_env, monkeypatch):
+        monkeypatch.setenv("ENABLE_API_DOCS", "false")
         async with self._client(create_app(), logged_in=True) as ac:
             docs = await ac.get("/docs")
             redoc = await ac.get("/redoc")

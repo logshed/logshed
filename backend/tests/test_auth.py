@@ -1,16 +1,14 @@
 """
-Tests for Argon2id hashing, session cookies, login rate limiting, admin password change, and admin CLI.
+Tests for Argon2id hashing, session cookies, login rate limiting, CORS, CSRF and admin password change (the reset-admin CLI is in test_cli_reset_admin.py).
 """
 
 from pathlib import Path
 import pytest
 import pytest_asyncio
-from argon2 import PasswordHasher
 from httpx import ASGITransport, AsyncClient
 
-from app.cli import reset_admin
 from app.core.config import get_cors_origins
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -391,6 +389,53 @@ class TestAuthentication:
             cookie_parts_env = [p.strip() for p in set_cookie_env.split(";")]
             assert "secure" in cookie_parts_env
 
+    @pytest.mark.asyncio
+    async def test_password_max_length_enforced(self, client: AsyncClient):
+        """Passwords exceeding 128 characters are rejected with 422 Unprocessable Entity."""
+        too_long = "A" * 129
+
+        # Setup
+        res_setup = await client.post("/api/auth/setup", json={"password": too_long})
+        assert res_setup.status_code == 422
+
+        # Login
+        res_login = await client.post("/api/auth/login", json={"password": too_long})
+        assert res_login.status_code == 422
+
+        # Setup valid password to authenticate for password change
+        await client.post("/api/auth/setup", json={"password": "valid_initial_pwd"})
+
+        # Password Change
+        res_change = await client.post(
+            "/api/auth/password",
+            json={"current_password": "valid_initial_pwd", "new_password": too_long},
+        )
+        assert res_change.status_code == 422
+
+    def test_token_issuer_claim_validation(self):
+        """Tokens without iss='logshed' or with invalid iss are rejected."""
+        import json
+        import time
+        from app.core.security import get_fernet
+
+        now = int(time.time())
+        fernet = get_fernet()
+
+        # Token with valid iss
+        valid_payload = {"user_id": 1, "iat": now, "exp": now + 3600, "iss": "logshed"}
+        valid_token = fernet.encrypt(json.dumps(valid_payload).encode()).decode()
+        assert verify_session_token(valid_token) is not None
+
+        # Token with missing iss
+        missing_iss_payload = {"user_id": 1, "iat": now, "exp": now + 3600}
+        missing_iss_token = fernet.encrypt(json.dumps(missing_iss_payload).encode()).decode()
+        assert verify_session_token(missing_iss_token) is None
+
+        # Token with wrong iss
+        wrong_iss_payload = {"user_id": 1, "iat": now, "exp": now + 3600, "iss": "other_app"}
+        wrong_iss_token = fernet.encrypt(json.dumps(wrong_iss_payload).encode()).decode()
+        assert verify_session_token(wrong_iss_token) is None
+
 
 # ===================================================================
 # 2. CORS Configuration
@@ -555,189 +600,6 @@ class TestAdminPasswordChange:
             res_after = await old_client.get("/api/settings")
             assert res_after.status_code == 401
             assert "Session expired due to password change" in res_after.json()["detail"]
-
-
-# ===================================================================
-# 4. Admin CLI Password Reset
-# ===================================================================
-
-class TestCLIPasswordReset:
-
-    def test_reset_admin_on_empty_table(self, tmp_path: Path):
-        db_path = tmp_path / "cli_empty.db"
-        run_migrations(db_path)
-        reset_admin("newpassword123", str(db_path))
-
-        conn = get_connection(db_path)
-        row = conn.execute(
-            "SELECT id, password_hash, created_at, updated_at FROM admin_auth"
-        ).fetchone()
-        conn.close()
-
-        assert row is not None
-        assert row[0] == 1
-        assert row[1].startswith("$argon2id$")
-
-        ph = PasswordHasher()
-        assert ph.verify(row[1], "newpassword123")
-
-    def test_reset_admin_on_existing_row(self, tmp_path: Path):
-        db_path = tmp_path / "cli_existing.db"
-        run_migrations(db_path)
-
-        ph = PasswordHasher()
-        old_hash = ph.hash("oldpassword")
-        conn = get_connection(db_path)
-        conn.execute(
-            "INSERT INTO admin_auth (id, password_hash, created_at, updated_at) "
-            "VALUES (1, ?, '2024-01-01T00:00:00', '2024-01-01T00:00:00')",
-            (old_hash,),
-        )
-        conn.commit()
-        conn.close()
-
-        reset_admin("newpassword456", str(db_path))
-
-        conn = get_connection(db_path)
-        row = conn.execute(
-            "SELECT password_hash, created_at, updated_at FROM admin_auth WHERE id=1"
-        ).fetchone()
-        conn.close()
-
-        assert row is not None
-        new_hash = row[0]
-        assert new_hash.startswith("$argon2id$")
-        with pytest.raises(Exception):
-            ph.verify(new_hash, "oldpassword")
-        assert ph.verify(new_hash, "newpassword456")
-        assert row[1] == "2024-01-01T00:00:00"
-        assert row[2] != "2024-01-01T00:00:00"
-
-    def test_reset_admin_argon2id_algorithm(self, tmp_path: Path):
-        db_path = tmp_path / "cli_algo.db"
-        run_migrations(db_path)
-        reset_admin("testpass", str(db_path))
-
-        conn = get_connection(db_path)
-        row = conn.execute(
-            "SELECT password_hash FROM admin_auth WHERE id=1"
-        ).fetchone()
-        conn.close()
-
-        assert row is not None
-        assert "$argon2id$" in row[0]
-
-    def test_reset_admin_only_one_row(self, tmp_path: Path):
-        db_path = tmp_path / "cli_onerow.db"
-        run_migrations(db_path)
-        reset_admin("pass1", str(db_path))
-        reset_admin("pass2", str(db_path))
-        reset_admin("pass3", str(db_path))
-
-        conn = get_connection(db_path)
-        count = conn.execute("SELECT COUNT(*) FROM admin_auth").fetchone()[0]
-        conn.close()
-
-        assert count == 1
-
-    @pytest.mark.asyncio
-    async def test_password_max_length_enforced(self, client: AsyncClient):
-        """Passwords exceeding 128 characters are rejected with 422 Unprocessable Entity."""
-        too_long = "A" * 129
-
-        # Setup
-        res_setup = await client.post("/api/auth/setup", json={"password": too_long})
-        assert res_setup.status_code == 422
-
-        # Login
-        res_login = await client.post("/api/auth/login", json={"password": too_long})
-        assert res_login.status_code == 422
-
-        # Setup valid password to authenticate for password change
-        await client.post("/api/auth/setup", json={"password": "valid_initial_pwd"})
-
-        # Password Change
-        res_change = await client.post(
-            "/api/auth/password",
-            json={"current_password": "valid_initial_pwd", "new_password": too_long},
-        )
-        assert res_change.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_csrf_header_protection(self):
-        """Mutating API requests without X-Requested-With return 403 Forbidden."""
-        app = create_app()
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as no_header_client:
-            # POST without header must fail with 403
-            res_post = await no_header_client.post("/api/auth/login", json={"password": "any"})
-            assert res_post.status_code == 403
-            assert "X-Requested-With" in res_post.json()["detail"]
-
-            # GET requests without header must succeed
-            res_get = await no_header_client.get("/api/auth/status")
-            assert res_get.status_code == 200
-
-            # Healthcheck (GET) without header must succeed
-            res_health = await no_header_client.get("/api/health")
-            assert res_health.status_code == 200
-
-        # POST with X-Requested-With header passes CSRF check
-        async with AsyncClient(
-            transport=transport,
-            base_url="http://test",
-            headers={"X-Requested-With": "XMLHttpRequest"},
-        ) as header_client:
-            res_post = await header_client.post("/api/auth/login", json={"password": "wrong"})
-            # Reaches route handler and returns 401 instead of 403
-            assert res_post.status_code == 401
-
-    def test_token_issuer_claim_validation(self):
-        """Tokens without iss='logshed' or with invalid iss are rejected."""
-        import json
-        import time
-        from app.core.security import get_fernet
-
-        now = int(time.time())
-        fernet = get_fernet()
-
-        # Token with valid iss
-        valid_payload = {"user_id": 1, "iat": now, "exp": now + 3600, "iss": "logshed"}
-        valid_token = fernet.encrypt(json.dumps(valid_payload).encode()).decode()
-        assert verify_session_token(valid_token) is not None
-
-        # Token with missing iss
-        missing_iss_payload = {"user_id": 1, "iat": now, "exp": now + 3600}
-        missing_iss_token = fernet.encrypt(json.dumps(missing_iss_payload).encode()).decode()
-        assert verify_session_token(missing_iss_token) is None
-
-        # Token with wrong iss
-        wrong_iss_payload = {"user_id": 1, "iat": now, "exp": now + 3600, "iss": "other_app"}
-        wrong_iss_token = fernet.encrypt(json.dumps(wrong_iss_payload).encode()).decode()
-        assert verify_session_token(wrong_iss_token) is None
-
-    def test_cli_reset_admin_prompts_when_password_omitted(self, tmp_path: Path, monkeypatch):
-        """CLI reset-admin prompts for password using getpass when --password is omitted."""
-        import app.cli as cli_mod
-        db_path = tmp_path / "cli_prompt.db"
-
-        monkeypatch.setattr(
-            "sys.argv",
-            ["app.cli", "reset-admin", "--db-path", str(db_path)],
-        )
-        monkeypatch.setattr("getpass.getpass", lambda prompt="": "PromptedSecretPassword123")
-
-        cli_mod.main()
-
-        conn = get_connection(str(db_path))
-        row = conn.execute("SELECT password_hash FROM admin_auth WHERE id=1").fetchone()
-        conn.close()
-
-        assert row is not None
-        ph = PasswordHasher()
-        assert ph.verify(row[0], "PromptedSecretPassword123")
-
-
 
 
 # ===================================================================
@@ -1035,6 +897,35 @@ class TestCorsAndBearerHardening:
             ac.cookies.update(auth_cookie)
             res = await ac.get("/api/v1/maintenance/status")
             assert res.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_csrf_header_protection(self):
+        """Mutating API requests without X-Requested-With return 403 Forbidden."""
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as no_header_client:
+            # POST without header must fail with 403
+            res_post = await no_header_client.post("/api/auth/login", json={"password": "any"})
+            assert res_post.status_code == 403
+            assert "X-Requested-With" in res_post.json()["detail"]
+
+            # GET requests without header must succeed
+            res_get = await no_header_client.get("/api/auth/status")
+            assert res_get.status_code == 200
+
+            # Healthcheck (GET) without header must succeed
+            res_health = await no_header_client.get("/api/health")
+            assert res_health.status_code == 200
+
+        # POST with X-Requested-With header passes CSRF check
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as header_client:
+            res_post = await header_client.post("/api/auth/login", json={"password": "wrong"})
+            # Reaches route handler and returns 401 instead of 403
+            assert res_post.status_code == 401
 
 
 class TestLoginHasNoGlobalFailureLimit:

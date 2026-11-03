@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SettingsPanel, pathToSettingsSubTab, settingsSubTabToPath } from '../components/settings/SettingsPanel.tsx';
 import * as settingsApi from '../api/settings.ts';
@@ -564,27 +564,31 @@ describe('SettingsPanel Component', () => {
     fireEvent.change(confirmPwdInput, { target: { value: 'newpassword123' } });
 
     expect(submitBtn).not.toBeDisabled();
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(submitBtn);
+      });
       expect(changePwdSpy).toHaveBeenCalledWith('oldpassword123', 'newpassword123');
-    });
-
-    expect(sessionStorage.getItem('login_notice')).toBe(
-      'Admin password changed successfully. Please sign in with your new password.'
-    );
-    await waitFor(() => {
+      expect(sessionStorage.getItem('login_notice')).toBe(
+        'Admin password changed successfully. Please sign in with your new password.'
+      );
       expect(
         screen.getByText('Admin password changed successfully. Redirecting to sign in...')
       ).toBeInTheDocument();
-    });
 
-    await waitFor(
-      () => {
-        expect(mockLogout).toHaveBeenCalled();
-      },
-      { timeout: 2000 }
-    );
+      // The sign-out follows after a 1 second pause, so the message can be read
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(900);
+      });
+      expect(mockLogout).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(mockLogout).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders About LogShed section on application tab with installed version and up to date status', async () => {

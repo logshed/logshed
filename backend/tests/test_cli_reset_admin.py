@@ -1,12 +1,14 @@
-"""Tests for the reset-admin CLI password handling."""
+"""Tests for the reset-admin CLI: password checks, prompts and the stored admin row."""
 
 from pathlib import Path
 
 import pytest
 from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
 import app.cli as cli_mod
-from app.core.migrations import get_connection
+from app.cli import reset_admin
+from app.core.migrations import get_connection, run_migrations
 
 
 def _run(monkeypatch, db_path: Path, *extra: str):
@@ -65,3 +67,58 @@ class TestResetAdminPassword:
         _run(monkeypatch, db, "--password", "ValidPassword123")
         assert "warning" in capsys.readouterr().err.lower()
         assert PasswordHasher().verify(_stored_hash(db), "ValidPassword123")
+
+
+class TestResetAdminFunction:
+    def test_sets_the_password_on_an_empty_table(self, tmp_path):
+        db = tmp_path / "empty.db"
+        run_migrations(db)
+        reset_admin("newpassword123", str(db))
+
+        stored = _stored_hash(db)
+        assert stored.startswith("$argon2id$")
+        assert PasswordHasher().verify(stored, "newpassword123")
+
+    def test_replaces_an_existing_password_and_keeps_created_at(self, tmp_path):
+        db = tmp_path / "existing.db"
+        run_migrations(db)
+        ph = PasswordHasher()
+        conn = get_connection(str(db))
+        try:
+            conn.execute(
+                "INSERT INTO admin_auth (id, password_hash, created_at, updated_at) "
+                "VALUES (1, ?, '2024-01-01T00:00:00', '2024-01-01T00:00:00')",
+                (ph.hash("oldpassword"),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        reset_admin("newpassword456", str(db))
+
+        conn = get_connection(str(db))
+        try:
+            new_hash, created_at, updated_at = conn.execute(
+                "SELECT password_hash, created_at, updated_at FROM admin_auth WHERE id=1"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert new_hash.startswith("$argon2id$")
+        with pytest.raises(VerifyMismatchError):
+            ph.verify(new_hash, "oldpassword")
+        assert ph.verify(new_hash, "newpassword456")
+        assert created_at == "2024-01-01T00:00:00"
+        assert updated_at != "2024-01-01T00:00:00"
+
+    def test_repeated_resets_keep_one_row(self, tmp_path):
+        db = tmp_path / "onerow.db"
+        run_migrations(db)
+        for password in ("pass1", "pass2", "pass3"):
+            reset_admin(password, str(db))
+
+        conn = get_connection(str(db))
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM admin_auth").fetchone()[0] == 1
+        finally:
+            conn.close()
+        assert PasswordHasher().verify(_stored_hash(db), "pass3")
