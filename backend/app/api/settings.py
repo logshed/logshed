@@ -30,6 +30,7 @@ from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest,
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
 from app.services.ai_service import is_ai_enabled
 from app.services.daily_digest import is_daily_digest_enabled
+from app.services.docker_endpoints import load_docker_endpoints
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 logger = logging.getLogger(__name__)
@@ -547,10 +548,8 @@ async def update_settings(
                     await docker_pool.set_primary_enabled(req.enable_docker)
 
                 def _get_ep1(conn):
-                    cur = conn.cursor()
-                    cur.execute("SELECT * FROM docker_endpoints WHERE id = 1")
-                    row = cur.fetchone()
-                    return dict(row) if row else None
+                    rows = load_docker_endpoints(conn, endpoint_id=1)
+                    return rows[0] if rows else None
 
                 ep1_data = await run_db_query(_get_ep1)
                 if ep1_data:

@@ -86,6 +86,61 @@ class TestDockerHostsApi:
         assert primary["enabled"] is True
 
     @pytest.mark.asyncio
+    async def test_list_shows_the_same_fields_with_and_without_the_pool(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        """The list reads the same row fields whether or not the collector pool runs, and never the key."""
+        from app.collectors.docker_pool import DockerCollectorPool
+        from app.core.pipeline import KeyedMultilineAssembler
+
+        resp = await client.post(
+            "/api/docker/hosts",
+            json={
+                "name": "TLS Node",
+                "url": "tcp://192.168.1.60:2376",
+                "source_alias": "tls-node",
+                "enabled": False,
+                "tls_enabled": True,
+                "verify_hostname": False,
+                "ca_cert": _PEM_CERT,
+                "client_cert": _PEM_CERT,
+                "client_key": _PEM_KEY,
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+        with patch("app.main.get_docker_pool", return_value=None):
+            without_pool = (await client.get("/api/docker/hosts", headers=auth_headers)).json()
+        pool = DockerCollectorPool(
+            assembler=KeyedMultilineAssembler(asyncio.Queue()),
+            db_path=tmp_path / "docker_hosts_test.db",
+        )
+        with patch("app.main.get_docker_pool", return_value=pool):
+            with_pool = (await client.get("/api/docker/hosts", headers=auth_headers)).json()
+
+        assert with_pool == without_pool
+        node = next(h for h in without_pool if h["name"] == "TLS Node")
+        assert node == {
+            **node,
+            "url": "tcp://192.168.1.60:2376",
+            "source_alias": "tls-node",
+            "enabled": False,
+            "tls_enabled": True,
+            "verify_hostname": False,
+            "ca_cert": _PEM_CERT,
+            "client_cert": _PEM_CERT,
+            "has_client_key": True,
+            "exclude_containers": "",
+            "is_connected": False,
+            "active_containers": 0,
+            "last_error": None,
+            "latency_ms": None,
+        }
+        assert "client_key" not in node
+        assert node["created_at"] and node["updated_at"]
+
+    @pytest.mark.asyncio
     async def test_create_and_duplicate_guard(self, client: AsyncClient, auth_headers: dict):
         """Allows creating new endpoint and rejects duplicate names."""
         payload = {

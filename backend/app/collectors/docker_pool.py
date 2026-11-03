@@ -17,6 +17,7 @@ from app.core.config import env_docker_disabled, get_cached_setting, get_db_path
 from app.core.migrations import get_connection
 from app.core.pipeline import KeyedMultilineAssembler
 from app.core.security import decrypt_value
+from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -155,33 +156,7 @@ class DockerCollectorPool:
             self._running = True
 
             def _query_endpoints(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT id, name, url, source_alias, enabled, tls_enabled,
-                           ca_cert, client_cert, client_key, exclude_containers, verify_hostname
-                    FROM docker_endpoints
-                    WHERE enabled = 1
-                    ORDER BY id ASC
-                    """
-                )
-                rows = cur.fetchall()
-                results = []
-                for r in rows:
-                    results.append({
-                        "id": r["id"],
-                        "name": r["name"],
-                        "url": r["url"],
-                        "source_alias": r["source_alias"],
-                        "enabled": r["enabled"],
-                        "tls_enabled": r["tls_enabled"],
-                        "ca_cert": r["ca_cert"],
-                        "client_cert": r["client_cert"],
-                        "client_key": r["client_key"],
-                        "exclude_containers": r["exclude_containers"],
-                        "verify_hostname": r["verify_hostname"],
-                    })
-                return results
+                return load_docker_endpoints(conn, enabled_only=True)
 
             from app.api.deps import run_db_query
             endpoints = await run_db_query(_query_endpoints, custom_db_path=self._db_path)
@@ -296,35 +271,7 @@ class DockerCollectorPool:
     async def get_statuses(self) -> list[dict[str, Any]]:
         """Collect live connection statuses and metrics for all configured hosts."""
         def _query_all(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT id, name, url, source_alias, enabled, tls_enabled,
-                       ca_cert, client_cert, client_key, exclude_containers, verify_hostname,
-                       created_at, updated_at
-                FROM docker_endpoints
-                ORDER BY id ASC
-                """
-            )
-            rows = cur.fetchall()
-            results = []
-            for r in rows:
-                results.append({
-                    "id": r["id"],
-                    "name": r["name"],
-                    "url": r["url"],
-                    "source_alias": r["source_alias"],
-                    "enabled": bool(r["enabled"]),
-                    "tls_enabled": bool(r["tls_enabled"]),
-                    "ca_cert": r["ca_cert"],
-                    "client_cert": r["client_cert"],
-                    "has_client_key": bool(r["client_key"] and str(r["client_key"]).strip()),
-                    "exclude_containers": r["exclude_containers"] or "",
-                    "verify_hostname": bool(r["verify_hostname"]),
-                    "created_at": r["created_at"],
-                    "updated_at": r["updated_at"],
-                })
-            return results
+            return [public_endpoint(row) for row in load_docker_endpoints(conn)]
 
         from app.api.deps import run_db_query
         endpoints = await run_db_query(_query_all, custom_db_path=self._db_path)
@@ -339,11 +286,5 @@ class DockerCollectorPool:
                 ep["last_error"] = with_tls_hostname_hint(status["last_error"])
                 ep["last_activity"] = status["last_activity"]
                 ep["latency_ms"] = status["latency_ms"]
-            else:
-                ep["is_connected"] = False
-                ep["active_containers"] = 0
-                ep["last_error"] = None
-                ep["last_activity"] = None
-                ep["latency_ms"] = None
 
         return endpoints

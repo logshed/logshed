@@ -31,6 +31,7 @@ from app.collectors.syslog import reload_active_alias_caches
 from app.core.config import invalidate_settings_cache
 from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
+from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -258,40 +259,7 @@ async def list_docker_endpoints(
         return [DockerEndpointResponse(**s) for s in statuses]
 
     def _query(conn: sqlite3.Connection):
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, url, source_alias, enabled, tls_enabled,
-                   ca_cert, client_cert, client_key, exclude_containers, verify_hostname,
-                   created_at, updated_at
-            FROM docker_endpoints
-            ORDER BY id ASC
-            """
-        )
-        rows = cur.fetchall()
-        results = []
-        for r in rows:
-            results.append({
-                "id": r["id"],
-                "name": r["name"],
-                "url": r["url"],
-                "source_alias": r["source_alias"],
-                "enabled": bool(r["enabled"]),
-                "tls_enabled": bool(r["tls_enabled"]),
-                "ca_cert": r["ca_cert"],
-                "client_cert": r["client_cert"],
-                "has_client_key": bool(r["client_key"] and str(r["client_key"]).strip()),
-                "verify_hostname": bool(r["verify_hostname"]),
-                "exclude_containers": r["exclude_containers"] or "",
-                "created_at": r["created_at"],
-                "updated_at": r["updated_at"],
-                "is_connected": False,
-                "active_containers": 0,
-                "last_error": None,
-                "last_activity": None,
-                "latency_ms": None,
-            })
-        return results
+        return [public_endpoint(row) for row in load_docker_endpoints(conn)]
 
     rows = await run_db_query(_query)
     return [DockerEndpointResponse(**r) for r in rows]
