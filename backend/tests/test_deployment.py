@@ -440,6 +440,23 @@ class TestDockerLiveContainer:
         finally:
             remove_test_containers()
 
+    @pytest.mark.parametrize("variable", ["PUID", "PGID"])
+    def test_container_refuses_to_start_as_root(self, built_image, variable):
+        container_name = "test-logshed-root-refused"
+        try:
+            res = subprocess.run(
+                ["docker", "run", "--name", container_name, "-e", f"{variable}=0", built_image],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert res.returncode == 1, res.stderr
+            assert f"{variable}=0" in res.stderr
+            assert "refuses to start" in res.stderr
+            assert "Uvicorn running" not in res.stdout + res.stderr
+        finally:
+            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 
 # ===================================================================
 # Entrypoint hardening (non-e2e: sh plus stub commands, no root, no Docker)
@@ -448,7 +465,7 @@ class TestDockerLiveContainer:
 class TestEntrypointHardening:
 
     @staticmethod
-    def _run_entrypoint(tmp_path: Path, env_extra: dict, socket_gid: str = "999"):
+    def _run_entrypoint(tmp_path: Path, env_extra: dict, socket_gid: str = "999", args: tuple = ()):
         """Run entrypoint.sh with stub commands first on PATH; return (result, calls list)."""
         stubs = tmp_path / "stubs"
         stubs.mkdir()
@@ -474,40 +491,63 @@ class TestEntrypointHardening:
         }
         env.update(env_extra)
         res = subprocess.run(
-            ["sh", str(ENTRYPOINT_PATH)], env=env, capture_output=True, text=True, timeout=30
+            ["sh", str(ENTRYPOINT_PATH), *args], env=env, capture_output=True, text=True, timeout=30
         )
         calls = log.read_text().splitlines() if log.exists() else []
         return res, calls
 
     @pytest.mark.parametrize("var", ["PUID", "PGID"])
-    def test_root_ids_start_with_a_loud_warning(self, tmp_path: Path, var: str):
+    def test_root_id_refuses_to_start_and_changes_nothing(self, tmp_path: Path, var: str):
         res, calls = self._run_entrypoint(tmp_path, {var: "0"})
-        assert res.returncode == 0, res.stderr
-        assert any(c.startswith("gosu") for c in calls)
-        warning = [line for line in res.stderr.splitlines() if f"{var}=0" in line]
-        assert warning, res.stderr
-        assert "WARNING" in warning[0]
-        assert "non-root" in res.stderr
-        assert "later release will refuse to start" in res.stderr
+        assert res.returncode != 0
+        error = [line for line in res.stderr.splitlines() if f"{var}=0" in line]
+        assert error, res.stderr
+        assert "ERROR" in error[0]
+        assert "refuses to start" in res.stderr
+        assert "non-root" in res.stderr and "1000" in res.stderr
         assert "ALLOW_ROOT" not in res.stderr
+        assert calls == []
 
-    def test_root_ids_warn_for_both_variables(self, tmp_path: Path):
+    def test_root_ids_name_both_variables(self, tmp_path: Path):
         res, calls = self._run_entrypoint(tmp_path, {"PUID": "0", "PGID": "0"})
-        assert res.returncode == 0, res.stderr
+        assert res.returncode != 0
         assert "PUID=0" in res.stderr and "PGID=0" in res.stderr
-        assert any(c.startswith("gosu") for c in calls)
+        assert calls == []
 
-    def test_allow_root_is_no_longer_a_setting(self, tmp_path: Path):
+    def test_root_id_only_names_the_variable_that_is_zero(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": "0", "PGID": "1000"})
+        assert res.returncode != 0
+        assert "PUID=0" in res.stderr and "PGID=" not in res.stderr
+
+    @pytest.mark.parametrize("value", ["00", "000"])
+    def test_zero_with_leading_zeros_is_root_too(self, tmp_path: Path, value: str):
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": value})
+        assert res.returncode != 0
+        assert f"PUID={value}" in res.stderr
+        assert calls == []
+
+    def test_root_id_refuses_a_custom_command_too(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": "0"}, args=("python", "-m", "app.cli"))
+        assert res.returncode != 0
+        assert calls == []
+
+    def test_allow_root_is_not_a_setting(self, tmp_path: Path):
         assert "ALLOW_ROOT" not in ENTRYPOINT_PATH.read_text()
         res, calls = self._run_entrypoint(tmp_path, {"PUID": "0", "PGID": "0", "ALLOW_ROOT": "true"})
+        assert res.returncode != 0
+        assert calls == []
+
+    @pytest.mark.parametrize("puid,pgid", [("1", "1"), ("10", "100"), ("1000", "0100"), ("99", "100")])
+    def test_other_ids_start(self, tmp_path: Path, puid: str, pgid: str):
+        res, calls = self._run_entrypoint(tmp_path, {"PUID": puid, "PGID": pgid})
         assert res.returncode == 0, res.stderr
-        assert "PUID=0" in res.stderr
+        assert "refuses to start" not in res.stderr
         assert any(c.startswith("gosu") for c in calls)
 
     def test_non_root_ids_print_no_root_warning(self, tmp_path: Path):
         res, calls = self._run_entrypoint(tmp_path, {"PUID": "1000", "PGID": "1000"})
         assert res.returncode == 0, res.stderr
-        assert "runs LogShed as root" not in res.stderr
+        assert "ERROR" not in res.stderr and "WARNING" not in res.stderr
 
     def test_root_socket_gid_adds_root_group_and_recommends_a_proxy(self, tmp_path: Path):
         res, calls = self._run_entrypoint(tmp_path, {}, socket_gid="0")

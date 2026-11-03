@@ -37,7 +37,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 ### 3.1 Non-Root User & Group Resolution
 * LogShed drops root privileges via `gosu` to run as an unprivileged user defined by `PUID` and `PGID` environment variables (defaulting to `1000:1000`).
 * `entrypoint.sh` checks for existing users or groups matching `PUID`/`PGID` and dynamically maps or creates the `appuser` account and group.
-* `PUID` or `PGID` set to `0` still starts, as in 1.2.x, but the entrypoint logs a warning at startup. A later release will refuse to start with either set to `0`; use a non-root user (for example `1000`) now.
+* `PUID` or `PGID` set to `0` (or any spelling of zero such as `00`) is refused: the entrypoint prints an error for each such variable and one line saying LogShed refuses to start, then exits with status 1 before it changes any user, group or file, also when a custom command is given. There is no override setting. Docker restarts the container under its restart policy, so the error repeats in `docker logs` until the variables are fixed. The Docker socket group `0` handling below is a separate case and stays.
 
 ### 3.2 Dynamic Docker Socket Permissions
 * When `/var/run/docker.sock` is mounted into the container:

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Upgrade Notes
 
+- **LogShed now refuses to start when `PUID` or `PGID` is `0`.** 1.3.0 and 1.3.1 start with a warning; this release prints an error that names the variable and stops with exit status 1, and there is no setting to allow it. If you still run with `PUID=0` or `PGID=0`, set both to a non-root user before updating (for example 1000, or the owner of your `/data` folder). On the first start with the new IDs LogShed hands the files in `/data` to that user, so a bind mount that root owned changes owner. A container with a restart policy keeps restarting and repeating the error until you fix the variables. A Docker socket owned by group `0` still works (LogShed adds its user to the root group and warns), but a Docker socket proxy is the better setup.
 - **Source installs** need Python 3.14. The Docker image already has it.
 
 ### Changed

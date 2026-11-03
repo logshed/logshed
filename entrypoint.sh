@@ -5,13 +5,25 @@ set -e
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
-# Warn loudly when the app would run as root. It still starts, as in 1.2.x, but a later release
-# will refuse to start with PUID or PGID set to 0.
-if [ "$PUID" = "0" ]; then
-    echo "WARNING: PUID=0 runs LogShed as root inside the container. Set PUID and PGID to a non-root user (for example 1000). A later release will refuse to start with PUID or PGID set to 0." >&2
+# Refuse to run as root. A zero spelled with leading zeros (00) is root too.
+is_zero() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -eq 0 ]
+}
+REFUSE_ROOT=""
+if is_zero "$PUID"; then
+    echo "ERROR: PUID=$PUID would run LogShed as root inside the container." >&2
+    REFUSE_ROOT=1
 fi
-if [ "$PGID" = "0" ]; then
-    echo "WARNING: PGID=0 runs LogShed with the root group inside the container. Set PUID and PGID to a non-root user (for example 1000). A later release will refuse to start with PUID or PGID set to 0." >&2
+if is_zero "$PGID"; then
+    echo "ERROR: PGID=$PGID would run LogShed with the root group inside the container." >&2
+    REFUSE_ROOT=1
+fi
+if [ -n "$REFUSE_ROOT" ]; then
+    echo "ERROR: LogShed refuses to start. Set PUID and PGID to a non-root user (for example 1000) and start it again; the files in /data are handed to that user on start." >&2
+    exit 1
 fi
 
 # Update or create appuser group with PGID
