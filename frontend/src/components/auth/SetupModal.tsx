@@ -33,7 +33,7 @@ export const SetupModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+    <main className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
       <div className="w-full max-w-md bg-dark-900 border border-dark-700 rounded-xl p-8 shadow-2xl">
         <div className="flex flex-col items-center mb-6">
           <div className="w-12 h-12 rounded-xl bg-accent-950/80 border border-accent-800/60 flex items-center justify-center mb-3">
@@ -93,7 +93,7 @@ export const SetupModal: React.FC = () => {
           <button
             type="submit"
             disabled={isLoading || password.length < PASSWORD_MIN_LENGTH || password !== confirmPassword}
-            className="w-full bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center space-x-2"
+            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center space-x-2"
           >
             {isLoading ? (
               <span>Setting up Account...</span>
@@ -106,6 +106,6 @@ export const SetupModal: React.FC = () => {
           </button>
         </form>
       </div>
-    </div>
+    </main>
   );
 };

@@ -284,7 +284,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
                 onClick={() => setTimePreset((prev) => (prev === preset.id ? '' : preset.id))}
                 className={`px-2.5 py-0.5 rounded text-[11px] font-mono transition cursor-pointer ${
                   timePreset === preset.id
-                    ? 'bg-accent-600 text-white font-semibold shadow-xs'
+                    ? 'bg-accent-700 text-white font-semibold shadow-xs'
                     : 'bg-dark-950 text-slate-400 hover:text-slate-200 hover:bg-dark-800 border border-dark-700'
                 }`}
               >

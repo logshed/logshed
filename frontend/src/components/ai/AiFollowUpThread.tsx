@@ -355,7 +355,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
               type="button"
               onClick={handleSend}
               disabled={isSending || !draft.trim()}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-3 rounded-lg bg-accent-600 hover:bg-accent-500 text-white font-medium transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-3 rounded-lg bg-accent-700 hover:bg-accent-600 text-white font-medium transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
               title="Send (Ctrl+Enter or Cmd+Enter)"
             >
               {isSending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

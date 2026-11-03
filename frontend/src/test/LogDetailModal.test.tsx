@@ -809,7 +809,7 @@ describe('LogDetailModal AI setting, Newer / Older steps and context app names',
     render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={onExplain} aiEnabled={false} />);
     const btn = screen.getByRole('button', { name: /Explain with AI/i });
     expect(btn).toHaveAttribute('title', 'AI features are turned off in Settings');
-    expect(btn.className).not.toContain('bg-accent-600');
+    expect(btn.className).not.toContain('bg-accent-700');
     fireEvent.click(btn);
     expect(onExplain).toHaveBeenCalledWith(log);
   });
@@ -818,7 +818,7 @@ describe('LogDetailModal AI setting, Newer / Older steps and context app names',
     render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} aiEnabled={true} />);
     const btn = screen.getByRole('button', { name: /Explain with AI/i });
     expect(btn).not.toHaveAttribute('title');
-    expect(btn.className).toContain('bg-accent-600');
+    expect(btn.className).toContain('bg-accent-700');
   });
 
   it('hides "Inspect Target + Context" when AI is off', async () => {

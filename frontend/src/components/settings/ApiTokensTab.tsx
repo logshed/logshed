@@ -336,7 +336,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           <button
             type="button"
             onClick={handleOpenGenerateModal}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-white rounded-lg transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" />
             <span>Generate Token</span>
@@ -900,7 +900,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting || !newTokenName.trim() || newTokenScopes.length === 0}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
                 >
                   {isSubmitting ? 'Generating...' : 'Create Token'}
                 </button>
@@ -1018,7 +1018,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <button
                   type="submit"
                   disabled={!canSaveEdit}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
                 >
                   {isSavingEdit ? 'Saving...' : 'Save'}
                 </button>
@@ -1093,7 +1093,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <button
                   type="button"
                   onClick={() => setCreatedRawToken(null)}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition cursor-pointer"
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-white rounded-lg transition cursor-pointer"
                 >
                   Done
                 </button>

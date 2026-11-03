@@ -559,7 +559,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
           >
             {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
             <span>{ruleToEdit ? 'Update Rule' : 'Create Rule'}</span>

@@ -1461,7 +1461,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <button
                   type="submit"
                   disabled={isSavingSettings}
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
+                  className="px-4 py-1.5 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
                 >
                   {isSavingSettings ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1743,7 +1743,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   setIsSavingSubTabModal(false);
                 }
               }}
-              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
             >
               {isSavingSubTabModal ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />

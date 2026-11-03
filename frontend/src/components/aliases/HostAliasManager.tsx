@@ -183,7 +183,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           <button
             type="button"
             onClick={openAddModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white rounded text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-700 hover:bg-accent-600 text-white rounded text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Host Alias</span>
@@ -378,7 +378,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
               <button
                 type="submit"
                 disabled={isSaving || !ip.trim() || !alias.trim()}
-                className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium px-4 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
+                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium px-4 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
               >
                 {isSaving ? (
                   <>

@@ -252,7 +252,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
               retentionOverridden
                 ? 'opacity-40 cursor-not-allowed bg-dark-950 text-slate-500 border border-dark-800'
                 : days === preset
-                ? 'bg-accent-600 text-white font-semibold shadow-xs cursor-pointer'
+                ? 'bg-accent-700 text-white font-semibold shadow-xs cursor-pointer'
                 : 'bg-dark-950 text-slate-400 hover:text-slate-200 hover:bg-dark-800 border border-dark-700 cursor-pointer'
             }`}
           >
@@ -265,6 +265,8 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       <div className="relative pt-1 pb-2">
         <input
           type="range"
+          aria-label="Retention period in days"
+          aria-valuetext={`${days} day${days === 1 ? '' : 's'}`}
           min={min}
           max={max}
           value={days}
@@ -290,7 +292,6 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
                 }}
                 role="button"
                 tabIndex={retentionOverridden ? -1 : 0}
-                aria-label={`Set retention to ${val} day${val === 1 ? '' : 's'}`}
                 className={`absolute -translate-x-1/2 flex flex-col items-center group transition focus:outline-hidden ${
                   retentionOverridden
                     ? 'cursor-not-allowed opacity-40'
@@ -324,7 +325,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           className={`font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition ${
             isSaving || days === retentionDays || retentionOverridden
               ? 'opacity-40 cursor-not-allowed bg-dark-800 text-slate-500 border border-dark-700'
-              : 'bg-accent-600 hover:bg-accent-500 text-white cursor-pointer shadow-md'
+              : 'bg-accent-700 hover:bg-accent-600 text-white cursor-pointer shadow-md'
           }`}
         >
           {saveSuccess ? (
@@ -477,7 +478,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
               type="button"
               onClick={handleVacuumConfirm}
               disabled={isCompacting}
-              className="px-4 py-1.5 text-xs bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              className="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
             >
               <Database className="w-3.5 h-3.5" />
               <span>Confirm & Compact</span>

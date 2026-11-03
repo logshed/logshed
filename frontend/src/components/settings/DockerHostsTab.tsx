@@ -371,7 +371,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
               <button
                 type="button"
                 onClick={openAddModal}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 rounded-lg shadow-xs transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg shadow-xs transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Docker Host</span>
@@ -943,7 +943,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting || !name.trim() || !url.trim()}
-                className="px-4 py-1.5 text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 rounded-lg shadow-xs transition cursor-pointer disabled:opacity-50"
+                className="px-4 py-1.5 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg shadow-xs transition cursor-pointer disabled:opacity-50"
               >
                 {isSubmitting ? 'Saving...' : editingHost ? 'Update Host' : 'Add Host'}
               </button>
@@ -1068,7 +1068,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     setUrl('unix:///var/run/docker.sock');
                   }
                 }}
-                className="px-3.5 py-1.5 text-xs bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-lg shadow transition cursor-pointer"
+                className="px-3.5 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow transition cursor-pointer"
               >
                 Re-add Docker Host
               </button>

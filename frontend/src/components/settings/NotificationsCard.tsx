@@ -755,7 +755,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting || !formName.trim() || !formUrl.trim()}
-                className="px-4 py-2 text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
+                className="px-4 py-2 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
               >
                 {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                 <span>{channelToEdit ? 'Save Changes' : 'Create Target'}</span>

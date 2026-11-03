@@ -18,8 +18,12 @@ describe('RetentionSlider Component', () => {
     // Header and Preset button both display 14 Days
     expect(screen.getAllByText('14 Days').length).toBe(2);
 
-    const slider = screen.getByRole('slider') as HTMLInputElement;
+    const slider = screen.getByRole('slider', { name: 'Retention period in days' }) as HTMLInputElement;
     expect(slider).toBeInTheDocument();
+    expect(slider).toHaveAttribute('aria-valuetext', '14 days');
+    // A scale marker is named by its visible text, and its title describes it
+    const marker = screen.getByRole('button', { name: '14d' });
+    expect(marker).toHaveAttribute('title', 'Set retention to 14 days');
     expect(slider.min).toBe('1');
     expect(slider.max).toBe('30');
     expect(slider.value).toBe('14');
@@ -101,7 +105,7 @@ describe('RetentionSlider Component', () => {
     fireEvent.click(preset7Btn);
 
     expect(saveBtn).not.toBeDisabled();
-    expect(saveBtn.className).toContain('bg-accent-600');
+    expect(saveBtn.className).toContain('bg-accent-700');
 
     fireEvent.click(saveBtn);
     await waitFor(() => {

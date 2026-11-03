@@ -452,7 +452,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                     onClick={() => setPromptViewMode('analysis')}
                     className={`px-2 py-0.5 rounded transition cursor-pointer ${
                       promptViewMode === 'analysis'
-                        ? 'bg-accent-600 text-white font-medium'
+                        ? 'bg-accent-700 text-white font-medium'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -463,7 +463,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                     onClick={() => setPromptViewMode('full')}
                     className={`px-2 py-0.5 rounded transition cursor-pointer ${
                       promptViewMode === 'full'
-                        ? 'bg-accent-600 text-white font-medium'
+                        ? 'bg-accent-700 text-white font-medium'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >

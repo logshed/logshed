@@ -41,7 +41,7 @@ export const LoginForm: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-dark-950 flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen bg-dark-950 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md bg-dark-900 border border-dark-700 rounded-xl p-8 shadow-2xl">
         {/* Brand Header */}
         <div className="flex flex-col items-center mb-6">
@@ -89,7 +89,7 @@ export const LoginForm: React.FC = () => {
           <button
             type="submit"
             disabled={isLoading || !password.trim()}
-            className="w-full bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center space-x-2"
+            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center space-x-2"
           >
             {isLoading ? (
               <span>Authenticating...</span>
@@ -102,6 +102,6 @@ export const LoginForm: React.FC = () => {
           </button>
         </form>
       </div>
-    </div>
+    </main>
   );
 };

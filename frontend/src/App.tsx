@@ -29,6 +29,14 @@ export const pathToTab = (pathname: string): AppTab => {
   return 'stream';
 };
 
+// The page's <h1>, read by screen readers; the navbar shows the same names
+const PAGE_TITLES: Record<AppTab, string> = {
+  stream: 'Console',
+  rules: 'Rules & History',
+  storage: 'Storage',
+  settings: 'Settings',
+};
+
 export const tabToPath = (tab: AppTab): string => {
   switch (tab) {
     case 'storage':
@@ -273,6 +281,7 @@ export const App: React.FC = () => {
             : 'overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]'
         } pb-14 md:pb-0`}
       >
+        <h1 className="sr-only">{PAGE_TITLES[activeTab]}</h1>
         {activeTab === 'stream' && (
           <LiveLogStream
             onDiagnoseAi={handleOpenAiModal}
@@ -371,7 +380,7 @@ export const App: React.FC = () => {
                   setIsSavingModal(false);
                 }
               }}
-              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
             >
               {isSavingModal ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />

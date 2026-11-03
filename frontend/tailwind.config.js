@@ -24,6 +24,8 @@ export default {
         accent: {
           500: '#0ea5e9', // Sky blue
           600: '#0284c7',
+          // Backgrounds behind white text: 5.9:1 (600 gives 4.1:1, below the 4.5:1 WCAG AA asks)
+          700: '#0369a1',
         }
       }
     },

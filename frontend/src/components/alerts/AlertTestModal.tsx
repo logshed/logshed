@@ -212,7 +212,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             type="button"
             onClick={handleRunTest}
             disabled={isTesting}
-            className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer flex items-center gap-1.5"
+            className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5"
           >
             {isTesting ? (
               <RefreshCw className="w-3 h-3 animate-spin" />

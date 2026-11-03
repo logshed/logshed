@@ -753,7 +753,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       }}
                       className={`px-2 py-0.5 rounded transition cursor-pointer ${
                         promptViewMode === 'analysis'
-                          ? 'bg-accent-600 text-white font-medium shadow-xs'
+                          ? 'bg-accent-700 text-white font-medium shadow-xs'
                           : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
@@ -769,7 +769,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       }}
                       className={`px-2 py-0.5 rounded transition cursor-pointer ${
                         promptViewMode === 'full'
-                          ? 'bg-accent-600 text-white font-medium shadow-xs'
+                          ? 'bg-accent-700 text-white font-medium shadow-xs'
                           : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
@@ -1223,7 +1223,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               <button
                 onClick={handleRunAnalysis}
                 disabled={isDiagnosing || isAiUnavailable}
-                className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
+                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
               >
                 {isDiagnosing ? (
                   <>

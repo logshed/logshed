@@ -313,7 +313,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                 <div
                   className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition shrink-0 ${
                     isChecked
-                      ? 'bg-accent-600 border-accent-500 text-white'
+                      ? 'bg-accent-700 border-accent-500 text-white'
                       : 'border-dark-600 bg-dark-950'
                   }`}
                 >

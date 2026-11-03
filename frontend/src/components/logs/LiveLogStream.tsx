@@ -2113,7 +2113,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onTouchCancel={() => {
             isTouchingRef.current = false;
           }}
-          className="flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain"
+          // Focusable, so the list scrolls with the arrow and page keys
+          tabIndex={0}
+          role="region"
+          aria-label="Log list"
+          className="flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
         >
           {isLoadingHistory && logs.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400 font-mono">
@@ -2157,7 +2161,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                   <button
                     type="button"
                     onClick={onOpenSourcesSettings}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-accent-600 hover:bg-accent-500 text-white transition cursor-pointer"
+                    className="px-3 py-1.5 rounded text-xs font-medium bg-accent-700 hover:bg-accent-600 text-white transition cursor-pointer"
                   >
                     Set up Docker hosts
                   </button>
@@ -2247,7 +2251,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 shadow-xl animate-in slide-in-from-bottom-2 w-[92%] sm:w-auto max-w-md flex justify-center">
             <button
               onClick={resumeAutoScroll}
-              className="w-full sm:w-auto bg-accent-600 hover:bg-accent-500 text-white text-xs font-semibold px-4 py-2 rounded-xl sm:rounded-full flex items-center justify-center gap-2 shadow-lg transition"
+              className="w-full sm:w-auto bg-accent-700 hover:bg-accent-600 text-white text-xs font-semibold px-4 py-2 rounded-xl sm:rounded-full flex items-center justify-center gap-2 shadow-lg transition"
             >
               <ArrowUp className="w-3.5 h-3.5 animate-bounce shrink-0" />
               <div className="flex flex-col items-center justify-center text-center leading-tight">
@@ -2321,7 +2325,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                 className={`text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer ${
                   selectedLogs.length > 200
                     ? 'bg-amber-600 hover:bg-amber-500'
-                    : 'bg-accent-600 hover:bg-accent-500'
+                    : 'bg-accent-700 hover:bg-accent-600'
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5" />

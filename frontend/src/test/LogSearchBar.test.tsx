@@ -16,6 +16,22 @@ async function renderSettled(ui: ReactElement) {
 }
 
 describe('LogSearchBar Component (Items #6, #22, #31)', () => {
+  it('names the severity and time selects by their visible labels', () => {
+    render(
+      <LogSearchBar
+        filters={{}}
+        onFilterChange={vi.fn()}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        availableSources={[]}
+        availableApps={[]}
+      />
+    );
+
+    expect(screen.getByLabelText('Severity:').tagName).toBe('SELECT');
+    expect(screen.getByLabelText('Time:').tagName).toBe('SELECT');
+  });
+
   it('hides the Reset button when no filters are active', () => {
     const filters: LogFilterParams = {};
     render(
@@ -360,7 +376,7 @@ describe('LogSearchBar search button, drawer and syntax help', () => {
     const onSearch = await renderBar();
     const button = screen.getByRole('button', { name: 'Search now' });
     expect(button).toHaveAttribute('title', 'Search now (Enter)');
-    expect(button.className).not.toContain('bg-accent-600');
+    expect(button.className).not.toContain('bg-accent-700');
     expect(screen.queryByText('Filter')).toBeNull();
     fireEvent.click(button);
     expect(onSearch).toHaveBeenCalledTimes(1);

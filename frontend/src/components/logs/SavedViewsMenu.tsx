@@ -450,7 +450,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
           <button
             type="submit"
             disabled={!canSave}
-            className="px-3 py-1.5 rounded bg-accent-600 hover:bg-accent-500 text-white font-medium transition disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save'}
           </button>
@@ -608,7 +608,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
           <button
             type="submit"
             disabled={isSaving || !name.trim() || isTaken}
-            className="px-3 py-1.5 rounded bg-accent-600 hover:bg-accent-500 text-white font-medium transition disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save View'}
           </button>

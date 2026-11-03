@@ -21,6 +21,7 @@ describe('LoginForm Component', () => {
 
   it('renders login form elements properly', () => {
     render(<LoginForm />);
+    expect(screen.getByRole('main')).toContainElement(screen.getByRole('heading', { level: 1 }));
 
     expect(screen.getByText('LOGSHED')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Enter password...')).toBeInTheDocument();

@@ -386,7 +386,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {aiEnabled ? (
               <button
                 onClick={() => onExplainWithAi(log)}
-                className="flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-600 hover:bg-accent-500 text-white rounded font-medium transition shadow-xs"
+                className="flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded font-medium transition shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Explain with AI</span>
@@ -547,7 +547,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   <button
                     onClick={handleInspectTargetAndContext}
                     title="Add Context to AI Analysis"
-                    className="flex items-center gap-1.5 px-2.5 py-1 bg-accent-600 hover:bg-accent-500 text-white rounded font-medium transition text-[11px] shadow-xs"
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded font-medium transition text-[11px] shadow-xs"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Inspect Target + Context ({targetAndContextLogs.length} logs)</span>

@@ -109,6 +109,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Dark Operations Aesthetic:** Native dark canvas (`color-scheme: dark;` background `#070a10`) tailored for server operations environments.
 * **Typography:** Clean sans-serif typography (`Inter`, system-ui) paired with monospace fonts for logs, timestamps, IP addresses, and code snippets.
 * **Layout Stability:** Built-in `scrollbar-gutter: stable` and slim scrollbars (`::-webkit-scrollbar`) to eliminate layout shifts when virtual lists update.
+* **Accessibility Baseline:** Every page passes the axe rules run by the UI check at 375, 640, 767 and 1280 px. The viewport allows pinch zoom (no `maximum-scale`). Each page has one `<h1>` (visually hidden on the logged-in pages, named after the navbar entry) inside a `<main>` landmark, including login and first-run setup. White text sits on `bg-accent-700` (`#0369a1`, 5.9:1), with `hover:bg-accent-600`; `accent-600` behind white text gives only 4.1:1. Form controls have a label (`<label htmlFor>` for the Console severity and time selects, `aria-label` for the retention slider), a control's name contains its visible text, and the Console log list is a focusable region ("Log list") that scrolls with the arrow and page keys. Keyboard access to rows and dialog focus handling are not covered yet.
 
 ## 5. Build & Asset Distribution
 * **Vite Bundling:** Vite compiles production static assets directly into `backend/app/static/`.

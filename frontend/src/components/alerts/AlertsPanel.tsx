@@ -1131,7 +1131,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
                 onClick={() => setScheduleFormRecurrence('daily')}
                 className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
                   scheduleFormRecurrence === 'daily'
-                    ? 'bg-accent-600 text-white border-accent-500'
+                    ? 'bg-accent-700 text-white border-accent-500'
                     : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
                 }`}
               >
@@ -1142,7 +1142,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
                 onClick={() => setScheduleFormRecurrence('weekly')}
                 className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
                   scheduleFormRecurrence === 'weekly'
-                    ? 'bg-accent-600 text-white border-accent-500'
+                    ? 'bg-accent-700 text-white border-accent-500'
                     : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
                 }`}
               >
@@ -1153,7 +1153,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
                 onClick={() => setScheduleFormRecurrence('monthly')}
                 className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
                   scheduleFormRecurrence === 'monthly'
-                    ? 'bg-accent-600 text-white border-accent-500'
+                    ? 'bg-accent-700 text-white border-accent-500'
                     : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
                 }`}
               >
@@ -1269,7 +1269,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
             >
               {scheduleToEdit ? 'Save Changes' : 'Create Schedule'}
             </button>

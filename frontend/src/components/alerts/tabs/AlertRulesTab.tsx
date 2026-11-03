@@ -172,7 +172,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             <button
               type="button"
               onClick={onOpenCreateModal}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition shadow-xs cursor-pointer whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition shadow-xs cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Alert Rule</span>
@@ -201,7 +201,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <button
                 type="button"
                 onClick={onOpenCreateModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create Alert Rule</span>

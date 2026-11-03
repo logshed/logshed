@@ -191,7 +191,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   type="button"
                   onClick={onApplyCustomWindow}
                   disabled={!customUntil}
-                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-700 hover:bg-accent-600 text-white rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   Set Window
                 </button>
@@ -274,7 +274,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <button
             type="button"
             onClick={onOpenAddScheduleModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
           >
             <Plus className="w-4 h-4" />
             <span>Add Schedule</span>

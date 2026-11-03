@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, useId } from 'react';
 import { Search, RotateCcw, Filter, Clock, X, SlidersHorizontal, CircleHelp } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
@@ -92,6 +92,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   facetsLimit,
   mobileToolbar,
 }) => {
+  const fieldId = useId();
   // The selected preset follows the filters (saved views, links, Reset); "Custom" chosen before any
   // bounds are entered is the only local choice.
   const [customTimeRequested, setCustomTimeRequested] = useState<boolean>(false);
@@ -320,7 +321,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" />
             {!mobileToolbar && <span>Filters</span>}
             {activeFilterCount > 0 && (
-              <span className="bg-accent-600 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
+              <span className="bg-accent-700 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
                 {activeFilterCount}
               </span>
             )}
@@ -393,8 +394,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         {/* Severity Filter Dropdown */}
         <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 rounded px-2 py-1">
           <Filter className="w-3 h-3 text-slate-400" />
-          <span className="text-slate-400 text-[11px] font-medium">Severity:</span>
+          <label htmlFor={`${fieldId}-severity`} className="text-slate-400 text-[11px] font-medium">Severity:</label>
           <select
+            id={`${fieldId}-severity`}
             value={filters.severity_max !== undefined ? filters.severity_max : ''}
             onChange={(e) => {
               const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
@@ -419,8 +421,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         {/* Time Preset Selector */}
         <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 rounded px-2 py-1">
           <Clock className="w-3 h-3 text-slate-400" />
-          <span className="text-slate-400 text-[11px] font-medium">Time:</span>
+          <label htmlFor={`${fieldId}-time`} className="text-slate-400 text-[11px] font-medium">Time:</label>
           <select
+            id={`${fieldId}-time`}
             value={timePreset}
             onChange={(e) => handleTimePresetChange(e.target.value)}
             className="bg-transparent text-[11px] text-slate-200 focus:outline-hidden font-mono"
@@ -569,8 +572,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Severity Filter */}
           <div>
-            <label className="block text-slate-400 font-medium mb-1.5">Severity</label>
+            <label htmlFor={`${fieldId}-severity-panel`} className="block text-slate-400 font-medium mb-1.5">Severity</label>
             <select
+              id={`${fieldId}-severity-panel`}
               value={filters.severity_max !== undefined ? filters.severity_max : ''}
               onChange={(e) => {
                 const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
@@ -589,8 +593,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Time Preset */}
           <div>
-            <label className="block text-slate-400 font-medium mb-1.5">Time Range</label>
+            <label htmlFor={`${fieldId}-time-panel`} className="block text-slate-400 font-medium mb-1.5">Time Range</label>
             <select
+              id={`${fieldId}-time-panel`}
               value={timePreset}
               onChange={(e) => handleTimePresetChange(e.target.value)}
               className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden font-mono"
@@ -651,7 +656,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 setIsMobileDrawerOpen(false);
                 onSearch();
               }}
-              className="flex-1 bg-accent-600 hover:bg-accent-500 text-white font-medium py-2 rounded text-center transition"
+              className="flex-1 bg-accent-700 hover:bg-accent-600 text-white font-medium py-2 rounded text-center transition"
             >
               Done
             </button>
