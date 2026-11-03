@@ -53,6 +53,9 @@ export interface AiProviderConfig {
   ai_base_url?: string | null;
 }
 
+// How much reasoning models may think before they answer (off asks for the lowest the model allows)
+export type AiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
+
 export interface SystemSettings {
   ai_enabled?: boolean;
   ai_provider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
@@ -72,7 +75,7 @@ export interface SystemSettings {
 
   // Advanced System Settings
   ai_timeout?: number;
-  ai_thinking_budget?: number;
+  ai_thinking_level?: AiThinkingLevel;
   app_url?: string;
   allow_private_notification_targets?: boolean;
   enable_docker?: boolean;

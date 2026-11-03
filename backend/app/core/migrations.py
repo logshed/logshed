@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Union
 
-from app.core.config import parse_bool
+from app.core.config import parse_bool, thinking_level_for_budget
 
 logger = logging.getLogger(__name__)
 
@@ -611,7 +611,8 @@ def repair_v3(conn: sqlite3.Connection) -> None:
     - add alert_history.sample_log_id;
     - number rules by id when a table holds more than one rule and none was ever ordered;
     - create the rule order indexes and drop the redundant ones;
-    - make saved view names unique ignoring case and add their unique index (dedupe_saved_view_names).
+    - make saved view names unique ignoring case and add their unique index (dedupe_saved_view_names);
+    - replace a stored thinking budget with its thinking level (convert_thinking_budget).
     """
     cur = conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
@@ -649,6 +650,32 @@ def repair_v3(conn: sqlite3.Connection) -> None:
         conn.execute(f"DROP INDEX IF EXISTS {index_name};")
 
     dedupe_saved_view_names(conn)
+    convert_thinking_budget(conn)
+
+
+def convert_thinking_budget(conn: sqlite3.Connection) -> None:
+    """
+    Replace a stored thinking token budget (ai_thinking_budget, up to 1.2.x) with its thinking level:
+    0 off, up to 2,048 low, up to 8,192 medium, above that high. A level saved already is kept, and an
+    unreadable budget is dropped, so the level falls back to the environment or the default.
+    """
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'ai_thinking_budget';").fetchone()
+    if row is None:
+        return
+    conn.execute("DELETE FROM system_settings WHERE key = 'ai_thinking_budget';")
+    try:
+        budget = int(str(row[0]).strip())
+    except (TypeError, ValueError):
+        logger.warning(f"Removed the stored thinking budget {row[0]!r}, which is not a number.")
+        return
+    level = thinking_level_for_budget(budget)
+    added = conn.execute(
+        "INSERT OR IGNORE INTO system_settings (key, value, updated_at, is_encrypted) "
+        "VALUES ('ai_thinking_level', ?, datetime('now'), 0);",
+        (level,),
+    ).rowcount
+    if added:
+        logger.info(f"Replaced the stored thinking budget {budget} with the thinking level {level}.")
 
 
 def _run_in_transaction(conn: sqlite3.Connection, step: Callable[[sqlite3.Connection], None]) -> None:

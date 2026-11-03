@@ -22,7 +22,7 @@ const mockBaseSettings: SystemSettings = {
   check_for_updates: true,
   maintenance_until: null,
   ai_timeout: 45.0,
-  ai_thinking_budget: 1024,
+  ai_thinking_level: 'low',
   app_url: 'https://logshed.lan',
   allow_private_notification_targets: true,
   trusted_proxies: '172.16.0.0/12',
@@ -47,7 +47,7 @@ describe('AdvancedSettingsCard Component', () => {
     );
 
     expect(screen.getByDisplayValue('45')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('1024')).toBeInTheDocument();
+    expect(screen.getByLabelText('Thinking Level')).toHaveValue('low');
     expect(screen.getByDisplayValue('https://logshed.lan')).toBeInTheDocument();
     expect(screen.getByDisplayValue('172.16.0.0/12')).toBeInTheDocument();
     expect(screen.getByDisplayValue('250')).toBeInTheDocument();
@@ -97,6 +97,34 @@ describe('AdvancedSettingsCard Component', () => {
       expect(onSaved).toHaveBeenCalled();
       expect(screen.getByText(/Settings saved successfully!/i)).toBeInTheDocument();
     });
+  });
+
+  it('offers the thinking levels and saves only the chosen level', async () => {
+    const onSaved = vi.fn();
+    vi.mocked(settingsApi.updateSettings).mockResolvedValueOnce({ status: 'ok' });
+
+    render(<AdvancedSettingsCard settings={mockBaseSettings} onSettingsSaved={onSaved} />);
+
+    const select = screen.getByLabelText('Thinking Level');
+    expect(Array.from((select as HTMLSelectElement).options).map((o) => [o.value, o.text])).toEqual([
+      ['off', 'Off (or the lowest the model allows)'],
+      ['low', 'Low (default)'],
+      ['medium', 'Medium'],
+      ['high', 'High'],
+    ]);
+
+    fireEvent.change(select, { target: { value: 'off' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(settingsApi.updateSettings).toHaveBeenCalledWith({ ai_thinking_level: 'off' });
+  });
+
+  it('shows the low level when the server sends none', () => {
+    const { ai_thinking_level: _omitted, ...withoutLevel } = mockBaseSettings;
+    render(<AdvancedSettingsCard settings={withoutLevel} onSettingsSaved={vi.fn()} />);
+    expect(screen.getByLabelText('Thinking Level')).toHaveValue('low');
+    expect(screen.queryByLabelText(/Unsaved changes bar/i)).not.toBeInTheDocument();
   });
 
   it('discards changes when Discard button is clicked', () => {

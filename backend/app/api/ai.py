@@ -436,7 +436,7 @@ async def diagnose_logs(
             system_prompt=ctx["system_prompt"],
             fallback_models=ctx["fallback_models"],
             timeout=ctx.get("ai_timeout", 45.0),
-            thinking_budget=ctx.get("ai_thinking_budget", 1024),
+            thinking_level=ctx.get("ai_thinking_level"),
         )
 
         if len(ai_res) == 11:
@@ -539,7 +539,7 @@ async def diagnose_logs_stream(
                     fallback_models=ctx["fallback_models"],
                     on_progress=on_progress,
                     timeout=ctx.get("ai_timeout", 45.0),
-                    thinking_budget=ctx.get("ai_thinking_budget", 1024),
+                    thinking_level=ctx.get("ai_thinking_level"),
                 )
 
                 if len(ai_res) == 11:
@@ -663,7 +663,7 @@ async def _run_follow_up(audit_id: int, ctx: dict, on_progress=None) -> AiFollow
         messages=ctx["messages"],
         fallback_models=ctx["fallback_models"],
         timeout=ctx["ai_timeout"],
-        thinking_budget=ctx["ai_thinking_budget"],
+        thinking_level=ctx["ai_thinking_level"],
         on_progress=on_progress,
     )
 

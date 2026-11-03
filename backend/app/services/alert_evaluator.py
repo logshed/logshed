@@ -867,7 +867,7 @@ class AlertEvaluator:
                         prompt_override=prompt,
                         fallback_models=fallback_models,
                         timeout=provider_settings["ai_timeout"],
-                        thinking_budget=provider_settings["ai_thinking_budget"],
+                        thinking_level=provider_settings["ai_thinking_level"],
                     )
                     if len(ai_res) == 11:
                         summary, root_cause, remediation, raw_response, prompt_sent, tokens_in, tokens_out, tokens_thoughts, tokens_used, actual_model, fallback_attempts = ai_res

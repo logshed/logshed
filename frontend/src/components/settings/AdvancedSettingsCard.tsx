@@ -10,8 +10,17 @@ import {
   RefreshCw,
   Save,
 } from 'lucide-react';
-import { SystemSettings } from '../../types.ts';
+import { AiThinkingLevel, SystemSettings } from '../../types.ts';
 import { updateSettings } from '../../api/settings.ts';
+
+const DEFAULT_THINKING_LEVEL: AiThinkingLevel = 'low';
+
+const THINKING_LEVEL_OPTIONS: { value: AiThinkingLevel; label: string }[] = [
+  { value: 'off', label: 'Off (or the lowest the model allows)' },
+  { value: 'low', label: 'Low (default)' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
 
 export interface AdvancedSettingsCardProps {
   settings: SystemSettings | null;
@@ -28,7 +37,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
 }) => {
   // Form state
   const [aiTimeout, setAiTimeout] = useState<number>(45.0);
-  const [aiThinkingBudget, setAiThinkingBudget] = useState<number>(1024);
+  const [aiThinkingLevel, setAiThinkingLevel] = useState<AiThinkingLevel>(DEFAULT_THINKING_LEVEL);
   const [appUrl, setAppUrl] = useState<string>('');
   const [allowPrivate, setAllowPrivate] = useState<boolean>(true);
   const [trustedProxies, setTrustedProxies] = useState<string>('');
@@ -55,7 +64,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   useEffect(() => {
     if (settings) {
       setAiTimeout(settings.ai_timeout ?? 45.0);
-      setAiThinkingBudget(settings.ai_thinking_budget ?? 1024);
+      setAiThinkingLevel(settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL);
       setAppUrl(settings.app_url ?? '');
       setAllowPrivate(settings.allow_private_notification_targets ?? true);
       setTrustedProxies(settings.trusted_proxies ?? '');
@@ -70,7 +79,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   const isDirty = Boolean(
     settings && (
       aiTimeout !== (settings.ai_timeout ?? 45.0) ||
-      aiThinkingBudget !== (settings.ai_thinking_budget ?? 1024) ||
+      aiThinkingLevel !== (settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL) ||
       appUrl.trim() !== (settings.app_url ?? '') ||
       allowPrivate !== (settings.allow_private_notification_targets ?? true) ||
       trustedProxies.trim() !== (settings.trusted_proxies ?? '') ||
@@ -88,7 +97,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   const handleReset = () => {
     if (!settings) return;
     setAiTimeout(settings.ai_timeout ?? 45.0);
-    setAiThinkingBudget(settings.ai_thinking_budget ?? 1024);
+    setAiThinkingLevel(settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL);
     setAppUrl(settings.app_url ?? '');
     setAllowPrivate(settings.allow_private_notification_targets ?? true);
     setTrustedProxies(settings.trusted_proxies ?? '');
@@ -112,10 +121,6 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       setSaveInlineError('Request Timeout must be greater than 0 seconds.');
       return false;
     }
-    if (aiThinkingBudget < 0) {
-      setSaveInlineError('Thinking Token Budget cannot be negative.');
-      return false;
-    }
     if (syslogMaxTcpConnections < 1) {
       setSaveInlineError('Max Concurrent TCP Connections must be at least 1.');
       return false;
@@ -129,8 +134,8 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     if (aiTimeout !== (settings.ai_timeout ?? 45.0)) {
       updates.ai_timeout = aiTimeout;
     }
-    if (aiThinkingBudget !== (settings.ai_thinking_budget ?? 1024)) {
-      updates.ai_thinking_budget = aiThinkingBudget;
+    if (aiThinkingLevel !== (settings.ai_thinking_level ?? DEFAULT_THINKING_LEVEL)) {
+      updates.ai_thinking_level = aiThinkingLevel;
     }
     const trimmedAppUrl = appUrl.trim();
     if (trimmedAppUrl !== (settings.app_url ?? '')) {
@@ -235,24 +240,25 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
             </div>
 
             <div>
-              <label htmlFor="ai-thinking-budget" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                Thinking Token Budget
+              <label htmlFor="ai-thinking-level" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                Thinking Level
               </label>
-              <input
-                id="ai-thinking-budget"
-                type="number"
-                min={0}
-                max={32768}
-                step={128}
-                value={aiThinkingBudget}
-                onChange={(e) => setAiThinkingBudget(parseInt(e.target.value, 10) || 0)}
-                required
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
-              />
+              <select
+                id="ai-thinking-level"
+                value={aiThinkingLevel}
+                onChange={(e) => setAiThinkingLevel(e.target.value as AiThinkingLevel)}
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500"
+              >
+                {THINKING_LEVEL_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <p className="text-[11px] text-slate-400">
-            The timeout applies to every AI provider. The thinking budget applies to Gemini and Claude models that support thinking (OpenAI reasoning models use a fixed low effort). Claude 4.6 and later models use an effort level instead: low up to 2,048 tokens, medium up to 8,192, high above that. Set the budget to 0 to turn thinking off; Claude 4.7 and later then run at low effort, and some of them always think.
+            The timeout applies to every AI provider. The thinking level sets how much reasoning models (Gemini 2.5 and later, Claude 3.7 and later, OpenAI o-series and GPT-5 and later) think before they answer: more thinking can find deeper causes but takes longer and uses more tokens. Some models cannot turn thinking off, such as Claude 5, Gemini 2.5 Pro and Gemini 3 and later; Off then asks for their lowest level.
           </p>
         </div>
 

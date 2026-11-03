@@ -239,7 +239,7 @@ describe('UnsavedChangesGuard Integration', () => {
         max_retention_days: 30,
         has_ai_api_key: true,
         ai_timeout: 45,
-        ai_thinking_budget: 1024,
+        ai_thinking_level: 'low',
         app_url: '',
         trusted_proxies: '',
         syslog_max_tcp_connections: 250,

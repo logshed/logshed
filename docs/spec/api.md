@@ -15,6 +15,7 @@ The OpenAPI document (`/openapi.json`, `/docs`) declares an HTTP Bearer security
 - Docker host `ca_cert`, `client_cert` and `client_key` keep the stored value when absent or `null`, and clear it when sent as `""`.
 - Settings: `ai_base_url` can be cleared by sending `""`. A masked secret (`"********"`) means "keep the stored value", so a client can send back what `GET /api/settings` returned without overwriting a key.
 - Settings: an `ai_model` (top level or in `ai_providers_config`) equal to that provider's default model is stored as `""`, which means "use the default", so the provider follows LogShed's default when it changes; `GET /api/settings` returns the default model for it.
+- Settings: `ai_thinking_level` is `off`, `low`, `medium` or `high` (`422` otherwise). It replaced the token budget `ai_thinking_budget` in 1.3.0, which `GET /api/settings` no longer returns and `POST` ignores. These routes serve only the web UI; `/api/v1` and MCP never had the setting.
 
 ## 2. Query Pagination & Evaluation Capping
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:

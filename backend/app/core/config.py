@@ -243,7 +243,9 @@ VALID_LOG_LEVELS: dict[str, Optional[int]] = {
 
 DEFAULT_AI_MODEL = "gemini-3.7-flash"
 DEFAULT_AI_TIMEOUT: float = float(os.environ.get("LOGSHED_AI_TIMEOUT", "45.0"))
-DEFAULT_AI_THINKING_BUDGET: int = int(os.environ.get("LOGSHED_AI_THINKING_BUDGET", "1024"))
+# How much the AI model may think before it answers; ai_engine maps each level per provider
+AI_THINKING_LEVELS = ("off", "low", "medium", "high")
+DEFAULT_AI_THINKING_LEVEL = "low"
 DEFAULT_INTERNAL_LOG_LEVEL = logging.WARNING
 
 
@@ -422,11 +424,26 @@ def _cast_ai_timeout(v: str) -> float:
     raise ValueError("ai_timeout must be > 0.0")
 
 
-def _cast_ai_thinking_budget(v: str) -> int:
-    val = int(v)
-    if val >= 0:
-        return val
-    raise ValueError("ai_thinking_budget must be >= 0")
+def thinking_level_for_budget(budget: int) -> str:
+    """The thinking level for a thinking token budget (the setting up to 1.2.x)."""
+    if budget <= 0:
+        return "off"
+    if budget <= 2048:
+        return "low"
+    if budget <= 8192:
+        return "medium"
+    return "high"
+
+
+def _cast_ai_thinking_level(v: str) -> str:
+    """A thinking level name, or a thinking token budget (LOGSHED_AI_THINKING_BUDGET) as its level."""
+    word = v.strip().lower()
+    if word in AI_THINKING_LEVELS:
+        return word
+    budget = int(word)
+    if budget < 0:
+        raise ValueError("a thinking budget must be >= 0")
+    return thinking_level_for_budget(budget)
 
 
 def _cast_syslog_max_connections(v: str) -> int:
@@ -455,12 +472,14 @@ def resolve_all_system_settings(db_settings: dict[str, str]) -> dict[str, Any]:
             default=45.0,
             caster=_cast_ai_timeout,
         ),
-        "ai_thinking_budget": resolve_setting(
+        # LOGSHED_AI_THINKING_BUDGET (documented since 1.1.0) still works, read as its level
+        "ai_thinking_level": resolve_setting(
             db_settings,
-            key="ai_thinking_budget",
-            env_var="LOGSHED_AI_THINKING_BUDGET",
-            default=1024,
-            caster=_cast_ai_thinking_budget,
+            key="ai_thinking_level",
+            env_var="LOGSHED_AI_THINKING_LEVEL",
+            env_aliases=["LOGSHED_AI_THINKING_BUDGET"],
+            default=DEFAULT_AI_THINKING_LEVEL,
+            caster=_cast_ai_thinking_level,
         ),
         # Legacy Alias: app_url (lowercase) was supported alongside APP_URL.
         # Retained silently for backward compatibility with existing configurations.

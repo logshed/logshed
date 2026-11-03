@@ -1865,10 +1865,10 @@ class TestAlertEvaluatorWindowPruningAndLightweightRecords:
 
 
 class TestAlertEnrichmentAiSettings:
-    """Alert AI enrichment uses the configured AI timeout and thinking budget."""
+    """Alert AI enrichment uses the configured AI timeout and thinking level."""
 
     @pytest.mark.asyncio
-    async def test_enrichment_passes_configured_timeout_and_thinking_budget(self, tmp_path: Path, monkeypatch):
+    async def test_enrichment_passes_configured_timeout_and_thinking_level(self, tmp_path: Path, monkeypatch):
         db_file = tmp_path / "alerts_ai.db"
         run_migrations(db_file)
         _turn_ai_on(db_file)
@@ -1888,7 +1888,7 @@ class TestAlertEnrichmentAiSettings:
         conn.close()
 
         import app.services.ai_service as ai_service
-        configured = {"ai_timeout": "90", "ai_thinking_budget": "2048"}
+        configured = {"ai_timeout": "90", "ai_thinking_level": "medium"}
         monkeypatch.setattr(ai_service, "get_cached_setting", lambda key, default=None: configured.get(key, default))
 
         captured: dict = {}
@@ -1913,7 +1913,7 @@ class TestAlertEnrichmentAiSettings:
         await evaluator.stop()
 
         assert captured["timeout"] == 90.0
-        assert captured["thinking_budget"] == 2048
+        assert captured["thinking_level"] == "medium"
         assert captured["provider"] == "ollama"
 
 

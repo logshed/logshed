@@ -61,6 +61,7 @@ def reset_advanced_settings_env(tmp_path: Path, monkeypatch):
     env_keys = [
         "LOGSHED_AI_TIMEOUT",
         "LOGSHED_AI_THINKING_BUDGET",
+        "LOGSHED_AI_THINKING_LEVEL",
         "APP_URL",
         "app_url",
         "ALLOW_PRIVATE_NOTIFICATION_TARGETS",
@@ -117,7 +118,6 @@ class TestThreeTierResolution:
         """When neither database nor environment variables are set, defaults return."""
         db_settings: dict[str, str] = {}
         assert resolve_setting(db_settings, "ai_timeout", "LOGSHED_AI_TIMEOUT", 45.0, float) == 45.0
-        assert resolve_setting(db_settings, "ai_thinking_budget", "LOGSHED_AI_THINKING_BUDGET", 1024, int) == 1024
         assert resolve_setting(db_settings, "app_url", "APP_URL", "", str) == ""
         assert resolve_setting(db_settings, "allow_private_notification_targets", "ALLOW_PRIVATE_NOTIFICATION_TARGETS", True, lambda v: v.lower() in ("true", "1", "yes")) is True
         assert resolve_setting(db_settings, "docker_source_alias", "DOCKER_SOURCE_ALIAS", "docker", str) == "docker"
@@ -126,7 +126,6 @@ class TestThreeTierResolution:
     def test_tier_2_env_overrides_defaults(self, monkeypatch: pytest.MonkeyPatch):
         """When environment variables are defined and DB is empty, env values take precedence."""
         monkeypatch.setenv("LOGSHED_AI_TIMEOUT", "60.0")
-        monkeypatch.setenv("LOGSHED_AI_THINKING_BUDGET", "2048")
         monkeypatch.setenv("APP_URL", "https://logshed.example.com")
         monkeypatch.setenv("ALLOW_PRIVATE_NOTIFICATION_TARGETS", "false")
         monkeypatch.setenv("DOCKER_SOURCE_ALIAS", "dockernode")
@@ -134,7 +133,6 @@ class TestThreeTierResolution:
 
         db_settings: dict[str, str] = {}
         assert resolve_setting(db_settings, "ai_timeout", "LOGSHED_AI_TIMEOUT", 45.0, float) == 60.0
-        assert resolve_setting(db_settings, "ai_thinking_budget", "LOGSHED_AI_THINKING_BUDGET", 1024, int) == 2048
         assert resolve_setting(db_settings, "app_url", "APP_URL", "", str) == "https://logshed.example.com"
         assert resolve_setting(db_settings, "allow_private_notification_targets", "ALLOW_PRIVATE_NOTIFICATION_TARGETS", True, lambda v: v.lower() in ("true", "1", "yes")) is False
         assert resolve_setting(db_settings, "docker_source_alias", "DOCKER_SOURCE_ALIAS", "docker", str) == "dockernode"
@@ -203,7 +201,7 @@ class TestThreeTierResolution:
         assert resolved["ai_timeout"] == 30.0
         assert resolved["syslog_max_tcp_connections"] == 500
         assert resolved["docker_source_alias"] == "custom_docker"
-        assert resolved["ai_thinking_budget"] == 1024
+        assert resolved["ai_thinking_level"] == "low"
         assert resolved["app_url"] == ""
         assert resolved["allow_private_notification_targets"] is True
         assert resolved["enable_docker"] is True
@@ -212,6 +210,95 @@ class TestThreeTierResolution:
         assert resolved["trust_docker_proxies"] is False
         assert resolved["cookie_secure"] is False
         assert resolved["syslog_tcp_inactivity_timeout"] == 0.0
+
+
+class TestThinkingLevelSetting:
+    """The thinking level replaced the thinking token budget; a budget still works, read as its level."""
+
+    @pytest.mark.parametrize(
+        "budget, level",
+        [("0", "off"), ("1", "low"), ("1024", "low"), ("2048", "low"), ("2049", "medium"), ("8192", "medium"), ("8193", "high"), ("32768", "high")],
+    )
+    def test_the_budget_variable_maps_to_a_level(self, monkeypatch: pytest.MonkeyPatch, budget, level):
+        monkeypatch.setenv("LOGSHED_AI_THINKING_BUDGET", budget)
+        assert resolve_all_system_settings({})["ai_thinking_level"] == level
+
+    def test_the_level_variable_wins_over_the_budget_variable(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("LOGSHED_AI_THINKING_BUDGET", "0")
+        monkeypatch.setenv("LOGSHED_AI_THINKING_LEVEL", " High ")
+        assert resolve_all_system_settings({})["ai_thinking_level"] == "high"
+
+    @pytest.mark.parametrize("level_env, budget_env, expected", [("extreme", "16000", "high"), ("extreme", None, "low"), (None, "-5", "low"), (None, "lots", "low")])
+    def test_unreadable_values_fall_through(self, monkeypatch: pytest.MonkeyPatch, level_env, budget_env, expected):
+        if level_env is not None:
+            monkeypatch.setenv("LOGSHED_AI_THINKING_LEVEL", level_env)
+        if budget_env is not None:
+            monkeypatch.setenv("LOGSHED_AI_THINKING_BUDGET", budget_env)
+        assert resolve_all_system_settings({})["ai_thinking_level"] == expected
+
+    def test_a_saved_level_wins_over_the_environment(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("LOGSHED_AI_THINKING_LEVEL", "high")
+        assert resolve_all_system_settings({"ai_thinking_level": "off"})["ai_thinking_level"] == "off"
+
+    @staticmethod
+    def _stored(db_file: Path) -> dict[str, str]:
+        conn = get_connection(db_file)
+        try:
+            rows = conn.execute(
+                "SELECT key, value FROM system_settings WHERE key IN ('ai_thinking_budget', 'ai_thinking_level')"
+            ).fetchall()
+        finally:
+            conn.close()
+        return dict(rows)
+
+    @staticmethod
+    def _store(db_file: Path, **values: str) -> None:
+        conn = get_connection(db_file)
+        try:
+            for key, value in values.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, datetime('now'), 0)",
+                    (key, value),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @pytest.mark.parametrize("budget, level", [("0", "off"), ("1024", "low"), ("4096", "medium"), ("24576", "high")])
+    def test_the_upgrade_turns_a_stored_budget_into_a_level_once(self, tmp_path: Path, caplog, budget, level):
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, ai_thinking_budget=budget)
+        with caplog.at_level(logging.INFO, logger="app.core.migrations"):
+            run_migrations(db_file)
+        assert self._stored(db_file) == {"ai_thinking_level": level}
+        assert f"Replaced the stored thinking budget {budget} with the thinking level {level}" in caplog.text
+
+        self._store(db_file, ai_thinking_level="high")
+        run_migrations(db_file)
+        assert self._stored(db_file) == {"ai_thinking_level": "high"}
+
+    def test_the_upgrade_keeps_a_saved_level(self, tmp_path: Path):
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, ai_thinking_budget="16000", ai_thinking_level="off")
+        run_migrations(db_file)
+        assert self._stored(db_file) == {"ai_thinking_level": "off"}
+
+    def test_the_upgrade_drops_an_unreadable_budget(self, tmp_path: Path, caplog):
+        db_file = tmp_path / "logs.db"
+        self._store(db_file, ai_thinking_budget="lots")
+        with caplog.at_level(logging.WARNING, logger="app.core.migrations"):
+            run_migrations(db_file)
+        assert self._stored(db_file) == {}
+        assert "Removed the stored thinking budget 'lots'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_the_settings_api_has_the_level_and_no_budget(self, client: AsyncClient):
+        client.cookies.set(SESSION_COOKIE_NAME, create_session_token(user_id=1))
+        res = await client.post("/api/settings", json={"ai_thinking_level": "off", "ai_thinking_budget": 9000})
+        assert res.status_code == 200
+        data = (await client.get("/api/settings")).json()
+        assert data["ai_thinking_level"] == "off"
+        assert "ai_thinking_budget" not in data
 
 
 # ===================================================================
@@ -317,7 +404,7 @@ class TestSettingsApi:
 
         expected_keys = [
             "ai_timeout",
-            "ai_thinking_budget",
+            "ai_thinking_level",
             "app_url",
             "allow_private_notification_targets",
             "enable_docker",
@@ -342,7 +429,7 @@ class TestSettingsApi:
 
         payload = {
             "ai_timeout": 65.5,
-            "ai_thinking_budget": 512,
+            "ai_thinking_level": "medium",
             "app_url": "https://logs.internal.net",
             "allow_private_notification_targets": False,
             "enable_docker": False,
@@ -364,7 +451,7 @@ class TestSettingsApi:
         assert get_res.status_code == 200
         data = get_res.json()
         assert data["ai_timeout"] == 65.5
-        assert data["ai_thinking_budget"] == 512
+        assert data["ai_thinking_level"] == "medium"
         assert data["app_url"] == "https://logs.internal.net"
         assert data["allow_private_notification_targets"] is False
         assert data["enable_docker"] is False
@@ -424,8 +511,8 @@ class TestSettingsApi:
         res = await client.post("/api/settings", json={"ai_timeout": -5.0})
         assert res.status_code == 422
 
-        # ai_thinking_budget must be >= 0
-        res = await client.post("/api/settings", json={"ai_thinking_budget": -1})
+        # ai_thinking_level must be one of the levels
+        res = await client.post("/api/settings", json={"ai_thinking_level": "extreme"})
         assert res.status_code == 422
 
         # syslog_max_tcp_connections must be >= 1

@@ -111,10 +111,10 @@ async def test_live_openai_reasoning_model_runs_an_analysis(model):
 
 @pytest.mark.asyncio
 # claude-sonnet-5-5 is the default Claude model (listed by GET /v1/models on 2026-11-02). Claude 4.6 and
-# later think adaptively: a budget up to 2,048 sends low effort, and 0 also runs at low effort (4.7 and later)
-@pytest.mark.parametrize("thinking_budget", [1024, 0])
-async def test_live_claude_runs_an_analysis_at_a_thinking_budget(thinking_budget):
-    """The default Claude model completes an analysis with the default budget and with thinking turned off."""
+# later think adaptively at the level's effort; off runs at low effort (Claude 5 models always think)
+@pytest.mark.parametrize("thinking_level", ["low", "off"])
+async def test_live_claude_runs_an_analysis_at_a_thinking_level(thinking_level):
+    """The default Claude model completes an analysis at the default level and with thinking off."""
     from app.services.ai_engine import execute_ai_analysis
 
     keys = load_env_keys()
@@ -132,11 +132,51 @@ async def test_live_claude_runs_an_analysis_at_a_thinking_budget(thinking_budget
         redacted_logs="2026-11-02T10:00:00Z nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors",
         log_count=1,
         timeout=120,
-        thinking_budget=thinking_budget,
+        thinking_level=thinking_level,
     )
     summary, model_used, fallback_attempts = result[0], result[9], result[10]
     tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
-    print(f"\nclaude-sonnet-5-5 budget {thinking_budget}: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {summary[:160]!r}")
+    print(f"\nclaude-sonnet-5-5 level {thinking_level}: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {summary[:160]!r}")
     assert summary.strip()
     assert model_used == "claude-sonnet-5-5"
+    assert fallback_attempts == []
+
+
+@pytest.mark.asyncio
+# Off asks for the lowest level. gemini-3.5-flash takes minimal; on 2026-11-03 gemini-3.8-flash refused it (as does gemini-3.7-flash, the default
+# Gemini model, which was overloaded that day) and OpenAI documented that gpt-6.1-sol (the default OpenAI model) refuses none, so both
+# requests are retried at low. None of these models has a shutdown date.
+@pytest.mark.parametrize(
+    "provider, key_name, model",
+    [("gemini", "GEMINI_API_KEY", "gemini-3.5-flash"), ("gemini", "GEMINI_API_KEY", "gemini-3.8-flash"), ("openai", "OPENAI_API_KEY", "gpt-6.1-sol")],
+)
+async def test_live_thinking_off_runs_an_analysis(provider, key_name, model, caplog):
+    """A model completes an analysis with thinking off, also when it refuses the lowest level and is asked at low."""
+    import logging
+
+    from app.services.ai_engine import execute_ai_analysis
+
+    api_key = load_env_keys().get(key_name)
+    if not api_key:
+        pytest.skip(f"{key_name} not configured in .env or environment")
+
+    with caplog.at_level(logging.INFO, logger="app.services.ai_engine"):
+        result = await execute_ai_analysis(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=None,
+            source_alias="nas-01",
+            app_name="smartd",
+            redacted_logs="2026-11-02T10:00:00Z nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors",
+            log_count=1,
+            timeout=120,
+            thinking_level="off",
+        )
+    summary, model_used, fallback_attempts = result[0], result[9], result[10]
+    tokens_in, tokens_out, tokens_thoughts = result[5], result[6], result[7]
+    retries = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    print(f"\n{model} off: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}, retries {retries}: {summary[:160]!r}")
+    assert summary.strip()
+    assert model_used == model
     assert fallback_attempts == []

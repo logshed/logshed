@@ -12,6 +12,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 import openai
+from google.genai import types as genai_types
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
@@ -376,7 +377,7 @@ Multiple transaction queries deadlock on shared index.
                 api_key="ant-key",
                 model="claude-sonnet-4-6",
                 prompt="test prompt",
-                thinking_budget=1024,
+                thinking_level="low",
             )
             assert "Thinking summary" in text
             assert tokens_thoughts == 30
@@ -442,7 +443,7 @@ Multiple transaction queries deadlock on shared index.
                 prompt="Operator explicitly edited prompt payload",
                 system_prompt=None,
                 timeout=DEFAULT_AI_TIMEOUT,
-                thinking_budget=None,
+                thinking_level=None,
             )
 
     @pytest.mark.asyncio
@@ -476,7 +477,7 @@ Multiple transaction queries deadlock on shared index.
                 base_url="https://api.openai.com/v1",
                 system_prompt=None,
                 timeout=45.0,
-                thinking_budget=None,
+                thinking_level=None,
             )
 
     @pytest.mark.asyncio
@@ -509,7 +510,7 @@ Multiple transaction queries deadlock on shared index.
                 prompt=prompt_sent,
                 system_prompt=None,
                 timeout=45.0,
-                thinking_budget=None,
+                thinking_level=None,
             )
 
     @pytest.mark.asyncio
@@ -702,7 +703,7 @@ Multiple transaction queries deadlock on shared index.
                 base_url="http://localhost:11434/v1",
                 system_prompt=None,
                 timeout=DEFAULT_AI_TIMEOUT,
-                thinking_budget=None,
+                thinking_level=None,
             )
 
 
@@ -3167,7 +3168,7 @@ class TestAiProviderDispatch:
             ("anthropic", "call_anthropic"),
         ],
     )
-    async def test_every_provider_receives_thinking_budget(self, provider, dispatch_name):
+    async def test_every_provider_receives_the_thinking_level(self, provider, dispatch_name):
         with patch(f"app.services.ai_engine.{dispatch_name}", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = (_STRUCTURED_REPLY, 10, 5, 0, 15)
             await ai_engine.execute_ai_analysis(
@@ -3179,9 +3180,9 @@ class TestAiProviderDispatch:
                 app_name="app",
                 redacted_logs="logs",
                 log_count=1,
-                thinking_budget=512,
+                thinking_level="high",
             )
-        assert mock_dispatch.call_args.kwargs["thinking_budget"] == 512
+        assert mock_dispatch.call_args.kwargs["thinking_level"] == "high"
 
     @pytest.mark.asyncio
     async def test_only_openai_providers_receive_base_url(self):
@@ -3751,6 +3752,39 @@ class TestOpenAiReasoningModelsGetNoTemperature:
         for kwargs in (await self._single_turn_kwargs(model), await self._multi_turn_kwargs(model)):
             assert kwargs["reasoning_effort"] == "low"
 
+    @pytest.mark.parametrize(
+        "model, level, effort",
+        [
+            ("gpt-6.1-terra", "off", "none"),
+            ("gpt-5.5", "medium", "medium"),
+            ("openai/gpt-5-mini", "high", "high"),
+            ("o3", "off", "low"),
+            ("o4-mini", "high", "high"),
+            ("gpt-6.1-sol", None, "low"),
+        ],
+    )
+    def test_the_thinking_level_sets_the_reasoning_effort(self, model, level, effort):
+        assert ai_engine._openai_sampling_kwargs(model, level) == {"reasoning_effort": effort}
+
+    @pytest.mark.asyncio
+    async def test_follow_ups_get_the_thinking_level(self):
+        from types import SimpleNamespace
+
+        chunks = [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Answer"))], usage=None)]
+        with patch("app.services.ai_engine.AsyncOpenAI") as mock_cls:
+            client = MagicMock()
+            client.chat.completions.create = AsyncMock(return_value=_aiter(chunks))
+            mock_cls.return_value = client
+            await ai_engine.execute_ai_follow_up(
+                provider="openai",
+                model="gpt-6.1-sol",
+                api_key="key",
+                base_url=None,
+                messages=[{"role": "user", "content": "q"}],
+                thinking_level="high",
+            )
+        assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "high"
+
 
 def _bad_request(message: str, param: Optional[str] = None) -> openai.BadRequestError:
     import httpx2
@@ -3761,7 +3795,7 @@ def _bad_request(message: str, param: Optional[str] = None) -> openai.BadRequest
 
 
 class TestOpenAiReasoningEffortFallback:
-    """Accepted reasoning efforts differ by model, so a refused one is retried once without it."""
+    """Accepted reasoning efforts differ by model, so a refused one is retried (none at low) and then without it."""
 
     REFUSED = "Unsupported value: 'reasoning_effort' does not support 'low' with this model. Supported values are: 'high'."
 
@@ -3809,6 +3843,21 @@ class TestOpenAiReasoningEffortFallback:
         second = client.chat.completions.create.call_args_list[1].kwargs
         assert "reasoning_effort" not in second
         assert second["stream"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_refused_none_is_retried_at_low_then_at_the_model_default(self):
+        refused_none = _bad_request("Unsupported value: 'reasoning_effort' does not support 'none' with this model.", "reasoning_effort")
+        client = MagicMock()
+        client.close = AsyncMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=[refused_none, _bad_request(self.REFUSED, "reasoning_effort"), self._response()]
+        )
+        with patch("app.services.ai_engine.AsyncOpenAI", return_value=client):
+            text, *_ = await ai_engine.call_openai(api_key="key", model="gpt-6.1-sol", prompt="logs", thinking_level="off")
+
+        assert text.startswith("## Summary")
+        efforts = [c.kwargs.get("reasoning_effort") for c in client.chat.completions.create.call_args_list]
+        assert efforts == ["none", "low", None]
 
     @pytest.mark.asyncio
     async def test_other_bad_requests_are_not_retried(self):
@@ -3890,7 +3939,8 @@ class TestOpenAiCompatibleProviders:
     @pytest.mark.parametrize("model", ["openai/o3", "openai/o4-mini", "openai/o1-pro"])
     def test_routed_o_series_ids_are_reasoning_models(self, model):
         assert ai_engine.supports_openai_reasoning(model) is True
-        assert ai_engine._openai_sampling_kwargs(model) == {"reasoning_effort": "low"}
+        assert ai_engine._openai_sampling_kwargs(model, "low") == {"reasoning_effort": "low"}
+        assert ai_engine._openai_sampling_kwargs(model, "off") == {"reasoning_effort": "low"}
 
     @pytest.mark.parametrize("model", ["openai/gpt-4o", "meta-llama/llama-3.3-70b-instruct", "qwen/qwen3-32b"])
     def test_other_routed_ids_are_not(self, model):
@@ -3903,15 +3953,114 @@ class TestGeminiLatestAliasesThink:
     @pytest.mark.parametrize(
         "model", ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest", "models/gemini-pro-latest"]
     )
-    def test_aliases_get_the_thinking_budget(self, model):
+    def test_aliases_get_a_thinking_level(self, model):
         assert ai_engine.supports_gemini_thinking(model) is True
-        config = ai_engine._gemini_generation_config(model, "SYS", 1024)
-        assert config.thinking_config.thinking_budget == 1024
+        config = ai_engine._gemini_thinking_config(model, "low")
+        assert config.thinking_level == genai_types.ThinkingLevel.LOW
+        assert config.thinking_budget is None
 
     @pytest.mark.parametrize("model", ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemma-latest"])
     def test_older_models_and_other_aliases_do_not(self, model):
         assert ai_engine.supports_gemini_thinking(model) is False
-        assert ai_engine._gemini_generation_config(model, "SYS", 1024).thinking_config is None
+        assert ai_engine._gemini_thinking_config(model, "low") is None
+        assert ai_engine._gemini_generation_config(model, "SYS", None).thinking_config is None
+
+
+class TestGeminiThinkingLevels:
+    """Gemini 2.5 takes a thinking budget; Gemini 3 and later take a thinking level and refuse a budget."""
+
+    @pytest.mark.parametrize(
+        "level, expected",
+        [("off", "MINIMAL"), ("low", "LOW"), ("medium", "MEDIUM"), ("high", "HIGH"), (None, "LOW")],
+    )
+    @pytest.mark.parametrize("model", ["gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.7-flash", "gemini-4-argon"])
+    def test_gemini_three_and_later_get_the_level(self, model, level, expected):
+        config = ai_engine._gemini_thinking_config(model, level)
+        assert config.thinking_level == genai_types.ThinkingLevel(expected)
+        assert config.thinking_budget is None
+
+    @pytest.mark.parametrize(
+        "level, budget", [("off", 0), ("low", 1024), ("medium", 8192), ("high", 24576), ("unknown", 1024)]
+    )
+    @pytest.mark.parametrize("model", ["gemini-2.5-flash", "gemini-2.5-flash-lite"])
+    def test_gemini_two_five_gets_a_budget(self, model, level, budget):
+        config = ai_engine._gemini_thinking_config(model, level)
+        assert config.thinking_budget == budget
+        assert config.thinking_level is None
+
+    def test_gemini_two_five_pro_cannot_turn_thinking_off(self):
+        assert ai_engine._gemini_thinking_config("gemini-2.5-pro", "off").thinking_budget == 128
+        assert ai_engine._gemini_thinking_config("gemini-2.5-pro", "high").thinking_budget == 24576
+
+    @staticmethod
+    def _refused(message: str = "Thinking level MINIMAL is not supported for this model."):
+        from google.genai import errors as genai_errors
+
+        return genai_errors.ClientError(400, {"error": {"code": 400, "message": message, "status": "INVALID_ARGUMENT"}})
+
+    @staticmethod
+    async def _analysis_configs(model: str, level: str, side_effect: list) -> list:
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            client = MagicMock()
+            client.aio.models.generate_content = AsyncMock(side_effect=side_effect)
+            client.aio.aclose = AsyncMock()
+            mock_genai.Client.return_value = client
+            await ai_engine.call_gemini(api_key="key", model=model, prompt="logs", thinking_level=level)
+        return [c.kwargs["config"].thinking_config for c in client.aio.models.generate_content.call_args_list]
+
+    @staticmethod
+    def _reply() -> MagicMock:
+        response = MagicMock()
+        response.text = "## Summary\nS\n\n## Root Cause\nC\n\n## Actionable Remediation\nF"
+        response.usage_metadata = MagicMock(
+            prompt_token_count=10, candidates_token_count=5, thoughts_token_count=0, total_token_count=15
+        )
+        return response
+
+    @pytest.mark.asyncio
+    async def test_a_refused_minimal_level_is_retried_at_low(self):
+        configs = await self._analysis_configs("gemini-4-argon", "off", [self._refused(), self._reply()])
+        assert [c.thinking_level for c in configs] == [genai_types.ThinkingLevel.MINIMAL, genai_types.ThinkingLevel.LOW]
+
+    @pytest.mark.asyncio
+    async def test_another_refused_level_is_retried_at_the_model_default(self):
+        refused = self._refused("Thinking level MEDIUM is not supported for this model.")
+        configs = await self._analysis_configs("gemini-3-pro-preview", "medium", [refused, self._reply()])
+        assert configs[0].thinking_level == genai_types.ThinkingLevel.MEDIUM
+        assert configs[1] is None
+
+    @pytest.mark.asyncio
+    async def test_other_bad_requests_are_not_retried(self):
+        with pytest.raises(RuntimeError, match="API key not valid"):
+            await self._analysis_configs("gemini-3.7-flash", "low", [self._refused("API key not valid."), self._reply()])
+
+    @pytest.mark.asyncio
+    async def test_a_follow_up_is_retried_from_the_start(self):
+        from types import SimpleNamespace
+
+        chunks = [SimpleNamespace(text="Answer", usage_metadata=None)]
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            client = MagicMock()
+            client.aio.models.generate_content_stream = AsyncMock(side_effect=[self._refused(), _aiter(chunks)])
+            client.aio.aclose = AsyncMock()
+            mock_genai.Client.return_value = client
+            deltas: list[str] = []
+
+            async def on_delta(text: str) -> None:
+                deltas.append(text)
+
+            text, *_ = await ai_engine.dispatch_multi_turn_gemini(
+                api_key="key",
+                model="gemini-4-argon",
+                messages=[{"role": "user", "content": "q"}],
+                system_prompt="SYS",
+                thinking_level="off",
+                on_delta=on_delta,
+            )
+        assert text == "Answer"
+        assert deltas == ["Answer"]
+        configs = [c.kwargs["config"].thinking_config for c in client.aio.models.generate_content_stream.call_args_list]
+        assert [c.thinking_level for c in configs] == [genai_types.ThinkingLevel.MINIMAL, genai_types.ThinkingLevel.LOW]
 
 
 class TestAnthropicRequestsPerModelFamily:
@@ -3925,41 +4074,44 @@ class TestAnthropicRequestsPerModelFamily:
     ]
 
     @staticmethod
-    def _kwargs(model: str, budget):
-        return ai_engine._anthropic_request_kwargs(model, "SYS", [{"role": "user", "content": "logs"}], budget)
+    def _kwargs(model: str, level):
+        return ai_engine._anthropic_request_kwargs(model, "SYS", [{"role": "user", "content": "logs"}], level)
 
+    @pytest.mark.parametrize("level, budget, max_tokens", [("low", 1024, 4096), ("medium", 8192, 10240), ("high", 16000, 18048)])
     @pytest.mark.parametrize("model", BUDGET_MODELS)
-    def test_older_models_keep_the_thinking_budget(self, model):
-        kwargs = self._kwargs(model, 1024)
-        assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    def test_older_models_get_a_thinking_budget_per_level(self, model, level, budget, max_tokens):
+        kwargs = self._kwargs(model, level)
+        assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": budget}
+        assert kwargs["max_tokens"] == max_tokens
         assert "temperature" not in kwargs
         assert "output_config" not in kwargs
 
+    @pytest.mark.parametrize("level", ["low", "medium", "high"])
     @pytest.mark.parametrize("model", ADAPTIVE_MODELS + NO_SAMPLING_MODELS)
-    def test_newer_models_think_adaptively_at_an_effort_level(self, model):
-        kwargs = self._kwargs(model, 1024)
+    def test_newer_models_think_adaptively_at_the_level(self, model, level):
+        kwargs = self._kwargs(model, level)
         assert kwargs["thinking"] == {"type": "adaptive"}
-        assert kwargs["output_config"] == {"effort": "low"}
+        assert kwargs["output_config"] == {"effort": level}
         assert "temperature" not in kwargs
         assert kwargs["max_tokens"] >= 16000
 
     @pytest.mark.parametrize("model", BUDGET_MODELS + ADAPTIVE_MODELS + ["claude-3-5-haiku-20241022"])
-    def test_without_thinking_models_up_to_four_six_keep_the_low_temperature(self, model):
-        kwargs = self._kwargs(model, 0)
+    def test_off_turns_thinking_off_up_to_four_six_with_the_low_temperature(self, model):
+        kwargs = self._kwargs(model, "off")
         assert kwargs["temperature"] == 0.2
         assert "thinking" not in kwargs
         assert "output_config" not in kwargs
 
     @pytest.mark.parametrize("model", NO_SAMPLING_MODELS)
-    def test_without_thinking_newer_models_get_no_temperature_and_the_lowest_effort(self, model):
-        kwargs = self._kwargs(model, 0)
+    def test_off_on_newer_models_sends_no_temperature_and_the_lowest_effort(self, model):
+        kwargs = self._kwargs(model, "off")
         assert "temperature" not in kwargs
         assert "thinking" not in kwargs
         assert kwargs["output_config"] == {"effort": "low"}
 
-    @pytest.mark.parametrize("budget, effort", [(None, "low"), (1024, "low"), (2048, "low"), (4096, "medium"), (8192, "medium"), (16384, "high")])
-    def test_the_thinking_budget_sets_the_effort(self, budget, effort):
-        assert self._kwargs("claude-sonnet-5-5", budget)["output_config"] == {"effort": effort}
+    @pytest.mark.parametrize("level", [None, "", "unknown"])
+    def test_a_missing_or_unknown_level_runs_at_the_default(self, level):
+        assert self._kwargs("claude-sonnet-5-5", level)["output_config"] == {"effort": "low"}
 
     @pytest.mark.asyncio
     async def test_a_declined_request_says_so(self):

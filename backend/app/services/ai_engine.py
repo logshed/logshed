@@ -12,7 +12,7 @@ import datetime
 import logging
 import re
 import urllib.parse
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Awaitable, Callable, Optional, Sequence, TypeVar
 
 import httpx
 from anthropic import (
@@ -21,15 +21,18 @@ from anthropic import (
     APIStatusError as AnthropicAPIStatusError,
 )
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from openai import APIConnectionError, AsyncOpenAI, APITimeoutError, BadRequestError
 
-from app.core.config import DEFAULT_AI_MODEL, DEFAULT_AI_TIMEOUT, DEFAULT_AI_THINKING_BUDGET, is_debug_or_dev
+from app.core.config import AI_THINKING_LEVELS, DEFAULT_AI_MODEL, DEFAULT_AI_THINKING_LEVEL, DEFAULT_AI_TIMEOUT, is_debug_or_dev
 from app.core.net_guard import GuardedOpenAIHttpClient
 from app.core.redactor import redact
 from app.core.utils import format_utc_offset
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 DEFAULT_SYSTEM_PROMPT = """You are an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator.
 Review the following redacted server/container logs and provide a structured diagnosis in Markdown format.
@@ -122,16 +125,20 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
 
 
 def supports_gemini_thinking(model_name: str) -> bool:
-    """Returns True if the Gemini model family supports reasoning/thinking budgets."""
+    """Returns True if the Gemini model family thinks (takes a thinking budget or level)."""
     m = model_name.lower()
     if any(v in m for v in ("2.5", "3.", "3-", "4.", "4-", "5.", "thinking", "think")):
         return True
     # Aliases that follow Google's current release (gemini-flash-latest and so on); all of them think
-    return bool(re.search(r"(?:^|/)gemini-(?:flash|flash-lite|pro)-latest$", m))
+    return bool(_GEMINI_LATEST_ALIAS.search(m))
 
 
 # GPT-5 and later (also behind a provider prefix such as openai/), except the non-reasoning chat variants
 _OPENAI_GPT_REASONING = re.compile(r"(?:^|[/_-])gpt-(?:[5-9]|1\d)(?!\d)")
+
+
+# The o-series (o1, o3, o4-mini), also behind a provider prefix
+_OPENAI_O_SERIES = re.compile(r"(?:^|[-_/])o\d")
 
 
 def supports_openai_reasoning(model_name: str) -> bool:
@@ -140,7 +147,7 @@ def supports_openai_reasoning(model_name: str) -> bool:
     chat variants) and names containing "reason". They take reasoning_effort and no temperature.
     """
     m = model_name.lower()
-    if re.search(r"(?:^|[-_/])o\d", m) or "reason" in m:
+    if _OPENAI_O_SERIES.search(m) or "reason" in m:
         return True
     return bool(_OPENAI_GPT_REASONING.search(m) and "chat" not in m)
 
@@ -153,40 +160,129 @@ def openai_model_takes_temperature(model_name: str) -> bool:
     return not supports_openai_reasoning(model_name)
 
 
-def _openai_sampling_kwargs(model: str) -> dict[str, Any]:
+def _openai_sampling_kwargs(model: str, thinking_level: Optional[str]) -> dict[str, Any]:
     """The temperature or reasoning effort LogShed sends with an OpenAI or OpenAI-compatible request."""
     kwargs: dict[str, Any] = {}
     if openai_model_takes_temperature(model):
         kwargs["temperature"] = 0.2
     if supports_openai_reasoning(model):
-        kwargs["reasoning_effort"] = "low"
+        kwargs["reasoning_effort"] = _openai_reasoning_effort(model, thinking_level)
     return kwargs
 
 
 async def _create_chat_completion(client: AsyncOpenAI, create_kwargs: dict[str, Any]) -> Any:
     """
-    Send the chat completion request. The accepted reasoning efforts differ by model (some accept
-    only high), so when the endpoint refuses reasoning_effort the request is sent once more
-    without it, at the model's own default effort.
+    Send the chat completion request. The accepted reasoning efforts differ by model (GPT-6 Sol
+    refuses none, some models accept only high), so when the endpoint refuses reasoning_effort the
+    request is sent again: at low when none was refused, otherwise without it, at the model's own
+    default effort.
     """
-    try:
-        return await client.chat.completions.create(**create_kwargs)
-    except BadRequestError as e:
-        refused_effort = getattr(e, "param", None) == "reasoning_effort" or "reasoning_effort" in str(e)
-        if "reasoning_effort" not in create_kwargs or not refused_effort:
-            raise
-        logger.info(
-            f"Model {create_kwargs.get('model')} refused reasoning_effort {create_kwargs['reasoning_effort']!r}; "
-            "retrying at its default effort."
-        )
-        retry_kwargs = {k: v for k, v in create_kwargs.items() if k != "reasoning_effort"}
-        return await client.chat.completions.create(**retry_kwargs)
+    attempt_kwargs = create_kwargs
+    while True:
+        try:
+            return await client.chat.completions.create(**attempt_kwargs)
+        except BadRequestError as e:
+            refused_effort = getattr(e, "param", None) == "reasoning_effort" or "reasoning_effort" in str(e)
+            if "reasoning_effort" not in attempt_kwargs or not refused_effort:
+                raise
+            refused = attempt_kwargs["reasoning_effort"]
+            if refused == "none":
+                attempt_kwargs = {**attempt_kwargs, "reasoning_effort": "low"}
+                retry_at = "low effort"
+            else:
+                attempt_kwargs = {k: v for k, v in attempt_kwargs.items() if k != "reasoning_effort"}
+                retry_at = "its default effort"
+            logger.info(f"Model {attempt_kwargs.get('model')} refused reasoning_effort {refused!r}; retrying at {retry_at}.")
 
 
 def supports_claude_thinking(model_name: str) -> bool:
     """Returns True if the Claude model supports extended thinking / reasoning budgets."""
     m = model_name.lower()
     return bool(re.search(r"claude-(?:3[.-][7-9]|[a-z]+-[4-9]|[4-9])", m) or "thinking" in m or "think" in m)
+
+
+# Thinking level per provider. The setting is off, low, medium or high; off asks for the lowest
+# the model allows, since some models always think.
+
+# Claude 4.5 and earlier: budget_tokens (at least 1,024, below max_tokens)
+_CLAUDE_THINKING_BUDGETS = {"low": 1024, "medium": 8192, "high": 16000}
+# Gemini 2.5: thinking_budget (0 turns thinking off; Flash and Flash-Lite allow up to 24,576)
+_GEMINI_THINKING_BUDGETS = {"off": 0, "low": 1024, "medium": 8192, "high": 24576}
+# Gemini 2.5 Pro cannot turn thinking off; 128 is its lowest budget
+_GEMINI_PRO_MIN_THINKING_BUDGET = 128
+# Gemini 3 and later: thinking_level, where minimal is the lowest
+_GEMINI_THINKING_LEVELS = {
+    "off": genai_types.ThinkingLevel.MINIMAL,
+    "low": genai_types.ThinkingLevel.LOW,
+    "medium": genai_types.ThinkingLevel.MEDIUM,
+    "high": genai_types.ThinkingLevel.HIGH,
+}
+_GEMINI_MAJOR_VERSION = re.compile(r"gemini-(\d+)")
+_GEMINI_LATEST_ALIAS = re.compile(r"(?:^|/)gemini-(?:flash|flash-lite|pro)-latest$")
+
+
+def _thinking_level(value: Optional[str]) -> str:
+    """The thinking level to use: the setting when it is a known level, otherwise the default."""
+    return value if value in AI_THINKING_LEVELS else DEFAULT_AI_THINKING_LEVEL
+
+
+def _openai_reasoning_effort(model: str, thinking_level: Optional[str]) -> str:
+    """The reasoning_effort for an OpenAI reasoning model; off is none, which the o-series do not accept."""
+    level = _thinking_level(thinking_level)
+    if level == "off":
+        return "low" if _OPENAI_O_SERIES.search(model.lower()) else "none"
+    return level
+
+
+def _claude_thinking_kwargs(model: str, thinking_level: Optional[str]) -> dict[str, Any]:
+    """
+    The thinking, effort, max_tokens and temperature arguments for a Claude model. Claude 4.6 and
+    later think adaptively at an effort level; from 4.7 on temperature is refused and the newest
+    models cannot turn thinking off, so off sends the lowest effort and leaves thinking at the
+    model's default. Claude 4.6 and earlier turn thinking off for off; 4.5 and earlier take a budget.
+    """
+    level = _thinking_level(thinking_level)
+    version = _claude_version(model)
+    if version is not None and version >= (4, 6) and (level != "off" or version >= (4, 7)):
+        kwargs: dict[str, Any] = {
+            "output_config": {"effort": "low" if level == "off" else level},
+            "max_tokens": 16000,
+        }
+        if level != "off":
+            kwargs["thinking"] = {"type": "adaptive"}
+        return kwargs
+    budget = _CLAUDE_THINKING_BUDGETS.get(level)
+    if budget and supports_claude_thinking(model):
+        return {
+            "thinking": {"type": "enabled", "budget_tokens": budget},
+            "max_tokens": max(4096, budget + 2048),
+        }
+    return {"max_tokens": 4096, "temperature": 0.2}
+
+
+def _gemini_takes_thinking_level(model: str) -> bool:
+    """
+    True for Gemini 3 and later and the -latest aliases (which follow Google's current release):
+    they take a thinking level, and refuse a thinking budget (always from Gemini 4 on).
+    """
+    m = model.lower()
+    if _GEMINI_LATEST_ALIAS.search(m):
+        return True
+    match = _GEMINI_MAJOR_VERSION.search(m)
+    return bool(match and int(match.group(1)) >= 3)
+
+
+def _gemini_thinking_config(model: str, thinking_level: Optional[str]) -> Optional[genai_types.ThinkingConfig]:
+    """The thinking config for a Gemini model, or None for models that do not think."""
+    if not supports_gemini_thinking(model):
+        return None
+    level = _thinking_level(thinking_level)
+    if _gemini_takes_thinking_level(model):
+        return genai_types.ThinkingConfig(thinking_level=_GEMINI_THINKING_LEVELS[level])
+    budget = _GEMINI_THINKING_BUDGETS[level]
+    if budget == 0 and "pro" in model.lower():
+        budget = _GEMINI_PRO_MIN_THINKING_BUDGET
+    return genai_types.ThinkingConfig(thinking_budget=budget)
 
 
 NON_TEXT_MODEL_KEYWORDS: tuple[str, ...] = (
@@ -754,20 +850,51 @@ def _gemini_client(api_key: str, timeout: float, max_retries: int = 1) -> genai.
 def _gemini_generation_config(
     model: str,
     system_prompt: str,
-    thinking_budget: Optional[int],
+    thinking_config: Optional[genai_types.ThinkingConfig],
 ) -> genai_types.GenerateContentConfig:
-    """Build the Gemini generation config, enabling a thinking budget on models that support it."""
+    """Build the Gemini generation config, with the thinking config on models that think."""
     config_kwargs: dict[str, Any] = {
         "system_instruction": system_prompt,
         "temperature": 0.2,
         "automatic_function_calling": genai_types.AutomaticFunctionCallingConfig(disable=True),
     }
-    effective_budget = thinking_budget if thinking_budget is not None else DEFAULT_AI_THINKING_BUDGET
-    if supports_gemini_thinking(model) and effective_budget is not None:
-        config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
-            thinking_budget=effective_budget
-        )
+    if thinking_config is not None:
+        config_kwargs["thinking_config"] = thinking_config
     return genai_types.GenerateContentConfig(**config_kwargs)
+
+
+def _gemini_refused_thinking_level(e: Exception) -> bool:
+    """True when Gemini refused the request because of its thinking config."""
+    return isinstance(e, genai_errors.ClientError) and e.code == 400 and "thinking" in str(e).lower()
+
+
+async def _gemini_send(
+    model: str,
+    system_prompt: str,
+    thinking_level: Optional[str],
+    send: Callable[[genai_types.GenerateContentConfig], Awaitable[T]],
+) -> T:
+    """
+    Send a Gemini request with the config for the thinking level. The accepted levels differ by
+    model (Gemini 4 and the Pro models have no minimal), so when the model refuses its level the
+    request is sent again: at low when minimal was refused, otherwise without a thinking config,
+    at the model's own default.
+    """
+    thinking = _gemini_thinking_config(model, thinking_level)
+    while True:
+        try:
+            return await send(_gemini_generation_config(model, system_prompt, thinking))
+        except genai_errors.ClientError as e:
+            refused = thinking.thinking_level if thinking is not None else None
+            if refused is None or not _gemini_refused_thinking_level(e):
+                raise
+            if refused == genai_types.ThinkingLevel.MINIMAL:
+                thinking = genai_types.ThinkingConfig(thinking_level=genai_types.ThinkingLevel.LOW)
+                retry_at = "low"
+            else:
+                thinking = None
+                retry_at = "its default level"
+            logger.info(f"Gemini model {model} refused thinking level {refused.value.lower()}; retrying at {retry_at}.")
 
 
 def _gemini_error(e: Exception) -> Exception:
@@ -806,7 +933,7 @@ async def call_gemini(
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
     max_retries: int = 1,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Dispatch request to Google Gemini API via the google-genai SDK.
@@ -821,12 +948,11 @@ async def call_gemini(
     try:
         client = _gemini_client(api_key, timeout, max_retries)
 
+        async def send(config: genai_types.GenerateContentConfig) -> Any:
+            return await client.aio.models.generate_content(model=model, contents=prompt, config=config)
+
         response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=_gemini_generation_config(model, effective_system_prompt, thinking_budget),
-            ),
+            _gemini_send(model, effective_system_prompt, thinking_level, send),
             timeout=timeout,
         )
 
@@ -882,7 +1008,7 @@ async def call_openai(
     base_url: Optional[str] = None,
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Dispatch request to OpenAI or OpenAI-compatible endpoint (e.g. Ollama, vLLM, LocalAI)
@@ -901,7 +1027,7 @@ async def call_openai(
                 {"role": "system", "content": effective_system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            **_openai_sampling_kwargs(model),
+            **_openai_sampling_kwargs(model, thinking_level),
         }
 
         response = await _create_chat_completion(client, create_kwargs)
@@ -942,15 +1068,6 @@ def _claude_version(model: str) -> Optional[tuple[int, int]]:
     return int(match.group(1)), int(match.group(2) or 0)
 
 
-def _claude_effort(thinking_budget: Optional[int]) -> str:
-    """The effort level that stands in for a thinking budget on Claude 4.6 and later."""
-    if not thinking_budget or thinking_budget <= 2048:
-        return "low"
-    if thinking_budget <= 8192:
-        return "medium"
-    return "high"
-
-
 def _anthropic_text(response: Any) -> str:
     """The text of an Anthropic message, failing clearly when the model declined the request."""
     text = "\n".join(
@@ -968,38 +1085,15 @@ def _anthropic_request_kwargs(
     model: str,
     system_prompt: str,
     messages: list[dict[str, str]],
-    thinking_budget: Optional[int],
+    thinking_level: Optional[str],
 ) -> dict[str, Any]:
-    """Build Anthropic Messages API arguments, enabling extended thinking on models that support it."""
-    create_kwargs: dict[str, Any] = {
+    """Build Anthropic Messages API arguments, with the thinking settings for the model's family."""
+    return {
         "model": model,
         "system": system_prompt,
         "messages": messages,
+        **_claude_thinking_kwargs(model, thinking_level),
     }
-
-    effective_budget = thinking_budget if thinking_budget is not None else DEFAULT_AI_THINKING_BUDGET
-    version = _claude_version(model)
-    if version is not None and version >= (4, 6):
-        thinking_on = bool(effective_budget and effective_budget > 0)
-        if thinking_on or version >= (4, 7):
-            # Adaptive thinking with an effort level replaces the token budget (refused from 4.7 on).
-            # From 4.7 on, temperature is refused and some models cannot turn thinking off, so
-            # a budget of 0 sends the lowest effort and leaves thinking at the model's default.
-            if thinking_on:
-                create_kwargs["thinking"] = {"type": "adaptive"}
-            create_kwargs["output_config"] = {"effort": _claude_effort(effective_budget)}
-            create_kwargs["max_tokens"] = 16000
-            return create_kwargs
-    if supports_claude_thinking(model) and effective_budget is not None and effective_budget > 0:
-        create_kwargs["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": effective_budget,
-        }
-        create_kwargs["max_tokens"] = max(4096, effective_budget + 2048)
-    else:
-        create_kwargs["max_tokens"] = 4096
-        create_kwargs["temperature"] = 0.2
-    return create_kwargs
 
 
 def _anthropic_error(e: Exception) -> Exception:
@@ -1028,7 +1122,7 @@ async def call_anthropic(
     system_prompt: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
     max_retries: int = 1,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
 ) -> tuple[str, int, int, int, int]:
     """
     Dispatch request to Anthropic Claude via the anthropic SDK.
@@ -1040,7 +1134,7 @@ async def call_anthropic(
         model,
         effective_system_prompt,
         [{"role": "user", "content": prompt}],
-        thinking_budget,
+        thinking_level,
     )
 
     try:
@@ -1155,7 +1249,7 @@ async def execute_ai_analysis(
     timeout: float = DEFAULT_AI_TIMEOUT,
     fallback_models: Optional[list[str]] = None,
     on_progress: Optional[Callable[[dict], Any]] = None,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
 ) -> tuple[str, str, str, str, str, int, int, int, int, str, list[str]]:
     """
     Unified entrypoint to run on-demand AI analysis with automatic multi-model failover.
@@ -1210,7 +1304,7 @@ async def execute_ai_analysis(
             "prompt": prompt,
             "system_prompt": system_prompt,
             "timeout": timeout,
-            "thinking_budget": thinking_budget,
+            "thinking_level": thinking_level,
         }
         if norm_provider in _OPENAI_PROVIDERS:
             dispatch_kwargs["base_url"] = base_url
@@ -1293,7 +1387,7 @@ async def dispatch_multi_turn_gemini(
     messages: ConversationMessages,
     system_prompt: str,
     timeout: float = DEFAULT_AI_TIMEOUT,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
     on_delta: Optional[Callable[[str], Any]] = None,
 ) -> tuple[str, int, int, int, int]:
     """
@@ -1317,18 +1411,20 @@ async def dispatch_multi_turn_gemini(
 
         chunks: list[str] = []
         usage = None
-        async with asyncio.timeout(timeout):
-            stream = await client.aio.models.generate_content_stream(
-                model=model,
-                contents=contents,
-                config=_gemini_generation_config(model, system_prompt, thinking_budget),
-            )
+
+        async def send(config: genai_types.GenerateContentConfig) -> None:
+            # A refused thinking level fails before the first chunk, so a retry starts from nothing
+            nonlocal usage
+            stream = await client.aio.models.generate_content_stream(model=model, contents=contents, config=config)
             async for chunk in stream:
                 text = chunk.text
                 if text:
                     chunks.append(text)
                     await _notify(on_delta, text)
                 usage = getattr(chunk, "usage_metadata", None) or usage
+
+        async with asyncio.timeout(timeout):
+            await _gemini_send(model, system_prompt, thinking_level, send)
 
         text = "".join(chunks)
         if not text.strip():
@@ -1359,6 +1455,7 @@ async def dispatch_multi_turn_openai(
     system_prompt: str,
     base_url: Optional[str] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
+    thinking_level: Optional[str] = None,
     on_delta: Optional[Callable[[str], Any]] = None,
 ) -> tuple[str, int, int, int, int]:
     """
@@ -1375,7 +1472,7 @@ async def dispatch_multi_turn_openai(
         create_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "system", "content": system_prompt}] + messages,
-            **_openai_sampling_kwargs(model),
+            **_openai_sampling_kwargs(model, thinking_level),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -1423,7 +1520,7 @@ async def dispatch_multi_turn_anthropic(
     messages: ConversationMessages,
     system_prompt: str,
     timeout: float = DEFAULT_AI_TIMEOUT,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
     on_delta: Optional[Callable[[str], Any]] = None,
 ) -> tuple[str, int, int, int, int]:
     """
@@ -1432,7 +1529,7 @@ async def dispatch_multi_turn_anthropic(
     Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used).
     """
     client = AsyncAnthropic(api_key=api_key or "no-key", timeout=timeout)
-    create_kwargs = _anthropic_request_kwargs(model, system_prompt, messages, thinking_budget)
+    create_kwargs = _anthropic_request_kwargs(model, system_prompt, messages, thinking_level)
 
     try:
         chunks: list[str] = []
@@ -1483,7 +1580,7 @@ async def execute_ai_follow_up(
     messages: ConversationMessages,
     fallback_models: Optional[list[str]] = None,
     timeout: float = DEFAULT_AI_TIMEOUT,
-    thinking_budget: Optional[int] = None,
+    thinking_level: Optional[str] = None,
     on_progress: Optional[Callable[[dict], Any]] = None,
 ) -> tuple[str, int, int, int, int, str, list[str]]:
     """
@@ -1526,7 +1623,7 @@ async def execute_ai_follow_up(
                     messages=messages,
                     system_prompt=FOLLOW_UP_SYSTEM_PROMPT,
                     timeout=timeout,
-                    thinking_budget=thinking_budget,
+                    thinking_level=thinking_level,
                     on_delta=on_delta,
                 )
             elif norm_provider == "anthropic":
@@ -1536,7 +1633,7 @@ async def execute_ai_follow_up(
                     messages=messages,
                     system_prompt=FOLLOW_UP_SYSTEM_PROMPT,
                     timeout=timeout,
-                    thinking_budget=thinking_budget,
+                    thinking_level=thinking_level,
                     on_delta=on_delta,
                 )
             else:
@@ -1547,6 +1644,7 @@ async def execute_ai_follow_up(
                     system_prompt=FOLLOW_UP_SYSTEM_PROMPT,
                     base_url=base_url,
                     timeout=timeout,
+                    thinking_level=thinking_level,
                     on_delta=on_delta,
                 )
             text, tokens_in, tokens_out, tokens_thoughts, tokens_used = result

@@ -184,6 +184,9 @@ class AiProviderConfig(BaseModel):
         return v
 
 
+AiThinkingLevel = Literal["off", "low", "medium", "high"]
+
+
 class SettingsResponse(BaseModel):
     """Application runtime configuration response with masked secrets."""
     ai_enabled: bool = False
@@ -204,7 +207,7 @@ class SettingsResponse(BaseModel):
 
     # Advanced System Settings
     ai_timeout: float = 45.0
-    ai_thinking_budget: int = 1024
+    ai_thinking_level: AiThinkingLevel = "low"
     app_url: str = ""
     allow_private_notification_targets: bool = True
     enable_docker: bool = True
@@ -273,9 +276,9 @@ class SettingsUpdateRequest(BaseModel):
         None,
         description="AI completion request timeout in seconds (must be > 0.0).",
     )
-    ai_thinking_budget: Optional[int] = Field(
+    ai_thinking_level: Optional[AiThinkingLevel] = Field(
         None,
-        description="Thinking token budget for reasoning models (integer >= 0, 0 disables).",
+        description="How much reasoning models may think: off (or the lowest the model allows), low, medium or high.",
     )
     app_url: Optional[str] = Field(
         None,
@@ -383,13 +386,6 @@ class SettingsUpdateRequest(BaseModel):
     def validate_ai_timeout(cls, v: Optional[float]) -> Optional[float]:
         if v is not None and v <= 0.0:
             raise ValueError("ai_timeout must be a float greater than 0.0")
-        return v
-
-    @field_validator("ai_thinking_budget")
-    @classmethod
-    def validate_ai_thinking_budget(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v < 0:
-            raise ValueError("ai_thinking_budget must be an integer greater than or equal to 0")
         return v
 
     @field_validator("app_url")

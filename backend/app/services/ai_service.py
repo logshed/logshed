@@ -19,7 +19,7 @@ from fastapi import HTTPException, status
 from app.api.deps import run_db_query
 from app.core.config import (
     DEFAULT_AI_MODEL,
-    DEFAULT_AI_THINKING_BUDGET,
+    DEFAULT_AI_THINKING_LEVEL,
     DEFAULT_AI_TIMEOUT,
     get_all_system_settings,
     get_cached_setting,
@@ -193,7 +193,7 @@ def resolve_ai_provider_settings(
         "base_url": base_url,
         "fallback_models": fallback_models,
         "ai_timeout": float(get_cached_setting("ai_timeout", DEFAULT_AI_TIMEOUT)),
-        "ai_thinking_budget": int(get_cached_setting("ai_thinking_budget", DEFAULT_AI_THINKING_BUDGET)),
+        "ai_thinking_level": get_cached_setting("ai_thinking_level", DEFAULT_AI_THINKING_LEVEL),
         "ai_enabled": ai_enabled,
         "has_ai_api_key": bool(api_key.strip()),
     }

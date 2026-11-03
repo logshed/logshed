@@ -207,7 +207,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         check_for_updates=check_for_updates,
         maintenance_until=maintenance_until,
         ai_timeout=resolved["ai_timeout"],
-        ai_thinking_budget=resolved["ai_thinking_budget"],
+        ai_thinking_level=resolved["ai_thinking_level"],
         app_url=resolved["app_url"],
         allow_private_notification_targets=resolved["allow_private_notification_targets"],
         enable_docker=resolved["enable_docker"],
@@ -336,8 +336,8 @@ async def update_settings(
         if req.ai_timeout is not None:
             updates.append(("ai_timeout", str(req.ai_timeout), 0))
 
-        if req.ai_thinking_budget is not None:
-            updates.append(("ai_thinking_budget", str(req.ai_thinking_budget), 0))
+        if req.ai_thinking_level is not None:
+            updates.append(("ai_thinking_level", req.ai_thinking_level, 0))
 
         if req.app_url is not None:
             updates.append(("app_url", req.app_url, 0))
