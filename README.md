@@ -156,7 +156,7 @@ No minimum hardware has been tested. These figures were measured on one test set
 ## Quick Start
 
 > [!IMPORTANT]
-> **Updating from 1.2.x?** The first start of 1.3.0 migrates the database, so back up `/data` first if you may want to return to 1.2.x. Read the [upgrade notes](CHANGELOG.md#upgrade-notes) too: among other changes, the API docs now need a login and `PUID` or `PGID` set to `0` will stop working in a later release.
+> **Updating from 1.2.x?** The first start of 1.3.0 migrates the database, so back up `/data` first if you may want to return to 1.2.x. Read the [upgrade notes](CHANGELOG.md#upgrade-notes) too: among other changes, alert history older than the retention period is deleted on the first start, the API docs now need a login and `PUID` or `PGID` set to `0` will stop working in a later release.
 
 ### Docker Compose (Recommended)
 
