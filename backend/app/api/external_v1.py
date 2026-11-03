@@ -692,6 +692,9 @@ def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
 _MAX_CURSOR_LENGTH = 200
 _INVALID_CURSOR_DETAIL = "Invalid cursor. Use the next_cursor value returned by the previous page."
 _TOTAL_CAP = 1001
+# Characters of message plus raw one page of GET /api/v1/logs redacts and returns at most (about
+# 8 MB); a page that reaches it ends early with a next_cursor. It always holds at least one row.
+LOG_PAGE_TEXT_BUDGET = 8 * 1024 * 1024
 
 
 def _encode_log_cursor(timestamp: str, log_id: int) -> str:
@@ -782,6 +785,14 @@ async def search_logs_v1(
         # One extra row signals another page exists
         has_more = len(rows) > limit
         rows = rows[:limit]
+        # Stop at the text budget, so one request cannot redact up to limit times two 64 KB fields
+        text_chars = 0
+        for kept, r in enumerate(rows, start=1):
+            text_chars += len(r["message"] or "") + (len(r["raw"] or "") if include_raw else 0)
+            if text_chars >= LOG_PAGE_TEXT_BUDGET and kept < len(rows):
+                rows = rows[:kept]
+                has_more = True
+                break
         next_cursor = _encode_log_cursor(str(rows[-1]["timestamp"]), rows[-1]["id"]) if has_more else None
         logs_list = [_row_to_log_entry(r, include_raw) for r in rows]
         return logs_list, total, next_cursor

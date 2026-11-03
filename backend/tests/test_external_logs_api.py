@@ -790,6 +790,82 @@ class TestKeysetPagination:
         assert "TEMP B-TREE FOR ORDER BY" not in details
 
 
+class TestLogPageTextBudget:
+    """A page of GET /api/v1/logs stops at the text budget of message plus raw and returns a cursor."""
+
+    @staticmethod
+    def _seed(db_path: Path, count: int, size: int) -> list[int]:
+        with get_connection(db_path) as conn:
+            for i in range(count):
+                ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
+                _insert_log_at(conn, ts, message=f"m{i:04d} " + "m" * (size - 6), raw=f"r{i:04d} " + "r" * (size - 6))
+            conn.commit()
+            return [r[0] for r in conn.execute("SELECT id FROM logs ORDER BY timestamp DESC, id DESC")]
+
+    @pytest.mark.asyncio
+    async def test_large_rows_stop_at_the_budget_with_a_cursor(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
+    ):
+        from app.api.external_v1 import LOG_PAGE_TEXT_BUDGET
+
+        expected = self._seed(tmp_path / "logs.db", 150, 65536)
+        rows_per_page = LOG_PAGE_TEXT_BUDGET // (2 * 65536)
+
+        res = await client.get(
+            "/api/v1/logs", params={"limit": 1000, "include_raw": "true"}, headers=logs_token_headers
+        )
+        body = res.json()
+        assert res.status_code == 200
+        assert len(body["logs"]) == rows_per_page
+        assert body["next_cursor"]
+        assert body["total"] == 150
+
+        # Every row comes back once, in order, over the following pages
+        entries, pages = await TestKeysetPagination()._collect(
+            client, logs_token_headers, limit=1000, include_raw="true"
+        )
+        assert [e["id"] for e in entries] == expected
+        assert pages == 3
+
+        # Without raw only the message counts, so a page holds twice as many rows
+        res = await client.get("/api/v1/logs", params={"limit": 1000}, headers=logs_token_headers)
+        assert len(res.json()["logs"]) == 2 * rows_per_page
+
+    @pytest.mark.asyncio
+    async def test_small_rows_are_unaffected(self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path):
+        expected = self._seed(tmp_path / "logs.db", 300, 200)
+
+        res = await client.get(
+            "/api/v1/logs", params={"limit": 1000, "include_raw": "true"}, headers=logs_token_headers
+        )
+        body = res.json()
+        assert [e["id"] for e in body["logs"]] == expected
+        assert body["next_cursor"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_page_always_holds_one_row_and_ends_without_cursor_on_the_last_row(
+        self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path, monkeypatch
+    ):
+        import app.api.external_v1 as external_v1
+
+        expected = self._seed(tmp_path / "logs.db", 6, 100)
+        monkeypatch.setattr(external_v1, "LOG_PAGE_TEXT_BUDGET", 50)
+        entries, pages = await TestKeysetPagination()._collect(client, logs_token_headers, limit=10)
+        assert [e["id"] for e in entries] == expected
+        assert pages == 6
+
+        # The budget is reached on the page's last row and nothing follows: no cursor
+        monkeypatch.setattr(external_v1, "LOG_PAGE_TEXT_BUDGET", 600)
+        res = await client.get("/api/v1/logs", params={"limit": 10}, headers=logs_token_headers)
+        body = res.json()
+        assert len(body["logs"]) == 6
+        assert body["next_cursor"] is None
+        res = await client.get("/api/v1/logs", params={"limit": 10, "include_raw": "true"}, headers=logs_token_headers)
+        body = res.json()
+        assert len(body["logs"]) == 3
+        assert body["next_cursor"]
+
+
 class TestFtsFallbackAndConsistency:
     """FTS5 syntax error fallback, busy mapping and indexer wake-up on the v1 log endpoints."""
 
