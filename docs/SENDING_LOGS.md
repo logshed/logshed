@@ -342,7 +342,7 @@ Create an API token in **Settings > API & MCP Access** with the `logs:write` sco
 - a single JSON object: `{"message": "a"}`, on one line or spread over several (pretty-printed);
 - newline-delimited JSON (NDJSON), one entry per line (a line may also hold an array of entries).
 
-A malformed body is refused with `400` naming the line, and nothing from it is stored. Values that are not objects (numbers, strings, `null`) are skipped.
+A malformed body is refused with `400` naming the line, and nothing from it is stored. So is a body or NDJSON line that is a bare value instead of an object (a number, a string, `true`, `false` or `null`): "Log entry on line N is not a JSON object." Inside an array, values that are not objects are skipped, so one bad item does not drop the rest of the batch.
 
 | Field | Meaning | Default |
 |---|---|---|

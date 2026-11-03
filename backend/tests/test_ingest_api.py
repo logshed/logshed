@@ -1026,7 +1026,26 @@ class TestIngestMalformedPayloads:
         assert _queued_entries() == []
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("body", ["42", '"just text"', "null", "true", "[1, 2, null]", "\n\n"])
+    @pytest.mark.parametrize(
+        "body, line",
+        [
+            ("42", 1),
+            ('"just text"', 1),
+            ("null", 1),
+            ("true", 1),
+            ('{"message": "a"}\n"just text"\n{"message": "c"}', 2),
+            ('{"message": "a"}\n\n7', 3),
+        ],
+        ids=["number", "string", "null", "true", "string ndjson line", "number after a blank line"],
+    )
+    async def test_a_bare_value_is_refused_naming_its_line(self, client, write_token, body, line):
+        resp = await self._post(client, write_token, body)
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == f"Log entry on line {line} is not a JSON object."
+        assert _queued_entries() == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", ["[1, 2, null]", "[]", "\n\n"])
     async def test_a_body_with_no_objects_accepts_nothing(self, client, write_token, body):
         resp = await self._post(client, write_token, body)
         assert resp.status_code == 200
@@ -1044,7 +1063,7 @@ class TestIngestMalformedPayloads:
 
     @pytest.mark.asyncio
     async def test_ndjson_lines_may_hold_arrays_and_skip_non_objects(self, client, write_token):
-        body = '{"message": "one"}\n[{"message": "two"}, {"message": "three"}, 7]\n"ignored"\n\n{"message": "four"}'
+        body = '{"message": "one"}\n[{"message": "two"}, {"message": "three"}, 7]\n\n{"message": "four"}'
         resp = await self._post(client, write_token, body)
         assert resp.status_code == 200
         assert resp.json()["accepted"] == 4

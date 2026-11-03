@@ -318,14 +318,20 @@ async def ingest_logs(
                 continue
             try:
                 item = json.loads(line)
-                if isinstance(item, dict):
-                    raw_entries.append(item)
-                elif isinstance(item, list):
-                    raw_entries.extend([x for x in item if isinstance(x, dict)])
             except json.JSONDecodeError as err:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid JSON payload on line {idx + 1}: {err}",
+                )
+            if isinstance(item, dict):
+                raw_entries.append(item)
+            elif isinstance(item, list):
+                # Non-objects inside an array are skipped, so one bad item does not drop the batch
+                raw_entries.extend([x for x in item if isinstance(x, dict)])
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Log entry on line {idx + 1} is not a JSON object.",
                 )
 
     if not raw_entries:
