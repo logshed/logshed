@@ -50,8 +50,13 @@ def _log_id(entry: dict[str, Any]) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+# A threshold window keeps whole entries only for its newest matches: the alert dispatch reads the
+# newest as the notification sample and at most this many as AI context; older ones keep the light record.
+FULL_ENTRIES_KEPT = 50
+
+
 def _rate_payload(entry: dict[str, Any]) -> dict[str, Any]:
-    """The light record a rate rule keeps of a match, instead of the whole log entry."""
+    """The light record a rate rule (and a threshold rule, past its newest matches) keeps of a match."""
     return {
         "id": entry.get("id"),
         "timestamp": entry.get("timestamp"),
@@ -270,7 +275,8 @@ class AlertEvaluator:
         self._rules: list[CompiledAlertRule] = []
         # Built from self._rules on first use after each change of the list
         self._index: Optional[RuleIndex[CompiledAlertRule]] = None
-        # A deque of (epoch, entry) per threshold rule, a RateWindow per rate rule
+        # A deque of (epoch, entry) per threshold rule (whole entries only for the newest
+        # FULL_ENTRIES_KEPT, light records before them), a RateWindow per rate rule
         self._windows: dict[int, Union[deque[tuple[float, dict[str, Any]]], RateWindow]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self._lock = threading.Lock()
@@ -509,7 +515,15 @@ class AlertEvaluator:
                             idx = len(window)
                             while idx > 0 and (window[idx - 1][0] if isinstance(window[idx - 1], (tuple, list)) else window[idx - 1]) > entry_epoch:
                                 idx -= 1
-                            window.insert(idx, (entry_epoch, entry))
+                            if len(window) - idx >= FULL_ENTRIES_KEPT:
+                                window.insert(idx, (entry_epoch, _rate_payload(entry)))
+                            else:
+                                window.insert(idx, (entry_epoch, entry))
+
+                        # The match that just left the newest FULL_ENTRIES_KEPT keeps only the light record
+                        if len(window) > FULL_ENTRIES_KEPT:
+                            older_epoch, older_entry = window[-FULL_ENTRIES_KEPT - 1]
+                            window[-FULL_ENTRIES_KEPT - 1] = (older_epoch, _rate_payload(older_entry))
 
                         # Bound maximum deque size
                         while len(window) > max_window_size:
@@ -819,7 +833,7 @@ class AlertEvaluator:
                             severity=l.get("severity"),
                             raw=l.get("raw"),
                         )
-                        for l in triggering_logs[-50:]  # Cap at recent 50 logs
+                        for l in triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
                     ]
                     redacted_lines = await asyncio.to_thread(redact, raw_lines)
                     redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)

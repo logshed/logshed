@@ -2625,3 +2625,117 @@ class TestRateRuleCountsInsteadOfStoring:
         conn.close()
         evaluator.reload_rules()
         assert len(evaluator._windows[rule_id]) == 0
+
+
+class TestThresholdWindowKeepsWholeEntriesOnlyForTheNewest:
+    """A threshold window keeps whole entries for its newest matches and light records before them."""
+
+    @pytest.fixture
+    def test_db(self, tmp_path: Path):
+        db_file = tmp_path / "test_threshold_window_shape.db"
+        run_migrations(db_file)
+        return db_file
+
+    @staticmethod
+    def _insert_rule(db_file: Path, threshold: int, ai: bool = False) -> int:
+        if ai:
+            _turn_ai_on(db_file)
+        conn = get_connection(db_file)
+        cur = conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, filter_app, match_pattern, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES ('Big Lines', 'threshold', 'worker', 'failure', ?, 300, 0, ?, 1, ?)
+            """,
+            (threshold, 1 if ai else 0, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        rule_id = cur.lastrowid
+        conn.close()
+        return rule_id
+
+    @staticmethod
+    def _entries(count: int, start: datetime) -> list[dict]:
+        return [
+            {
+                "id": i + 1,
+                "app_name": "worker",
+                "source_alias": "node-1",
+                "source_ip": "10.0.0.1",
+                "severity": 3,
+                "message": f"failure {i} from 10.0.{i % 250}.9 " + "m" * 2000,
+                "raw": f"<131>worker: failure {i} " + "r" * 60000,
+                "timestamp": (start + timedelta(milliseconds=10 * i)).isoformat(),
+            }
+            for i in range(count)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_window_holds_whole_entries_for_the_newest_fifty_only(self, test_db: Path):
+        from app.services.alert_evaluator import FULL_ENTRIES_KEPT
+
+        rule_id = self._insert_rule(test_db, threshold=1000)
+        evaluator = AlertEvaluator(test_db)
+        entries = self._entries(300, datetime.now(timezone.utc) - timedelta(seconds=30))
+        # Out of order: a late batch of older logs goes deep into the window, a few land among the newest
+        await evaluator.evaluate_batch(entries[:200])
+        await evaluator.evaluate_batch(entries[250:])
+        await evaluator.evaluate_batch(entries[200:250])
+        await evaluator.stop()
+
+        window = list(evaluator._windows[rule_id])
+        assert [payload["id"] for _, payload in window] == list(range(1, 301))
+        whole = [payload["id"] for _, payload in window if "raw" in payload]
+        assert whole == list(range(301 - FULL_ENTRIES_KEPT, 301))
+        light = [payload for _, payload in window[:-FULL_ENTRIES_KEPT]]
+        assert all(len(payload["message"]) <= 200 for payload in light)
+        assert all(payload["app_name"] == "worker" and payload["source_alias"] == "node-1" for payload in light)
+
+    @pytest.mark.asyncio
+    async def test_firing_sends_the_same_sample_and_ai_lines(self, test_db: Path, monkeypatch):
+        from app.core.redactor import redact
+        from app.services.ai_engine import format_prompt_log_line
+        from app.services.notifier import NotifierService
+        import app.services.ai_engine as ai_engine
+
+        self._insert_rule(test_db, threshold=120, ai=True)
+        captured: dict = {}
+        bodies: list[str] = []
+
+        async def mock_execute_ai_analysis(**kwargs):
+            captured.update(kwargs)
+            return AiAnalysisResult(
+                summary="Summary.", root_cause="Cause.", remediation="Fix.", raw_response="raw",
+                prompt_sent="prompt", tokens_in=1, tokens_out=1, tokens_thoughts=0, tokens_used=2,
+                model_used="gemini-2.5-flash",
+            )
+
+        async def mock_send(self, title, body, channel_id=None):
+            bodies.append(body)
+            return True
+
+        monkeypatch.setattr(ai_engine, "execute_ai_analysis", mock_execute_ai_analysis)
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        entries = self._entries(120, datetime.now(timezone.utc) - timedelta(seconds=30))
+        evaluator = AlertEvaluator(test_db)
+        await evaluator.evaluate_batch(entries[:60])
+        await evaluator.evaluate_batch(entries[60:])
+        await evaluator.stop()
+
+        expected_lines = redact([
+            format_prompt_log_line(
+                timestamp=e["timestamp"], source=e["source_alias"], app_name=e["app_name"],
+                message=e["message"], severity=e["severity"], raw=e["raw"],
+            )
+            for e in entries[-50:]
+        ])
+        assert captured["redacted_logs"] == "\n".join(expected_lines)
+        assert captured["log_count"] == 120
+        assert len(bodies) == 1
+        assert "failure 119 from 10.0.119.9" in bodies[0]
+        conn = get_connection(test_db)
+        row = conn.execute("SELECT sample_log, sample_log_id FROM alert_history").fetchone()
+        conn.close()
+        assert row[0] == entries[-1]["message"][:1000]
+        assert row[1] == 120
