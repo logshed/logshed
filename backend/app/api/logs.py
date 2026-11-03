@@ -25,7 +25,9 @@ from app.models import (
 from app.core.utils import (
     expand_source_aliases,
     load_docker_source_aliases,
+    load_former_docker_aliases,
     parse_multi_values,
+    source_filter_sql,
 )
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 from app.services.log_query import (
@@ -89,7 +91,7 @@ async def list_logs(
         if parsed_sources:
             src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
             where_clauses.append(
-                f"(logs.source_alias IN ({src_placeholders}) OR (logs.source_ip IN ({src_placeholders}) AND (logs.source_alias IS NULL OR logs.source_alias NOT IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)) AND logs.source_ip != 'docker'))"
+                source_filter_sql(src_placeholders)
             )
             for i, s in enumerate(parsed_sources):
                 params[f"src_{i}"] = s
@@ -494,6 +496,7 @@ async def get_log_facets(
             "app_to_hosts": app_mapping,
             "truncated": truncated,
             "limit": FACET_LIMIT,
+            "former_docker_aliases": load_former_docker_aliases(conn),
         }
 
     data = await run_db_query(_fetch_facets)

@@ -25,7 +25,7 @@ from app.core.config import (
     parse_bool,
 )
 from app.core.security import decrypt_value, encrypt_value, keeps_stored_secret, mask_secret
-from app.core.utils import get_server_timezone_name, parse_iso_to_utc_datetime
+from app.core.utils import get_server_timezone_name, note_docker_alias_change, parse_iso_to_utc_datetime
 
 from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest, AiProviderConfig
 from app.services.ai_engine import DEFAULT_SYSTEM_PROMPT
@@ -489,6 +489,8 @@ async def update_settings(
                     now,
                 ),
             )
+        if req.docker_source_alias is not None and old_docker_alias_box[0] != req.docker_source_alias:
+            note_docker_alias_change(conn, old_docker_alias_box[0], req.docker_source_alias)
 
         conn.commit()
 

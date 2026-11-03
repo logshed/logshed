@@ -31,6 +31,7 @@ from app.collectors.syslog import reload_active_alias_caches
 from app.core.config import invalidate_settings_cache
 from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
+from app.core.utils import note_docker_alias_change
 from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
 
 logger = logging.getLogger(__name__)
@@ -312,6 +313,7 @@ async def create_docker_endpoint(
             ),
         )
         new_id = cur.lastrowid
+        note_docker_alias_change(conn, None, payload.source_alias.strip() or "docker")
         conn.commit()
         return new_id
 
@@ -484,6 +486,9 @@ async def update_docker_endpoint(
             ),
         )
 
+        if alias_val != row["source_alias"]:
+            note_docker_alias_change(conn, row["source_alias"], alias_val)
+
         # Synchronize primary endpoint updates back to system_settings
         if endpoint_id == 1:
             cur.execute(
@@ -583,13 +588,16 @@ async def delete_docker_endpoint(
 
     def _delete(conn: sqlite3.Connection):
         cur = conn.cursor()
-        cur.execute("SELECT id FROM docker_endpoints WHERE id = ?", (endpoint_id,))
-        if not cur.fetchone():
+        cur.execute("SELECT source_alias FROM docker_endpoints WHERE id = ?", (endpoint_id,))
+        row = cur.fetchone()
+        if not row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Docker endpoint not found.",
             )
         cur.execute("DELETE FROM docker_endpoints WHERE id = ?", (endpoint_id,))
+        # Its container logs keep their alias, so they must stay Docker rows
+        note_docker_alias_change(conn, row[0], None)
         conn.commit()
 
     await run_db_query(_delete)

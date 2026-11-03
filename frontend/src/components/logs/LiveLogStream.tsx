@@ -186,6 +186,37 @@ export function syncFiltersToUrl(filters: LogFilterParams) {
   }
 }
 
+/**
+ * Every source_alias that marks a row as Docker output: the configured Docker hosts' aliases and
+ * the former ones of deleted or renamed hosts (their old container logs keep them).
+ */
+export function buildDockerAliasSet(endpoints: DockerEndpoint[], formerAliases: string[]): Set<string> {
+  const s = new Set<string>(formerAliases);
+  endpoints.forEach((ep) => {
+    if (ep.source_alias) s.add(ep.source_alias);
+  });
+  return s;
+}
+
+/**
+ * Give rows whose stored alias turns out to be a Docker alias that alias back. Rows prepared
+ * before the Docker hosts and former Docker aliases were loaded may show the syslog alias of
+ * their address instead. Returns the same array when nothing changes.
+ */
+export function restoreDockerAliases(
+  logs: ProcessedLogEntry[],
+  dockerAliases: Set<string>
+): ProcessedLogEntry[] {
+  let changed = false;
+  const next = logs.map((log) => {
+    const stored = log.storedSourceAlias;
+    if (!stored || log.source_alias === stored || !dockerAliases.has(stored)) return log;
+    changed = true;
+    return { ...log, source_alias: stored };
+  });
+  return changed ? next : logs;
+}
+
 export function prepareLogEntry(
   entry: LogEntry | ProcessedLogEntry,
   aliases?: Record<string, string>,
@@ -194,22 +225,24 @@ export function prepareLogEntry(
   todayKey?: string,
 ): ProcessedLogEntry {
   const existing = entry as ProcessedLogEntry;
+  const storedSourceAlias = existing.storedSourceAlias ?? entry.source_alias;
   const isDocker =
     entry.source_ip === 'docker' ||
     Boolean(
-      dockerAliases && entry.source_alias && dockerAliases.has(entry.source_alias)
+      dockerAliases && storedSourceAlias && dockerAliases.has(storedSourceAlias)
     );
 
   const canonical =
     !isDocker &&
     aliases &&
-    ((entry.source_alias && aliases[entry.source_alias]) ||
+    ((storedSourceAlias && aliases[storedSourceAlias]) ||
       (entry.source_ip && aliases[entry.source_ip]));
-  const source_alias = canonical || entry.source_alias;
+  const source_alias = canonical || storedSourceAlias;
 
   return {
     ...entry,
     source_alias,
+    storedSourceAlias,
     formattedTimestamp:
       existing.formattedTimestamp ??
       formatStreamTimestamp(entry.timestamp, entry.received_at, timeZone, todayKey),
@@ -519,6 +552,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [dockerEndpoints, setDockerEndpoints] = useState<DockerEndpoint[]>([]);
   const dockerEndpointsRef = useRef<DockerEndpoint[]>([]);
   const dockerAliasesRef = useRef<Set<string>>(new Set());
+  const [formerDockerAliases, setFormerDockerAliases] = useState<string[]>([]);
+  const formerDockerAliasesRef = useRef<string[]>([]);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [missedLogsCount, setMissedLogsCount] = useState<number>(0);
   const [selectedLogIds, setSelectedLogIds] = useState<Set<number>>(new Set());
@@ -657,11 +692,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
       setDockerEndpoints(endpointsList);
       dockerEndpointsRef.current = endpointsList;
-      const s = new Set<string>();
-      endpointsList.forEach((ep) => {
-        if (ep.source_alias) s.add(ep.source_alias);
-      });
-      dockerAliasesRef.current = s;
+      dockerAliasesRef.current = buildDockerAliasSet(endpointsList, formerDockerAliasesRef.current);
+      const dockerAliases = dockerAliasesRef.current;
+      setLogs((prev) => restoreDockerAliases(prev, dockerAliases));
     });
   }, [knownAliases]);
 
@@ -694,15 +727,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         if (endpointsList) {
           setDockerEndpoints(endpointsList);
           dockerEndpointsRef.current = endpointsList;
-          const s = new Set<string>();
-          endpointsList.forEach((ep) => {
-            if (ep.source_alias) s.add(ep.source_alias);
-          });
-          dockerAliasesRef.current = s;
+          dockerAliasesRef.current = buildDockerAliasSet(endpointsList, formerDockerAliasesRef.current);
         }
 
         // Build all current and previous Docker aliases to reliably identify Docker logs
-        const allDockerAliases = new Set<string>();
+        const allDockerAliases = new Set<string>(formerDockerAliasesRef.current);
         endpointsList?.forEach((ep) => {
           if (ep.source_alias) allDockerAliases.add(ep.source_alias);
         });
@@ -1512,6 +1541,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   useEffect(() => {
     fetchLogFacets()
       .then((facets) => {
+        const former = facets.former_docker_aliases ?? [];
+        formerDockerAliasesRef.current = former;
+        setFormerDockerAliases(former);
+        dockerAliasesRef.current = buildDockerAliasSet(dockerEndpointsRef.current, former);
+        const dockerAliases = dockerAliasesRef.current;
+        setLogs((prev) => restoreDockerAliases(prev, dockerAliases));
         setFacetsTruncated(Boolean(facets.truncated));
         setFacetsLimit(facets.limit);
         const hasFacets = (facets.sources?.length ?? 0) > 0 || (facets.apps?.length ?? 0) > 0;
@@ -2348,6 +2383,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onEditDockerHost={onEditDockerHost}
           onManageDeletedDockerHost={onManageDeletedDockerHost}
           dockerEndpoints={dockerEndpoints}
+          formerDockerAliases={formerDockerAliases}
           isHostAliased={
             activeLogDetail
               ? Boolean(

@@ -1005,3 +1005,98 @@ class TestAdditionalHostsEnvParsing:
         with caplog.at_level("WARNING", logger="app.core.config"):
             assert get_docker_additional_hosts() == []
         assert any("DOCKER_ADDITIONAL_HOSTS" in r.getMessage() for r in caplog.records)
+
+
+class TestFormerDockerHostLogsStayDocker:
+    """Logs of a deleted or renamed Docker host keep counting as Docker rows."""
+
+    _IP = "192.168.1.60"
+
+    def _seed_nas(self, db_file: Path) -> None:
+        _seed_endpoint(db_file, id=2, name="NAS", url=f"tcp://{self._IP}:2375", source_alias="nas-docker")
+        _seed_logs(db_file, [(self._IP, "nas-docker", "container line"), (self._IP, self._IP, "syslog line")])
+
+    @staticmethod
+    def _former(db_file: Path) -> list[str]:
+        from app.core.utils import load_former_docker_aliases
+
+        with get_connection(db_file) as conn:
+            return load_former_docker_aliases(conn)
+
+    async def _messages(self, client: AsyncClient, headers: dict, source: str) -> list[str]:
+        resp = await client.get("/api/logs", params={"source": source}, headers=headers)
+        assert resp.status_code == 200
+        return sorted(log["message"] for log in resp.json()["logs"])
+
+    @pytest.mark.asyncio
+    async def test_deleted_host_rows_keep_their_alias_and_stay_out_of_syslog_filters(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        db_file = tmp_path / "docker_hosts_test.db"
+        self._seed_nas(db_file)
+
+        resp = await client.delete("/api/docker/hosts/2", headers=auth_headers)
+        assert resp.status_code == 200
+        resp = await client.post("/api/aliases", json={"ip": self._IP, "alias": "nas"}, headers=auth_headers)
+        assert resp.status_code == 200
+
+        # The syslog alias save relabels only the syslog row
+        assert _log_aliases(db_file, self._IP) == ["nas-docker", "nas"]
+        assert await self._messages(client, auth_headers, "nas") == ["syslog line"]
+        assert await self._messages(client, auth_headers, self._IP) == ["syslog line"]
+        assert await self._messages(client, auth_headers, "nas-docker") == ["container line"]
+
+        facets = (await client.get("/api/logs/facets", headers=auth_headers)).json()
+        assert {"nas", "nas-docker"} <= set(facets["sources"])
+        assert facets["former_docker_aliases"] == ["nas-docker"]
+
+        resp = await client.post("/api/logs/delete/preview", json={"sources": ["nas"]}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["matched_count"] == 1
+
+        token = (
+            await client.post("/api/tokens", json={"name": "Reader", "scopes": ["logs:read"]}, headers=auth_headers)
+        ).json()["raw_token"]
+        resp = await client.get(
+            "/api/v1/logs", params={"source": "nas"}, headers={"Authorization": f"Bearer {token}"}
+        )
+        assert [log["message"] for log in resp.json()["logs"]] == ["syslog line"]
+
+    @pytest.mark.asyncio
+    async def test_former_alias_list_follows_creates_renames_and_deletes(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        db_file = tmp_path / "docker_hosts_test.db"
+        self._seed_nas(db_file)
+
+        assert (await client.put("/api/docker/hosts/2", json={"source_alias": "nas-box"}, headers=auth_headers)).status_code == 200
+        assert self._former(db_file) == ["nas-docker"]
+        assert (await client.delete("/api/docker/hosts/2", headers=auth_headers)).status_code == 200
+        assert self._former(db_file) == ["nas-docker", "nas-box"]
+
+        # Adding a Docker host again with a former alias takes it off the list
+        resp = await client.post(
+            "/api/docker/hosts",
+            json={"name": "NAS", "url": f"tcp://{self._IP}:2375", "source_alias": "nas-docker"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert self._former(db_file) == ["nas-box"]
+
+        # The primary host renamed from Settings
+        assert (await client.post("/api/settings", json={"docker_source_alias": "main"}, headers=auth_headers)).status_code == 200
+        assert self._former(db_file) == ["nas-box"]  # "docker" always counts as Docker, so it is not listed
+        assert (await client.post("/api/settings", json={"docker_source_alias": "main-2"}, headers=auth_headers)).status_code == 200
+        assert self._former(db_file) == ["nas-box", "main"]
+
+    @pytest.mark.asyncio
+    async def test_syslog_alias_cannot_take_a_former_docker_alias(
+        self, client: AsyncClient, auth_headers: dict, tmp_path: Path
+    ):
+        db_file = tmp_path / "docker_hosts_test.db"
+        self._seed_nas(db_file)
+        assert (await client.delete("/api/docker/hosts/2", headers=auth_headers)).status_code == 200
+
+        resp = await client.post("/api/aliases", json={"ip": self._IP, "alias": "NAS-Docker"}, headers=auth_headers)
+        assert resp.status_code == 409
+        assert "deleted or renamed" in resp.json()["detail"]

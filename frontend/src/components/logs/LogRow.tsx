@@ -6,6 +6,8 @@ import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp } from '../
 import { getCachedServerTimezone } from '../../api/settings.ts';
 
 export interface ProcessedLogEntry extends LogEntry {
+  /** source_alias as stored, before prepareLogEntry shows a syslog host alias in its place. */
+  storedSourceAlias?: string;
   formattedTimestamp?: string;
   cleanedMessage?: string;
   strippedMessage?: string;

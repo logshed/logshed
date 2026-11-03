@@ -1013,6 +1013,9 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 <p className="text-slate-400 leading-relaxed">
                   The Docker host endpoint for <span className="font-mono text-slate-200 font-semibold">{deletedHostNotice.name}</span> is no longer configured in LogShed. You can re-add it as a Docker host or map its IP address as a Syslog host alias.
                 </p>
+                <p className="text-slate-400 leading-relaxed">
+                  Its old container logs keep their Docker label either way: a Syslog host alias applies only to the syslog logs from that address.
+                </p>
                 <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
                   <div>
                     <span className="text-slate-400">Host / Alias:</span> {deletedHostNotice.name}

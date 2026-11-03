@@ -5,6 +5,7 @@ Shared core utility functions for string matching, normalization, and timestamp 
 import datetime
 import fnmatch
 import functools
+import json
 import os
 import re
 import zoneinfo
@@ -166,10 +167,81 @@ def parse_multi_values(values: Optional[list[str]]) -> list[str]:
     return result
 
 
+# system_settings key holding a JSON list of the aliases of deleted Docker hosts and the old
+# aliases of renamed ones. Rows have no column that says which collector stored them, so this
+# list is what keeps those hosts' old container logs classed as Docker.
+FORMER_DOCKER_ALIASES_KEY = "former_docker_aliases"
+
+# Every source_alias that marks a row as Docker output in SQL (for IN and NOT IN): the alias of
+# each Docker host and each former Docker alias. load_docker_source_aliases is the Python side.
+# Only text items of a JSON array are read, so a damaged setting can never put NULL into NOT IN.
+DOCKER_ALIASES_SQL = (
+    "SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL"
+    " UNION SELECT value FROM json_each(COALESCE((SELECT value FROM system_settings"
+    f" WHERE key = '{FORMER_DOCKER_ALIASES_KEY}' AND json_valid(value) AND json_type(value) = 'array'), '[]'))"
+    " WHERE type = 'text'"
+)
+
+
+def source_filter_sql(placeholders: str) -> str:
+    """
+    The WHERE fragment for a host filter: rows whose alias is one of the names, or syslog and
+    ingest rows from one of the addresses (never Docker rows, which share the address).
+    """
+    return (
+        f"(logs.source_alias IN ({placeholders}) OR (logs.source_ip IN ({placeholders})"
+        f" AND (logs.source_alias IS NULL OR logs.source_alias NOT IN ({DOCKER_ALIASES_SQL}))"
+        " AND logs.source_ip != 'docker'))"
+    )
+
+
+def load_former_docker_aliases(conn: Any) -> list[str]:
+    """The aliases of deleted Docker hosts and the old aliases of renamed ones, oldest first."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = ?", (FORMER_DOCKER_ALIASES_KEY,)
+        ).fetchone()
+        values = json.loads(row[0]) if row and row[0] else []
+    except Exception:
+        return []
+    if not isinstance(values, list):
+        return []
+    return [v.strip() for v in values if isinstance(v, str) and v.strip()]
+
+
+def note_docker_alias_change(conn: Any, old_alias: Optional[str], new_alias: Optional[str]) -> None:
+    """
+    Record that a Docker host stopped using old_alias (deleted, or renamed to new_alias) and
+    started using new_alias (created or renamed). The old alias joins the former Docker aliases,
+    so the container logs that carry it stay Docker; the new one leaves that list. The caller
+    commits.
+    """
+    old_alias = (old_alias or "").strip()
+    new_alias = (new_alias or "").strip()
+    former = load_former_docker_aliases(conn)
+    updated = [a for a in former if a != new_alias]
+    if old_alias and old_alias != new_alias and old_alias != "docker" and old_alias not in updated:
+        updated.append(old_alias)
+    if updated == former:
+        return
+    conn.execute(
+        """
+        INSERT INTO system_settings (key, value, updated_at, is_encrypted)
+        VALUES (?, ?, ?, 0)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        """,
+        (
+            FORMER_DOCKER_ALIASES_KEY,
+            json.dumps(updated),
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        ),
+    )
+
+
 def load_docker_source_aliases(conn: Any) -> set[str]:
     """
     Return the source_alias values that mark a log row as Docker container output: every
-    Docker host alias, the primary Docker alias setting and "docker".
+    Docker host alias, the primary Docker alias setting, the former Docker aliases and "docker".
 
     Syslog and Docker rows from the same machine share a source_ip, so this set is what
     keeps them apart. Matching is exact (as in SQL `IN`), never case-insensitive.
@@ -185,6 +257,7 @@ def load_docker_source_aliases(conn: Any) -> set[str]:
             aliases.add(str(row[0]).strip())
     except Exception:
         pass
+    aliases.update(load_former_docker_aliases(conn))
     return aliases
 
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from app.core.migrations import get_connection
-from app.core.utils import expand_source_aliases, parse_multi_values
+from app.core.utils import expand_source_aliases, parse_multi_values, source_filter_sql
 from app.models import LogDeleteRequest
 from app.services.log_query import add_fts_filter, execute_with_fts_fallback, to_utc_bound
 
@@ -53,7 +53,7 @@ def build_deletion_filter(
         has_filter = True
         src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
         where_clauses.append(
-            f"(logs.source_alias IN ({src_placeholders}) OR (logs.source_ip IN ({src_placeholders}) AND (logs.source_alias IS NULL OR logs.source_alias NOT IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)) AND logs.source_ip != 'docker'))"
+            source_filter_sql(src_placeholders)
         )
         for i, s in enumerate(parsed_sources):
             params[f"src_{i}"] = s

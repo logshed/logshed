@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
-from app.core.utils import load_docker_source_aliases
+from app.core.utils import load_docker_source_aliases, load_former_docker_aliases
 from app.models import HostAliasCreate, HostAliasResponse, MessageResponse
 
 router = APIRouter(prefix="/aliases", tags=["Host Aliases"])
@@ -25,6 +25,14 @@ _ALIAS_CLASH_HINT = "Choose a different name so syslog and container logs from t
 def raise_if_alias_used_by_docker(conn, alias: str) -> None:
     """409 when a syslog host alias would match a Docker host alias (letter case ignored)."""
     folded = alias.strip().lower()
+    if any(a.lower() == folded for a in load_former_docker_aliases(conn)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"The alias '{alias.strip()}' belonged to a Docker host that was deleted or renamed, "
+                f"and its old container logs still carry it. {_ALIAS_CLASH_HINT}"
+            ),
+        )
     if any(a.lower() == folded for a in load_docker_source_aliases(conn)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

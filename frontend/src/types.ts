@@ -306,6 +306,8 @@ export interface LogFacetsResponse {
   truncated?: boolean;
   /** Most entries each list holds; truncated is true when more existed */
   limit?: number;
+  /** Aliases of deleted or renamed Docker hosts; rows that carry one are Docker rows */
+  former_docker_aliases?: string[];
 }
 
 export interface AiModelInfo {

@@ -208,6 +208,83 @@ class TestExpandSourceAliases:
 
 
 
+
+class TestFormerDockerAliases:
+    """Aliases of deleted or renamed Docker hosts keep their rows classed as Docker."""
+
+    @staticmethod
+    def _conn(tmp_path):
+        from app.core.migrations import get_connection, run_migrations
+
+        db_file = tmp_path / "former.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.executemany(
+            """
+            INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
+            VALUES ('2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z', '10.0.0.9', ?, 'web', 1, 6, ?, ?)
+            """,
+            [("old-docker", "container", "container"), ("10.0.0.9", "syslog", "syslog")],
+        )
+        conn.commit()
+        return conn
+
+    @staticmethod
+    def _filtered(conn) -> list[str]:
+        from app.core.utils import source_filter_sql
+
+        sql = f"SELECT message FROM logs WHERE {source_filter_sql(':s0')} ORDER BY id"
+        return [r[0] for r in conn.execute(sql, {"s0": "10.0.0.9"})]
+
+    def test_sql_and_python_sides_read_the_same_list(self, tmp_path):
+        from app.core.utils import load_docker_source_aliases, note_docker_alias_change
+
+        conn = self._conn(tmp_path)
+        try:
+            # Before: the host's address filter takes the container row too
+            assert self._filtered(conn) == ["container", "syslog"]
+            note_docker_alias_change(conn, "old-docker", None)
+            conn.commit()
+            assert self._filtered(conn) == ["syslog"]
+            assert "old-docker" in load_docker_source_aliases(conn)
+
+            note_docker_alias_change(conn, None, "old-docker")
+            conn.commit()
+            assert "old-docker" not in load_docker_source_aliases(conn)
+            assert self._filtered(conn) == ["container", "syslog"]
+        finally:
+            conn.close()
+
+    @pytest.mark.parametrize("stored", ["not json", "{\"a\": 1}", "[1, null, \"  \"]", ""])
+    def test_a_damaged_setting_is_read_as_empty(self, tmp_path, stored):
+        from app.core.utils import FORMER_DOCKER_ALIASES_KEY, load_former_docker_aliases
+
+        conn = self._conn(tmp_path)
+        try:
+            conn.execute(
+                "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, '', 0)",
+                (FORMER_DOCKER_ALIASES_KEY, stored),
+            )
+            assert load_former_docker_aliases(conn) == []
+            assert self._filtered(conn) == ["container", "syslog"]
+        finally:
+            conn.close()
+
+    def test_collector_app_backfill_includes_former_hosts(self, tmp_path):
+        from app.collectors.docker_collector import _batch_update_app_aliases
+        from app.core.utils import note_docker_alias_change
+
+        conn = self._conn(tmp_path)
+        try:
+            note_docker_alias_change(conn, "old-docker", None)
+            conn.commit()
+            _batch_update_app_aliases(conn, raw_name="web", target_alias="web-alias", source_ip="10.0.0.9")
+            rows = conn.execute("SELECT source_alias, app_name FROM logs ORDER BY id").fetchall()
+            assert [tuple(r) for r in rows] == [("old-docker", "web-alias"), ("10.0.0.9", "web")]
+        finally:
+            conn.close()
+
+
 @pytest.fixture
 def server_tz(monkeypatch):
     """Set the process time zone and fully restore it (including time.tzset) afterwards."""

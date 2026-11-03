@@ -115,6 +115,10 @@ class LogFacetsResponse(BaseModel):
     source_app_mapping: dict[str, list[str]] = Field(default_factory=dict)
     truncated: bool = Field(False, description="True when a list or mapping was capped at `limit` entries")
     limit: int = Field(..., description="Most entries each list and mapping holds")
+    former_docker_aliases: list[str] = Field(
+        default_factory=list,
+        description="Aliases of deleted or renamed Docker hosts; rows that carry one are Docker rows",
+    )
 
 
 class LogDeleteRequest(BaseModel):

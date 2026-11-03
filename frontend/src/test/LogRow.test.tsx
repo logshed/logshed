@@ -1,7 +1,12 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { LogRow, areLogRowPropsEqual, ProcessedLogEntry, LOG_GRID_COLS_WITH_AI, LOG_GRID_COLS_WITHOUT_AI } from '../components/logs/LogRow.tsx';
-import { matchesSearchQuery, prepareLogEntry } from '../components/logs/LiveLogStream.tsx';
+import {
+  buildDockerAliasSet,
+  matchesSearchQuery,
+  prepareLogEntry,
+  restoreDockerAliases,
+} from '../components/logs/LiveLogStream.tsx';
 
 describe('LogRow Component and Optimization', () => {
   const baseLog: ProcessedLogEntry = {
@@ -142,6 +147,52 @@ describe('LogRow Component and Optimization', () => {
     expect(prepared.formattedTimestamp).toBeDefined();
     expect(prepared.cleanedMessage).toBe('Slow query detected');
     expect(prepared.strippedMessage).toBe('Slow query detected');
+  });
+
+  it('prepareLogEntry keeps the alias of a former Docker host instead of the syslog alias of its address', () => {
+    const containerLog = {
+      id: 202,
+      timestamp: '2026-11-03T10:00:00.000Z',
+      received_at: '2026-11-03T10:00:00.000Z',
+      source_ip: '192.168.1.60',
+      source_alias: 'nas-docker',
+      app_name: 'plex',
+      facility: 1,
+      severity: 6,
+      message: 'Container started',
+      raw: 'Container started',
+    };
+    const aliases = { '192.168.1.60': 'nas' };
+
+    expect(prepareLogEntry(containerLog, aliases, undefined, buildDockerAliasSet([], [])).source_alias).toBe('nas');
+    const dockerAliases = buildDockerAliasSet([], ['nas-docker']);
+    expect(prepareLogEntry(containerLog, aliases, undefined, dockerAliases).source_alias).toBe('nas-docker');
+  });
+
+  it('restoreDockerAliases gives rows prepared before the Docker aliases loaded their stored alias back', () => {
+    const base = {
+      timestamp: '2026-11-03T10:00:00.000Z',
+      received_at: '2026-11-03T10:00:00.000Z',
+      source_ip: '192.168.1.60',
+      facility: 1,
+      severity: 6,
+      raw: 'line',
+    };
+    const aliases = { '192.168.1.60': 'nas' };
+    // Prepared while the Docker alias set was still empty: both rows show the syslog alias
+    const rows = [
+      prepareLogEntry({ ...base, id: 1, source_alias: 'nas-docker', app_name: 'plex', message: 'container' }, aliases, undefined, new Set()),
+      prepareLogEntry({ ...base, id: 2, source_alias: '192.168.1.60', app_name: 'sshd', message: 'syslog' }, aliases, undefined, new Set()),
+    ];
+    expect(rows.map((r) => r.source_alias)).toEqual(['nas', 'nas']);
+
+    const restored = restoreDockerAliases(rows, buildDockerAliasSet([], ['nas-docker']));
+    expect(restored.map((r) => r.source_alias)).toEqual(['nas-docker', 'nas']);
+    expect(restored[1]).toBe(rows[1]);
+    // Nothing to change: the same array comes back, so React skips the update
+    expect(restoreDockerAliases(restored, buildDockerAliasSet([], ['nas-docker']))).toBe(restored);
+    // Preparing a prepared row again reads its stored alias, not the shown one
+    expect(prepareLogEntry(rows[0], aliases, undefined, buildDockerAliasSet([], ['nas-docker'])).source_alias).toBe('nas-docker');
   });
 
   it('prepareLogEntry canonicalizes host alias upon ingestion when aliases are supplied', () => {

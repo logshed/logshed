@@ -504,6 +504,53 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     });
   });
 
+  it('treats a log from a deleted remote Docker host as a container log through the former aliases', () => {
+    const formerLog: LogEntry = {
+      id: 204,
+      timestamp: '2026-11-03T10:00:00Z',
+      received_at: '2026-11-03T10:00:00Z',
+      source_ip: '192.168.1.60',
+      source_alias: 'nas-docker',
+      app_name: 'plex',
+      facility: 1,
+      severity: 6,
+      message: 'Container started',
+      raw: 'Container started',
+    };
+
+    const handleManageDeleted = vi.fn();
+    const { rerender } = render(
+      <LogDetailModal
+        log={formerLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onAddAlias={vi.fn()}
+        onManageDeletedDockerHost={handleManageDeleted}
+        dockerEndpoints={[]}
+        formerDockerAliases={['nas-docker']}
+      />
+    );
+
+    expect(screen.getByText('Raw Container Output')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Configure Docker Host/i }));
+    expect(handleManageDeleted).toHaveBeenCalledWith({ name: 'nas-docker', ip: '192.168.1.60' });
+
+    // Without the list the same row reads as a host alias log
+    rerender(
+      <LogDetailModal
+        log={formerLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+        onAddAlias={vi.fn()}
+        onManageDeletedDockerHost={handleManageDeleted}
+        dockerEndpoints={[]}
+      />
+    );
+    expect(screen.queryByRole('button', { name: /Configure Docker Host/i })).toBeNull();
+  });
+
   it('treats a facility 1 log sent over HTTP ingest as a host alias log, not a Docker log', () => {
     const httpLog: LogEntry = {
       id: 203,

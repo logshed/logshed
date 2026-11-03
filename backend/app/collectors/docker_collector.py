@@ -37,6 +37,7 @@ from app.core.pipeline import (
     clean_log_text,
     SEVERITY_LEVEL_MAP,
 )
+from app.core.utils import DOCKER_ALIASES_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -546,14 +547,14 @@ def _batch_update_app_aliases(
         """
         params = (target_alias, source_ip, raw_name, source_alias, source_ip, raw_name, source_alias, batch_size)
     else:
-        update_query = """
+        update_query = f"""
             UPDATE logs SET app_name = ?
             WHERE source_ip = ? AND app_name = ?
-              AND source_alias IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)
+              AND source_alias IN ({DOCKER_ALIASES_SQL})
               AND id IN (
                 SELECT id FROM logs
                 WHERE source_ip = ? AND app_name = ?
-                  AND source_alias IN (SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL)
+                  AND source_alias IN ({DOCKER_ALIASES_SQL})
                 ORDER BY id DESC
                 LIMIT ?
             )

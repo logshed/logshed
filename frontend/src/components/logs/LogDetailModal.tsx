@@ -18,6 +18,8 @@ interface LogDetailModalProps {
   onEditDockerHost?: (endpointId: number) => void;
   onManageDeletedDockerHost?: (info: { name: string; ip: string }) => void;
   dockerEndpoints?: DockerEndpoint[];
+  /** Aliases of deleted or renamed Docker hosts; rows that carry one are container logs. */
+  formerDockerAliases?: string[];
   isHostAliased?: boolean;
   onCreateDropRule?: (log: LogEntry) => void;
   /** Opens Rules & History with a new alert rule prefilled from this log. */
@@ -54,6 +56,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   onEditDockerHost,
   onManageDeletedDockerHost,
   dockerEndpoints = [],
+  formerDockerAliases = [],
   isHostAliased,
   onCreateDropRule,
   onCreateAlertRule,
@@ -222,12 +225,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     return null;
   }, [log, isSyslogRaw, dockerEndpoints]);
 
-  // Only the reserved source_ip "docker" marks a Docker host that is no longer configured:
-  // remote hosts log under their address, which syslog and HTTP senders there share
+  // A Docker host that is no longer configured: the reserved source_ip "docker", or the alias of a
+  // deleted or renamed host (remote hosts log under their address, which syslog senders share)
   const isDeletedDockerHost = useMemo(() => {
     if (!log || isSyslogRaw || matchedDockerEndpoint) return false;
-    return log.source_ip === 'docker';
-  }, [log, isSyslogRaw, matchedDockerEndpoint]);
+    return log.source_ip === 'docker' || (Boolean(log.source_alias) && formerDockerAliases.includes(log.source_alias));
+  }, [log, isSyslogRaw, matchedDockerEndpoint, formerDockerAliases]);
 
   const isDockerSource = Boolean(matchedDockerEndpoint || isDeletedDockerHost);
   // HTTP-ingested logs have neither a syslog packet nor container output as their raw text
