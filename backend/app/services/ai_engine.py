@@ -12,8 +12,9 @@ import datetime
 import logging
 import re
 import urllib.parse
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional, Sequence, TypeVar
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Sequence, TypeVar
 
 import httpx
 from anthropic import (
@@ -932,6 +933,29 @@ def _gemini_error(e: Exception) -> Exception:
     return RuntimeError(err_msg)
 
 
+@asynccontextmanager
+async def _gemini_session(api_key: str, timeout: float, max_retries: int = 1) -> AsyncIterator[genai.Client]:
+    """A Gemini client for one request: closed afterwards, with timeouts and SDK failures turned into LogShed errors."""
+    if not api_key:
+        raise ValueError("Google Gemini API key is not configured in settings.")
+
+    client = None
+    try:
+        client = _gemini_client(api_key, timeout, max_retries)
+        yield client
+    except (asyncio.TimeoutError, TimeoutError):
+        raise TimeoutError("Request timed out")
+    except httpx.TimeoutException as te:
+        raise TimeoutError(f"Request timed out: {te}") from te
+    except (ValueError, AiServiceUnavailableError):
+        raise
+    except Exception as e:
+        raise _gemini_error(e) from e
+    finally:
+        if client is not None:
+            await _close_gemini_client(client)
+
+
 async def call_gemini(
     api_key: str,
     model: str,
@@ -945,14 +969,9 @@ async def call_gemini(
     Dispatch request to Google Gemini API via the google-genai SDK.
     Uses client.aio for async operations with API key authentication.
     """
-    if not api_key:
-        raise ValueError("Google Gemini API key is not configured in settings.")
-
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
 
-    client = None
-    try:
-        client = _gemini_client(api_key, timeout, max_retries)
+    async with _gemini_session(api_key, timeout, max_retries) as client:
 
         async def send(config: genai_types.GenerateContentConfig) -> Any:
             return await client.aio.models.generate_content(model=model, contents=prompt, config=config)
@@ -969,18 +988,6 @@ async def call_gemini(
         usage = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
         tokens_in, tokens_out, tokens_thoughts, tokens_used = extract_token_usage(prompt, text, usage)
         return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
-
-    except (asyncio.TimeoutError, TimeoutError):
-        raise TimeoutError("Request timed out")
-    except httpx.TimeoutException as te:
-        raise TimeoutError(f"Request timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
-        raise
-    except Exception as e:
-        raise _gemini_error(e) from e
-    finally:
-        if client is not None:
-            await _close_gemini_client(client)
 
 
 def _openai_error(e: Exception) -> Exception:
@@ -1007,6 +1014,30 @@ def _openai_error(e: Exception) -> Exception:
     return RuntimeError(err_msg)
 
 
+@asynccontextmanager
+async def _openai_session(api_key: str, base_url: Optional[str], timeout: float) -> AsyncIterator[AsyncOpenAI]:
+    """An OpenAI SDK client for one request: closed afterwards, with timeouts and SDK failures turned into LogShed errors."""
+    effective_base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
+
+    client = None
+    try:
+        client = _openai_client(api_key or "not-needed", effective_base_url, timeout)
+        yield client
+    except APITimeoutError as te:
+        raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
+    except (asyncio.TimeoutError, TimeoutError):
+        raise TimeoutError("OpenAI endpoint timed out")
+    except httpx.TimeoutException as te:
+        raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
+    except (ValueError, AiServiceUnavailableError):
+        raise
+    except Exception as e:
+        raise _openai_error(e) from e
+    finally:
+        if client is not None:
+            await _close_sdk_client(client)
+
+
 async def call_openai(
     api_key: str,
     model: str,
@@ -1020,13 +1051,9 @@ async def call_openai(
     Dispatch request to OpenAI or OpenAI-compatible endpoint (e.g. Ollama, vLLM, LocalAI)
     via the openai SDK with configurable base_url.
     """
-    effective_base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
 
-    client = None
-    try:
-        client = _openai_client(api_key or "not-needed", effective_base_url, timeout)
-
+    async with _openai_session(api_key, base_url, timeout) as client:
         create_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -1046,20 +1073,6 @@ async def call_openai(
         tokens_in, tokens_out, tokens_thoughts, tokens_used = extract_token_usage(prompt, text, response.usage)
         return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
 
-    except APITimeoutError as te:
-        raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
-    except (asyncio.TimeoutError, TimeoutError):
-        raise TimeoutError("OpenAI endpoint timed out")
-    except httpx.TimeoutException as te:
-        raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
-        raise
-    except Exception as e:
-        raise _openai_error(e) from e
-    finally:
-        if client is not None:
-            await _close_sdk_client(client)
-
 
 # claude-<family>-<major>[-<minor>] (claude-opus-4-8, claude-sonnet-5), or claude-<major>-<minor>-<family>
 # (claude-3-7-sonnet); an 8-digit date suffix is not a minor version
@@ -1074,17 +1087,33 @@ def _claude_version(model: str) -> Optional[tuple[int, int]]:
     return int(match.group(1)), int(match.group(2) or 0)
 
 
+def _require_anthropic_text(text: str, response: Any) -> str:
+    """The reply text, failing clearly when it is empty, also when the model declined the request."""
+    if not text:
+        if getattr(response, "stop_reason", None) == "refusal":
+            raise RuntimeError("Anthropic model declined the request (stop_reason: refusal).")
+        raise RuntimeError("Anthropic endpoint returned empty response content.")
+    return text
+
+
 def _anthropic_text(response: Any) -> str:
     """The text of an Anthropic message, failing clearly when the model declined the request."""
     text = "\n".join(
         block.text for block in getattr(response, "content", []) or []
         if getattr(block, "type", "") == "text" or hasattr(block, "text")
     ).strip()
-    if not text:
-        if getattr(response, "stop_reason", None) == "refusal":
-            raise RuntimeError("Anthropic model declined the request (stop_reason: refusal).")
-        raise RuntimeError("Anthropic endpoint returned empty response content.")
-    return text
+    return _require_anthropic_text(text, response)
+
+
+def _anthropic_token_usage(usage: Any, sent_text: str, text: str) -> tuple[int, int, int, int]:
+    """Token counts from an Anthropic usage object, estimated from the texts when it reports none."""
+    tokens_in = getattr(usage, "input_tokens", 0) or 0
+    tokens_out = getattr(usage, "output_tokens", 0) or 0
+    tokens_thoughts = getattr(usage, "thinking_tokens", 0) or 0
+    tokens_used = tokens_in + tokens_out + tokens_thoughts
+    if tokens_used == 0:
+        return extract_token_usage(sent_text, text, usage)
+    return tokens_in, tokens_out, tokens_thoughts, tokens_used
 
 
 def _anthropic_request_kwargs(
@@ -1121,6 +1150,26 @@ def _anthropic_error(e: Exception) -> Exception:
     return RuntimeError(err_msg)
 
 
+@asynccontextmanager
+async def _anthropic_session(api_key: str, timeout: float) -> AsyncIterator[AsyncAnthropic]:
+    """An Anthropic SDK client for one request: closed afterwards, with timeouts and SDK failures turned into LogShed errors."""
+    client = AsyncAnthropic(api_key=api_key or "no-key", timeout=timeout)
+    try:
+        yield client
+    except AnthropicTimeoutError as te:
+        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
+    except (asyncio.TimeoutError, TimeoutError):
+        raise TimeoutError("Anthropic endpoint timed out")
+    except httpx.TimeoutException as te:
+        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
+    except (ValueError, AiServiceUnavailableError):
+        raise
+    except Exception as e:
+        raise _anthropic_error(e) from e
+    finally:
+        await _close_sdk_client(client)
+
+
 async def call_anthropic(
     api_key: str,
     model: str,
@@ -1134,8 +1183,6 @@ async def call_anthropic(
     Dispatch request to Anthropic Claude via the anthropic SDK.
     """
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
-    client = AsyncAnthropic(api_key=api_key or "no-key", timeout=timeout)
-
     create_kwargs = _anthropic_request_kwargs(
         model,
         effective_system_prompt,
@@ -1143,32 +1190,13 @@ async def call_anthropic(
         thinking_level,
     )
 
-    try:
+    async with _anthropic_session(api_key, timeout) as client:
         response = await client.messages.create(**create_kwargs)
         text = _anthropic_text(response)
-
-        usage = getattr(response, "usage", None)
-        tokens_in = getattr(usage, "input_tokens", 0) or 0
-        tokens_out = getattr(usage, "output_tokens", 0) or 0
-        tokens_thoughts = getattr(usage, "thinking_tokens", 0) or 0
-        tokens_used = tokens_in + tokens_out + tokens_thoughts
-        if tokens_used == 0:
-            tokens_in, tokens_out, tokens_thoughts, tokens_used = extract_token_usage(prompt, text, usage)
-
+        tokens_in, tokens_out, tokens_thoughts, tokens_used = _anthropic_token_usage(
+            getattr(response, "usage", None), prompt, text
+        )
         return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
-
-    except AnthropicTimeoutError as te:
-        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
-    except (asyncio.TimeoutError, TimeoutError):
-        raise TimeoutError("Anthropic endpoint timed out")
-    except httpx.TimeoutException as te:
-        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
-        raise
-    except Exception as e:
-        raise _anthropic_error(e) from e
-    finally:
-        await _close_sdk_client(client)
 
 
 _OPENAI_PROVIDERS = ("openai", "openai_compatible")
@@ -1416,12 +1444,7 @@ async def dispatch_multi_turn_gemini(
     Each text chunk is passed to on_delta as it arrives.
     Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used).
     """
-    if not api_key:
-        raise ValueError("Google Gemini API key is not configured in settings.")
-
-    client = None
-    try:
-        client = _gemini_client(api_key, timeout)
+    async with _gemini_session(api_key, timeout) as client:
         contents = [
             genai_types.Content(
                 role="model" if m["role"] == "assistant" else "user",
@@ -1456,18 +1479,6 @@ async def dispatch_multi_turn_gemini(
         )
         return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
 
-    except (asyncio.TimeoutError, TimeoutError):
-        raise TimeoutError("Request timed out")
-    except httpx.TimeoutException as te:
-        raise TimeoutError(f"Request timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
-        raise
-    except Exception as e:
-        raise _gemini_error(e) from e
-    finally:
-        if client is not None:
-            await _close_gemini_client(client)
-
 
 async def dispatch_multi_turn_openai(
     api_key: str,
@@ -1484,12 +1495,7 @@ async def dispatch_multi_turn_openai(
     Each text chunk is passed to on_delta as it arrives.
     Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used).
     """
-    effective_base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
-
-    client = None
-    try:
-        client = _openai_client(api_key or "not-needed", effective_base_url, timeout)
-
+    async with _openai_session(api_key, base_url, timeout) as client:
         create_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "system", "content": system_prompt}] + messages,
@@ -1520,20 +1526,6 @@ async def dispatch_multi_turn_openai(
         )
         return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
 
-    except APITimeoutError as te:
-        raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
-    except (asyncio.TimeoutError, TimeoutError):
-        raise TimeoutError("OpenAI endpoint timed out")
-    except httpx.TimeoutException as te:
-        raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
-        raise
-    except Exception as e:
-        raise _openai_error(e) from e
-    finally:
-        if client is not None:
-            await _close_sdk_client(client)
-
 
 async def dispatch_multi_turn_anthropic(
     api_key: str,
@@ -1549,10 +1541,9 @@ async def dispatch_multi_turn_anthropic(
     Each text chunk is passed to on_delta as it arrives (thinking blocks are not streamed).
     Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used).
     """
-    client = AsyncAnthropic(api_key=api_key or "no-key", timeout=timeout)
     create_kwargs = _anthropic_request_kwargs(model, system_prompt, messages, thinking_level)
 
-    try:
+    async with _anthropic_session(api_key, timeout) as client:
         chunks: list[str] = []
         async with asyncio.timeout(timeout):
             async with client.messages.stream(**create_kwargs) as stream:
@@ -1562,35 +1553,11 @@ async def dispatch_multi_turn_anthropic(
                         await _notify(on_delta, text)
                 final_message = await stream.get_final_message()
 
-        text = "".join(chunks).strip()
-        if not text:
-            if getattr(final_message, "stop_reason", None) == "refusal":
-                raise RuntimeError("Anthropic model declined the request (stop_reason: refusal).")
-            raise RuntimeError("Anthropic endpoint returned empty response content.")
-
-        usage = getattr(final_message, "usage", None)
-        tokens_in = getattr(usage, "input_tokens", 0) or 0
-        tokens_out = getattr(usage, "output_tokens", 0) or 0
-        tokens_thoughts = getattr(usage, "thinking_tokens", 0) or 0
-        tokens_used = tokens_in + tokens_out + tokens_thoughts
-        if tokens_used == 0:
-            tokens_in, tokens_out, tokens_thoughts, tokens_used = extract_token_usage(
-                _conversation_text(system_prompt, messages), text, usage
-            )
+        text = _require_anthropic_text("".join(chunks).strip(), final_message)
+        tokens_in, tokens_out, tokens_thoughts, tokens_used = _anthropic_token_usage(
+            getattr(final_message, "usage", None), _conversation_text(system_prompt, messages), text
+        )
         return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
-
-    except AnthropicTimeoutError as te:
-        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
-    except (asyncio.TimeoutError, TimeoutError):
-        raise TimeoutError("Anthropic endpoint timed out")
-    except httpx.TimeoutException as te:
-        raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
-        raise
-    except Exception as e:
-        raise _anthropic_error(e) from e
-    finally:
-        await _close_sdk_client(client)
 
 
 async def execute_ai_follow_up(

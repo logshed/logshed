@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 import openai
 from google.genai import types as genai_types
+import httpx
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
@@ -3377,6 +3378,156 @@ class TestAiClientLifecycle:
             inst.close = AsyncMock(side_effect=RuntimeError("close failed"))
             text, *_ = await ai_engine.call_openai(api_key="k", model="gpt-4o", prompt="p")
         assert text == _STRUCTURED_REPLY
+
+
+_ERROR_REQUEST = httpx.Request("POST", "https://provider.example/v1")
+
+
+def _provider_call(provider: str, path: str, error: BaseException):
+    """Patch the provider SDK so its request raises error, and return the analysis or follow-up call to await."""
+    messages = [{"role": "user", "content": "q"}]
+    if provider == "gemini":
+        patcher = patch("app.services.ai_engine.genai")
+        inst = _gemini_client_mock(patcher.start())
+        if path == "single":
+            inst.aio.models.generate_content = AsyncMock(side_effect=error)
+            call = ai_engine.call_gemini(api_key="k", model="gemini-3.7-flash", prompt="p")
+        else:
+            inst.aio.models.generate_content_stream = AsyncMock(side_effect=error)
+            call = ai_engine.dispatch_multi_turn_gemini(
+                api_key="k", model="gemini-3.7-flash", messages=messages, system_prompt="s"
+            )
+    elif provider == "openai":
+        patcher = patch("app.services.ai_engine.AsyncOpenAI")
+        inst = _sdk_client_mock(patcher.start())
+        inst.chat.completions.create = AsyncMock(side_effect=error)
+        if path == "single":
+            call = ai_engine.call_openai(api_key="k", model="gpt-4o", prompt="p")
+        else:
+            call = ai_engine.dispatch_multi_turn_openai(api_key="k", model="gpt-4o", messages=messages, system_prompt="s")
+    else:
+        patcher = patch("app.services.ai_engine.AsyncAnthropic")
+        inst = _sdk_client_mock(patcher.start())
+        model = "claude-3-5-haiku-20241022"
+        if path == "single":
+            inst.messages.create = AsyncMock(side_effect=error)
+            call = ai_engine.call_anthropic(api_key="k", model=model, prompt="p")
+        else:
+            inst.messages.stream = MagicMock(side_effect=error)
+            call = ai_engine.dispatch_multi_turn_anthropic(api_key="k", model=model, messages=messages, system_prompt="s")
+    return patcher, call
+
+
+_PROVIDER_ERROR_PREFIX = {
+    "gemini": "Gemini API error: ",
+    "openai": "OpenAI endpoint error: ",
+    "anthropic": "Anthropic endpoint error: ",
+}
+_PROVIDER_TIMEOUT_TEXT = {
+    "gemini": "Request timed out",
+    "openai": "OpenAI endpoint timed out",
+    "anthropic": "Anthropic endpoint timed out",
+}
+
+
+class TestProviderErrorsOnBothPaths:
+    """An analysis and a follow-up to the same provider turn SDK failures into the same errors."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    @pytest.mark.parametrize("provider", ["gemini", "openai", "anthropic"])
+    async def test_asyncio_timeout_is_a_timeout_error(self, provider, path):
+        patcher, call = _provider_call(provider, path, asyncio.TimeoutError())
+        try:
+            with pytest.raises(TimeoutError) as info:
+                await call
+        finally:
+            patcher.stop()
+        assert str(info.value) == _PROVIDER_TIMEOUT_TEXT[provider]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    @pytest.mark.parametrize("provider", ["gemini", "openai", "anthropic"])
+    async def test_httpx_timeout_is_a_timeout_error_naming_it(self, provider, path):
+        patcher, call = _provider_call(provider, path, httpx.ReadTimeout("read stalled"))
+        try:
+            with pytest.raises(TimeoutError) as info:
+                await call
+        finally:
+            patcher.stop()
+        assert str(info.value) == f"{_PROVIDER_TIMEOUT_TEXT[provider]}: read stalled"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    @pytest.mark.parametrize("provider", ["openai", "anthropic"])
+    async def test_sdk_timeout_is_a_timeout_error(self, provider, path):
+        if provider == "openai":
+            error = openai.APITimeoutError(request=_ERROR_REQUEST)
+        else:
+            import anthropic
+            error = anthropic.APITimeoutError(request=_ERROR_REQUEST)
+        patcher, call = _provider_call(provider, path, error)
+        try:
+            with pytest.raises(TimeoutError) as info:
+                await call
+        finally:
+            patcher.stop()
+        assert str(info.value).startswith(f"{_PROVIDER_TIMEOUT_TEXT[provider]}: ")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    @pytest.mark.parametrize("provider", ["gemini", "openai", "anthropic"])
+    async def test_overload_is_retryable_and_redacted(self, provider, path):
+        patcher, call = _provider_call(
+            provider, path, RuntimeError("503 overloaded, api_key=sk-abcdef1234567890abcdef")
+        )
+        try:
+            with pytest.raises(ai_engine.AiServiceUnavailableError) as info:
+                await call
+        finally:
+            patcher.stop()
+        assert str(info.value).startswith(_PROVIDER_ERROR_PREFIX[provider])
+        assert "sk-abcdef1234567890abcdef" not in str(info.value)
+        assert ai_engine.is_retryable_for_fallback(info.value)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    @pytest.mark.parametrize("provider", ["gemini", "openai", "anthropic"])
+    async def test_other_failure_is_not_retryable(self, provider, path):
+        patcher, call = _provider_call(provider, path, RuntimeError("invalid request body"))
+        try:
+            with pytest.raises(RuntimeError) as info:
+                await call
+        finally:
+            patcher.stop()
+        assert type(info.value) is RuntimeError
+        assert str(info.value) == f"{_PROVIDER_ERROR_PREFIX[provider]}invalid request body"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    @pytest.mark.parametrize("provider", ["gemini", "openai", "anthropic"])
+    async def test_value_error_passes_through(self, provider, path):
+        error = ValueError("not configured")
+        patcher, call = _provider_call(provider, path, error)
+        try:
+            with pytest.raises(ValueError) as info:
+                await call
+        finally:
+            patcher.stop()
+        assert info.value is error
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["single", "multi"])
+    async def test_gemini_without_a_key_is_refused_before_any_client(self, path):
+        with patch("app.services.ai_engine.genai") as mock_genai:
+            with pytest.raises(ValueError, match="Gemini API key is not configured"):
+                if path == "single":
+                    await ai_engine.call_gemini(api_key="", model="gemini-3.7-flash", prompt="p")
+                else:
+                    await ai_engine.dispatch_multi_turn_gemini(
+                        api_key="", model="gemini-3.7-flash", messages=[{"role": "user", "content": "q"}], system_prompt="s"
+                    )
+        mock_genai.Client.assert_not_called()
 
 
 class _ConnectedRequest:
