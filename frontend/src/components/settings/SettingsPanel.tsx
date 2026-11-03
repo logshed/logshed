@@ -27,7 +27,7 @@ import { fetchVersion } from '../../api/system.ts';
 import { getAiModels } from '../../api/ai.ts';
 import { changePassword } from '../../api/auth.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
-import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
@@ -82,13 +82,6 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
 };
 
 type ProviderId = 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
-
-const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-  gemini: DEFAULT_AI_MODEL,
-  openai: 'gpt-6.1-sol',
-  anthropic: 'claude-sonnet-5-5',
-  openai_compatible: 'llama3.2',
-};
 
 // Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
 // Docker host, which the LogShed container reaches as host.docker.internal.
@@ -236,10 +229,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Form states
   const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
-    gemini: { apiKey: '', hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '', baseUrl: '' },
-    openai: { apiKey: '', hasKey: false, model: 'gpt-6.1-sol', fallbackModels: '', baseUrl: '' },
-    anthropic: { apiKey: '', hasKey: false, model: 'claude-sonnet-5-5', fallbackModels: '', baseUrl: '' },
-    openai_compatible: { apiKey: '', hasKey: true, model: 'llama3.2', fallbackModels: '', baseUrl: '' },
+    gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
+    openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
+    anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
+    openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
   });
 
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
@@ -1183,7 +1176,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="text"
                   value={aiModel}
                   onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                  placeholder={aiProvider === 'gemini' ? DEFAULT_AI_MODEL : aiProvider === 'openai' ? 'gpt-6.1-sol' : aiProvider === 'anthropic' ? 'claude-sonnet-5-5' : 'llama3.2'}
+                  placeholder={DEFAULT_PROVIDER_MODELS[aiProvider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
                   className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
                 />
               )}

@@ -24,18 +24,11 @@ import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '.
 import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
-import { DEFAULT_AI_MODEL, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { AiFollowUpThread } from './AiFollowUpThread.tsx';
 import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
-
-const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-  gemini: DEFAULT_AI_MODEL,
-  openai: 'gpt-6.1-sol',
-  anthropic: 'claude-sonnet-5-5',
-  openai_compatible: 'llama3.2',
-};
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
@@ -74,10 +67,10 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [fallbackModels, setFallbackModels] = useState<string>('');
 
   const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
-    gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
-    openai: { hasKey: false, model: 'gpt-6.1-sol', fallbackModels: '' },
-    anthropic: { hasKey: false, model: 'claude-sonnet-5-5', fallbackModels: '' },
-    openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
+    gemini: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '' },
+    openai: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '' },
+    anthropic: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '' },
+    openai_compatible: { hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '' },
   });
 
   // Model discovery states
@@ -293,10 +286,10 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
       // Initialize provider configs from system settings
       const configs: Record<string, ProviderLocalState> = {
-        gemini: { hasKey: false, model: DEFAULT_AI_MODEL, fallbackModels: '' },
-        openai: { hasKey: false, model: 'gpt-6.1-sol', fallbackModels: '' },
-        anthropic: { hasKey: false, model: 'claude-sonnet-5-5', fallbackModels: '' },
-        openai_compatible: { hasKey: true, model: 'llama3.2', fallbackModels: '' },
+        gemini: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '' },
+        openai: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '' },
+        anthropic: { hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '' },
+        openai_compatible: { hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '' },
       };
 
       if (settRes?.ai_providers_config) {
@@ -967,7 +960,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         type="text"
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                        placeholder={provider === 'gemini' ? DEFAULT_AI_MODEL : provider === 'openai' ? 'gpt-6.1-sol' : provider === 'anthropic' ? 'claude-sonnet-5-5' : 'llama3.2'}
+                        placeholder={DEFAULT_PROVIDER_MODELS[provider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
                         className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
                       />
                     )}

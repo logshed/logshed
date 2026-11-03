@@ -4,6 +4,14 @@
 
 export const DEFAULT_AI_MODEL = 'gemini-3.7-flash';
 
+/** The model each provider uses when none is chosen (DEFAULT_AI_MODELS in backend/app/core/config.py). */
+export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  gemini: DEFAULT_AI_MODEL,
+  openai: 'gpt-6.1-sol',
+  anthropic: 'claude-sonnet-5-5',
+  openai_compatible: 'llama3.2',
+};
+
 export const DEFAULT_SYSTEM_PROMPT = `You are an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator.
 Review the following redacted server/container logs and provide a structured diagnosis in Markdown format.
 

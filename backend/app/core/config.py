@@ -242,6 +242,13 @@ VALID_LOG_LEVELS: dict[str, Optional[int]] = {
 }
 
 DEFAULT_AI_MODEL = "gemini-3.7-flash"
+# The model each provider uses when none is chosen
+DEFAULT_AI_MODELS: dict[str, str] = {
+    "gemini": DEFAULT_AI_MODEL,
+    "openai": "gpt-6.1-sol",
+    "anthropic": "claude-sonnet-5-5",
+    "openai_compatible": "llama3.2",
+}
 DEFAULT_AI_TIMEOUT: float = float(os.environ.get("LOGSHED_AI_TIMEOUT", "45.0"))
 # How much the AI model may think before it answers; ai_engine maps each level per provider
 AI_THINKING_LEVELS = ("off", "low", "medium", "high")

@@ -4325,7 +4325,7 @@ class TestAnthropicRequestsPerModelFamily:
                 await ai_engine.call_anthropic(api_key="key", model="claude-sonnet-5-5", prompt="logs")
 
     def test_default_claude_model_is_sonnet_five_five(self):
-        from app.api.settings import DEFAULT_AI_MODELS
+        from app.core.config import DEFAULT_AI_MODELS
         from app.services.ai_service import resolve_ai_provider_settings
 
         assert DEFAULT_AI_MODELS["anthropic"] == "claude-sonnet-5-5"

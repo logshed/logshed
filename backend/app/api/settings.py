@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.api.deps import get_current_user, run_db_query
 from app.core.config import (
     DEFAULT_AI_MODEL,
+    DEFAULT_AI_MODELS,
     get_all_system_settings,
     get_max_retention_days,
     is_max_retention_days_overridden,
@@ -53,14 +54,6 @@ SENSITIVE_KEYS = {
     "ai_api_key_anthropic",
     "ai_api_key_openai_compatible",
 }
-
-DEFAULT_AI_MODELS: dict[str, str] = {
-    "gemini": DEFAULT_AI_MODEL,
-    "openai": "gpt-6.1-sol",
-    "anthropic": "claude-sonnet-5-5",
-    "openai_compatible": "llama3.2",
-}
-
 
 def _model_to_store(provider: str, model: str) -> str:
     """

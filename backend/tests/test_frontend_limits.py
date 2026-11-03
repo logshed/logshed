@@ -1,4 +1,4 @@
-"""The frontend's copies of backend field limits, token scopes and the queue size match the backend."""
+"""The frontend's copies of backend field limits, token scopes, the queue size, the masked secret and the default AI models match the backend."""
 
 import re
 from pathlib import Path
@@ -91,3 +91,14 @@ def test_navbar_queue_warning_is_half_the_ingestion_queue():
     text = (FRONTEND_SRC / "components" / "common" / "Navbar.tsx").read_text(encoding="utf-8")
     depth = int(re.search(r"export const QUEUE_WARNING_DEPTH = (\d+);", text).group(1))
     assert depth == _QUEUE_MAXSIZE // 2
+
+
+def test_frontend_default_models_match_the_backend():
+    from app.core.config import DEFAULT_AI_MODEL, DEFAULT_AI_MODELS
+
+    text = (FRONTEND_SRC / "utils" / "aiPrompt.ts").read_text(encoding="utf-8")
+    assert re.search(r"export const DEFAULT_AI_MODEL = '([^']+)';", text).group(1) == DEFAULT_AI_MODEL
+    block = text.split("export const DEFAULT_PROVIDER_MODELS", 1)[1].split("};", 1)[0]
+    frontend = dict(re.findall(r"(\w+): '([^']+)'", block))
+    frontend.update({name: DEFAULT_AI_MODEL for name in re.findall(r"(\w+): DEFAULT_AI_MODEL", block)})
+    assert frontend == DEFAULT_AI_MODELS
