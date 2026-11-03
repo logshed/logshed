@@ -852,12 +852,17 @@ def _gemini_generation_config(
     system_prompt: str,
     thinking_config: Optional[genai_types.ThinkingConfig],
 ) -> genai_types.GenerateContentConfig:
-    """Build the Gemini generation config, with the thinking config on models that think."""
+    """
+    Build the Gemini generation config, with the thinking config on models that think. Gemini 3
+    and later keep their default temperature, which Google advises for them (a lower one can make
+    them loop or do worse); older models get 0.2.
+    """
     config_kwargs: dict[str, Any] = {
         "system_instruction": system_prompt,
-        "temperature": 0.2,
         "automatic_function_calling": genai_types.AutomaticFunctionCallingConfig(disable=True),
     }
+    if not _gemini_takes_thinking_level(model):
+        config_kwargs["temperature"] = 0.2
     if thinking_config is not None:
         config_kwargs["thinking_config"] = thinking_config
     return genai_types.GenerateContentConfig(**config_kwargs)

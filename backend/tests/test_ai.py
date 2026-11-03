@@ -3988,6 +3988,17 @@ class TestGeminiThinkingLevels:
         assert config.thinking_budget == budget
         assert config.thinking_level is None
 
+    @pytest.mark.parametrize(
+        "model", ["gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.7-flash", "gemini-4-argon", "gemini-flash-latest"]
+    )
+    def test_gemini_three_and_later_keep_their_default_temperature(self, model):
+        # Google advises against lowering the temperature of these models: they can loop or do worse
+        assert ai_engine._gemini_generation_config(model, "SYS", None).temperature is None
+
+    @pytest.mark.parametrize("model", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
+    def test_older_models_keep_the_low_temperature(self, model):
+        assert ai_engine._gemini_generation_config(model, "SYS", None).temperature == 0.2
+
     def test_gemini_two_five_pro_cannot_turn_thinking_off(self):
         assert ai_engine._gemini_thinking_config("gemini-2.5-pro", "off").thinking_budget == 128
         assert ai_engine._gemini_thinking_config("gemini-2.5-pro", "high").thinking_budget == 24576
