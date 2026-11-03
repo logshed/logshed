@@ -7,12 +7,19 @@ to discard repetitive syslog or container noise before persistence.
 
 import asyncio
 import datetime
-import json
 import re
+import sqlite3
 from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 
 from app.api.deps import get_current_user, run_db_query
+from app.api.rule_transfer import (
+    INVALID_IMPORT_PAYLOAD,
+    export_response,
+    import_items,
+    next_display_order,
+    reorder_rules,
+)
 from app.models import (
     DropPresetResponse,
     DropRuleCreate,
@@ -33,6 +40,62 @@ from app.core.regex_validator import check_regex_safety, compile_user_pattern, v
 
 router = APIRouter(prefix="/drop-rules", tags=["Drop Rules"])
 
+_DROP_EXPORT_COLUMNS = "name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, display_order"
+
+
+def _default_drop_rule_name(app: Optional[str], source: Optional[str], message: Optional[str]) -> str:
+    """The name shown for a drop rule saved without one: its app, its host, or its message pattern."""
+    return app or source or (f"Drop {message}" if message and message != "*" else "Drop Rule")
+
+
+def _row_to_drop_export_item(r: Any) -> DropRuleExportItem:
+    """Map a drop_rules row with the export columns to the portable export definition."""
+    return DropRuleExportItem(
+        name=r["name"],
+        source_pattern=r["source_pattern"],
+        app_pattern=r["app_pattern"],
+        message_pattern=r["message_pattern"],
+        is_regex=bool(r["is_regex"]),
+        is_enabled=bool(r["is_enabled"]),
+        severity_threshold=r["severity_threshold"],
+        display_order=r["display_order"] if "display_order" in r.keys() else 0,
+    )
+
+
+def _insert_drop_rule(conn: sqlite3.Connection, rule: dict[str, Any], created_at: str) -> tuple[int, int]:
+    """Insert a drop rule after the existing ones; returns its id and display order. The caller commits."""
+    display_order = next_display_order(conn, "drop_rules")
+    cur = conn.execute(
+        """
+        INSERT INTO drop_rules (
+            name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, display_order, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        """,
+        (
+            rule["name"],
+            rule["source_pattern"],
+            rule["app_pattern"],
+            rule["message_pattern"],
+            1 if rule["is_regex"] else 0,
+            1 if rule["is_enabled"] else 0,
+            rule["severity_threshold"],
+            display_order,
+            created_at,
+        ),
+    )
+    return cur.lastrowid, display_order
+
+
+def _new_drop_rule_response(rule: dict[str, Any], rule_id: int, display_order: int, created_at: str) -> DropRuleResponse:
+    """The response for a drop rule just stored by _insert_drop_rule."""
+    return DropRuleResponse(
+        id=rule_id,
+        **rule,
+        dropped_count=0,
+        display_order=display_order,
+        created_at=created_at,
+    )
+
 
 @router.get("", response_model=list[DropRuleResponse])
 async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRuleResponse]:
@@ -51,7 +114,7 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
         for r in rows:
             rule_id = r["id"]
             live_count = r["dropped_count"] + counts.get(rule_id, 0)
-            rule_name = r["name"] or r["app_pattern"] or r["source_pattern"] or (f"Drop {r['message_pattern']}" if r["message_pattern"] != "*" else "Drop Rule")
+            rule_name = r["name"] or _default_drop_rule_name(r["app_pattern"], r["source_pattern"], r["message_pattern"])
             results.append(
                 DropRuleResponse(
                     id=rule_id,
@@ -76,37 +139,14 @@ async def list_drop_rules(user: dict = Depends(get_current_user)) -> list[DropRu
 async def export_drop_rules(user: dict = Depends(get_current_user)) -> Response:
     """Export all configured drop rules as a JSON bundle."""
     def _query(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, display_order "
-            "FROM drop_rules ORDER BY display_order ASC, id ASC"
-        )
-        rows = cur.fetchall()
-        return [
-            DropRuleExportItem(
-                name=r["name"],
-                source_pattern=r["source_pattern"],
-                app_pattern=r["app_pattern"],
-                message_pattern=r["message_pattern"],
-                is_regex=bool(r["is_regex"]),
-                is_enabled=bool(r["is_enabled"]),
-                severity_threshold=r["severity_threshold"],
-                display_order=r["display_order"] if "display_order" in r.keys() else 0,
-            )
-            for r in rows
-        ]
+        rows = conn.execute(
+            f"SELECT {_DROP_EXPORT_COLUMNS} FROM drop_rules ORDER BY display_order ASC, id ASC"
+        ).fetchall()
+        return [_row_to_drop_export_item(r) for r in rows]
 
     exported_rules = await run_db_query(_query)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    bundle = DropRuleExportBundle(
-        version="1",
-        exported_at=now_iso,
-        drop_rules=exported_rules,
-    )
-    return Response(
-        content=json.dumps(bundle.model_dump(), indent=2),
-        media_type="application/json",
-    )
+    return export_response(DropRuleExportBundle(version="1", exported_at=now_iso, drop_rules=exported_rules))
 
 
 @router.get("/{rule_id}/export", response_model=DropRuleExportSingle)
@@ -116,25 +156,8 @@ async def export_single_drop_rule(
 ) -> Response:
     """Export a single drop rule as a JSON object."""
     def _query(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, display_order "
-            "FROM drop_rules WHERE id = ?",
-            (rule_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return DropRuleExportItem(
-            name=row["name"],
-            source_pattern=row["source_pattern"],
-            app_pattern=row["app_pattern"],
-            message_pattern=row["message_pattern"],
-            is_regex=bool(row["is_regex"]),
-            is_enabled=bool(row["is_enabled"]),
-            severity_threshold=row["severity_threshold"],
-            display_order=row["display_order"] if "display_order" in row.keys() else 0,
-        )
+        row = conn.execute(f"SELECT {_DROP_EXPORT_COLUMNS} FROM drop_rules WHERE id = ?", (rule_id,)).fetchone()
+        return _row_to_drop_export_item(row) if row else None
 
     item = await run_db_query(_query)
     if not item:
@@ -144,15 +167,7 @@ async def export_single_drop_rule(
         )
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    single = DropRuleExportSingle(
-        version="1",
-        exported_at=now_iso,
-        drop_rule=item,
-    )
-    return Response(
-        content=json.dumps(single.model_dump(), indent=2),
-        media_type="application/json",
-    )
+    return export_response(DropRuleExportSingle(version="1", exported_at=now_iso, drop_rule=item))
 
 
 @router.post("/import", response_model=DropRuleImportResponse)
@@ -164,21 +179,9 @@ async def import_drop_rules(
     Import drop rules from a bundle, single rule object, or raw dictionary.
     Deduplicates rules matching (source_pattern, app_pattern, message_pattern) case-insensitively.
     """
-    if isinstance(payload, dict):
-        if "drop_rules" in payload and isinstance(payload["drop_rules"], list):
-            items = payload["drop_rules"]
-        elif "drop_rule" in payload and isinstance(payload["drop_rule"], dict):
-            items = [payload["drop_rule"]]
-        else:
-            items = [payload]
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        return DropRuleImportResponse(
-            imported=0,
-            skipped=0,
-            errors=["Invalid payload format: expected JSON object or array."],
-        )
+    items = import_items(payload, "drop_rules", "drop_rule")
+    if items is None:
+        return DropRuleImportResponse(imported=0, skipped=0, errors=[INVALID_IMPORT_PAYLOAD])
 
     def _get_existing(conn):
         cur = conn.cursor()
@@ -255,7 +258,7 @@ async def import_drop_rules(
 
         existing_keys.add(dedup_key)
         to_insert.append({
-            "name": (raw_item.get("name") or "").strip() or None,
+            "name": (raw_item.get("name") or "").strip() or _default_drop_rule_name(app, src, msg),
             "source_pattern": src,
             "app_pattern": app,
             "message_pattern": msg,
@@ -267,34 +270,8 @@ async def import_drop_rules(
     if to_insert:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         def _insert_all(conn):
-            cur = conn.cursor()
-            cur.execute("SELECT COALESCE(MAX(display_order), 0) FROM drop_rules")
-            max_order = cur.fetchone()[0]
-            for idx_rule, rule in enumerate(to_insert, start=1):
-                rule_name = (
-                    rule["name"]
-                    or rule["app_pattern"]
-                    or rule["source_pattern"]
-                    or (f"Drop {rule['message_pattern']}" if rule["message_pattern"] != "*" else "Drop Rule")
-                )
-                cur.execute(
-                    """
-                    INSERT INTO drop_rules (
-                        name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, display_order, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-                    """,
-                    (
-                        rule_name,
-                        rule["source_pattern"],
-                        rule["app_pattern"],
-                        rule["message_pattern"],
-                        1 if rule["is_regex"] else 0,
-                        1 if rule["is_enabled"] else 0,
-                        rule["severity_threshold"],
-                        max_order + idx_rule,
-                        now_iso,
-                    ),
-                )
+            for rule in to_insert:
+                _insert_drop_rule(conn, rule, now_iso)
             conn.commit()
 
         await run_db_query(_insert_all)
@@ -316,11 +293,7 @@ async def create_drop_rule(
     source = payload.source_pattern.strip() if payload.source_pattern else None
     app = payload.app_pattern.strip() if payload.app_pattern else None
     msg = payload.message_pattern.strip() if payload.message_pattern else "*"
-    name = (
-        payload.name.strip()
-        if payload.name and payload.name.strip()
-        else (app or source or (f"Drop {msg}" if msg != "*" else "Drop Rule"))
-    )
+    name = payload.name.strip() if payload.name and payload.name.strip() else _default_drop_rule_name(app, source, msg)
 
     if not source and not app and (not msg or msg == "*") and payload.severity_threshold is None:
         raise HTTPException(
@@ -333,48 +306,24 @@ async def create_drop_rule(
         validate_regex_pattern(msg)
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rule = {
+        "name": name,
+        "source_pattern": source,
+        "app_pattern": app,
+        "message_pattern": msg,
+        "is_regex": payload.is_regex,
+        "is_enabled": payload.is_enabled,
+        "severity_threshold": payload.severity_threshold,
+    }
 
     def _insert(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT COALESCE(MAX(display_order), 0) + 1 FROM drop_rules")
-        next_order = cur.fetchone()[0]
-        cur.execute(
-            """
-            INSERT INTO drop_rules (
-                name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, display_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-            """,
-            (
-                name,
-                source,
-                app,
-                msg,
-                1 if payload.is_regex else 0,
-                1 if payload.is_enabled else 0,
-                payload.severity_threshold,
-                next_order,
-                now_iso,
-            ),
-        )
+        rule_id, display_order = _insert_drop_rule(conn, rule, now_iso)
         conn.commit()
-        rule_id = cur.lastrowid
-        return DropRuleResponse(
-            id=rule_id,
-            name=name,
-            source_pattern=source,
-            app_pattern=app,
-            message_pattern=msg,
-            is_regex=payload.is_regex,
-            is_enabled=payload.is_enabled,
-            severity_threshold=payload.severity_threshold,
-            dropped_count=0,
-            display_order=next_order,
-            created_at=now_iso,
-        )
+        return rule_id, display_order
 
-    result = await run_db_query(_insert)
+    rule_id, display_order = await run_db_query(_insert)
     await asyncio.to_thread(get_drop_filter().reload_rules)
-    return result
+    return _new_drop_rule_response(rule, rule_id, display_order, now_iso)
 
 
 @router.put("/reorder", response_model=list[DropRuleResponse])
@@ -383,29 +332,7 @@ async def reorder_drop_rules(
     user: dict = Depends(get_current_user),
 ) -> list[DropRuleResponse]:
     """Atomically update the evaluation and display order of drop rules."""
-    rule_ids = payload.rule_ids
-    if len(rule_ids) != len(set(rule_ids)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Duplicate rule IDs in reorder request",
-        )
-
-    def _reorder(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM drop_rules")
-        existing_ids = {r[0] for r in cur.fetchall()}
-        if set(rule_ids) != existing_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Reorder payload must match all configured drop rule IDs",
-            )
-
-        for order_idx, r_id in enumerate(rule_ids, start=1):
-            cur.execute("UPDATE drop_rules SET display_order = ? WHERE id = ?", (order_idx, r_id))
-        conn.commit()
-
-    await run_db_query(_reorder)
-    await asyncio.to_thread(get_drop_filter().reload_rules)
+    await reorder_rules("drop_rules", "drop rule", payload.rule_ids, get_drop_filter().reload_rules)
     return await list_drop_rules(user=user)
 
 
@@ -464,11 +391,7 @@ async def update_drop_rule(
             else existing["severity_threshold"]
         )
         if "name" in fields:
-            new_name = _clean(payload.name) or (
-                app_normalized
-                or source_normalized
-                or (f"Drop {new_message}" if new_message and new_message != "*" else "Drop Rule")
-            )
+            new_name = _clean(payload.name) or _default_drop_rule_name(app_normalized, source_normalized, new_message)
         else:
             new_name = existing["name"] or "Drop Rule"
 
@@ -662,48 +585,21 @@ async def install_drop_preset(
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-    preset_name = preset.get("name") or "Drop Rule"
+    rule = {
+        "name": preset.get("name") or "Drop Rule",
+        "source_pattern": preset.get("source_pattern"),
+        "app_pattern": preset.get("app_pattern"),
+        "message_pattern": msg,
+        "is_regex": bool(preset.get("is_regex")),
+        "is_enabled": True,
+        "severity_threshold": preset.get("severity_threshold"),
+    }
 
     def _insert(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT COALESCE(MAX(display_order), 0) + 1 FROM drop_rules")
-        next_order = cur.fetchone()[0]
-        cur.execute(
-            """
-            INSERT INTO drop_rules (
-                name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, dropped_count, display_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, 1, ?, 0, ?, ?)
-            """,
-            (
-                preset_name,
-                preset.get("source_pattern"),
-                preset.get("app_pattern"),
-                msg,
-                1 if preset.get("is_regex") else 0,
-                preset.get("severity_threshold"),
-                next_order,
-                now_iso,
-            ),
-        )
-        rule_id = cur.lastrowid
+        rule_id, display_order = _insert_drop_rule(conn, rule, now_iso)
         conn.commit()
-        return rule_id, next_order
+        return rule_id, display_order
 
-    rule_id, next_order = await run_db_query(_insert)
+    rule_id, display_order = await run_db_query(_insert)
     await asyncio.to_thread(get_drop_filter().reload_rules)
-
-    return DropRuleResponse(
-        id=rule_id,
-        name=preset_name,
-        source_pattern=preset.get("source_pattern"),
-        app_pattern=preset.get("app_pattern"),
-        message_pattern=msg,
-        is_regex=bool(preset.get("is_regex")),
-        is_enabled=True,
-        severity_threshold=preset.get("severity_threshold"),
-        dropped_count=0,
-        display_order=next_order,
-        created_at=now_iso,
-    )
-
-
+    return _new_drop_rule_response(rule, rule_id, display_order, now_iso)

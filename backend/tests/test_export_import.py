@@ -464,3 +464,123 @@ class TestAlertRulesExportImportPaths:
         for path in ("/api/alerts/import", "/api/alerts/rules/import"):
             res = await client.post(path, json={"version": "1", "alert_rules": []}, headers=auth_headers)
             assert res.status_code == 200, path
+
+
+class TestEveryInsertPathStoresTheWholeRule:
+    """Create, preset install and import store every field and add the rule at the end of the order."""
+
+    @staticmethod
+    async def _first_preset(client: AsyncClient, auth_headers: dict, path: str) -> dict:
+        res = await client.get(path, headers=auth_headers)
+        assert res.status_code == 200
+        return res.json()[0]
+
+    @pytest.mark.asyncio
+    async def test_alert_rules(self, client: AsyncClient, auth_headers: dict):
+        created = await client.post(
+            "/api/alerts/rules",
+            json={
+                "name": "Created",
+                "rule_type": "rate",
+                "filter_app": "sshd",
+                "filter_severity": 4,
+                "match_pattern": "Failed password",
+                "threshold_count": 7,
+                "window_seconds": 120,
+                "cooldown_seconds": 600,
+                "ai_enrichment": True,
+                "is_enabled": False,
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 201
+        preset = await self._first_preset(client, auth_headers, "/api/alerts/presets")
+        installed = await client.post(f"/api/alerts/presets/{preset['id']}/install", headers=auth_headers)
+        assert installed.status_code == 201
+        imported = await client.post(
+            "/api/alerts/rules/import",
+            json={
+                "alert_rules": [
+                    {
+                        "name": "Imported",
+                        "rule_type": "pattern",
+                        "filter_app": "nginx",
+                        "filter_severity": 3,
+                        "match_pattern": "upstream timed out",
+                        "threshold_count": 2,
+                        "window_seconds": 30,
+                        "cooldown_seconds": 90,
+                        "ai_enrichment": False,
+                        "is_enabled": True,
+                        "channel_id": 99,
+                        "display_order": 1,
+                    }
+                ]
+            },
+            headers=auth_headers,
+        )
+        assert imported.json()["imported"] == 1
+
+        listed = (await client.get("/api/alerts/rules", headers=auth_headers)).json()
+        assert [r["display_order"] for r in listed] == [1, 2, 3]
+        assert listed[0] == created.json()
+        assert listed[1] == installed.json()
+        assert installed.json()["name"] == preset["name"]
+        assert installed.json()["is_enabled"] is True
+        stored = listed[2]
+        assert {k: stored[k] for k in (
+            "name", "rule_type", "channel_id", "filter_app", "filter_severity", "match_pattern",
+            "threshold_count", "window_seconds", "cooldown_seconds", "ai_enrichment", "is_enabled", "trigger_count",
+        )} == {
+            "name": "Imported", "rule_type": "pattern", "channel_id": None, "filter_app": "nginx",
+            "filter_severity": 3, "match_pattern": "upstream timed out", "threshold_count": 2,
+            "window_seconds": 30, "cooldown_seconds": 90, "ai_enrichment": False, "is_enabled": True,
+            "trigger_count": 0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_drop_rules(self, client: AsyncClient, auth_headers: dict):
+        created = await client.post(
+            "/api/drop-rules",
+            json={
+                "source_pattern": "10.0.0.*",
+                "app_pattern": "cron",
+                "message_pattern": "^session (opened|closed)",
+                "is_regex": True,
+                "is_enabled": False,
+                "severity_threshold": 6,
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 201
+        preset = await self._first_preset(client, auth_headers, "/api/drop-rules/presets")
+        installed = await client.post(f"/api/drop-rules/presets/{preset['id']}/install", headers=auth_headers)
+        assert installed.status_code == 201
+        imported = await client.post(
+            "/api/drop-rules/import",
+            json={"drop_rule": {"app_pattern": "healthcheck", "message_pattern": "GET /ping", "severity_threshold": 7}},
+            headers=auth_headers,
+        )
+        assert imported.json()["imported"] == 1
+
+        # The list adds drops counted in memory since the last flush, which other tests can leave behind
+        listed = [
+            {k: v for k, v in r.items() if k != "dropped_count"}
+            for r in (await client.get("/api/drop-rules", headers=auth_headers)).json()
+        ]
+        assert [r["display_order"] for r in listed] == [1, 2, 3]
+        assert created.json()["dropped_count"] == 0
+        assert listed[0] == {k: v for k, v in created.json().items() if k != "dropped_count"}
+        assert listed[0]["name"] == "cron"
+        assert listed[1] == {k: v for k, v in installed.json().items() if k != "dropped_count"}
+        assert installed.json()["is_enabled"] is True
+        assert {k: v for k, v in listed[2].items() if k not in ("id", "created_at")} == {
+            "name": "healthcheck",
+            "source_pattern": None,
+            "app_pattern": "healthcheck",
+            "message_pattern": "GET /ping",
+            "is_regex": False,
+            "is_enabled": True,
+            "severity_threshold": 7,
+            "display_order": 3,
+        }

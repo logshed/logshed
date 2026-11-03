@@ -7,13 +7,19 @@ dry-run pattern testing, and historical alert log auditing.
 
 import asyncio
 import datetime
-import json
 import logging
 import sqlite3
 from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import get_current_user, run_db_query
+from app.api.rule_transfer import (
+    INVALID_IMPORT_PAYLOAD,
+    export_response,
+    import_items,
+    next_display_order,
+    reorder_rules,
+)
 from app.models import (
     AlertHistoryItem,
     AlertHistoryListResponse,
@@ -45,6 +51,29 @@ from app.core.utils import parse_iso_to_epoch, parse_iso_to_utc_datetime
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
+
+
+# The columns _row_to_alert_rule_response reads, in its order
+_ALERT_RULE_COLUMNS = """
+    id, name, rule_type, channel_id, filter_app, filter_severity,
+    match_pattern, threshold_count, window_seconds, cooldown_seconds,
+    ai_enrichment, is_enabled, trigger_count, last_triggered_at,
+    suppress_until, display_order, created_at
+"""
+
+
+async def _fetch_alert_rule_row(rule_id: int) -> Any:
+    """The row of one alert rule with _ALERT_RULE_COLUMNS, or 404."""
+    def _fetch(conn):
+        return conn.execute(f"SELECT {_ALERT_RULE_COLUMNS} FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
+
+    row = await run_db_query(_fetch)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert rule {rule_id} not found.",
+        )
+    return row
 
 
 def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
@@ -219,20 +248,87 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
     """List all configured alert rules."""
     def _query(conn):
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
-                   match_pattern, threshold_count, window_seconds, cooldown_seconds,
-                   ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, display_order, created_at
-            FROM alert_rules
-            ORDER BY display_order ASC, id ASC
-            """
-        )
+        cur.execute(f"SELECT {_ALERT_RULE_COLUMNS} FROM alert_rules ORDER BY display_order ASC, id ASC")
         rows = cur.fetchall()
         return [_row_to_alert_rule_response(r) for r in rows]
 
     return await run_db_query(_query)
+
+
+_ALERT_EXPORT_COLUMNS = """
+    name, rule_type, filter_app, filter_severity, match_pattern,
+    threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
+    display_order
+"""
+
+
+def _row_to_alert_export_item(r: Any) -> AlertRuleExportItem:
+    """Map an alert_rules row with the export columns to the portable export definition."""
+    return AlertRuleExportItem(
+        name=r["name"],
+        rule_type=r["rule_type"] or "threshold",
+        filter_app=r["filter_app"],
+        filter_severity=r["filter_severity"],
+        match_pattern=r["match_pattern"],
+        threshold_count=r["threshold_count"] or 1,
+        window_seconds=r["window_seconds"] or 60,
+        cooldown_seconds=r["cooldown_seconds"] or 300,
+        ai_enrichment=bool(r["ai_enrichment"]),
+        is_enabled=bool(r["is_enabled"]),
+        display_order=r["display_order"] if "display_order" in r.keys() else 0,
+    )
+
+
+def _require_notification_channel(conn: sqlite3.Connection, channel_id: int) -> None:
+    """Refuse a rule that names a notification channel that does not exist (400)."""
+    if not conn.execute("SELECT id FROM notification_channels WHERE id = ?", (channel_id,)).fetchone():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Notification channel {channel_id} does not exist.",
+        )
+
+
+def _insert_alert_rule(conn: sqlite3.Connection, rule: dict[str, Any], created_at: str) -> tuple[int, int]:
+    """Insert an alert rule after the existing ones; returns its id and display order. The caller commits."""
+    display_order = next_display_order(conn, "alert_rules")
+    cur = conn.execute(
+        """
+        INSERT INTO alert_rules
+        (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
+         threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
+         is_enabled, trigger_count, display_order, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        """,
+        (
+            rule["name"],
+            rule["rule_type"],
+            rule["channel_id"],
+            rule["filter_app"],
+            rule["filter_severity"],
+            rule["match_pattern"],
+            rule["threshold_count"],
+            rule["window_seconds"],
+            rule["cooldown_seconds"],
+            int(rule["ai_enrichment"]),
+            int(rule["is_enabled"]),
+            display_order,
+            created_at,
+        ),
+    )
+    return cur.lastrowid, display_order
+
+
+def _new_alert_rule_response(rule: dict[str, Any], rule_id: int, display_order: int, created_at: str) -> AlertRuleResponse:
+    """The response for an alert rule just stored by _insert_alert_rule."""
+    return AlertRuleResponse(
+        id=rule_id,
+        **rule,
+        trigger_count=0,
+        display_order=display_order,
+        last_triggered_at=None,
+        suppress_until=None,
+        created_at=created_at,
+    )
 
 
 @router.get("/export", response_model=AlertRuleExportBundle, include_in_schema=False)
@@ -240,45 +336,14 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
 async def export_alert_rules(user: dict = Depends(get_current_user)) -> Response:
     """Export all configured alert rules as a JSON bundle."""
     def _query(conn):
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT name, rule_type, filter_app, filter_severity, match_pattern,
-                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
-                   display_order
-            FROM alert_rules
-            ORDER BY display_order ASC, id ASC
-            """
-        )
-        rows = cur.fetchall()
-        return [
-            AlertRuleExportItem(
-                name=r["name"],
-                rule_type=r["rule_type"] or "threshold",
-                filter_app=r["filter_app"],
-                filter_severity=r["filter_severity"],
-                match_pattern=r["match_pattern"],
-                threshold_count=r["threshold_count"] or 1,
-                window_seconds=r["window_seconds"] or 60,
-                cooldown_seconds=r["cooldown_seconds"] or 300,
-                ai_enrichment=bool(r["ai_enrichment"]),
-                is_enabled=bool(r["is_enabled"]),
-                display_order=r["display_order"] if "display_order" in r.keys() else 0,
-            )
-            for r in rows
-        ]
+        rows = conn.execute(
+            f"SELECT {_ALERT_EXPORT_COLUMNS} FROM alert_rules ORDER BY display_order ASC, id ASC"
+        ).fetchall()
+        return [_row_to_alert_export_item(r) for r in rows]
 
     exported_rules = await run_db_query(_query)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    bundle = AlertRuleExportBundle(
-        version="1",
-        exported_at=now_iso,
-        alert_rules=exported_rules,
-    )
-    return Response(
-        content=json.dumps(bundle.model_dump(), indent=2),
-        media_type="application/json",
-    )
+    return export_response(AlertRuleExportBundle(version="1", exported_at=now_iso, alert_rules=exported_rules))
 
 
 @router.get("/{rule_id}/export", response_model=AlertRuleExportSingle, include_in_schema=False)
@@ -289,33 +354,8 @@ async def export_single_alert_rule(
 ) -> Response:
     """Export a single alert rule as a JSON object."""
     def _query(conn):
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT name, rule_type, filter_app, filter_severity, match_pattern,
-                   threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
-                   display_order
-            FROM alert_rules
-            WHERE id = ?
-            """,
-            (rule_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return AlertRuleExportItem(
-            name=row["name"],
-            rule_type=row["rule_type"] or "threshold",
-            filter_app=row["filter_app"],
-            filter_severity=row["filter_severity"],
-            match_pattern=row["match_pattern"],
-            threshold_count=row["threshold_count"] or 1,
-            window_seconds=row["window_seconds"] or 60,
-            cooldown_seconds=row["cooldown_seconds"] or 300,
-            ai_enrichment=bool(row["ai_enrichment"]),
-            is_enabled=bool(row["is_enabled"]),
-            display_order=row["display_order"] if "display_order" in row.keys() else 0,
-        )
+        row = conn.execute(f"SELECT {_ALERT_EXPORT_COLUMNS} FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
+        return _row_to_alert_export_item(row) if row else None
 
     item = await run_db_query(_query)
     if not item:
@@ -325,15 +365,7 @@ async def export_single_alert_rule(
         )
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    single = AlertRuleExportSingle(
-        version="1",
-        exported_at=now_iso,
-        alert_rule=item,
-    )
-    return Response(
-        content=json.dumps(single.model_dump(), indent=2),
-        media_type="application/json",
-    )
+    return export_response(AlertRuleExportSingle(version="1", exported_at=now_iso, alert_rule=item))
 
 
 @router.post("/import", response_model=AlertRuleImportResponse, include_in_schema=False)
@@ -346,21 +378,9 @@ async def import_alert_rules(
     Import alert rules from a bundle, single rule object, or raw dictionary.
     Deduplicates rules with matching names case-insensitively.
     """
-    if isinstance(payload, dict):
-        if "alert_rules" in payload and isinstance(payload["alert_rules"], list):
-            items = payload["alert_rules"]
-        elif "alert_rule" in payload and isinstance(payload["alert_rule"], dict):
-            items = [payload["alert_rule"]]
-        else:
-            items = [payload]
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        return AlertRuleImportResponse(
-            imported=0,
-            skipped=0,
-            errors=["Invalid payload format: expected JSON object or array."],
-        )
+    items = import_items(payload, "alert_rules", "alert_rule")
+    if items is None:
+        return AlertRuleImportResponse(imported=0, skipped=0, errors=[INVALID_IMPORT_PAYLOAD])
 
     def _get_existing(conn):
         cur = conn.cursor()
@@ -445,6 +465,7 @@ async def import_alert_rules(
         to_insert.append({
             "name": name,
             "rule_type": rule_type,
+            "channel_id": None,
             "filter_app": filter_app,
             "filter_severity": filter_severity,
             "match_pattern": match_pattern,
@@ -458,33 +479,8 @@ async def import_alert_rules(
     if to_insert:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         def _insert_all(conn):
-            cur = conn.cursor()
-            cur.execute("SELECT COALESCE(MAX(display_order), 0) FROM alert_rules")
-            max_order = cur.fetchone()[0]
-            for idx_rule, rule in enumerate(to_insert, start=1):
-                cur.execute(
-                    """
-                    INSERT INTO alert_rules
-                    (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
-                     threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
-                     is_enabled, trigger_count, display_order, created_at)
-                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-                    """,
-                    (
-                        rule["name"],
-                        rule["rule_type"],
-                        rule["filter_app"],
-                        rule["filter_severity"],
-                        rule["match_pattern"],
-                        rule["threshold_count"],
-                        rule["window_seconds"],
-                        rule["cooldown_seconds"],
-                        int(rule["ai_enrichment"]),
-                        int(rule["is_enabled"]),
-                        max_order + idx_rule,
-                        now_iso,
-                    ),
-                )
+            for rule in to_insert:
+                _insert_alert_rule(conn, rule, now_iso)
             conn.commit()
 
         await run_db_query(_insert_all)
@@ -507,72 +503,30 @@ async def create_alert_rule(
         validate_regex_pattern(rule_in.match_pattern)
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rule = {
+        "name": rule_in.name.strip(),
+        "rule_type": rule_in.rule_type.strip(),
+        "channel_id": rule_in.channel_id,
+        "filter_app": rule_in.filter_app.strip() if rule_in.filter_app else None,
+        "filter_severity": rule_in.filter_severity,
+        "match_pattern": rule_in.match_pattern.strip() if rule_in.match_pattern else None,
+        "threshold_count": rule_in.threshold_count,
+        "window_seconds": rule_in.window_seconds,
+        "cooldown_seconds": rule_in.cooldown_seconds,
+        "ai_enrichment": rule_in.ai_enrichment,
+        "is_enabled": rule_in.is_enabled,
+    }
 
     def _insert(conn):
-        cur = conn.cursor()
-
-        # Validate channel_id if specified
         if rule_in.channel_id is not None:
-            cur.execute("SELECT id FROM notification_channels WHERE id = ?", (rule_in.channel_id,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Notification channel {rule_in.channel_id} does not exist.",
-                )
-
-        cur.execute("SELECT COALESCE(MAX(display_order), 0) + 1 FROM alert_rules")
-        next_order = cur.fetchone()[0]
-
-        cur.execute(
-            """
-            INSERT INTO alert_rules
-            (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
-             threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
-             is_enabled, trigger_count, display_order, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-            """,
-            (
-                rule_in.name.strip(),
-                rule_in.rule_type.strip(),
-                rule_in.channel_id,
-                rule_in.filter_app.strip() if rule_in.filter_app else None,
-                rule_in.filter_severity,
-                rule_in.match_pattern.strip() if rule_in.match_pattern else None,
-                rule_in.threshold_count,
-                rule_in.window_seconds,
-                rule_in.cooldown_seconds,
-                int(rule_in.ai_enrichment),
-                int(rule_in.is_enabled),
-                next_order,
-                now_iso,
-            ),
-        )
-        rule_id = cur.lastrowid
+            _require_notification_channel(conn, rule_in.channel_id)
+        rule_id, display_order = _insert_alert_rule(conn, rule, now_iso)
         conn.commit()
-        return rule_id, next_order
+        return rule_id, display_order
 
-    rule_id, next_order = await run_db_query(_insert)
+    rule_id, display_order = await run_db_query(_insert)
     await asyncio.to_thread(get_alert_evaluator().reload_rules)
-
-    return AlertRuleResponse(
-        id=rule_id,
-        name=rule_in.name.strip(),
-        rule_type=rule_in.rule_type.strip(),
-        channel_id=rule_in.channel_id,
-        filter_app=rule_in.filter_app.strip() if rule_in.filter_app else None,
-        filter_severity=rule_in.filter_severity,
-        match_pattern=rule_in.match_pattern.strip() if rule_in.match_pattern else None,
-        threshold_count=rule_in.threshold_count,
-        window_seconds=rule_in.window_seconds,
-        cooldown_seconds=rule_in.cooldown_seconds,
-        ai_enrichment=rule_in.ai_enrichment,
-        is_enabled=rule_in.is_enabled,
-        trigger_count=0,
-        display_order=next_order,
-        last_triggered_at=None,
-        suppress_until=None,
-        created_at=now_iso,
-    )
+    return _new_alert_rule_response(rule, rule_id, display_order, now_iso)
 
 
 @router.get("/rules/{rule_id}", response_model=AlertRuleResponse)
@@ -581,27 +535,7 @@ async def get_alert_rule(
     user: dict = Depends(get_current_user),
 ) -> AlertRuleResponse:
     """Retrieve details for a single alert rule."""
-    def _fetch(conn):
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
-                   match_pattern, threshold_count, window_seconds, cooldown_seconds,
-                   ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, display_order, created_at
-            FROM alert_rules
-            WHERE id = ?
-            """,
-            (rule_id,),
-        )
-        return cur.fetchone()
-
-    row = await run_db_query(_fetch)
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Alert rule {rule_id} not found.",
-        )
+    row = await _fetch_alert_rule_row(rule_id)
 
     return _row_to_alert_rule_response(row)
 
@@ -612,29 +546,7 @@ async def reorder_alert_rules(
     user: dict = Depends(get_current_user),
 ) -> list[AlertRuleResponse]:
     """Atomically update the evaluation and display order of alert rules."""
-    rule_ids = payload.rule_ids
-    if len(rule_ids) != len(set(rule_ids)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Duplicate rule IDs in reorder request",
-        )
-
-    def _reorder(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM alert_rules")
-        existing_ids = {r[0] for r in cur.fetchall()}
-        if set(rule_ids) != existing_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Reorder payload must match all configured alert rule IDs",
-            )
-
-        for order_idx, r_id in enumerate(rule_ids, start=1):
-            cur.execute("UPDATE alert_rules SET display_order = ? WHERE id = ?", (order_idx, r_id))
-        conn.commit()
-
-    await run_db_query(_reorder)
-    await asyncio.to_thread(get_alert_evaluator().reload_rules)
+    await reorder_rules("alert_rules", "alert rule", payload.rule_ids, get_alert_evaluator().reload_rules)
     return await list_alert_rules(user=user)
 
 
@@ -645,27 +557,7 @@ async def update_alert_rule(
     user: dict = Depends(get_current_user),
 ) -> AlertRuleResponse:
     """Update fields on an existing alert rule."""
-    def _fetch(conn):
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
-                   match_pattern, threshold_count, window_seconds, cooldown_seconds,
-                   ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, display_order, created_at
-            FROM alert_rules
-            WHERE id = ?
-            """,
-            (rule_id,),
-        )
-        return cur.fetchone()
-
-    row = await run_db_query(_fetch)
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Alert rule {rule_id} not found.",
-        )
+    row = await _fetch_alert_rule_row(rule_id)
 
     fields = rule_in.model_fields_set
     new_name = rule_in.name.strip() if "name" in fields and rule_in.name is not None else row[1]
@@ -710,12 +602,7 @@ async def update_alert_rule(
     def _update(conn):
         cur = conn.cursor()
         if new_channel is not None and new_channel != row[3]:
-            cur.execute("SELECT id FROM notification_channels WHERE id = ?", (new_channel,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Notification channel {new_channel} does not exist.",
-                )
+            _require_notification_channel(conn, new_channel)
 
         cur.execute(
             """
@@ -894,69 +781,30 @@ async def install_preset(
 
     channel_id = payload.channel_id if payload else None
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rule = {
+        "name": preset["name"],
+        "rule_type": preset["rule_type"],
+        "channel_id": channel_id,
+        "filter_app": preset.get("filter_app"),
+        "filter_severity": preset.get("filter_severity"),
+        "match_pattern": preset.get("match_pattern"),
+        "threshold_count": preset["threshold_count"],
+        "window_seconds": preset["window_seconds"],
+        "cooldown_seconds": preset["cooldown_seconds"],
+        "ai_enrichment": preset["ai_enrichment"],
+        "is_enabled": True,
+    }
 
     def _insert(conn):
-        cur = conn.cursor()
         if channel_id is not None:
-            cur.execute("SELECT id FROM notification_channels WHERE id = ?", (channel_id,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Notification channel {channel_id} does not exist.",
-                )
-
-        cur.execute("SELECT COALESCE(MAX(display_order), 0) + 1 FROM alert_rules")
-        next_order = cur.fetchone()[0]
-
-        cur.execute(
-            """
-            INSERT INTO alert_rules
-            (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
-             threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
-             is_enabled, trigger_count, display_order, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-            """,
-            (
-                preset["name"],
-                preset["rule_type"],
-                channel_id,
-                preset.get("filter_app"),
-                preset.get("filter_severity"),
-                preset.get("match_pattern"),
-                preset["threshold_count"],
-                preset["window_seconds"],
-                preset["cooldown_seconds"],
-                int(preset["ai_enrichment"]),
-                next_order,
-                now_iso,
-            ),
-        )
-        rule_id = cur.lastrowid
+            _require_notification_channel(conn, channel_id)
+        rule_id, display_order = _insert_alert_rule(conn, rule, now_iso)
         conn.commit()
-        return rule_id, next_order
+        return rule_id, display_order
 
-    rule_id, next_order = await run_db_query(_insert)
+    rule_id, display_order = await run_db_query(_insert)
     await asyncio.to_thread(get_alert_evaluator().reload_rules)
-
-    return AlertRuleResponse(
-        id=rule_id,
-        name=preset["name"],
-        rule_type=preset["rule_type"],
-        channel_id=channel_id,
-        filter_app=preset.get("filter_app"),
-        filter_severity=preset.get("filter_severity"),
-        match_pattern=preset.get("match_pattern"),
-        threshold_count=preset["threshold_count"],
-        window_seconds=preset["window_seconds"],
-        cooldown_seconds=preset["cooldown_seconds"],
-        ai_enrichment=preset["ai_enrichment"],
-        is_enabled=True,
-        trigger_count=0,
-        display_order=next_order,
-        last_triggered_at=None,
-        suppress_until=None,
-        created_at=now_iso,
-    )
+    return _new_alert_rule_response(rule, rule_id, display_order, now_iso)
 
 
 

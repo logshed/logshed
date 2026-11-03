@@ -161,6 +161,21 @@ class TestAlertsApi:
         assert "does not exist" in res.json()["detail"]
 
     @pytest.mark.asyncio
+    async def test_update_and_preset_install_refuse_an_unknown_channel(self, client: AsyncClient, auth_headers: dict):
+        rule = (await client.post("/api/alerts/rules", json={"name": "Channel Check"}, headers=auth_headers)).json()
+        res = await client.put(f"/api/alerts/rules/{rule['id']}", json={"channel_id": 99999}, headers=auth_headers)
+        assert res.status_code == 400
+        assert res.json()["detail"] == "Notification channel 99999 does not exist."
+
+        preset_id = (await client.get("/api/alerts/presets", headers=auth_headers)).json()[0]["id"]
+        res = await client.post(
+            f"/api/alerts/presets/{preset_id}/install", json={"channel_id": 99999}, headers=auth_headers
+        )
+        assert res.status_code == 400
+        assert res.json()["detail"] == "Notification channel 99999 does not exist."
+        assert len((await client.get("/api/alerts/rules", headers=auth_headers)).json()) == 1
+
+    @pytest.mark.asyncio
     async def test_test_pattern_endpoint(self, client: AsyncClient, auth_headers: dict):
         # 1. Match with IP extraction
         payload = {
