@@ -1678,3 +1678,50 @@ class TestSearchBooleanOperators:
         res = await client.get("/api/logs", params={"query": query})
         assert res.status_code == 200
         assert {log["message"] for log in res.json()["logs"]} == expected_messages
+
+    WORD_MESSAGES = [
+        "cron job started",
+        "crontab updated",
+        "microns measured",
+        "acronym list",
+        "disk full on node",
+        "full disk",
+        "key=value pair",
+        "pve-node2 up",
+        "caf\u00e9 ouvert",
+    ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query, expected_messages",
+        [
+            # A term matches the start of a word, never the middle of one
+            ("cron", {"cron job started", "crontab updated"}),
+            ("rons", set()),
+            ("microns OR acronym NOT cron", {"microns measured", "acronym list"}),
+            ("msg:cron", {"cron job started", "crontab updated"}),
+            # Words side by side in any order; a quoted phrase as consecutive whole words
+            ("disk full", {"disk full on node", "full disk"}),
+            ('"disk full"', {"disk full on node"}),
+            ('"disk fu"', set()),
+            # Punctuation splits words, and the last word of the term is a prefix
+            ("pve-node", {"pve-node2 up"}),
+            ("key=val", {"key=value pair"}),
+            # Accents are ignored, as the unicode61 tokenizer folds them
+            ("cafe", {"caf\u00e9 ouvert"}),
+        ],
+    )
+    async def test_terms_match_word_starts_like_fts5(
+        self, client: AsyncClient, auth_cookie: dict, tmp_path: Path, query, expected_messages
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        template = self._entries()[0]
+        entries = [
+            {**template, "message": m, "raw": m, "timestamp": f"2026-10-20T11:0{i}:00Z"}
+            for i, m in enumerate(self.WORD_MESSAGES)
+        ]
+        _seed_logs(tmp_path / "logs.db", entries)
+
+        res = await client.get("/api/logs", params={"query": query})
+        assert res.status_code == 200
+        assert {log["message"] for log in res.json()["logs"]} == expected_messages

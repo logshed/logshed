@@ -288,7 +288,6 @@ const SEARCH_COLUMNS = new Set(['app_name', 'app', 'source_alias', 'source', 'ho
 const SEARCH_TOKEN_RE = /("[^"]*"|'[^']*'|[a-z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)/g;
 
 const isSearchOperator = (token: string | undefined) => token !== undefined && SEARCH_OPERATORS.has(token);
-const stripSearchQuotes = (value: string) => value.replace(/^["'*]+|["'*]+$/g, '');
 
 /**
  * True when history search would run the query as an expression. Like format_fts_query, it refuses
@@ -371,30 +370,77 @@ export function compileSearchQuery(query?: string): CompiledSearchQuery {
   return { lowered, terms, expr, hasOperators };
 }
 
-/** One word, "phrase" or column filter (app:, host:, source:, msg: and their long forms) against a log. */
-function matchesSearchTerm(log: LogEntry, term: string, combined: string): boolean {
+// Word characters as the FTS5 unicode61 tokenizer of history search reads them: letters, digits and
+// private use characters; everything else separates words, and accents are folded away
+const SEARCH_WORD_RE = /[\p{L}\p{N}\p{Co}]+/gu;
+const COMBINING_MARKS_RE = /\p{M}+/gu;
+
+/** The words of a text as history search indexes them: lower-cased, accents removed. */
+export function searchWords(text: string): string[] {
+  return text.toLowerCase().normalize('NFD').replace(COMBINING_MARKS_RE, '').match(SEARCH_WORD_RE) || [];
+}
+
+/**
+ * True when the words occur one after the other in fieldWords, as an FTS5 phrase: each word whole,
+ * except that the last may be the start of a word when prefix is set (a term is sent as term*).
+ */
+function wordsOccur(fieldWords: string[], words: string[], prefix: boolean): boolean {
+  const last = words.length - 1;
+  for (let i = 0; i + last < fieldWords.length; i++) {
+    let j = 0;
+    while (j < last && fieldWords[i + j] === words[j]) j++;
+    if (j === last && (prefix ? fieldWords[i + j].startsWith(words[j]) : fieldWords[i + j] === words[j])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** A term's words, and whether its last word is a prefix: yes unless the term is a quoted phrase. */
+function termWords(raw: string): { words: string[]; prefix: boolean } {
+  const quoted = raw.length >= 2 && (raw[0] === '"' || raw[0] === "'") && raw[raw.length - 1] === raw[0];
+  return { words: searchWords(quoted ? raw.slice(1, -1) : raw), prefix: !quoted };
+}
+
+/** The words of each searchable field of one log, split once per log and only when a term needs them. */
+class LogWords {
+  private cache = new Map<string, string[]>();
+  constructor(private readonly log: LogEntry) {}
+  get(field: 'message' | 'app_name' | 'source_alias' | 'source_ip'): string[] {
+    let words = this.cache.get(field);
+    if (!words) {
+      words = searchWords(this.log[field] || '');
+      this.cache.set(field, words);
+    }
+    return words;
+  }
+}
+
+const FREE_TERM_FIELDS = ['message', 'app_name', 'source_alias', 'source_ip'] as const;
+
+/**
+ * One word, "phrase" or column filter (app:, host:, source:, msg: and their long forms) against a
+ * log, matched like history search: at word starts, a phrase as consecutive words within one field.
+ */
+function matchesSearchTerm(term: string, logWords: LogWords): boolean {
   const colon = term.indexOf(':');
   if (colon > 0 && !term.startsWith('"') && !term.startsWith("'")) {
     const col = term.slice(0, colon);
-    const cleanVal = stripSearchQuotes(term.slice(colon + 1));
-    if (SEARCH_COLUMNS.has(col) && !cleanVal) return true;
-    if (col === 'app_name' || col === 'app') {
-      return (log.app_name || '').toLowerCase().includes(cleanVal);
-    }
-    if (col === 'source' || col === 'source_alias' || col === 'host') {
+    if (SEARCH_COLUMNS.has(col)) {
+      const { words, prefix } = termWords(term.slice(colon + 1));
+      if (words.length === 0) return true;
+      if (col === 'app_name' || col === 'app') return wordsOccur(logWords.get('app_name'), words, prefix);
+      if (col === 'message' || col === 'msg') return wordsOccur(logWords.get('message'), words, prefix);
       return (
-        (log.source_alias || '').toLowerCase().includes(cleanVal) ||
-        (log.source_ip || '').toLowerCase().includes(cleanVal)
+        wordsOccur(logWords.get('source_alias'), words, prefix) ||
+        wordsOccur(logWords.get('source_ip'), words, prefix)
       );
-    }
-    if (col === 'message' || col === 'msg') {
-      return (log.message || '').toLowerCase().includes(cleanVal);
     }
   }
 
-  const cleanTerm = stripSearchQuotes(term);
-  if (!cleanTerm) return true;
-  return combined.includes(cleanTerm);
+  const { words, prefix } = termWords(term);
+  if (words.length === 0) return true;
+  return FREE_TERM_FIELDS.some((field) => wordsOccur(logWords.get(field), words, prefix));
 }
 
 function evaluateSearchNode(node: SearchNode, matchTerm: (term: string) => boolean): boolean {
@@ -418,31 +464,19 @@ export function matchesSearchQuery(
   const compiled = typeof query === 'string' || query === undefined ? compileSearchQuery(query) : query;
   if (!compiled.lowered) return true;
 
-  const fields = [
-    log.message || '',
-    log.app_name || '',
-    log.source_alias || '',
-    log.source_ip || '',
-  ];
-  const combined = fields.join(' ').toLowerCase();
-
-  // 1. Direct case-insensitive substring match (not with operators, so "auth NOT cron" text cannot bypass NOT)
-  if (!compiled.hasOperators && combined.includes(compiled.lowered)) {
-    return true;
+  // 1. A precompiled regex, when one is supplied, decides alone (the query is its source)
+  if (precompiledRegex) {
+    return [log.message, log.app_name, log.source_alias, log.source_ip].some((f) => precompiledRegex.test(f || ''));
   }
 
-  // 2. Precompiled regex match (only if explicitly provided)
-  if (precompiledRegex && fields.some((f) => precompiledRegex.test(f))) {
-    return true;
-  }
-
-  // 3. The query as an expression (e.g. "error OR timeout", "auth NOT cron"), grouped like history search
-  const matchTerm = (term: string) => matchesSearchTerm(log, term, combined);
+  // 2. The query as an expression (e.g. "error OR timeout", "auth NOT cron"), grouped like history search
+  const logWords = new LogWords(log);
+  const matchTerm = (term: string) => matchesSearchTerm(term, logWords);
   if (compiled.expr) {
     return evaluateSearchNode(compiled.expr, matchTerm);
   }
 
-  // 4. Incomplete operators, as while typing ("error OR"): every remaining term must match
+  // 3. Incomplete operators, as while typing ("error OR"): every remaining term must match
   return compiled.terms.length > 0 && compiled.terms.every(matchTerm);
 }
 

@@ -116,6 +116,34 @@ describe('matchesSearchQuery AND, OR and NOT like history search', () => {
     expect(matching(query)).toEqual(sorted(expected));
   });
 
+  // Same cases as test_terms_match_word_starts_like_fts5 in backend/tests/test_logs_api.py
+  const WORD_MESSAGES = [
+    'cron job started',
+    'crontab updated',
+    'microns measured',
+    'acronym list',
+    'disk full on node',
+    'full disk',
+    'key=value pair',
+    'pve-node2 up',
+    'caf\u00e9 ouvert',
+  ];
+  it.each([
+    ['cron', ['cron job started', 'crontab updated']],
+    ['rons', []],
+    ['microns OR acronym NOT cron', ['microns measured', 'acronym list']],
+    ['msg:cron', ['cron job started', 'crontab updated']],
+    ['disk full', ['disk full on node', 'full disk']],
+    ['"disk full"', ['disk full on node']],
+    ['"disk fu"', []],
+    ['pve-node', ['pve-node2 up']],
+    ['key=val', ['key=value pair']],
+    ['cafe', ['caf\u00e9 ouvert']],
+  ])('matches word starts like FTS5: %s', (query, expected) => {
+    const matched = WORD_MESSAGES.filter((m) => matchesSearchQuery(makeLog(m), compileSearchQuery(query)));
+    expect(sorted(matched)).toEqual(sorted(expected));
+  });
+
   it('keeps the popover examples right: error OR timeout and auth NOT cron', () => {
     const q1 = compileSearchQuery('error OR timeout');
     expect(matchesSearchQuery(makeLog('disk error'), q1)).toBe(true);
