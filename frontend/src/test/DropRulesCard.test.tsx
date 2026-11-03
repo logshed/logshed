@@ -628,6 +628,47 @@ describe('DropRulesCard Component', () => {
     fireEvent.dragEnd(row);
     expect(row.className).not.toContain('opacity-40');
   });
+
+  it('moves a dragged rule to the row it is dropped on, and a drop on itself sends nothing', async () => {
+    const rules: DropRule[] = [1, 2, 3].map((id) => ({ ...mockRules[0], id, name: `Rule ${id}` }));
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(rules);
+    const reorderSpy = vi
+      .spyOn(dropRulesApi, 'reorderDropRules')
+      .mockImplementation(async (ids: number[]) => ids.map((id) => rules.find((r) => r.id === id)!));
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
+
+    render(<DropRulesCard />);
+    await waitFor(() => expect(screen.getByTestId('drop-rule-row-3')).toBeInTheDocument());
+
+    fireEvent.dragStart(screen.getByTestId('drop-rule-row-1'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('drop-rule-row-1'), { dataTransfer });
+    expect(reorderSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('drop-rule-row-1').className).not.toContain('opacity-40');
+
+    fireEvent.dragStart(screen.getByTestId('drop-rule-row-1'), { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId('drop-rule-row-3'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('drop-rule-row-3'), { dataTransfer });
+    await waitFor(() => expect(reorderSpy).toHaveBeenCalledWith([2, 3, 1]));
+    expect(screen.getByTestId('drop-rule-row-1').className).not.toContain('opacity-40');
+  });
+
+  it('reports import errors from the server and a file that is not JSON', async () => {
+    const importSpy = vi
+      .spyOn(dropRulesApi, 'importDropRules')
+      .mockResolvedValue({ imported: 0, skipped: 1, errors: ['Item #2: bad pattern'] });
+    const { container } = render(<DropRulesCard />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument());
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(fileInput, { target: { files: [new File(['{}'], 'rules.json')] } });
+    await waitFor(() =>
+      expect(screen.getByText('Imported 0, skipped 1. Errors: Item #2: bad pattern')).toBeInTheDocument()
+    );
+
+    fireEvent.change(fileInput, { target: { files: [new File(['not json'], 'rules.json')] } });
+    await waitFor(() => expect(screen.getByText(/not valid JSON/)).toBeInTheDocument());
+    expect(importSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 

@@ -736,6 +736,26 @@ describe('AlertsPanel Component', () => {
     });
   });
 
+  it('reports import errors from the server and a file that is not JSON', async () => {
+    const importSpy = vi
+      .spyOn(alertsApi, 'importAlertRules')
+      .mockResolvedValue({ imported: 1, skipped: 0, errors: ["Rule 'X': invalid filter_severity value."] });
+    const { container } = render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument());
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(fileInput, { target: { files: [new File(['{}'], 'rules.json')] } });
+    await waitFor(() =>
+      expect(
+        screen.getByText("Imported 1, skipped 0. Errors: Rule 'X': invalid filter_severity value.")
+      ).toBeInTheDocument()
+    );
+
+    fireEvent.change(fileInput, { target: { files: [new File(['not json'], 'rules.json')] } });
+    await waitFor(() => expect(screen.getByText(/not valid JSON/)).toBeInTheDocument());
+    expect(importSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('auto-dismisses success feedback after 5 seconds', async () => {
     vi.spyOn(alertsApi, 'importAlertRules').mockResolvedValue({ imported: 1, skipped: 0, errors: [] });
 
@@ -1215,6 +1235,30 @@ describe('AlertsPanel Component', () => {
       expect(row.className).toContain('opacity-40');
       fireEvent.dragEnd(row);
       expect(row.className).not.toContain('opacity-40');
+    });
+
+    it('moves a dragged rule to the row it is dropped on, and a drop on itself sends nothing', async () => {
+      const rules = [makeRule(1, 'Rule A'), makeRule(2, 'Rule B'), makeRule(3, 'Rule C')];
+      vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(rules);
+      const reorderSpy = vi
+        .spyOn(alertsApi, 'reorderAlertRules')
+        .mockImplementation(async (ids: number[]) => ids.map((id) => rules.find((r) => r.id === id)!));
+      const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
+      const rowOf = (name: string) => screen.getByText(name).closest('[draggable="true"]') as HTMLElement;
+
+      render(<AlertsPanel />);
+      await waitFor(() => expect(screen.getByText('Rule C')).toBeInTheDocument());
+
+      fireEvent.dragStart(rowOf('Rule A'), { dataTransfer });
+      fireEvent.drop(rowOf('Rule A'), { dataTransfer });
+      expect(reorderSpy).not.toHaveBeenCalled();
+
+      fireEvent.dragStart(rowOf('Rule A'), { dataTransfer });
+      fireEvent.dragOver(rowOf('Rule C'), { dataTransfer });
+      fireEvent.drop(rowOf('Rule C'), { dataTransfer });
+      await waitFor(() => expect(reorderSpy).toHaveBeenCalledWith([2, 3, 1]));
+      expect(ruleOrder()).toEqual([2, 3, 1]);
+      expect(rowOf('Rule A').className).not.toContain('opacity-40');
     });
 
     it('keeps the drop rules badge at its loaded count while the Drop Rules tab loads', async () => {

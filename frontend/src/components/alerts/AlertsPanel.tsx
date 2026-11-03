@@ -41,7 +41,6 @@ import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { fetchSettings } from '../../api/settings.ts';
 import {
-  downloadBlob,
   slugify,
   formatLocalTimestamp,
   formatMaintenanceTime,
@@ -56,6 +55,7 @@ import { AlertPresetsModal } from './AlertPresetsModal.tsx';
 import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
 import { isMaintenanceItem } from '../../utils/maintenanceHistory.ts';
 import { useSerialReorder } from '../../utils/useSerialReorder.ts';
+import { downloadRuleExport, importRuleFile } from '../../utils/ruleTransfer.ts';
 import { AlertRulesTab } from './tabs/AlertRulesTab.tsx';
 import { DropRulesTab } from './tabs/DropRulesTab.tsx';
 import { AlertHistoryTab } from './tabs/AlertHistoryTab.tsx';
@@ -653,62 +653,19 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleExportAll = async () => {
-    try {
-      const blob = await exportAllAlertRules();
-      downloadBlob(blob, 'logshed-alert-rules.json');
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to export alert rules.', isError: true });
-    }
-  };
+  const handleExportAll = () =>
+    downloadRuleExport(exportAllAlertRules, 'logshed-alert-rules.json', setFeedbackMsg, 'Failed to export alert rules.');
 
-  const handleExportSingle = async (rule: AlertRule) => {
-    try {
-      const blob = await exportSingleAlertRule(rule.id);
-      downloadBlob(blob, `${slugify(rule.name)}.json`);
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to export alert rule.', isError: true });
-    }
-  };
+  const handleExportSingle = (rule: AlertRule) =>
+    downloadRuleExport(
+      () => exportSingleAlertRule(rule.id),
+      `${slugify(rule.name)}.json`,
+      setFeedbackMsg,
+      'Failed to export alert rule.'
+    );
 
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target?.result as string;
-        const json = JSON.parse(text);
-        const res = await importAlertRules(json);
-        if (res.errors && res.errors.length > 0) {
-          setFeedbackMsg({
-            text: `Imported ${res.imported}, skipped ${res.skipped}. Errors: ${res.errors.join('; ')}`,
-            isError: res.imported === 0,
-          });
-        } else {
-          setFeedbackMsg({
-            text: `Imported ${res.imported} rule${res.imported === 1 ? '' : 's'} (${res.skipped} skipped).`,
-            isError: false,
-          });
-        }
-        loadAll();
-      } catch (err: any) {
-        setFeedbackMsg({
-          text: err.message || 'Failed to import rules. Invalid JSON file.',
-          isError: true,
-        });
-      }
-    };
-    reader.onerror = () => {
-      setFeedbackMsg({
-        text: 'Failed to read file.',
-        isError: true,
-      });
-    };
-    reader.readAsText(file);
-  };
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) =>
+    importRuleFile(e, importAlertRules, setFeedbackMsg, loadAll);
 
   // Delete history item
   const handleDeleteHistory = async (id: number) => {

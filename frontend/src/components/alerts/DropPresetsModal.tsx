@@ -1,6 +1,6 @@
 import React from 'react';
-import { Plus, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
+import { PresetCard } from './PresetCard.tsx';
 import { DropPreset, DropRule } from '../../types.ts';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 
@@ -51,80 +51,41 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
               const isInstalling = installingPresetId === preset.id;
 
               return (
-                <div
+                <PresetCard
                   key={preset.id}
-                  className="bg-dark-950/70 border border-dark-750 hover:border-dark-650 rounded-xl p-4 flex flex-col justify-between space-y-3 transition"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-xs font-semibold text-slate-100 truncate">{preset.name}</span>
-                        {preset.is_custom && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-800 shrink-0">
-                            Custom
-                          </span>
-                        )}
-                      </div>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-800 text-slate-300 border border-dark-700 shrink-0">
-                        {preset.is_regex ? 'Regex' : 'Substring'}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-slate-400 leading-relaxed">{preset.description}</p>
-
-                    <div className="pt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-400">
-                      {preset.app_pattern && (
-                        <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
-                          app: {preset.app_pattern}
-                        </span>
-                      )}
-                      {preset.source_pattern && (
-                        <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
-                          host: {preset.source_pattern}
-                        </span>
-                      )}
-                      <span className="bg-dark-800 px-2 py-0.5 rounded text-accent-400 border border-dark-700 font-mono truncate max-w-full">
-                        pattern: {preset.message_pattern}
-                      </span>
-                      {preset.severity_threshold != null && (
-                        <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
-                          {lessSevereLabel(preset.severity_threshold)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-dark-800 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-slate-400">
-                      {alreadyInstalled ? (
-                        <span className="flex items-center gap-1 text-emerald-400">
-                          <CheckCircle2 className="w-3 h-3 shrink-0" />
-                          <span>Rule already configured</span>
-                        </span>
-                      ) : (
-                        'Instant 1-click filter'
-                      )}
+                  name={preset.name}
+                  isCustom={preset.is_custom}
+                  badge={
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-800 text-slate-300 border border-dark-700 shrink-0">
+                      {preset.is_regex ? 'Regex' : 'Substring'}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => onInstallPreset(preset)}
-                      disabled={isInstalling}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-accent-400 bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/30 transition cursor-pointer disabled:opacity-50 shrink-0"
-                    >
-                      {isInstalling ? (
-                        <>
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                          <span>Installing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-3 h-3" />
-                          <span>{alreadyInstalled ? 'Install Again' : 'Install Rule'}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                  }
+                  description={preset.description}
+                  alreadyInstalled={alreadyInstalled}
+                  installedText="Rule already configured"
+                  notInstalledText="Instant 1-click filter"
+                  isInstalling={isInstalling}
+                  onInstall={() => onInstallPreset(preset)}
+                >
+                  {preset.app_pattern && (
+                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                      app: {preset.app_pattern}
+                    </span>
+                  )}
+                  {preset.source_pattern && (
+                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                      host: {preset.source_pattern}
+                    </span>
+                  )}
+                  <span className="bg-dark-800 px-2 py-0.5 rounded text-accent-400 border border-dark-700 font-mono truncate max-w-full">
+                    pattern: {preset.message_pattern}
+                  </span>
+                  {preset.severity_threshold != null && (
+                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                      {lessSevereLabel(preset.severity_threshold)}
+                    </span>
+                  )}
+                </PresetCard>
               );
             })}
           </div>

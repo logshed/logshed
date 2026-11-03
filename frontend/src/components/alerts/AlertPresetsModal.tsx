@@ -1,6 +1,7 @@
 import React from 'react';
-import { Plus, RefreshCw, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
+import { PresetCard } from './PresetCard.tsx';
 import { AlertPreset, AlertRule, NotificationChannel } from '../../types.ts';
 
 export interface AlertPresetsModalProps {
@@ -77,86 +78,47 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
               const isInstalling = installingPresetId === preset.id;
 
               return (
-                <div
+                <PresetCard
                   key={preset.id}
-                  className="bg-dark-950/70 border border-dark-750 hover:border-dark-650 rounded-xl p-4 flex flex-col justify-between space-y-3 transition"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-xs font-semibold text-slate-100 truncate">{preset.name}</span>
-                        {preset.is_custom && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-800 shrink-0">
-                            Custom
-                          </span>
-                        )}
-                      </div>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/40 shrink-0">
-                        {preset.rule_type}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-slate-400 leading-relaxed">{preset.description}</p>
-
-                    <div className="pt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-400">
-                      {preset.filter_app && (
-                        <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
-                          app: {preset.filter_app}
-                        </span>
-                      )}
-                      {preset.match_pattern && (
-                        <span className="bg-dark-800 px-2 py-0.5 rounded text-accent-400 border border-dark-700 font-mono truncate max-w-full">
-                          pattern: {preset.match_pattern}
-                        </span>
-                      )}
-                      <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
-                        {preset.rule_type === 'rate'
-                          ? `>= ${preset.threshold_count} logs/s in ${preset.window_seconds}s`
-                          : `${preset.threshold_count} in ${preset.window_seconds}s`}
-                      </span>
-                      <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
-                        cooldown: {preset.cooldown_seconds}s
-                      </span>
-                      {preset.ai_enrichment && (
-                        <span className="bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded border border-purple-800/40 flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>AI Enrichment</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-dark-800 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-slate-400">
-                      {alreadyInstalled ? (
-                        <span className="flex items-center gap-1 text-emerald-400">
-                          <CheckCircle2 className="w-3 h-3 shrink-0" />
-                          <span>Preset already installed</span>
-                        </span>
-                      ) : (
-                        'Instant 1-click activation'
-                      )}
+                  name={preset.name}
+                  isCustom={preset.is_custom}
+                  badge={
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/40 shrink-0">
+                      {preset.rule_type}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => onInstallPreset(preset)}
-                      disabled={isInstalling}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-accent-400 bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/30 transition cursor-pointer disabled:opacity-50 shrink-0"
-                    >
-                      {isInstalling ? (
-                        <>
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                          <span>Installing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-3 h-3" />
-                          <span>{alreadyInstalled ? 'Install Again' : 'Install Rule'}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                  }
+                  description={preset.description}
+                  alreadyInstalled={alreadyInstalled}
+                  installedText="Preset already installed"
+                  notInstalledText="Instant 1-click activation"
+                  isInstalling={isInstalling}
+                  onInstall={() => onInstallPreset(preset)}
+                >
+                  {preset.filter_app && (
+                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                      app: {preset.filter_app}
+                    </span>
+                  )}
+                  {preset.match_pattern && (
+                    <span className="bg-dark-800 px-2 py-0.5 rounded text-accent-400 border border-dark-700 font-mono truncate max-w-full">
+                      pattern: {preset.match_pattern}
+                    </span>
+                  )}
+                  <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
+                    {preset.rule_type === 'rate'
+                      ? `>= ${preset.threshold_count} logs/s in ${preset.window_seconds}s`
+                      : `${preset.threshold_count} in ${preset.window_seconds}s`}
+                  </span>
+                  <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
+                    cooldown: {preset.cooldown_seconds}s
+                  </span>
+                  {preset.ai_enrichment && (
+                    <span className="bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded border border-purple-800/40 flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5" />
+                      <span>AI Enrichment</span>
+                    </span>
+                  )}
+                </PresetCard>
               );
             })}
           </div>

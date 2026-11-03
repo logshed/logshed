@@ -12,13 +12,12 @@ import {
   Trash2,
   Shield,
   ExternalLink,
-  GripVertical,
-  ChevronUp,
-  ChevronDown,
 } from 'lucide-react';
 import { AlertRule, NotificationChannel, MaintenanceWindowResponse } from '../../../types.ts';
 import { formatLocalTimestamp, formatMaintenanceTime } from '../../../utils/formatters.ts';
 import { useServerTimezone } from '../../../utils/hooks.ts';
+import { useReorderableList } from '../../../utils/useReorderableList.ts';
+import { RuleOrderControls } from '../RuleOrderControls.tsx';
 
 export interface AlertRulesTabProps {
   rules: AlertRule[];
@@ -67,41 +66,9 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
   onReorderRules,
   getChannelStatus,
 }) => {
-  const [draggedIndex, setDraggedIndex] = React.useState<number | null>(null);
+  const { draggedIndex, moveItem, dragProps } = useReorderableList(rules, (newOrder) => onReorderRules?.(newOrder));
   const serverTimezone = useServerTimezone();
 
-  const handleMoveRule = (index: number, direction: 'up' | 'down') => {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= rules.length) return;
-    const newRules = [...rules];
-    const [moved] = newRules.splice(index, 1);
-    newRules.splice(targetIndex, 0, moved);
-    onReorderRules?.(newRules);
-  };
-
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', index.toString());
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === targetIndex) {
-      setDraggedIndex(null);
-      return;
-    }
-    const newRules = [...rules];
-    const [moved] = newRules.splice(draggedIndex, 1);
-    newRules.splice(targetIndex, 0, moved);
-    setDraggedIndex(null);
-    onReorderRules?.(newRules);
-  };
   return (
     <div className="space-y-4">
       {/* Active Maintenance Banner on Rules Tab */}
@@ -249,11 +216,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               return (
                 <div
                   key={rule.id}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, index)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, index)}
-                  onDragEnd={() => setDraggedIndex(null)}
+                  {...dragProps(index)}
                   className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                     draggedIndex === index ? 'opacity-40 bg-dark-800/60' : ''
                   } ${
@@ -261,35 +224,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                   }`}
                 >
                   <div className="flex items-start gap-3 min-w-0 flex-1">
-                    {/* Drag Handle and Up/Down Chevrons */}
-                    <div className="flex flex-col items-center gap-2 sm:gap-0.5 shrink-0 pt-0.5 text-slate-500">
-                      <button
-                        type="button"
-                        onClick={() => handleMoveRule(index, 'up')}
-                        disabled={index === 0}
-                        aria-label={`Move rule ${rule.id} up`}
-                        title="Move up"
-                        className="w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed"
-                      >
-                        <ChevronUp className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                      </button>
-                      <div
-                        className="hidden sm:flex cursor-grab active:cursor-grabbing p-0.5 text-slate-500 hover:text-slate-300"
-                        title="Drag to reorder"
-                      >
-                        <GripVertical className="w-4 h-4" />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleMoveRule(index, 'down')}
-                        disabled={index === rules.length - 1}
-                        aria-label={`Move rule ${rule.id} down`}
-                        title="Move down"
-                        className="w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed"
-                      >
-                        <ChevronDown className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                      </button>
-                    </div>
+                    <RuleOrderControls ruleId={rule.id} index={index} count={rules.length} onMove={moveItem} />
 
                     <div className="space-y-1.5 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">

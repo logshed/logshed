@@ -9,9 +9,6 @@ import {
   Zap,
   Download,
   Upload,
-  GripVertical,
-  ChevronUp,
-  ChevronDown,
 } from 'lucide-react';
 import { DropPreset, DropRule } from '../../../types.ts';
 import {
@@ -26,12 +23,15 @@ import {
   reorderDropRules,
 } from '../../../api/dropRules.ts';
 import { fetchLogFacets } from '../../../api/logs.ts';
-import { downloadBlob, slugify } from '../../../utils/formatters.ts';
+import { slugify } from '../../../utils/formatters.ts';
 import { Modal } from '../../common/Modal.tsx';
 import { useSerialReorder } from '../../../utils/useSerialReorder.ts';
+import { useReorderableList } from '../../../utils/useReorderableList.ts';
+import { downloadRuleExport, importRuleFile } from '../../../utils/ruleTransfer.ts';
 import { lessSevereLabel } from '../../../utils/severityLabels.ts';
 import { CreateDropRuleModal } from '../CreateDropRuleModal.tsx';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
+import { RuleOrderControls } from '../RuleOrderControls.tsx';
 
 export interface DropRulesTabProps {
   onRulesChange?: (rules: DropRule[]) => void;
@@ -92,47 +92,13 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
     onRulesChange?.(rules);
   }, [rules, hasLoaded, onRulesChange]);
 
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-
   const handleReorder = useSerialReorder<DropRule>(
     rules,
     setRules,
     reorderDropRules,
     (message) => setFeedbackMsg({ text: message, isError: true })
   );
-
-  const handleMoveRule = (index: number, direction: 'up' | 'down') => {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= rules.length) return;
-    const newRules = [...rules];
-    const [moved] = newRules.splice(index, 1);
-    newRules.splice(targetIndex, 0, moved);
-    handleReorder(newRules);
-  };
-
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', index.toString());
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === targetIndex) {
-      setDraggedIndex(null);
-      return;
-    }
-    const newRules = [...rules];
-    const [moved] = newRules.splice(draggedIndex, 1);
-    newRules.splice(targetIndex, 0, moved);
-    setDraggedIndex(null);
-    handleReorder(newRules);
-  };
+  const { draggedIndex, moveItem, dragProps } = useReorderableList(rules, handleReorder);
 
   const handleInstallPreset = async (preset: DropPreset) => {
     setInstallingPresetId(preset.id);
@@ -168,63 +134,19 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
     }
   };
 
-  const handleExportAll = async () => {
-    try {
-      const blob = await exportAllDropRules();
-      downloadBlob(blob, 'logshed-drop-rules.json');
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to export drop rules.', isError: true });
-    }
-  };
+  const handleExportAll = () =>
+    downloadRuleExport(exportAllDropRules, 'logshed-drop-rules.json', setFeedbackMsg, 'Failed to export drop rules.');
 
-  const handleExportSingle = async (rule: DropRule) => {
-    try {
-      const blob = await exportSingleDropRule(rule.id);
-      const filename = rule.name ? `${slugify(rule.name)}.json` : `drop-rule-${rule.id}.json`;
-      downloadBlob(blob, filename);
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to export drop rule.', isError: true });
-    }
-  };
+  const handleExportSingle = (rule: DropRule) =>
+    downloadRuleExport(
+      () => exportSingleDropRule(rule.id),
+      rule.name ? `${slugify(rule.name)}.json` : `drop-rule-${rule.id}.json`,
+      setFeedbackMsg,
+      'Failed to export drop rule.'
+    );
 
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target?.result as string;
-        const json = JSON.parse(text);
-        const res = await importDropRules(json);
-        if (res.errors && res.errors.length > 0) {
-          setFeedbackMsg({
-            text: `Imported ${res.imported}, skipped ${res.skipped}. Errors: ${res.errors.join('; ')}`,
-            isError: res.imported === 0,
-          });
-        } else {
-          setFeedbackMsg({
-            text: `Imported ${res.imported} rule${res.imported === 1 ? '' : 's'} (${res.skipped} skipped).`,
-            isError: false,
-          });
-        }
-        loadRules();
-      } catch (err: any) {
-        setFeedbackMsg({
-          text: err.message || 'Failed to import rules. Invalid JSON file.',
-          isError: true,
-        });
-      }
-    };
-    reader.onerror = () => {
-      setFeedbackMsg({
-        text: 'Failed to read file.',
-        isError: true,
-      });
-    };
-    reader.readAsText(file);
-  };
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) =>
+    importRuleFile(e, importDropRules, setFeedbackMsg, loadRules);
 
   const totalDropped = rules.reduce((acc, r) => acc + (r.dropped_count || 0), 0);
 
@@ -365,11 +287,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
               <div
                 key={rule.id}
                 data-testid={`drop-rule-row-${rule.id}`}
-                draggable
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, index)}
-                onDragEnd={() => setDraggedIndex(null)}
+                {...dragProps(index)}
                 className={`p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                   draggedIndex === index ? 'opacity-40 bg-dark-800/60' : ''
                 } ${
@@ -377,35 +295,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                 }`}
               >
                 <div className="flex items-start gap-3 min-w-0 flex-1">
-                  {/* Drag Handle and Up/Down Chevrons */}
-                  <div className="flex flex-col items-center gap-2 sm:gap-0.5 shrink-0 pt-0.5 text-slate-500">
-                    <button
-                      type="button"
-                      onClick={() => handleMoveRule(index, 'up')}
-                      disabled={index === 0}
-                      aria-label={`Move rule ${rule.id} up`}
-                      title="Move up"
-                      className="w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <ChevronUp className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                    </button>
-                    <div
-                      className="hidden sm:flex cursor-grab active:cursor-grabbing p-0.5 text-slate-500 hover:text-slate-300"
-                      title="Drag to reorder"
-                    >
-                      <GripVertical className="w-4 h-4" />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleMoveRule(index, 'down')}
-                      disabled={index === rules.length - 1}
-                      aria-label={`Move rule ${rule.id} down`}
-                      title="Move down"
-                      className="w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <ChevronDown className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                    </button>
-                  </div>
+                  <RuleOrderControls ruleId={rule.id} index={index} count={rules.length} onMove={moveItem} />
 
                   <div className="space-y-1.5 min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
