@@ -386,6 +386,21 @@ class TestSettingsCache:
         res = await client.get("/api/settings")
         assert res.json()["server_timezone"] is None
 
+    @pytest.mark.asyncio
+    async def test_settings_report_the_syslog_listening_port(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        """syslog_port is the port the listener uses for UDP and TCP (SYSLOG_PORT, 1514 by default)."""
+        monkeypatch.delenv("SYSLOG_PORT", raising=False)
+        res = await client.get("/api/settings")
+        assert res.status_code == 401
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        assert (await client.get("/api/settings")).json()["syslog_port"] == 1514
+        monkeypatch.setenv("SYSLOG_PORT", "5140")
+        assert (await client.get("/api/settings")).json()["syslog_port"] == 5140
+        # An invalid value falls back to 1514, as the listener does
+        monkeypatch.setenv("SYSLOG_PORT", "70000")
+        assert (await client.get("/api/settings")).json()["syslog_port"] == 1514
+
 
 
 # ===================================================================

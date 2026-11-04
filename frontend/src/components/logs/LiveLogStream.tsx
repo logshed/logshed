@@ -546,8 +546,13 @@ export function hasActiveLogFilters(filters: LogFilterParams): boolean {
   );
 }
 
+/** The syslog port LogShed uses when SYSLOG_PORT is not set. */
+export const DEFAULT_SYSLOG_PORT = 1514;
+
 /** Example command in the first-run card; the host part is a placeholder the user replaces. */
-export const ONBOARDING_LOGGER_COMMAND = 'logger -n <logshed-host> -P 1514 "Hello from LogShed"';
+export function onboardingLoggerCommand(port: number = DEFAULT_SYSLOG_PORT): string {
+  return `logger -n <logshed-host> -P ${port} "Hello from LogShed"`;
+}
 
 interface LiveLogStreamProps {
   onDiagnoseAi: (selectedLogs: LogEntry[]) => void;
@@ -638,13 +643,17 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const lastHandledAliasVersionRef = useRef<number>(aliasVersion);
   // Off until settings load, so users who never turned AI on do not see AI buttons flash in
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
+  // The listening port from settings, for the first-run card; undefined until settings load
+  const [syslogPort, setSyslogPort] = useState<number | undefined>(undefined);
   const { copied: copiedOnboardingCmd, copy: copyOnboardingCmd } = useClipboard();
+  const onboardingCommand = onboardingLoggerCommand(syslogPort);
 
   useEffect(() => {
     fetchSettings()
       .then((s) => {
         if (s.server_timezone) setServerTimezone(s.server_timezone);
         setAiEnabled(s.ai_enabled ?? Boolean(s.has_ai_api_key));
+        if (s.syslog_port) setSyslogPort(s.syslog_port);
       })
       .catch(() => {});
   }, []);
@@ -1229,6 +1238,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
       );
       setLogs(preparedLogs);
+      // An unfiltered page counts every stored row, so its total says whether the database has logs
+      if (!hasActiveLogFilters(activeFilters)) {
+        setDatabaseHasLogs((prev) => prev === true || res.total > 0 || res.logs.length > 0);
+      }
       // New results for new filters: rank the Quick Filter chips again from them
       chipRankDirtyRef.current = true;
       updateFacetsWithNewLogs(res.logs);
@@ -1583,8 +1596,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         setLogs((prev) => restoreDockerAliases(prev, dockerAliases));
         setFacetsTruncated(Boolean(facets.truncated));
         setFacetsLimit(facets.limit);
-        const hasFacets = (facets.sources?.length ?? 0) > 0 || (facets.apps?.length ?? 0) > 0;
-        setDatabaseHasLogs((prev) => prev === true || hasFacets);
+        // Only the apps come from stored rows alone: the hosts include configured syslog aliases and
+        // Docker hosts (the Primary Docker host always exists), so they say nothing about stored logs
+        const hasStoredApps = (facets.apps?.length ?? 0) > 0;
+        setDatabaseHasLogs((prev) => prev === true || hasStoredApps);
         if (facets.sources && facets.sources.length > 0) {
           setAccumulatedSources((prev) => Array.from(new Set([...prev, ...facets.sources])).sort());
         }
@@ -2178,13 +2193,16 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                   <h2 className="text-sm font-semibold text-slate-100">No logs yet</h2>
                 </div>
                 <p className="leading-relaxed">
-                  LogShed listens for syslog on port 1514 (UDP and TCP) inside the container by default. Point your devices at the host port you mapped to it.
+                  {syslogPort !== undefined
+                    ? `LogShed listens for syslog on port ${syslogPort} (UDP and TCP) inside the container.`
+                    : `LogShed listens for syslog on port ${DEFAULT_SYSLOG_PORT} (UDP and TCP) inside the container by default.`}{' '}
+                  Point your devices at the host port you mapped to it.
                 </p>
                 <div className="flex items-center gap-2 bg-dark-950 border border-dark-700 rounded px-3 py-2">
-                  <code className="flex-1 min-w-0 font-mono text-[11px] text-slate-200 break-all">{ONBOARDING_LOGGER_COMMAND}</code>
+                  <code className="flex-1 min-w-0 font-mono text-[11px] text-slate-200 break-all">{onboardingCommand}</code>
                   <button
                     type="button"
-                    onClick={() => copyOnboardingCmd(ONBOARDING_LOGGER_COMMAND)}
+                    onClick={() => copyOnboardingCmd(onboardingCommand)}
                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
                     title="Copy command"
                   >

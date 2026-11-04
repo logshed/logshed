@@ -5,7 +5,7 @@ import {
   LiveLogStream,
   parseFocusLogIdFromUrl,
   QUICK_FILTER_RERANK_MS,
-  ONBOARDING_LOGGER_COMMAND,
+  onboardingLoggerCommand,
 } from '../components/logs/LiveLogStream.tsx';
 import * as savedViewsApi from '../api/savedViews.ts';
 import { MOBILE_LOG_ROW_HEIGHT, DESKTOP_LOG_ROW_HEIGHT } from '../components/logs/LogRow.tsx';
@@ -2518,6 +2518,33 @@ describe('LiveLogStream console controls', () => {
       expect(screen.queryByText('No logs yet')).toBeNull();
     });
 
+    it('shows the listening port from settings in the first-run card', async () => {
+      mockSettings({ syslog_port: 5140 });
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(emptyFacets as any);
+      mockLogs([]);
+      const copySpy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
+      renderStream({});
+
+      expect(
+        await screen.findByText(
+          'LogShed listens for syslog on port 5140 (UDP and TCP) inside the container. Point your devices at the host port you mapped to it.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByText('logger -n <logshed-host> -P 5140 "Hello from LogShed"')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Copy/ }));
+      await waitFor(() => expect(copySpy).toHaveBeenCalledWith('logger -n <logshed-host> -P 5140 "Hello from LogShed"'));
+    });
+
+    it('shows the first-run card on a new install, where the facets already list the Primary Docker host', async () => {
+      mockSettings({});
+      // Configured hosts are listed before they log; only apps come from stored rows
+      vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue({ ...emptyFacets, sources: ['docker'] } as any);
+      mockLogs([]);
+      renderStream({});
+
+      expect(await screen.findByRole('heading', { name: 'No logs yet' })).toBeInTheDocument();
+    });
+
     it('shows the first-run card when the database has no logs at all', async () => {
       mockSettings({});
       vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(emptyFacets as any);
@@ -2532,13 +2559,13 @@ describe('LiveLogStream console controls', () => {
           'LogShed listens for syslog on port 1514 (UDP and TCP) inside the container by default. Point your devices at the host port you mapped to it.'
         )
       ).toBeInTheDocument();
-      expect(screen.getByText(ONBOARDING_LOGGER_COMMAND)).toBeInTheDocument();
-      expect(ONBOARDING_LOGGER_COMMAND).toBe('logger -n <logshed-host> -P 1514 "Hello from LogShed"');
+      expect(screen.getByText(onboardingLoggerCommand())).toBeInTheDocument();
+      expect(onboardingLoggerCommand()).toBe('logger -n <logshed-host> -P 1514 "Hello from LogShed"');
       expect(screen.getByText('See Sending Logs in the documentation for device guides.')).toBeInTheDocument();
       expect(screen.queryByText('Waiting for new logs...')).toBeNull();
 
       fireEvent.click(screen.getByRole('button', { name: /Copy/ }));
-      await waitFor(() => expect(copySpy).toHaveBeenCalledWith(ONBOARDING_LOGGER_COMMAND));
+      await waitFor(() => expect(copySpy).toHaveBeenCalledWith(onboardingLoggerCommand()));
       expect(await screen.findByText('Copied')).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'Set up Docker hosts' }));
@@ -2557,13 +2584,27 @@ describe('LiveLogStream console controls', () => {
       expect(screen.queryByText('No logs yet')).toBeNull();
     });
 
-    it('does not show the first-run card before the facets arrive', async () => {
+    it('decides the first-run card from an unfiltered history page while the facets are still loading', async () => {
       mockSettings({});
       vi.spyOn(logsApi, 'fetchLogFacets').mockImplementation(() => new Promise(() => {}));
       mockLogs([]);
       renderStream();
-      expect(await screen.findByText('Waiting for new logs...')).toBeInTheDocument();
-      expect(screen.queryByText('No logs yet')).toBeNull();
+      // An unfiltered page with a total of 0: the database is empty, whatever the facets say later
+      expect(await screen.findByRole('heading', { name: 'No logs yet' })).toBeInTheDocument();
+    });
+
+    it('does not show the first-run card while a filtered search finds nothing and the facets are loading', async () => {
+      mockSettings({});
+      vi.spyOn(logsApi, 'fetchLogFacets').mockImplementation(() => new Promise(() => {}));
+      mockLogs([]);
+      window.history.replaceState(null, '', '/?q=nothing-matches');
+      try {
+        renderStream();
+        expect(await screen.findByText('No logs match the current filters.')).toBeInTheDocument();
+        expect(screen.queryByText('No logs yet')).toBeNull();
+      } finally {
+        window.history.replaceState(null, '', '/');
+      }
     });
   });
 

@@ -235,6 +235,10 @@ class SettingsResponse(BaseModel):
     server_tz_name: str = "UTC"
     server_tz_offset_minutes: int = 0
 
+    # The port the syslog listener uses inside the container, for UDP and TCP (SYSLOG_PORT). The
+    # host port mapped to it is not known here.
+    syslog_port: int = 1514
+
     @model_validator(mode="after")
     def clamp_retention_days(self) -> "SettingsResponse":
         if self.retention_overridden:

@@ -16,6 +16,7 @@ from app.core.config import (
     DEFAULT_AI_MODELS,
     get_all_system_settings,
     get_max_retention_days,
+    get_syslog_port,
     is_max_retention_days_overridden,
     get_internal_log_level,
     get_internal_log_level_name,
@@ -220,6 +221,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         server_timezone=server_timezone,
         server_tz_name=server_tz_name,
         server_tz_offset_minutes=server_tz_offset_minutes,
+        syslog_port=get_syslog_port(),
     )
 
 

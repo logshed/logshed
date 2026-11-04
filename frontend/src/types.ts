@@ -98,6 +98,8 @@ export interface SystemSettings {
   server_timezone?: string | null;
   server_tz_name?: string;
   server_tz_offset_minutes?: number;
+  /** The syslog listening port inside the container, for UDP and TCP (SYSLOG_PORT) */
+  syslog_port?: number;
 }
 
 export type AppTab = 'stream' | 'storage' | 'rules' | 'settings';
