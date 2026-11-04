@@ -2661,6 +2661,60 @@ describe('LiveLogStream console controls', () => {
       expect(appsLabel.compareDocumentPosition(firstApp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    describe('host and app chips as a drill-down', () => {
+      const mappedFacets = {
+        ...volumeFacets,
+        host_to_apps: { zeta: ['zz', 'aa'], mid: ['yy', 'cc'], alpha: ['bb'] },
+        app_to_hosts: { zz: ['zeta'], aa: ['zeta'], yy: ['mid'], cc: ['mid'], bb: ['alpha'] },
+      };
+      const chip = (testId: string, name: string) =>
+        screen.getAllByTestId(testId).find((el) => el.textContent === name) as HTMLButtonElement;
+      const start = async () => {
+        vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(mappedFacets as any);
+        renderStream();
+        await screen.findByText('msg 1 from zz');
+        await waitFor(() => expect(chipTexts('quick-filter-app')).toContain('aa'));
+        return { hostsBefore: chipTexts('quick-filter-host'), appsBefore: chipTexts('quick-filter-app') };
+      };
+
+      it('shows the selected host\'s apps, ranked by their volume there, and keeps the hosts in place', async () => {
+        const { hostsBefore } = await start();
+        // The filtered buffer then holds only mid's rows
+        mockLogs(volumeLogs.filter((l) => l.source_alias === 'mid'));
+        fireEvent.click(chip('quick-filter-host', 'mid'));
+        await waitFor(() => expect(chipTexts('quick-filter-app')).toEqual(['yy', 'cc']));
+        expect(chipTexts('quick-filter-host')).toEqual(hostsBefore);
+        expect(screen.getAllByTestId('quick-filter-host').every((el) => !(el as HTMLButtonElement).disabled)).toBe(true);
+      });
+
+      it('keeps every chip in place when an app is selected first and disables the hosts without it', async () => {
+        const { hostsBefore, appsBefore } = await start();
+        mockLogs(volumeLogs.filter((l) => l.app_name === 'zz'));
+        fireEvent.click(chip('quick-filter-app', 'zz'));
+        await waitFor(() => expect(chip('quick-filter-host', 'mid')).toBeDisabled());
+        expect(chipTexts('quick-filter-host')).toEqual(hostsBefore);
+        expect(chipTexts('quick-filter-app')).toEqual(appsBefore);
+        expect(chip('quick-filter-host', 'zeta')).toBeEnabled();
+        expect(chip('quick-filter-host', 'alpha')).toHaveAttribute('title', 'No logs from alpha for the selected app');
+        // A disabled chip does nothing
+        fireEvent.click(chip('quick-filter-host', 'mid'));
+        expect(chip('quick-filter-host', 'mid')).toBeDisabled();
+
+        // Then a host: the apps follow it, and the selected app stays
+        fireEvent.click(chip('quick-filter-host', 'zeta'));
+        await waitFor(() => expect(chipTexts('quick-filter-app')).toEqual(['zz', 'aa']));
+        expect(chipTexts('quick-filter-host')).toEqual(hostsBefore);
+
+        // Clearing both brings every chip back as it was
+        mockLogs(volumeLogs);
+        fireEvent.click(chip('quick-filter-host', 'zeta'));
+        fireEvent.click(chip('quick-filter-app', 'zz'));
+        await waitFor(() => expect(chipTexts('quick-filter-app')).toEqual(appsBefore));
+        expect(chipTexts('quick-filter-host')).toEqual(hostsBefore);
+        expect(screen.getAllByTestId('quick-filter-host').every((el) => !(el as HTMLButtonElement).disabled)).toBe(true);
+      });
+    });
+
     it('keeps a selected chip visible when it falls outside the top 6', async () => {
       window.history.replaceState(null, '', '/?app=gg');
       renderStream();

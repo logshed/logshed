@@ -1778,23 +1778,43 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     chipRankDirtyRef.current = true;
   }, [filters]);
 
+  // Hosts are the top level and apps live under them. Host chips are ranked from the unfiltered
+  // buffer and stay where they are while any chip is selected (after a first ranking); hosts the
+  // selected apps rule out are shown disabled. App chips follow the selected hosts: their apps,
+  // ranked by volume in the buffer, which then holds only those hosts' rows. While an app is
+  // selected the buffer holds only that app, so the app ranking is kept as it was.
+  const [appChipCounts, setAppChipCounts] = useState<Record<string, number>>({});
+  const chipSelectionRef = useRef({ hosts: 0, apps: 0 });
+  chipSelectionRef.current = { hosts: activeSources.length, apps: activeApps.length };
+
   useEffect(() => {
     const now = Date.now();
     if (!chipRankDirtyRef.current && now - chipRankedAtRef.current < QUICK_FILTER_RERANK_MS) return;
+    const { hosts: selectedHosts, apps: selectedApps } = chipSelectionRef.current;
+    const firstRanking = chipRankedAtRef.current === 0;
     chipRankDirtyRef.current = false;
     chipRankedAtRef.current = now;
-    setChipCounts(countQuickFilterVolumes(logs));
+    const counts = countQuickFilterVolumes(logs);
+    if (firstRanking || (selectedHosts === 0 && selectedApps === 0)) setChipCounts(counts);
+    if (firstRanking || selectedApps === 0) setAppChipCounts(counts.apps);
   }, [logs]);
 
   const quickHostChips = useMemo(
-    () => rankQuickFilterChips(availableSourcesForSelectedApps, chipCounts.hosts, activeSources),
-    [availableSourcesForSelectedApps, chipCounts.hosts, activeSources],
+    () => rankQuickFilterChips(allAvailableSources, chipCounts.hosts, activeSources),
+    [allAvailableSources, chipCounts.hosts, activeSources],
   );
 
   const quickAppChips = useMemo(
-    () => rankQuickFilterChips(availableAppsForSelectedHosts, chipCounts.apps, activeApps),
-    [availableAppsForSelectedHosts, chipCounts.apps, activeApps],
+    () =>
+      rankQuickFilterChips(
+        activeSources.length > 0 ? availableAppsForSelectedHosts : allAvailableApps,
+        appChipCounts,
+        activeApps,
+      ),
+    [activeSources.length, availableAppsForSelectedHosts, allAvailableApps, appChipCounts, activeApps],
   );
+
+  const selectableHostChips = useMemo(() => new Set(availableSourcesForSelectedApps), [availableSourcesForSelectedApps]);
 
   // Saved views are shared by the search bar (Views menu, mobile drawer) and the pinned chips below
   const savedViews = useSavedViews();
@@ -1951,15 +1971,20 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           )}
           {quickHostChips.map((src) => {
             const isSelected = activeSources.includes(src);
+            const isDisabled = !isSelected && !selectableHostChips.has(src);
             return (
               <button
                 key={src}
                 data-testid="quick-filter-host"
                 onClick={() => toggleQuickSource(src)}
-                className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
+                disabled={isDisabled}
+                title={isDisabled ? `No logs from ${src} for the selected app${activeApps.length > 1 ? 's' : ''}` : undefined}
+                className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition shrink-0 ${
                   isSelected
-                    ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
-                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
+                    ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold cursor-pointer'
+                    : isDisabled
+                    ? 'bg-dark-800 text-slate-300 border-dark-700 opacity-40 cursor-not-allowed'
+                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600 cursor-pointer'
                 }`}
               >
                 {src}
