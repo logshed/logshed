@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
 
 ### Fixed
+- **Sky blue accents**: Highlighted text, active tabs, chips and tinted panels now show the sky blue accent they were meant to have instead of the default text and border shades.
 - **Claude refusals fall back to another model**: When a Claude model declines an analysis, Anthropic's own fallback model answers where one exists, and otherwise LogShed tries your configured fallback models instead of failing.
 - **First lines after a Docker reconnect**: A container that started while LogShed was reconnecting to its Docker host now keeps the lines it wrote before LogShed caught up.
 
