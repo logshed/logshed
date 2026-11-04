@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StoragePanel } from '../components/storage/StoragePanel.tsx';
 import * as settingsApi from '../api/settings.ts';
@@ -66,9 +66,13 @@ describe('StoragePanel Component', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { level: 2, name: /Storage & Retention/i })).toBeInTheDocument();
     });
+    // The slider copies the stored retention in an effect after it mounts; let that run first, or a
+    // slow runner can apply it after the change below and put the slider back to 14
+    await act(async () => {});
 
     const slider = screen.getByRole('slider');
     fireEvent.change(slider, { target: { value: '21' } });
+    expect(slider).toHaveValue('21');
 
     const saveBtn = screen.getByRole('button', { name: /Save Retention/i });
     await waitFor(() => {
