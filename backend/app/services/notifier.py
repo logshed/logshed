@@ -73,6 +73,18 @@ _BLOCKED_ADDRESS_MESSAGES = {
 }
 
 
+def _safe_port(parsed: urllib.parse.SplitResult) -> Optional[int]:
+    """
+    Return the numeric port of a parsed URL, or None when the netloc segment after
+    ':' is not an integer. Apprise URLs such as tgram://<bot_id>:<bot_token>/<chat_id>
+    carry a token where urllib expects a port, and SplitResult.port raises ValueError.
+    """
+    try:
+        return parsed.port
+    except ValueError:
+        return None
+
+
 def _check_ip_address_safety(
     ip_addr: Union[ipaddress.IPv4Address, ipaddress.IPv6Address],
     allow_private: bool,
@@ -159,8 +171,9 @@ def validate_notification_url(url: str) -> Tuple[bool, Optional[str]]:
         return False, f"Scheme '{scheme}' is not allowed for notification targets."
 
     # 2. Port checks on URL (standard Docker daemon ports 2375, 2376)
-    if parsed.port in _BLOCKED_PORTS:
-        return False, f"Port {parsed.port} is blocked to protect container control sockets."
+    url_port = _safe_port(parsed)
+    if url_port in _BLOCKED_PORTS:
+        return False, f"Port {url_port} is blocked to protect container control sockets."
 
     # 3. Hostname loopback checks
     hostname = (parsed.hostname or "").strip()
@@ -386,8 +399,12 @@ def _validate_redirect_url(redirect_url: str) -> Tuple[bool, Optional[str]]:
     if scheme not in ("http", "https"):
         return False, f"Redirect to scheme '{scheme}' is forbidden."
 
-    if parsed.port in _BLOCKED_PORTS:
-        return False, f"Redirect destination port {parsed.port} is blocked."
+    try:
+        redirect_port = parsed.port
+    except ValueError:
+        return False, "Redirect destination URL has an invalid port."
+    if redirect_port in _BLOCKED_PORTS:
+        return False, f"Redirect destination port {redirect_port} is blocked."
 
     hostname = (parsed.hostname or "").strip()
     if not hostname:

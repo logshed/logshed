@@ -100,6 +100,17 @@ class TestNotifierUnit:
         assert valid is True
         assert err is None
 
+    @patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("149.154.167.220", 0))])
+    def test_validate_telegram_url_with_token_colon(self, mock_dns):
+        # Telegram bot tokens contain ':' which urllib misreads as a port separator
+        valid, err = validate_notification_url("tgram://123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/987654321")
+        assert valid is True
+        assert err is None
+
+    def test_validate_url_with_non_numeric_port_does_not_raise(self):
+        valid, err = validate_notification_url("json://example.com:BOTTOKEN/path")
+        assert isinstance(valid, bool)
+
     def test_validate_notification_url_invalid(self):
         valid, err = validate_notification_url("")
         assert valid is False
