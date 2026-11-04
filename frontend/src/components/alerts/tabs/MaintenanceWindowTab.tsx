@@ -10,7 +10,7 @@ import {
   Check,
 } from 'lucide-react';
 import { MaintenanceSchedule, MaintenanceWindowResponse } from '../../../types.ts';
-import { formatMaintenanceTime, toLocalDatetimeInputString } from '../../../utils/formatters.ts';
+import { formatMaintenanceTime, timeInputZoneLabel, toLocalDatetimeInputString } from '../../../utils/formatters.ts';
 import { copyToClipboard } from '../../../utils/clipboard.ts';
 import { useServerTimezone } from '../../../utils/hooks.ts';
 
@@ -177,14 +177,16 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
             {/* Custom Time */}
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">Specific End Time:</span>
+              <span className="text-xs font-medium text-slate-400">
+                Specific End Time <span className="font-mono">({timeInputZoneLabel(serverTimezone)})</span>:
+              </span>
               <div className="flex items-center gap-2">
                 <input
                   type="datetime-local"
-                  aria-label="Maintenance window end time"
+                  aria-label={`Maintenance window end time (${timeInputZoneLabel(serverTimezone)})`}
                   value={customUntil}
                   onChange={(e) => setCustomUntil(e.target.value)}
-                  min={toLocalDatetimeInputString(new Date().toISOString())}
+                  min={toLocalDatetimeInputString(new Date().toISOString(), serverTimezone)}
                   className="bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 px-3 py-1.5 focus:border-accent-500 focus:outline-none"
                 />
                 <button

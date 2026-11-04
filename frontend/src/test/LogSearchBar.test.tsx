@@ -331,6 +331,39 @@ describe('LogSearchBar capped lists and Today preset', () => {
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }));
   });
 
+  it('fills From with midnight on the server clock when switching from Today to Custom', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 03:00 UTC on 3 November is still 2 November in New York (the runner is in UTC)
+    vi.setSystemTime(new Date('2026-11-03T03:00:00Z'));
+    try {
+      const onFilterChange = vi.fn();
+      await renderSettled(
+        <LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={onFilterChange} timeZone="America/New_York" />
+      );
+      fireEvent.change(screen.getByLabelText('Time:'), { target: { value: 'custom' } });
+      expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-11-02T05:00:00.000Z' }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows and reads the custom range on the server clock, with the zone beside it', async () => {
+    const onFilterChange = vi.fn();
+    await renderSettled(
+      <LogSearchBar
+        {...baseProps}
+        filters={{ from: '2026-07-01T12:00:00.000Z' }}
+        onFilterChange={onFilterChange}
+        timeZone="Europe/London"
+      />
+    );
+    const from = screen.getAllByLabelText('From:')[0] as HTMLInputElement;
+    expect(from.value).toBe('2026-07-01T13:00');
+    expect(screen.getAllByText('Europe/London').length).toBeGreaterThan(0);
+    fireEvent.change(from, { target: { value: '2026-07-01T09:15' } });
+    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-07-01T08:15:00.000Z' }));
+  });
+
   it('shows Today for a saved view or link carrying since_midnight', async () => {
     await renderSettled(<LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={vi.fn()} />);
     const select = screen.getAllByRole('combobox').find((el) =>

@@ -135,7 +135,7 @@ describe('MaintenanceWindowTab', () => {
     expect(screen.getByRole('button', { name: 'Set Window' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '4 Hours' }));
     expect(handlers.onSetPreset).toHaveBeenCalledWith(4);
-    fireEvent.change(screen.getByLabelText('Maintenance window end time'), { target: { value: '2026-11-02T18:00' } });
+    fireEvent.change(screen.getByLabelText(/Maintenance window end time/), { target: { value: '2026-11-02T18:00' } });
     expect(handlers.setCustomUntil).toHaveBeenCalledWith('2026-11-02T18:00');
   });
 

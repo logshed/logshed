@@ -2051,6 +2051,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       <div {...(isMobile && pullTouchHandlers ? pullTouchHandlers : {})} className="shrink-0 select-none">
         {/* Search & Filter Bar with Integrated Saved Views */}
         <LogSearchBar
+          timeZone={serverTimezone || undefined}
           filters={filters}
           onFilterChange={setFilters}
           onSearch={() => loadInitialLogs()}

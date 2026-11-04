@@ -421,7 +421,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
 
   const handleApplyCustomWindow = async () => {
     if (!customUntil) return;
-    const iso = fromLocalDatetimeInputString(customUntil);
+    // The picker shows the server clock, as the window's times are shown
+    const iso = fromLocalDatetimeInputString(customUntil, serverTimezone);
     if (!iso) {
       setFeedbackMsg({ text: 'Please enter a valid future date and time.', isError: true });
       return;

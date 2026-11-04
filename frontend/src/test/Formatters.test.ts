@@ -4,6 +4,8 @@ import {
   cleanLogMessageForDisplay,
   toLocalDatetimeInputString,
   fromLocalDatetimeInputString,
+  startOfTodayIso,
+  timeInputZoneLabel,
   slugify,
   downloadBlob,
   formatMaintenanceTime,
@@ -193,6 +195,55 @@ describe('fromLocalDatetimeInputString', () => {
     const isoString = fromLocalDatetimeInputString(localString);
     expect(isoString).toBeDefined();
     expect(toLocalDatetimeInputString(isoString)).toBe(localString);
+  });
+});
+
+describe('date and time inputs on the server clock', () => {
+  // The runner's zone is not one of these (CI and this machine run in UTC), so browser time cannot pass for server time
+  it('reads and writes the server zone, not the browser zone', () => {
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).not.toBe('Europe/London');
+    expect(toLocalDatetimeInputString('2026-07-01T12:00:00Z', 'Europe/London')).toBe('2026-07-01T13:00');
+    expect(fromLocalDatetimeInputString('2026-07-01T13:00', 'Europe/London')).toBe('2026-07-01T12:00:00.000Z');
+    expect(toLocalDatetimeInputString('2026-01-15T04:00:00Z', 'Asia/Kolkata')).toBe('2026-01-15T09:30');
+    expect(fromLocalDatetimeInputString('2026-01-15T09:30', 'Asia/Kolkata')).toBe('2026-01-15T04:00:00.000Z');
+    expect(fromLocalDatetimeInputString('2026-01-15T09:30', 'America/New_York')).toBe('2026-01-15T14:30:00.000Z');
+  });
+
+  it('round-trips every hour across both clock changes', () => {
+    for (let h = 0; h < 72; h++) {
+      for (const start of ['2026-03-28T00:00:00Z', '2026-10-24T00:00:00Z']) {
+        const iso = new Date(Date.parse(start) + h * 3600_000).toISOString();
+        const shown = toLocalDatetimeInputString(iso, 'Europe/London');
+        const back = fromLocalDatetimeInputString(shown, 'Europe/London') as string;
+        // A time shown twice reads as its first occurrence, which shows the same
+        expect(toLocalDatetimeInputString(back, 'Europe/London')).toBe(shown);
+      }
+    }
+  });
+
+  it('takes the first occurrence of a repeated time and moves a skipped time forward', () => {
+    // 25 Oct 2026: London clocks go back from 02:00 BST to 01:00 GMT, so 01:30 happens twice
+    expect(fromLocalDatetimeInputString('2026-10-25T01:30', 'Europe/London')).toBe('2026-10-25T00:30:00.000Z');
+    // 29 Mar 2026: London clocks go forward from 01:00 GMT to 02:00 BST, so 01:30 never happens
+    const skipped = fromLocalDatetimeInputString('2026-03-29T01:30', 'Europe/London');
+    expect(skipped).toBe('2026-03-29T01:30:00.000Z');
+    expect(toLocalDatetimeInputString(skipped, 'Europe/London')).toBe('2026-03-29T02:30');
+  });
+
+  it('gives midnight of today on the server clock', () => {
+    const now = new Date('2026-11-03T03:00:00Z');
+    // Still 2 November in New York (22:00 EST), already 3 November in India (08:30 IST)
+    expect(startOfTodayIso('America/New_York', now)).toBe('2026-11-02T05:00:00.000Z');
+    expect(startOfTodayIso('Asia/Kolkata', now)).toBe('2026-11-02T18:30:00.000Z');
+    expect(startOfTodayIso('UTC', now)).toBe('2026-11-03T00:00:00.000Z');
+  });
+
+  it('falls back to browser time for an unknown or missing zone and says so', () => {
+    expect(timeInputZoneLabel('Europe/London')).toBe('Europe/London');
+    expect(timeInputZoneLabel(undefined)).toBe('browser time');
+    expect(timeInputZoneLabel('Mars/Base')).toBe('browser time');
+    const local = new Date(2026, 8, 16, 6, 57).toISOString();
+    expect(fromLocalDatetimeInputString('2026-09-16T06:57', 'Mars/Base')).toBe(local);
   });
 });
 

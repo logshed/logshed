@@ -102,45 +102,6 @@ export function cleanLogMessageForDisplay(text: string | null | undefined): stri
 }
 
 /**
- * Formats a UTC ISO datetime string into a local 'YYYY-MM-DDTHH:mm' string
- * suitable for the value attribute of an HTML5 <input type="datetime-local" />.
- */
-export function toLocalDatetimeInputString(isoString?: string | null): string {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  if (isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-/**
- * Converts a local 'YYYY-MM-DDTHH:mm' string from an HTML5 <input type="datetime-local" />
- * into a UTC ISO datetime string suitable for backend API log filtering.
- */
-export function fromLocalDatetimeInputString(localString?: string | null): string | undefined {
-  if (!localString || !localString.trim()) return undefined;
-  const [datePart, timePart] = localString.trim().split('T');
-  if (!datePart || !timePart) return undefined;
-  const [year, month, day] = datePart.split('-').map(Number);
-  const timePieces = timePart.split(':').map(Number);
-  const hours = timePieces[0];
-  const minutes = timePieces[1];
-  if (
-    isNaN(year) || isNaN(month) || isNaN(day) ||
-    isNaN(hours) || isNaN(minutes)
-  ) {
-    return undefined;
-  }
-  const d = new Date(year, month - 1, day, hours, minutes);
-  if (isNaN(d.getTime())) return undefined;
-  return d.toISOString();
-}
-
-/**
  * Prepares a backend timestamp for Date parsing: a value without a zone suffix is treated as UTC.
  */
 export function cleanIsoString(ts: string): string {
@@ -215,6 +176,74 @@ function getDateParts(date: Date, timeZone?: string): DateParts {
     minutes: String(date.getMinutes()).padStart(2, '0'),
     seconds: String(date.getSeconds()).padStart(2, '0'),
   };
+}
+
+/** The wall-clock time of an instant in the zone, as epoch milliseconds read as if it were UTC. */
+function wallClockMs(epochMs: number, timeZone: string): number {
+  const p = getDateParts(new Date(epochMs), timeZone);
+  return Date.UTC(p.year, p.month - 1, p.day, Number(p.hours), Number(p.minutes), Number(p.seconds));
+}
+
+/**
+ * The instant at which the zone's clock shows the given wall-clock time (fields read as UTC).
+ * A time shown twice (a clock going back) gives its first occurrence; a time the clock skips
+ * (a clock going forward) is moved forward by the length of the gap, as maintenance schedules are.
+ */
+function zoneWallClockToEpoch(wallMs: number, timeZone: string): number {
+  const offsetBefore = wallClockMs(wallMs - 12 * 3600_000, timeZone) - (wallMs - 12 * 3600_000);
+  const offsetAfter = wallClockMs(wallMs + 12 * 3600_000, timeZone) - (wallMs + 12 * 3600_000);
+  const matches = [offsetBefore, offsetAfter]
+    .map((offset) => wallMs - offset)
+    .filter((epoch) => wallClockMs(epoch, timeZone) === wallMs);
+  return matches.length > 0 ? Math.min(...matches) : wallMs - offsetBefore;
+}
+
+/** True when the runtime knows the time zone (an unknown one falls back to browser time everywhere). */
+function isKnownTimeZone(timeZone?: string): timeZone is string {
+  return Boolean(timeZone && getDateTimeFormatter(timeZone));
+}
+
+/**
+ * Formats a UTC ISO datetime string as 'YYYY-MM-DDTHH:mm' for the value of an
+ * <input type="datetime-local" />, on the clock of the given time zone (browser time when none).
+ */
+export function toLocalDatetimeInputString(isoString?: string | null, timeZone?: string): string {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return '';
+  const p = getDateParts(date, timeZone);
+  return `${dayKey(p)}T${p.hours}:${p.minutes}`;
+}
+
+/**
+ * Reads a 'YYYY-MM-DDTHH:mm' value from an <input type="datetime-local" /> as a time on the clock
+ * of the given time zone (browser time when none) and returns it as a UTC ISO string.
+ */
+export function fromLocalDatetimeInputString(localString?: string | null, timeZone?: string): string | undefined {
+  if (!localString || !localString.trim()) return undefined;
+  const [datePart, timePart] = localString.trim().split('T');
+  if (!datePart || !timePart) return undefined;
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hours, minutes] = timePart.split(':').map(Number);
+  if ([year, month, day, hours, minutes].some((n) => n === undefined || isNaN(n))) return undefined;
+  if (isKnownTimeZone(timeZone)) {
+    const wall = Date.UTC(year, month - 1, day, hours, minutes);
+    if (isNaN(wall)) return undefined;
+    return new Date(zoneWallClockToEpoch(wall, timeZone)).toISOString();
+  }
+  const d = new Date(year, month - 1, day, hours, minutes);
+  if (isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
+
+/** Midnight at the start of today in the given time zone (browser time when none), as a UTC ISO string. */
+export function startOfTodayIso(timeZone?: string, now: Date = new Date()): string {
+  return fromLocalDatetimeInputString(`${dayKey(getDateParts(now, timeZone))}T00:00`, timeZone) as string;
+}
+
+/** The zone name shown beside a date and time input: the server zone, or "browser time" when it is unknown. */
+export function timeInputZoneLabel(timeZone?: string): string {
+  return isKnownTimeZone(timeZone) ? timeZone : 'browser time';
 }
 
 function dayKey(parts: DateParts): string {

@@ -5,7 +5,12 @@ import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel, compactMoreSevereLabel } from '../../utils/severityLabels.ts';
-import { toLocalDatetimeInputString, fromLocalDatetimeInputString } from '../../utils/formatters.ts';
+import {
+  toLocalDatetimeInputString,
+  fromLocalDatetimeInputString,
+  startOfTodayIso,
+  timeInputZoneLabel,
+} from '../../utils/formatters.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
 import { SavedViewsState, useSavedViews, findActiveView } from './useSavedViews.ts';
 
@@ -75,6 +80,8 @@ interface LogSearchBarProps {
    * becomes a compact toolbar band (the Console passes its quick filters and stream controls).
    */
   mobileToolbar?: React.ReactNode;
+  /** The server time zone: custom From and To times are read and shown on its clock, as every log time is. */
+  timeZone?: string;
 }
 
 export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
@@ -91,6 +98,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   facetsTruncated = false,
   facetsLimit,
   mobileToolbar,
+  timeZone,
 }) => {
   const fieldId = useId();
   // The selected preset follows the filters (saved views, links, Reset); "Custom" chosen before any
@@ -193,9 +201,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
       setCustomTimeRequested(true);
       // Start the pickers from the preset's current window rather than leaving them empty
       if (filters.from === SINCE_MIDNIGHT) {
-        const midnight = new Date();
-        midnight.setHours(0, 0, 0, 0);
-        onFilterChange({ ...filters, from: midnight.toISOString() });
+        // "Today" starts at midnight on the server clock, as the backend reads since_midnight
+        onFilterChange({ ...filters, from: startOfTodayIso(timeZone) });
       } else if (filters.from && Object.prototype.hasOwnProperty.call(TIME_PRESET_MS, filters.from)) {
         onFilterChange({
           ...filters,
@@ -216,7 +223,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
       from: preset,
       to: undefined,
     });
-  }, [filters, onFilterChange]);
+  }, [filters, onFilterChange, timeZone]);
 
   const handleResetFilters = useCallback(() => {
     setCustomTimeRequested(false);
@@ -443,33 +450,38 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         {showCustomTime && (
           <div className="flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border border-dark-700 w-full max-w-full md:w-auto">
             <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
-              <span className="text-slate-400 text-[11px] shrink-0">From:</span>
+              <label htmlFor={`${fieldId}-from`} className="text-slate-400 text-[11px] shrink-0">From:</label>
               <input
+                id={`${fieldId}-from`}
                 type="datetime-local"
-                value={toLocalDatetimeInputString(filters.from)}
+                value={toLocalDatetimeInputString(filters.from, timeZone)}
                 onChange={(e) =>
                   onFilterChange({
                     ...filters,
-                    from: fromLocalDatetimeInputString(e.target.value),
+                    from: fromLocalDatetimeInputString(e.target.value, timeZone),
                   })
                 }
                 className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
             <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
-              <span className="text-slate-400 text-[11px] shrink-0">To:</span>
+              <label htmlFor={`${fieldId}-to`} className="text-slate-400 text-[11px] shrink-0">To:</label>
               <input
+                id={`${fieldId}-to`}
                 type="datetime-local"
-                value={toLocalDatetimeInputString(filters.to)}
+                value={toLocalDatetimeInputString(filters.to, timeZone)}
                 onChange={(e) =>
                   onFilterChange({
                     ...filters,
-                    to: fromLocalDatetimeInputString(e.target.value),
+                    to: fromLocalDatetimeInputString(e.target.value, timeZone),
                   })
                 }
                 className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
+            <span className="text-slate-400 text-[11px] font-mono shrink min-w-0 truncate" title="From and To are times in this zone">
+              {timeInputZoneLabel(timeZone)}
+            </span>
           </div>
         )}
 
@@ -615,15 +627,16 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           {showCustomTime && (
             <div className="w-full space-y-2 p-2.5 bg-dark-950 rounded border border-dark-700">
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1">From:</label>
+                <label htmlFor={`${fieldId}-from-panel`} className="block text-slate-400 text-[11px] mb-1">From:</label>
                 <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
                   <input
+                    id={`${fieldId}-from-panel`}
                     type="datetime-local"
-                    value={toLocalDatetimeInputString(filters.from)}
+                    value={toLocalDatetimeInputString(filters.from, timeZone)}
                     onChange={(e) =>
                       onFilterChange({
                         ...filters,
-                        from: fromLocalDatetimeInputString(e.target.value),
+                        from: fromLocalDatetimeInputString(e.target.value, timeZone),
                       })
                     }
                     className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
@@ -631,21 +644,25 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 </div>
               </div>
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1">To:</label>
+                <label htmlFor={`${fieldId}-to-panel`} className="block text-slate-400 text-[11px] mb-1">To:</label>
                 <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
                   <input
+                    id={`${fieldId}-to-panel`}
                     type="datetime-local"
-                    value={toLocalDatetimeInputString(filters.to)}
+                    value={toLocalDatetimeInputString(filters.to, timeZone)}
                     onChange={(e) =>
                       onFilterChange({
                         ...filters,
-                        to: fromLocalDatetimeInputString(e.target.value),
+                        to: fromLocalDatetimeInputString(e.target.value, timeZone),
                       })
                     }
                     className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
                   />
                 </div>
               </div>
+              <p className="text-slate-400 text-[11px]">
+                Times in <span className="font-mono">{timeInputZoneLabel(timeZone)}</span>
+              </p>
             </div>
           )}
 

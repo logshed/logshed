@@ -6,6 +6,8 @@ import * as alertsApi from '../api/alerts.ts';
 import * as notificationsApi from '../api/notifications.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
 import * as logsApi from '../api/logs.ts';
+import * as settingsApi from '../api/settings.ts';
+import type { SettingsResponseData } from '../api/settings.ts';
 import { setAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 import { stubDownloads } from './downloadStubs.ts';
 
@@ -994,7 +996,7 @@ describe('AlertsPanel Component', () => {
       expect(screen.getByText('On-Demand Maintenance')).toBeInTheDocument();
     });
 
-    const dateInput = screen.getByLabelText('Maintenance window end time');
+    const dateInput = screen.getByLabelText(/Maintenance window end time/);
     fireEvent.change(dateInput, { target: { value: '2026-09-26T18:00' } });
 
     const setWindowBtn = screen.getByRole('button', { name: 'Set Window' });
@@ -1004,6 +1006,35 @@ describe('AlertsPanel Component', () => {
       expect(setMaintSpy).toHaveBeenCalled();
       expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
     });
+  });
+
+  it('reads the specific end time on the server clock and names the zone', async () => {
+    // The runner is in UTC; the server is four hours behind it in September
+    vi.spyOn(settingsApi, 'getCachedServerTimezone').mockReturnValue('America/New_York');
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({ server_timezone: 'America/New_York' } as SettingsResponseData);
+    const setMaintSpy = vi.spyOn(alertsApi, 'setMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: '2026-09-26T22:00:00Z',
+      on_demand_until: '2026-09-26T22:00:00Z',
+      schedules: [],
+    });
+
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+    await waitFor(() => {
+      expect(screen.getByText('On-Demand Maintenance')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('(America/New_York)')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Maintenance window end time (America/New_York)'), {
+      target: { value: '2026-09-26T18:00' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Set Window' }));
+
+    await waitFor(() => {
+      expect(setMaintSpy).toHaveBeenCalled();
+    });
+    expect(setMaintSpy.mock.calls[0][0]).toBe('2026-09-26T22:00:00.000Z');
   });
 
   it('manages recurring maintenance schedules (add, toggle, delete)', async () => {
