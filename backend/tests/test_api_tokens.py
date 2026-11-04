@@ -157,10 +157,13 @@ class TestApiTokenUnit:
 
         first = limiter.check_request("token_1")
         assert (first.allowed, first.remaining, first.limit, first.reset_seconds) == (True, 2, 3, 60)
+        # Later requests report when the oldest one leaves the window, not the newest
         now[0] += 10
-        assert limiter.check_request("token_1").remaining == 1
+        second = limiter.check_request("token_1")
+        assert (second.remaining, second.reset_seconds) == (1, 50)
         now[0] += 10
         assert limiter.check_request("token_1").remaining == 0
+        assert limiter.retry_after("token_1") == 40
 
         limited = limiter.check_request("token_1")
         assert (limited.allowed, limited.remaining, limited.reset_seconds) == (False, 0, 40)

@@ -92,7 +92,10 @@ class SlidingWindowLimiter:
     def retry_after(self, key: str) -> int:
         """Whole seconds until the oldest event for `key` leaves the window (at least 1)."""
         now = self._clock()
-        window = self._prune(key, now)
+        return self._seconds_until_oldest_leaves(self._prune(key, now), now)
+
+    def _seconds_until_oldest_leaves(self, window: Optional[deque[float]], now: float) -> int:
+        """Whole seconds until the oldest event in a pruned window leaves it; 1 for an empty window."""
         if not window:
             return 1
         # window minus the elapsed time: "oldest + window - now" can round to just above the window

@@ -5,7 +5,6 @@ API token generation, hashing, verification, and rate limiting for LogShed Exter
 from dataclasses import dataclass
 import hashlib
 import json
-import math
 import secrets
 import threading
 import time
@@ -139,17 +138,16 @@ class ApiTokenRateLimiter(SlidingWindowLimiter):
     def check_request(self, key: str) -> RateLimitStatus:
         """
         Record a request timestamp if allowed and return the resulting window status.
-        When limited, nothing is recorded and reset_seconds is the wait until a slot frees.
+        When limited, nothing is recorded and reset_seconds is the wait until a slot frees. When allowed,
+        it is read after recording, so a token's first request reports the whole window.
         """
         now = self._clock()
         window = self._prune(key, now)
         used = len(window) if window else 0
-        oldest = window[0] if window else now
-        # window minus the elapsed time: "oldest + window - now" can round to just above the window
-        reset_seconds = max(1, math.ceil(self.window_seconds - (now - oldest)))
         if used >= self.max_requests:
-            return RateLimitStatus(self.max_requests, 0, reset_seconds, False)
+            return RateLimitStatus(self.max_requests, 0, self._seconds_until_oldest_leaves(window, now), False)
         self._append(key, now)
+        reset_seconds = self._seconds_until_oldest_leaves(self._windows[key], now)
         return RateLimitStatus(self.max_requests, self.max_requests - used - 1, reset_seconds, True)
 
     def record_request(self, key: str) -> bool:
