@@ -271,7 +271,7 @@ For complete technical schemas, database structures, FTS5 triggers, and REST/SSE
 
 ## Local Development
 
-Ensure you have **Python 3.12+** and **Node.js 20+** installed:
+Ensure you have **Python 3.12+** and **Node.js 24+** installed:
 
 ```bash
 # 1. Clone the repository

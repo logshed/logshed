@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [1.3.1] - Unreleased
 
+### Changed
+- **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
+
 ## [1.3.0-beta.1] - 2026-11-04
 
 ### Upgrade Notes

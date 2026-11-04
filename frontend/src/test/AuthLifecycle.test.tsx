@@ -230,7 +230,16 @@ describe('API client errors', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const blob = await apiFetchBlob('/api/export/logs');
-    expect(await blob.text()).toBe('a,b\n1,2\n');
+    // Node.js 20 returns its own Blob; Node.js 24 returns jsdom's, which has no text() but works with FileReader.
+    const text = typeof blob.text === 'function'
+      ? await blob.text()
+      : await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(blob);
+      });
+    expect(text).toBe('a,b\n1,2\n');
     expect(new Headers(fetchMock.mock.calls[0][1]!.headers).get('X-Requested-With')).toBe('XMLHttpRequest');
     expect(fetchMock.mock.calls[0][1]!.credentials).toBe('include');
 

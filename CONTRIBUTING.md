@@ -10,7 +10,7 @@ Before starting work on a large new feature, please open a [Feature Request](htt
 
 ## Local Development Setup
 
-Prerequisites: **Python 3.12+** and **Node.js 20+**.
+Prerequisites: **Python 3.12+** and **Node.js 24+**.
 
 ```bash
 # 1. Clone the repository

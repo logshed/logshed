@@ -202,7 +202,7 @@ class TestDockerfileStatic:
     def test_dockerfile_exists_and_multistage(self):
         assert DOCKERFILE_PATH.exists(), "Dockerfile must exist"
         content = DOCKERFILE_PATH.read_text()
-        assert "node:20-alpine" in content and "frontend-builder" in content
+        assert "node:24-alpine" in content and "frontend-builder" in content
         assert "RUN npm ci" in content
         assert "npm run build" in content
         assert "FROM python:3.12-slim" in content

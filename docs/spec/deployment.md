@@ -9,7 +9,7 @@ LogShed executes as a single container, single OS process application running mu
 
 ### 2.1 Multi-Stage Build Stages
 * **Stage 1 (Frontend Builder):**
-  * Base Image: `node:20-alpine` (`--platform=$BUILDPLATFORM`)
+  * Base Image: `node:24-alpine` (`--platform=$BUILDPLATFORM`)
   * Working Directory: `/frontend`
   * Action: Installs npm dependencies and compiles React SPA (`npm run build`), emitting output directly to static assets directory.
 * **Stage 2 (Runtime Environment):**
