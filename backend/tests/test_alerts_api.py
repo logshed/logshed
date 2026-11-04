@@ -307,15 +307,22 @@ class TestAlertsApi:
         assert data["items"][0]["rule_name"] == "Test Security Spike"
         assert data["items"][0]["sample_log_id"] == 4321
 
-        # 2. Delete single history record
+        # 2. Read one record by id, as a notification link does
+        one = await client.get(f"/api/alerts/history/{history_id}", headers=auth_headers)
+        assert one.status_code == 200
+        assert one.json() == data["items"][0]
+
+        # 3. Delete single history record
         del_item = await client.delete(f"/api/alerts/history/{history_id}", headers=auth_headers)
         assert del_item.status_code == 200
 
-        # 3. Verify empty
+        # 4. Verify empty, and the deleted record is not found by id
         res_after = await client.get("/api/alerts/history", headers=auth_headers)
         assert res_after.json()["total"] == 0
+        gone = await client.get(f"/api/alerts/history/{history_id}", headers=auth_headers)
+        assert gone.status_code == 404
 
-        # 4. Clear all history
+        # 5. Clear all history
         clear_res = await client.delete("/api/alerts/history", headers=auth_headers)
         assert clear_res.status_code == 200
 

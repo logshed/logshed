@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { AlertRule } from '../types.ts';
-import { AlertsPanel, pathToAlertSubTab, alertSubTabToPath } from '../components/alerts/AlertsPanel.tsx';
+import { AlertsPanel, pathToAlertSubTab, alertSubTabToPath, parseIncidentIdFromUrl } from '../components/alerts/AlertsPanel.tsx';
 import * as alertsApi from '../api/alerts.ts';
 import * as notificationsApi from '../api/notifications.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
@@ -10,6 +10,7 @@ import * as settingsApi from '../api/settings.ts';
 import type { SettingsResponseData } from '../api/settings.ts';
 import { setAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 import { stubDownloads } from './downloadStubs.ts';
+import { ApiError } from '../api/client.ts';
 
 const mockRules: AlertRule[] = [
   {
@@ -515,6 +516,62 @@ describe('AlertsPanel Component', () => {
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Incident Alert Details' })).toBeNull();
     });
+  });
+
+  it('reads the incident id only from /rules/history?id=N', () => {
+    window.history.pushState(null, '', '/rules/history?id=42');
+    expect(parseIncidentIdFromUrl()).toBe(42);
+    window.history.pushState(null, '', '/rules/rules?id=42');
+    expect(parseIncidentIdFromUrl()).toBeNull();
+    for (const bad of ['', '0', '-3', '4x', '1.5']) {
+      window.history.pushState(null, '', `/rules/history?id=${bad}`);
+      expect(parseIncidentIdFromUrl()).toBeNull();
+    }
+  });
+
+  it('opens the incident a notification link names, even when it is not on the first page', async () => {
+    const linked = {
+      ...mockHistory.items[0],
+      id: 77,
+      rule_name: 'Disk Full',
+      sample_log: 'No space left on device',
+    };
+    const fetchItem = vi.spyOn(alertsApi, 'fetchAlertHistoryItem').mockResolvedValue(linked);
+    window.history.pushState(null, '', '/rules/history?id=77');
+    render(<AlertsPanel />);
+
+    expect(await screen.findByRole('heading', { name: 'Incident Alert Details' })).toBeInTheDocument();
+    expect(screen.getByText('No space left on device')).toBeInTheDocument();
+    expect(fetchItem).toHaveBeenCalledWith(77);
+
+    // Closing it leaves the plain history URL, so a reload does not open it again
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Incident Alert Details' })).toBeNull();
+    });
+    expect(window.location.pathname + window.location.search).toBe('/rules/history');
+  });
+
+  it('says so when the linked incident no longer exists', async () => {
+    vi.spyOn(alertsApi, 'fetchAlertHistoryItem').mockRejectedValue(
+      new ApiError(404, 'Alert history record 77 not found.')
+    );
+    window.history.pushState(null, '', '/rules/history?id=77');
+    render(<AlertsPanel />);
+
+    expect(
+      await screen.findByText('Incident record 77 was not found. It may have been deleted or removed by retention.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Incident Alert Details' })).toBeNull();
+    expect(window.location.search).toBe('');
+  });
+
+  it('does not fetch a single incident without an id in the URL', async () => {
+    const fetchItem = vi.spyOn(alertsApi, 'fetchAlertHistoryItem');
+    window.history.pushState(null, '', '/rules/history');
+    render(<AlertsPanel />);
+    await screen.findByText('Target / Rule');
+    expect(fetchItem).not.toHaveBeenCalled();
   });
 
   it('synchronizes alert subtab URLs and updates on browser popstate', async () => {

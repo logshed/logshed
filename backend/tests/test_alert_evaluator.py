@@ -473,7 +473,7 @@ class TestAlertEvaluatorEngine:
 
     @pytest.mark.asyncio
     async def test_app_url_configured_includes_link_in_notification(self, test_db: Path, monkeypatch):
-        """Verify that when APP_URL is configured, the notification includes the link to /rules/history."""
+        """Verify that when APP_URL is configured, the notification links to the saved incident in /rules/history."""
         monkeypatch.setenv("APP_URL", "https://logshed.lan:8443")
         conn = get_connection(test_db)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -527,10 +527,13 @@ class TestAlertEvaluatorEngine:
 
         assert len(sent_payloads) == 1
         body = sent_payloads[0]["body"]
-        assert "**Link:** https://logshed.lan:8443/rules/history" in body
+        conn = get_connection(test_db)
+        history_id = conn.execute("SELECT id FROM alert_history").fetchone()[0]
+        conn.close()
+        assert f"**Link:** https://logshed.lan:8443/rules/history?id={history_id}" in body
 
     async def test_app_url_included_for_non_enriched_alert(self, test_db: Path, monkeypatch):
-        """Verify that non-enriched alerts also include the link to /rules/history when APP_URL is configured."""
+        """Verify that non-enriched alerts also link to the saved incident when APP_URL is configured."""
         monkeypatch.setenv("APP_URL", "https://logshed.lan:8443/")
         conn = get_connection(test_db)
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -569,7 +572,10 @@ class TestAlertEvaluatorEngine:
         assert sent_payloads[0]["title"] == "LogShed: Non-AI Alert Rule"
         body = sent_payloads[0]["body"]
         assert "**AI Analysis:**" not in body
-        assert "**Link:** https://logshed.lan:8443/rules/history" in body
+        conn = get_connection(test_db)
+        history_id = conn.execute("SELECT id FROM alert_history").fetchone()[0]
+        conn.close()
+        assert f"**Link:** https://logshed.lan:8443/rules/history?id={history_id}" in body
 
 
 

@@ -1,5 +1,6 @@
 import { apiFetch, apiFetchBlob } from './client.ts';
 import {
+  AlertHistoryItem,
   AlertHistoryResponse,
   AlertPreset,
   AlertRule,
@@ -67,6 +68,10 @@ export async function fetchAlertHistory(
     url += `&rule_id=${ruleId}`;
   }
   return apiFetch<AlertHistoryResponse>(url);
+}
+
+export async function fetchAlertHistoryItem(id: number): Promise<AlertHistoryItem> {
+  return apiFetch<AlertHistoryItem>('/api/alerts/history/' + id);
 }
 
 export async function deleteAlertHistoryItem(id: number): Promise<{ status: string }> {

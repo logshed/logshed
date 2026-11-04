@@ -961,8 +961,8 @@ class AlertEvaluator:
                 incident_summary = f"Alert triggered with {log_count} matching event(s)."
 
         # Record event in alert_history table via worker thread
-        def _execute_insert(conn: sqlite3.Connection) -> None:
-            conn.execute(
+        def _execute_insert(conn: sqlite3.Connection) -> Optional[int]:
+            cur = conn.execute(
                 """
                 INSERT INTO alert_history
                 (rule_id, rule_name, channel_id, trigger_count, sample_log, sample_log_id, incident_summary, ai_enrichment, ai_model, ai_audit_id, triggered_at)
@@ -982,10 +982,13 @@ class AlertEvaluator:
                     now_iso,
                 ),
             )
+            return cur.lastrowid
 
+        # The notification links to this record, or to the history list when it was not saved
+        history_id: Optional[int] = None
         try:
             from app.api.deps import run_db_query
-            await run_db_query(_execute_insert, custom_db_path=self.db_path)
+            history_id = await run_db_query(_execute_insert, custom_db_path=self.db_path)
         except Exception as db_err:
             logger.error(f"Failed to record alert history for rule {rule.id}: {db_err}")
 
@@ -1038,7 +1041,10 @@ class AlertEvaluator:
         from app.core.config import get_cached_setting
         app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
         if app_url:
-            body_lines.append(f"**Link:** {app_url}/rules/history")
+            link = f"{app_url}/rules/history"
+            if history_id:
+                link += f"?id={history_id}"
+            body_lines.append(f"**Link:** {link}")
 
         notification_body = "\n".join(body_lines)
 

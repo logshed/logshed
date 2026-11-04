@@ -60,7 +60,7 @@ The runtime operational and advanced settings are:
 - `enable_mcp`: Master toggle for the embedded Model Context Protocol (MCP) server (Env: `LOGSHED_ENABLE_MCP`, default: `False`). Managed via the API & MCP Access tab.
 - `ai_timeout`: Outbound AI request timeout in seconds (Env: `LOGSHED_AI_TIMEOUT`, default: `45.0`).
 - `ai_thinking_level`: How much reasoning models think: `off` (or the lowest the model allows), `low`, `medium` or `high` (Env: `LOGSHED_AI_THINKING_LEVEL`, default: `low`; `LOGSHED_AI_THINKING_BUDGET` is still read as its level). It replaced the token budget `ai_thinking_budget` in 1.3.0; see `ai-engine.md` section 4 for the mapping per provider.
-- `app_url`: Public base instance URL for action links in push notifications (Env: `APP_URL`, legacy alias: `app_url`, default: `""`).
+- `app_url`: Public base instance URL for action links in push notifications (alert notifications link to `<app_url>/rules/history?id=<history id>`, which opens that incident) (Env: `APP_URL`, legacy alias: `app_url`, default: `""`).
 - `allow_private_notification_targets`: Permit notification webhooks to target LAN/RFC1918 IPs and `.local`/`.internal`/`.lan` hosts (Env: `ALLOW_PRIVATE_NOTIFICATION_TARGETS`, default: `True`).
 - `enable_docker`: Switch for the local Docker host (endpoint 1, "Primary Docker"), kept in step with that endpoint's `enabled` flag (Env: `ENABLE_DOCKER`, default: `True`; `false` in the environment keeps endpoint 1 off whatever is stored). It does not affect other Docker hosts, which each follow their own `enabled` flag.
 - `docker_exclude_containers`: Comma-separated container names/IDs to ignore (Env: `DOCKER_EXCLUDE_CONTAINERS`, default: `""`).

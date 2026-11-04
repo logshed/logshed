@@ -24,6 +24,7 @@ import {
   fetchAlertPresets,
   installAlertPreset,
   fetchAlertHistory,
+  fetchAlertHistoryItem,
   deleteAlertHistoryItem,
   clearAlertHistory,
   exportAllAlertRules,
@@ -90,6 +91,26 @@ export const alertSubTabToPath = (subTab: AlertViewTab): string => {
       return '/rules/rules';
   }
 };
+
+/**
+ * Id of the incident to open, from the `id` parameter of /rules/history (notification links set it
+ * to the alert's history record).
+ */
+export function parseIncidentIdFromUrl(): number | null {
+  if (pathToAlertSubTab(window.location.pathname) !== 'history') return null;
+  const raw = new URLSearchParams(window.location.search).get('id');
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const id = parseInt(raw, 10);
+  return id > 0 ? id : null;
+}
+
+function removeIncidentIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('id')) return;
+  params.delete('id');
+  const query = params.toString();
+  window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
+}
 
 const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
   <span
@@ -270,6 +291,36 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // A notification link opens its incident (/rules/history?id=N), which may be on any history page
+  useEffect(() => {
+    const id = parseIncidentIdFromUrl();
+    if (id === null) return;
+    let cancelled = false;
+    fetchAlertHistoryItem(id)
+      .then((item) => {
+        if (!cancelled) setSelectedHistoryItem(item);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        removeIncidentIdFromUrl();
+        setFeedbackMsg({
+          text:
+            err?.status === 404
+              ? `Incident record ${id} was not found. It may have been deleted or removed by retention.`
+              : err?.message || 'Failed to load the incident record.',
+          isError: true,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const closeHistoryItem = () => {
+    setSelectedHistoryItem(null);
+    removeIncidentIdFromUrl();
+  };
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -675,7 +726,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       setHistoryItems((prev) => prev.filter((h) => h.id !== id));
       setHistoryTotal((prev) => Math.max(0, prev - 1));
       if (selectedHistoryItem?.id === id) {
-        setSelectedHistoryItem(null);
+        closeHistoryItem();
       }
       setHistoryItemToDelete(null);
       // Refetch the current page, and step back one page when it is now empty
@@ -703,7 +754,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       await clearAlertHistory();
       setHistoryItems([]);
       setHistoryTotal(0);
-      setSelectedHistoryItem(null);
+      closeHistoryItem();
       setIsClearHistoryModalOpen(false);
       setFeedbackMsg({ text: 'All alert history records cleared.', isError: false });
     } catch (err: any) {
@@ -999,7 +1050,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       {selectedHistoryItem && (
         <Modal
           isOpen={!!selectedHistoryItem}
-          onClose={() => setSelectedHistoryItem(null)}
+          onClose={closeHistoryItem}
           title={
             isMaintenanceItem(selectedHistoryItem)
               ? 'Maintenance Window Details'

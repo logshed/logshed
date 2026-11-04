@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [1.3.1] - Unreleased
 
 ### Changed
+- **Notification links open the incident**: With `APP_URL` set, the link in an alert notification now opens that alert's incident record instead of the Incident History list.
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
 
 ### Fixed

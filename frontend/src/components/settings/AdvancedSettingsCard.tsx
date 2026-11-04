@@ -282,7 +282,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
               <p className="text-[11px] text-slate-400 mt-1">
-                Used in notification dispatch to generate direct links to incident history.
+                Used in alert notifications for a link that opens the incident.
               </p>
             </div>
 
