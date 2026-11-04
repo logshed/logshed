@@ -47,6 +47,7 @@ Read these before updating from 1.2.x. The first start migrates the database to 
 - **`reset-admin`** asks for the new password twice instead of taking it on the command line.
 
 ### Fixed
+- **Telegram notifications**: Saving or testing a Telegram channel no longer fails with a server error, because the colon in the bot token was read as a port. Thanks to @marcomosa (#2).
 - **AI with current models**: Analyses failed with Claude Opus 4.7 and later (including all Claude 5 models), OpenAI reasoning models (o-series, GPT-5 and later) and Gemini 4 models, because LogShed sent settings these models refuse.
 - **Saved AI settings**: Saving Settings no longer stores the default model of every provider, so defaults now follow LogShed's updates.
 - **Alert rules**: Busy rate rules (for example 100 logs per second over 5 minutes) now fire, and editing a drop rule can clear its host or app filter.
