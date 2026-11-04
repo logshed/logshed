@@ -566,12 +566,13 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
 
             <div className="space-y-1 min-w-0">
               <label htmlFor="digest-schedule-time" className="block text-[11px] font-semibold text-slate-400 uppercase">
-                Schedule Time (Local)
+                Schedule Time{' '}
+                {/* The digest runs on the server clock (TZ), not the browser's */}
+                <span className="normal-case font-mono">({serverTimezone || 'server time'})</span>
               </label>
               <input
                 type="text"
                 id="digest-schedule-time"
-                aria-label="Schedule Time"
                 value={currentDigestScheduleTime}
                 placeholder="HH:MM"
                 maxLength={5}

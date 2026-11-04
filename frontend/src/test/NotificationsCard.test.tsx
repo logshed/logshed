@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NotificationsCard } from '../components/settings/NotificationsCard.tsx';
 import * as notifApi from '../api/notifications.ts';
 import * as settingsApi from '../api/settings.ts';
+import type { SystemSettings } from '../types.ts';
 
 vi.mock('../api/notifications.ts', () => ({
   fetchNotificationChannels: vi.fn(),
@@ -21,6 +22,17 @@ vi.mock('../api/settings.ts', () => ({
 describe('NotificationsCard Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('labels the digest schedule time with the server time zone it runs in', async () => {
+    vi.mocked(notifApi.fetchNotificationChannels).mockResolvedValue([]);
+    // The runner is in UTC, so a browser-time label could not pass for this one
+    const { unmount } = render(<NotificationsCard settings={{ server_timezone: 'Asia/Kolkata' } as SystemSettings} />);
+    expect(await screen.findByLabelText('Schedule Time (Asia/Kolkata)')).toBeInTheDocument();
+    unmount();
+
+    render(<NotificationsCard settings={{ server_timezone: null } as SystemSettings} />);
+    expect(await screen.findByLabelText('Schedule Time (server time)')).toBeInTheDocument();
   });
 
   it('renders empty state when no channels are configured', async () => {
