@@ -21,8 +21,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.api import ai, alerts, aliases, auth, docker_hosts, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
 from app.api.deps import get_optional_user, require_auth_or_token, run_db_query
@@ -45,6 +44,7 @@ from app.core.loop_lag import get_loop_lag_monitor
 from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
 from app.core.security import get_or_create_master_key
+from app.core.static_files import mount_frontend
 from app.services.daily_digest import DailyDigestWorker
 from app.services.fts_indexer import FTSIndexWorker
 from app.services.retention import PruneWorker
@@ -647,6 +647,10 @@ def _register_api_docs(app: FastAPI) -> tuple[set[str], str]:
     return {_DOCS_URL, _REDOC_URL, _OPENAPI_URL}, policy
 
 
+# The frontend build's output (frontend/vite.config.ts); absent in a checkout without a build
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
 def _api_docs_enabled() -> bool:
     """ENABLE_API_DOCS (default true) serves /docs, /redoc and /openapi.json."""
     return env_bool("ENABLE_API_DOCS", True)
@@ -762,26 +766,9 @@ def create_app() -> FastAPI:
     # Direct Model Context Protocol root mount (Streamable HTTP /mcp per MCP specification)
     app.include_router(mcp.router)
 
-    # Static files serving with SPA fallback
-    static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.exists():
-        assets_dir = static_dir / "assets"
-        if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-        @app.get("/{full_path:path}")
-        async def serve_spa(full_path: str):
-            if full_path.startswith("api") or full_path.startswith("mcp"):
-                raise HTTPException(status_code=404, detail="Not Found")
-            resolved_file = (static_dir / full_path).resolve()
-            if not resolved_file.is_relative_to(static_dir.resolve()):
-                raise HTTPException(status_code=404, detail="Not Found")
-            if resolved_file.is_file():
-                return FileResponse(str(resolved_file))
-            index_path = static_dir / "index.html"
-            if index_path.is_file():
-                return FileResponse(str(index_path))
-            raise HTTPException(status_code=404, detail="Static files not found")
+    # The built SPA, with precompressed copies and caching headers (app.core.static_files)
+    if STATIC_DIR.exists():
+        mount_frontend(app, STATIC_DIR)
 
     return app
 

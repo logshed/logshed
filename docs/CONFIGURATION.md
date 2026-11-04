@@ -210,6 +210,8 @@ On Linux, `host.docker.internal` works only when the LogShed service has `extra_
 
 Login attempts are limited to 5 failures per client address per minute (IPv6 clients share one limit per /64), and at most 2 attempts from one address are checked at the same time. Each attempt is counted before the password is checked, so parallel guesses cannot get around the limit. Exceeding either limit returns `429` with a `Retry-After` header. A successful login clears the address's failure count.
 
+**Behind a reverse proxy:** LogShed sends the web interface's files already compressed (Brotli or gzip, whichever the browser accepts) and lets browsers keep the versioned files under `/assets/` for a year, so the proxy does not need to compress them. API responses are not compressed. If your proxy compresses responses, it should leave the live streams (`text/event-stream`) alone; LogShed sends `X-Accel-Buffering: no` on them so nginx does not buffer them.
+
 ---
 
 ## Advanced

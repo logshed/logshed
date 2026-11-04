@@ -11,7 +11,7 @@ LogShed executes as a single container, single OS process application running mu
 * **Stage 1 (Frontend Builder):**
   * Base Image: `node:24-alpine` (`--platform=$BUILDPLATFORM`)
   * Working Directory: `/frontend`
-  * Action: Installs npm dependencies and compiles React SPA (`npm run build`), emitting output directly to static assets directory.
+  * Action: Installs npm dependencies and compiles React SPA (`npm run build`), emitting output directly to static assets directory, with Brotli and gzip copies of the text files (see [frontend.md](frontend.md#5-build--asset-distribution)).
 * **Stage 2 (Runtime Environment):**
   * Base Image: `python:3.12-slim`
   * System Packages: `tini` (init process), `curl` (container health checks), `gosu` (privilege dropping), and `procps` (process table queries).
