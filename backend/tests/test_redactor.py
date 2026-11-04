@@ -232,6 +232,54 @@ MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfnNkGFOQCPO...
 
 
 
+class TestRedactorPasswordKeyBoundaries:
+    """Password keys match as whole keys, and the English word "pass" is not taken for one."""
+
+    @pytest.mark.parametrize(
+        "text, secret",
+        [
+            ("password: hunter2", "hunter2"),
+            ("passwd=x1y2z3", "x1y2z3"),
+            ("pwd: s3cret", "s3cret"),
+            ("PASS=hunter2", "hunter2"),
+            ("pass=hunter2", "hunter2"),
+            ("login ok pass=hunter2", "hunter2"),
+            ("pass:hunter2", "hunter2"),
+            ("db_pass=s3cret", "s3cret"),
+            ("SMTP_PASS=s3cret", "s3cret"),
+            ("mysql-pwd: s3cret", "s3cret"),
+            ("user.password=s3cret", "s3cret"),
+            ("DB_PASSWORD=s3cret", "s3cret"),
+            ("pass: hunter2", "hunter2"),
+            ("    pass: hunter2", "hunter2"),
+            ("- pass: hunter2", "hunter2"),
+            ("user: bob\npass: hunter2", "hunter2"),
+            ('{"user": "bob", "pass": "hunter2"}', "hunter2"),
+            ("{user: bob, pass: hunter2}", "hunter2"),
+            ("user=bob, pass: hunter2", "hunter2"),
+            ("'pass': 'hunter2'", "hunter2"),
+        ],
+    )
+    def test_password_values_stay_hidden(self, text, secret):
+        result = redact(text)
+        assert secret not in result
+        assert REDACTED in result
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "FTSIndexWorker error during indexing pass: database is locked",
+            "second pass: ok",
+            "bypass: enabled",
+            "compass: north",
+            "Bypass=on for this route",
+            "trespass: none",
+        ],
+    )
+    def test_words_ending_in_pass_are_left_alone(self, text):
+        assert redact(text) == text
+
+
 class TestRedactorQuotedKeys:
     """Key/value patterns must also match JSON and Python style quoted keys."""
 

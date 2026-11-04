@@ -132,12 +132,27 @@ _PATTERNS: list[tuple[str, re.Pattern, str]] = [
     ),
 
     # --- Password Fields ---
-    # password=..., password: ..., passwd=..., "password": "...", etc.
+    # password=..., password: ..., passwd=..., "password": "...", etc. No letter or digit may come
+    # right before the key, so db_password= and SMTP_PWD= match but words like "bypass" do not.
     (
         "password_field",
         re.compile(
-            r"((?:password|passwd|pwd|pass)" + _SEP + r")" + _SECRET_VALUE,
+            r"((?<![a-z0-9])(?:password|passwd|pwd)" + _SEP + r")" + _SECRET_VALUE,
             re.IGNORECASE,
+        ),
+        rf"\1{REDACTED}",
+    ),
+    # The short key "pass" is also an English word ("indexing pass: database is locked"), so it
+    # counts with "=" or a colon not followed by a space anywhere (pass=x, db_pass:x); with ": " only
+    # where a field starts (a line, after indentation or "- ", after "{", "[" or ",") or when quoted.
+    (
+        "pass_field",
+        re.compile(
+            r"((?<![a-z0-9])pass" + _Q + r"(?:\s*=\s*|:(?=\S))"
+            + r"|(?:^|[{,\[])[ \t]*(?:-[ \t]+)?pass" + _SEP
+            + r"|(?<![a-z0-9])\\?[\"']pass\\?[\"']\s*[:=]\s*)"
+            + _SECRET_VALUE,
+            re.IGNORECASE | re.MULTILINE,
         ),
         rf"\1{REDACTED}",
     ),
