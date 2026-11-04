@@ -22,6 +22,7 @@ describe('CreateDropRuleModal Component', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('closes immediately without warning when X button is clicked with no unsaved changes', () => {

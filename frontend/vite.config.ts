@@ -58,7 +58,7 @@ export default defineConfig({
     // (cuts collect time by ~70%). Adding react-dom and the testing libraries gained little and broke a test.
     deps: {
       optimizer: {
-        web: {
+        client: {
           enabled: true,
           include: ['lucide-react', 'recharts'],
         },

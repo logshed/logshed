@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import {
   LiveLogStream,
   parseFocusLogIdFromUrl,
@@ -29,7 +29,7 @@ const virtualizerControl: {
   edgeRows: number | null;
   headOnly: boolean;
   lastOptions: any;
-  scrollToIndex: ReturnType<typeof vi.fn>;
+  scrollToIndex: Mock<(...args: unknown[]) => void>;
 } = {
   edgeRows: null,
   headOnly: false,

@@ -41,6 +41,7 @@ describe('AlertRuleModal Component', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('does not render dialog content when isOpen is false', () => {
@@ -387,6 +388,7 @@ describe('AlertRuleModal prefill from a log', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     onClose.mockReset();
   });
 
