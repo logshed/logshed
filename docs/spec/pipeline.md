@@ -47,6 +47,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Reconnection Backoff:** Implements automated exponential backoff for socket reconnects:
   - Supervisor backoff: Initial backoff of `1.0s`, doubling on consecutive connection errors up to a maximum ceiling of `60.0s` (`DOCKER_SOCKET_POLL_MAX`), resetting to `1.0s` on successful connection.
   - Container tailer backoff: Initial backoff of `1.0s`, doubling up to `15.0s`, automatically reconnecting when containers restart.
+  - Events stream end: when the daemon ends the `/events` stream, cleanly (for example while restarting) or with an error, the supervisor stops every container tailer (they hold the old client), backs off and reconnects, then tails the running containers again on the new connection.
 
 ---
 

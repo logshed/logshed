@@ -1601,6 +1601,10 @@ class DockerTailer:
                         "Docker events keepalive heartbeat failed; half-open connection detected"
                     )
                 await events_task
+                if not self._cancel_event.is_set():
+                    # The daemon closed the stream cleanly (for example while restarting). Reconnect like
+                    # after an error: the tailers hold this client, which closes when the caller returns.
+                    raise httpx.RemoteProtocolError("Docker events stream ended")
             except asyncio.CancelledError:
                 if heartbeat_failed:
                     raise httpx.ReadTimeout(

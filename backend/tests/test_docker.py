@@ -1033,7 +1033,9 @@ class TestDockerNewContainerFirstLines:
                 return MockLogsResp()
 
         try:
-            await asyncio.wait_for(tailer._watch_events(MockClient()), timeout=5.0)
+            # The events stream ends once every expected tailer opened, which the supervisor treats as a reconnect
+            with pytest.raises(httpx.RemoteProtocolError, match="Docker events stream ended"):
+                await asyncio.wait_for(tailer._watch_events(MockClient()), timeout=5.0)
         finally:
             await tailer._cleanup_tailers()
         return tailer, captured
@@ -2973,3 +2975,106 @@ class TestAppAliasDedupBound:
             await asyncio.sleep(0)
 
         await tailer.stop()
+
+
+# ===================================================================
+# Reconnecting after the events stream drops
+# ===================================================================
+
+class _FakeDockerDaemon:
+    """A Docker API behind httpx.MockTransport, one numbered client per connection.
+
+    Container A runs from the start. While the first events stream is open, once A is being tailed,
+    container B starts (its start event is lost with the stream) and the stream then ends, cleanly
+    or with an error. Later event streams stay open until the test ends.
+    """
+
+    B_STARTED_AT = "2026-11-04T17:00:05.123456789Z"
+
+    def __init__(self, clean_end: bool):
+        self.clean_end = clean_end
+        self.connections = 0
+        self.running = {"a" * 64: ("app-a", "2026-11-04T16:00:00.000000001Z")}
+        self.log_requests: list[tuple[int, str, dict]] = []
+        self.a_tailed = asyncio.Event()
+        self.released = asyncio.Event()
+
+    def client(self, *args, **kwargs) -> httpx.AsyncClient:
+        self.connections += 1
+        number = self.connections
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return await self.handle(number, request)
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://docker")
+
+    async def _held_open(self):
+        await self.released.wait()
+        if False:
+            yield b""
+
+    async def _first_events(self):
+        await self.a_tailed.wait()
+        self.running["b" * 64] = ("app-b", self.B_STARTED_AT)
+        if not self.clean_end:
+            raise httpx.RemoteProtocolError("peer closed connection")
+        if False:
+            yield b""
+
+    async def handle(self, number: int, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/_ping":
+            return httpx.Response(200, text="OK")
+        if path == "/containers/json":
+            return httpx.Response(200, json=[{"Id": cid, "Names": [f"/{name}"], "Labels": {}} for cid, (name, _) in self.running.items()])
+        if path == "/events":
+            return httpx.Response(200, content=self._first_events() if number == 1 else self._held_open())
+        cid = path.split("/")[2]
+        if path.endswith("/json"):
+            return httpx.Response(200, json={"Config": {"Tty": False}, "State": {"StartedAt": self.running[cid][1]}})
+        if path.endswith("/logs"):
+            self.log_requests.append((number, cid, dict(request.url.params)))
+            if number == 1 and cid.startswith("a"):
+                self.a_tailed.set()
+            return httpx.Response(200, content=self._held_open())
+        return httpx.Response(404)
+
+
+class TestEventsStreamGap:
+
+    async def _run_until_second_connection_tails(self, monkeypatch, daemon: _FakeDockerDaemon) -> None:
+        monkeypatch.setattr("app.collectors.docker_collector._INITIAL_BACKOFF", 0.01)
+        monkeypatch.setattr("app.collectors.docker_collector._build_client", daemon.client)
+        monkeypatch.setenv("DOCKER_HEARTBEAT_INTERVAL", "0")
+        tailer = DockerTailer(
+            KeyedMultilineAssembler(), enable_docker=True, url="tcp://docker:2375", discovery_interval=0
+        )
+        tailer._schedule_app_alias_update = lambda *args, **kwargs: None
+        task = asyncio.create_task(tailer.run())
+        try:
+            async def second_connection_tails_both():
+                while {cid[0] for n, cid, _ in daemon.log_requests if n == 2} != {"a", "b"}:
+                    await asyncio.sleep(0.005)
+
+            await asyncio.wait_for(second_connection_tails_both(), timeout=5)
+        finally:
+            daemon.released.set()
+            await tailer.stop()
+            await asyncio.wait_for(task, timeout=5)
+
+    @pytest.mark.asyncio
+    async def test_clean_end_of_the_events_stream_tails_the_containers_again_on_the_new_connection(self, monkeypatch):
+        daemon = _FakeDockerDaemon(clean_end=True)
+        # Before the fix the old tailers kept retrying on the closed client, so this timed out
+        await self._run_until_second_connection_tails(monkeypatch, daemon)
+
+        assert daemon.connections >= 2
+        assert {cid[0] for n, cid, _ in daemon.log_requests if n == 2} == {"a", "b"}
+
+    @pytest.mark.asyncio
+    async def test_first_connection_opens_every_running_container_at_the_end_of_its_log(self, monkeypatch):
+        daemon = _FakeDockerDaemon(clean_end=False)
+        await self._run_until_second_connection_tails(monkeypatch, daemon)
+
+        first = [params for n, _, params in daemon.log_requests if n == 1]
+        assert first == [{"stdout": "true", "stderr": "true", "follow": "true", "timestamps": "true", "tail": "0"}]
