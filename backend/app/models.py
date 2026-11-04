@@ -286,7 +286,7 @@ class SettingsUpdateRequest(BaseModel):
     )
     ai_thinking_level: Optional[AiThinkingLevel] = Field(
         None,
-        description="How much reasoning models may think: off (or the lowest the model allows), low, medium or high.",
+        description="How much reasoning models may think: off (or the lowest level where a model keeps thinking), low, medium or high.",
     )
     app_url: Optional[str] = Field(
         None,

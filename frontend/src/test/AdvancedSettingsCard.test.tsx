@@ -107,7 +107,7 @@ describe('AdvancedSettingsCard Component', () => {
 
     const select = screen.getByLabelText('Thinking Level');
     expect(Array.from((select as HTMLSelectElement).options).map((o) => [o.value, o.text])).toEqual([
-      ['off', 'Off (or the lowest the model allows)'],
+      ['off', 'Off (or the lowest level)'],
       ['low', 'Low (default)'],
       ['medium', 'Medium'],
       ['high', 'High'],

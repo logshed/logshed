@@ -16,7 +16,7 @@ import { updateSettings } from '../../api/settings.ts';
 const DEFAULT_THINKING_LEVEL: AiThinkingLevel = 'low';
 
 const THINKING_LEVEL_OPTIONS: { value: AiThinkingLevel; label: string }[] = [
-  { value: 'off', label: 'Off (or the lowest the model allows)' },
+  { value: 'off', label: 'Off (or the lowest level)' },
   { value: 'low', label: 'Low (default)' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
@@ -258,7 +258,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-400">
-            The timeout applies to every AI provider. The thinking level sets how much reasoning models (Gemini 2.5 and later, Claude 3.7 and later, OpenAI o-series and GPT-5 and later) think before they answer: more thinking can find deeper causes but takes longer and uses more tokens. Some models cannot turn thinking off, such as Claude 5, Gemini 2.5 Pro and Gemini 3 and later; Off then asks for their lowest level.
+            The timeout applies to every AI provider. The thinking level sets how much reasoning models (Gemini 2.5 and later, Claude 3.7 and later, OpenAI o-series and GPT-5 and later) think before they answer: more thinking can find deeper causes but takes longer and uses more tokens. Claude 5 and later, Gemini 2.5 Pro and Gemini 3 and later still think a little at Off: LogShed asks them for their lowest level.
           </p>
         </div>
 

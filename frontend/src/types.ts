@@ -53,7 +53,7 @@ export interface AiProviderConfig {
   ai_base_url?: string | null;
 }
 
-// How much reasoning models may think before they answer (off asks for the lowest the model allows)
+// How much reasoning models may think before they answer (off asks for the lowest level where a model keeps thinking)
 export type AiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 
 export interface SystemSettings {
