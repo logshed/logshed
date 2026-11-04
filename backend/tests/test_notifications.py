@@ -100,6 +100,31 @@ class TestNotifierUnit:
         assert valid is True
         assert err is None
 
+    @patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("149.154.167.220", 0))])
+    def test_validate_telegram_url_with_token_colon(self, mock_dns):
+        # Telegram bot tokens contain ':' which urllib misreads as a port separator
+        valid, err = validate_notification_url("tgram://123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/987654321")
+        assert valid is True
+        assert err is None
+
+    @patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("149.154.167.220", 0))])
+    def test_validate_telegram_url_with_encoded_token_colon(self, mock_dns):
+        # The 1.2.x workaround (colon written as %3A) must keep working after the fix
+        valid, err = validate_notification_url("tgram://123456789%3AAAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/987654321")
+        assert valid is True
+        assert err is None
+
+    def test_validate_url_with_non_numeric_port_does_not_raise(self):
+        # Apprise refuses the URL itself, so the check returns its message instead of raising
+        valid, err = validate_notification_url("json://example.com:BOTTOKEN/path")
+        assert valid is False
+        assert "unsupported notification url" in (err or "").lower()
+
+    def test_validate_url_blocked_port_still_rejected(self):
+        valid, err = validate_notification_url("json://example.com:2375/path")
+        assert valid is False
+        assert "2375" in (err or "")
+
     def test_validate_notification_url_invalid(self):
         valid, err = validate_notification_url("")
         assert valid is False
@@ -193,6 +218,12 @@ class TestNotifierUnit:
         is_safe, err = _validate_redirect_url("http://[::169.254.169.254]/meta")
         assert is_safe is False
         assert "metadata" in (err or "").lower()
+
+    def test_redirect_with_non_numeric_port_rejected(self):
+        from app.services.notifier import _validate_redirect_url
+        is_safe, err = _validate_redirect_url("https://example.com:BOTTOKEN/path")
+        assert is_safe is False
+        assert "invalid port" in (err or "").lower()
 
     def test_validate_ssrf_docker_ports_rejected(self):
         valid, err = validate_notification_url("json://192.168.1.50:2375/v1.41/containers/json")
