@@ -563,16 +563,12 @@ class TestEveryInsertPathStoresTheWholeRule:
         )
         assert imported.json()["imported"] == 1
 
-        # The list adds drops counted in memory since the last flush, which other tests can leave behind
-        listed = [
-            {k: v for k, v in r.items() if k != "dropped_count"}
-            for r in (await client.get("/api/drop-rules", headers=auth_headers)).json()
-        ]
+        listed = (await client.get("/api/drop-rules", headers=auth_headers)).json()
         assert [r["display_order"] for r in listed] == [1, 2, 3]
         assert created.json()["dropped_count"] == 0
-        assert listed[0] == {k: v for k, v in created.json().items() if k != "dropped_count"}
+        assert listed[0] == created.json()
         assert listed[0]["name"] == "cron"
-        assert listed[1] == {k: v for k, v in installed.json().items() if k != "dropped_count"}
+        assert listed[1] == installed.json()
         assert installed.json()["is_enabled"] is True
         assert {k: v for k, v in listed[2].items() if k not in ("id", "created_at")} == {
             "name": "healthcheck",
@@ -583,4 +579,5 @@ class TestEveryInsertPathStoresTheWholeRule:
             "is_enabled": True,
             "severity_threshold": 7,
             "display_order": 3,
+            "dropped_count": 0,
         }

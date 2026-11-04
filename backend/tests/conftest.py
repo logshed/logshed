@@ -11,6 +11,7 @@ from app.core import security
 from app.core.config import get_cors_origins, invalidate_settings_cache
 from app.api.deps import reset_all_db_connections
 from app.api.ingest import clear_ingest_token_cache
+import app.services.drop_filter as drop_filter_mod
 
 # Building the FastAPI app costs ~0.12s (route schema generation) and ~330 tests build one, so
 # share instances. Swapped in before test modules run `from app.main import create_app`.
@@ -65,6 +66,22 @@ def fast_password_hasher():
     security._password_hasher = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
     yield
     security._password_hasher = original
+
+
+@pytest.fixture(autouse=True)
+def reset_drop_filter_counts():
+    """Clear drops counted in memory by the process-wide drop filter, so a test that drops logs without a
+    flush cannot add them to a later test's rule with the same id (the drop rules list adds pending counts)."""
+    def clear():
+        drop_filter = drop_filter_mod._drop_filter
+        # Some tests swap in a fake filter
+        if isinstance(drop_filter, drop_filter_mod.DropFilter):
+            for rule_id in drop_filter.get_all_pending_counts():
+                drop_filter.reset_rule_count(rule_id)
+
+    clear()
+    yield
+    clear()
 
 
 @pytest.fixture(autouse=True)
