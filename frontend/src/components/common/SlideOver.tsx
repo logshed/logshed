@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useId, useRef } from 'react';
 import { X } from 'lucide-react';
-import { useEscapeKey } from '../../utils/hooks.ts';
+import { useDialog } from '../../utils/dialogStack.ts';
 
 interface SlideOverProps {
   isOpen: boolean;
@@ -21,7 +21,9 @@ export const SlideOver: React.FC<SlideOverProps> = ({
   children,
   width = 'max-w-3xl',
 }) => {
-  useEscapeKey(isOpen, onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialog(isOpen, onClose, panelRef);
 
   if (!isOpen) return null;
 
@@ -37,13 +39,18 @@ export const SlideOver: React.FC<SlideOverProps> = ({
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="fixed inset-y-0 right-0 flex max-w-full pl-0 sm:pl-10 pointer-events-none">
           <div
-            className={`pointer-events-auto w-screen ${width} bg-dark-900 border-l border-dark-700 shadow-2xl flex flex-col overscroll-contain animate-in slide-in-from-right duration-200 overflow-x-hidden`}
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
+            className={`pointer-events-auto w-screen ${width} bg-dark-900 border-l border-dark-700 shadow-2xl flex flex-col overscroll-contain outline-none animate-in slide-in-from-right duration-200 overflow-x-hidden`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-700 bg-dark-950 shrink-0 gap-2">
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-slate-200 tracking-wide truncate">{title}</div>
+                <h2 id={titleId} className="text-sm font-semibold text-slate-200 tracking-wide truncate">{title}</h2>
                 {subtitle && (
                   <div className="mt-0.5">{subtitle}</div>
                 )}

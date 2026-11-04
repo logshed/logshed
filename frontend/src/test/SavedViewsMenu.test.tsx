@@ -352,6 +352,21 @@ describe('Rename saved views and the active view', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
+  it('Esc in the delete confirmation closes only the confirmation, then the next Esc closes the menu', () => {
+    const { onDeleteView } = renderMenu();
+    fireEvent.click(screen.getByRole('button', { name: /Saved views menu/i }));
+    fireEvent.click(screen.getByLabelText('Delete view DHCP Traffic'));
+    expect(screen.getByRole('dialog', { name: 'Delete Saved View' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('views-dropdown-panel')).toBeInTheDocument();
+    expect(onDeleteView).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' });
+    expect(screen.queryByTestId('views-dropdown-panel')).toBeNull();
+  });
+
   it('Enter saves the trimmed name and Esc closes without saving', async () => {
     const { onRenameView } = renderMenu();
     let input = openRenameFor('DHCP Traffic');

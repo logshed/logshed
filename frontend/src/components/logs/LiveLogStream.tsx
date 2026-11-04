@@ -37,6 +37,7 @@ import {
   ProcessedLogEntry,
   areLogRowPropsEqual,
   logGridCols,
+  logRowId,
   DESKTOP_LOG_ROW_HEIGHT,
   MOBILE_LOG_ROW_HEIGHT,
 } from './LogRow.tsx';
@@ -1522,6 +1523,74 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     rowVirtualizer.measure();
   }, [isMobile, rowVirtualizer]);
 
+  // Keyboard row cursor. The list keeps DOM focus (rows mount and unmount as it scrolls) and
+  // names the cursor row with aria-activedescendant. Tracked by log id, so it stays on its log
+  // when live rows are added above it; -1 when unset or the log has left the buffer.
+  const [cursorLogId, setCursorLogId] = useState<number | null>(null);
+  const cursorIndex = useMemo(
+    () => (cursorLogId === null ? -1 : processedLogs.findIndex((l) => l.id === cursorLogId)),
+    [cursorLogId, processedLogs],
+  );
+
+  // The cursor follows the log open in the detail drawer (also when it moves to the newer or older
+  // log there), so closing the drawer leaves the cursor on the last log viewed
+  useEffect(() => {
+    if (activeLogDetail) setCursorLogId(activeLogDetail.id);
+  }, [activeLogDetail]);
+
+  const handleListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Only keys pressed on the list itself, not on buttons inside it (such as the empty-state ones)
+    if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey) return;
+    const count = processedLogs.length;
+    if (count === 0) return;
+    const rowHeight = isMobile ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT;
+    const pageRows = Math.max(1, Math.floor(e.currentTarget.clientHeight / rowHeight) - 1);
+    // Without a cursor, the first key lands on the first row in view
+    const scrollTop = e.currentTarget.scrollTop;
+    const firstInView = rowVirtualizer.getVirtualItems().find((item) => item.start + item.size > scrollTop)?.index ?? 0;
+    const current = cursorIndex >= 0 ? cursorIndex : null;
+    let next: number | null = null;
+    switch (e.key) {
+      case 'ArrowDown':
+        next = current === null ? firstInView : current + 1;
+        break;
+      case 'ArrowUp':
+        next = current === null ? firstInView : current - 1;
+        break;
+      case 'PageDown':
+        next = (current ?? firstInView) + pageRows;
+        break;
+      case 'PageUp':
+        next = (current ?? firstInView) - pageRows;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = count - 1;
+        break;
+      case 'Enter':
+        if (current === null) return;
+        e.preventDefault();
+        setActiveLogDetail(processedLogs[current]);
+        return;
+      case ' ':
+        if (current === null) return;
+        e.preventDefault();
+        toggleSelectLog(processedLogs[current], current, e.shiftKey);
+        return;
+      default:
+        return;
+    }
+    e.preventDefault();
+    const index = Math.min(count - 1, Math.max(0, next));
+    setCursorLogId(processedLogs[index].id);
+    rowVirtualizer.scrollToIndex(index, { align: 'auto' });
+  };
+  // aria-activedescendant may only name a row that is in the DOM
+  const cursorRowRendered =
+    cursorIndex >= 0 && rowVirtualizer.getVirtualItems().some((item) => item.index === cursorIndex);
+
   // Scroll the focused log into view once it is loaded, paging older logs (newest first) until it is found
   useEffect(() => {
     if (focusLogId === null || focusScrolledRef.current || isLoadingHistory || logs.length === 0) return;
@@ -1825,13 +1894,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // Multi-select across single or multiple hosts with Shift-click range support
   const toggleSelectLog = useCallback(
-    (log: LogEntry, index: number, e: React.MouseEvent) => {
-      e.stopPropagation();
+    (log: LogEntry, index: number, shiftKey: boolean) => {
       const lastIndex = lastSelectedLogIndexRef.current;
 
       setSelectedLogIds((prev) => {
         const next = new Set(prev);
-        if (e.shiftKey && lastIndex !== null && lastIndex !== index) {
+        if (shiftKey && lastIndex !== null && lastIndex !== index) {
           const start = Math.min(lastIndex, index);
           const end = Math.max(lastIndex, index);
           const rangeLogs = logsRef.current.slice(start, end + 1);
@@ -2188,11 +2256,14 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onTouchCancel={() => {
             isTouchingRef.current = false;
           }}
-          // Focusable, so the list scrolls with the arrow and page keys
+          // One Tab stop: the arrow, page, Home and End keys move the row cursor (handleListKeyDown)
           tabIndex={0}
-          role="region"
+          onKeyDown={handleListKeyDown}
+          role={processedLogs.length > 0 ? 'listbox' : 'region'}
           aria-label="Log list"
-          className="flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
+          aria-multiselectable={processedLogs.length > 0 ? true : undefined}
+          aria-activedescendant={cursorRowRendered ? logRowId(processedLogs[cursorIndex].id) : undefined}
+          className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
         >
           {isLoadingHistory && logs.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400 font-mono">
@@ -2274,6 +2345,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                     isMobile={isMobile}
                     aiEnabled={aiEnabled}
                     isFocused={log.id === focusLogId}
+                    isCursor={virtualRow.index === cursorIndex}
                     style={{
                       position: 'absolute',
                       top: 0,

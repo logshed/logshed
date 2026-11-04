@@ -1,45 +1,10 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useClipboard, useEscapeKey } from '../utils/hooks.ts';
+import { useClipboard } from '../utils/hooks.ts';
 import { usePullToRefresh } from '../utils/usePullToRefresh.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 
-describe('Custom Hooks (useEscapeKey & useClipboard)', () => {
-  describe('useEscapeKey', () => {
-    it('calls onClose when isOpen is true and Escape key is pressed', () => {
-      const onClose = vi.fn();
-      renderHook(() => useEscapeKey(true, onClose));
-
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not call onClose when isOpen is false', () => {
-      const onClose = vi.fn();
-      renderHook(() => useEscapeKey(false, onClose));
-
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-      expect(onClose).not.toHaveBeenCalled();
-    });
-
-    it('does not call onClose when non-Escape key is pressed', () => {
-      const onClose = vi.fn();
-      renderHook(() => useEscapeKey(true, onClose));
-
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      expect(onClose).not.toHaveBeenCalled();
-    });
-
-    it('removes event listener on unmount', () => {
-      const onClose = vi.fn();
-      const { unmount } = renderHook(() => useEscapeKey(true, onClose));
-
-      unmount();
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-      expect(onClose).not.toHaveBeenCalled();
-    });
-  });
-
+describe('Custom Hooks (useClipboard)', () => {
   describe('useClipboard', () => {
     beforeEach(() => {
       vi.useFakeTimers();

@@ -1751,6 +1751,116 @@ describe('LiveLogStream Component', () => {
 
     window.history.replaceState({}, '', '/');
   });
+
+  describe('keyboard row cursor', () => {
+    const loadList = async () => {
+      renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+      await waitFor(() => {
+        expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+      });
+      const list = screen.getByRole('listbox', { name: 'Log list' });
+      list.focus();
+      return list;
+    };
+    const key = (el: HTMLElement, k: string, init: Record<string, unknown> = {}) => fireEvent.keyDown(el, { key: k, ...init });
+
+    it('is one Tab stop whose arrow, page, Home and End keys move a cursor named by aria-activedescendant', async () => {
+      virtualizerControl.scrollToIndex.mockClear();
+      const list = await loadList();
+      expect(list).toHaveAttribute('tabindex', '0');
+      expect(list).toHaveAttribute('aria-multiselectable', 'true');
+      expect(list).not.toHaveAttribute('aria-activedescendant');
+      expect(within(list).getAllByRole('option')).toHaveLength(4);
+
+      key(list, 'ArrowDown'); // the first key lands on the first row in view
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+      key(list, 'ArrowDown');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-102');
+      key(list, 'ArrowUp');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+      key(list, 'ArrowUp'); // stays on the first row
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+      key(list, 'End');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-104');
+      expect(virtualizerControl.scrollToIndex).toHaveBeenLastCalledWith(3, { align: 'auto' });
+      key(list, 'ArrowDown'); // stays on the last row
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-104');
+      key(list, 'Home');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+      // Four rows tall, so a page moves three rows (one stays in view for context)
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: DESKTOP_LOG_ROW_HEIGHT * 4 });
+      key(list, 'PageDown');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-104');
+      key(list, 'PageUp');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+
+      expect(document.getElementById('log-row-101')!.className).toContain('group-focus/loglist:ring-1');
+      expect(document.getElementById('log-row-104')!.className).not.toContain('group-focus/loglist:ring-1');
+    });
+
+    it('ticks the cursor row with Space and a range with Shift+Space', async () => {
+      const list = await loadList();
+      key(list, 'ArrowDown');
+      key(list, ' ');
+      expect(screen.getByText('1 log selected')).toBeInTheDocument();
+      expect(document.getElementById('log-row-101')).toHaveAttribute('aria-selected', 'true');
+      expect(document.getElementById('log-row-102')).toHaveAttribute('aria-selected', 'false');
+
+      key(list, 'ArrowDown');
+      key(list, 'ArrowDown');
+      key(list, ' ', { shiftKey: true });
+      expect(screen.getByText('3 logs selected')).toBeInTheDocument();
+
+      key(list, ' '); // unticks the cursor row
+      expect(screen.getByText('2 logs selected')).toBeInTheDocument();
+      expect(document.getElementById('log-row-103')).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('opens the cursor row with Enter, and Esc returns focus to the list with the cursor on the last log viewed', async () => {
+      const list = await loadList();
+      key(list, ' '); // nothing happens without a cursor
+      key(list, 'Enter');
+      expect(screen.queryByText('1 log selected')).toBeNull();
+      expect(screen.queryByText(/Log Record #/i)).toBeNull();
+
+      key(list, 'ArrowDown');
+      key(list, 'Enter');
+      await waitFor(() => {
+        expect(screen.getByText(/Log Record #101/i)).toBeInTheDocument();
+      });
+      const drawer = screen.getByRole('dialog', { name: /Log Record #101/ });
+      expect(drawer.contains(document.activeElement)).toBe(true);
+
+      fireEvent.click(screen.getByRole('button', { name: /Older log/i }));
+      await waitFor(() => {
+        expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument();
+      });
+
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      await waitFor(() => {
+        expect(screen.queryByText(/Log Record #102/i)).toBeNull();
+      });
+      expect(list).toHaveFocus();
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-102');
+    });
+
+    it('leaves keys pressed with Ctrl, Meta or Alt alone', async () => {
+      const list = await loadList();
+      key(list, 'ArrowDown', { ctrlKey: true });
+      key(list, 'End', { metaKey: true });
+      key(list, 'ArrowDown', { altKey: true });
+      expect(list).not.toHaveAttribute('aria-activedescendant');
+    });
+
+    it('is a plain region while there are no rows', async () => {
+      (logsApi.fetchLogs as Mock).mockResolvedValue({ logs: [], total: 0, limit: 500, offset: 0 });
+      renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+      const region = await screen.findByRole('region', { name: 'Log list' });
+      expect(screen.queryByRole('listbox')).toBeNull();
+      fireEvent.keyDown(region, { key: 'ArrowDown' });
+      expect(region).not.toHaveAttribute('aria-activedescendant');
+    });
+  });
 });
 
 

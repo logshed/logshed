@@ -404,7 +404,13 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                 <span>{copiedSnippetId === 1 ? 'Copied' : 'Copy cURL'}</span>
               </button>
             </div>
-            <pre className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto">
+            {/* Focusable, so keyboard users can scroll a long command sideways */}
+            <pre
+              tabIndex={0}
+              role="region"
+              aria-label="Start maintenance cURL command"
+              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-500"
+            >
               {startSnippet}
             </pre>
           </div>
@@ -421,7 +427,13 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                 <span>{copiedSnippetId === 2 ? 'Copied' : 'Copy cURL'}</span>
               </button>
             </div>
-            <pre className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto">
+            {/* Focusable, so keyboard users can scroll a long command sideways */}
+            <pre
+              tabIndex={0}
+              role="region"
+              aria-label="Stop maintenance cURL command"
+              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-500"
+            >
               {stopSnippet}
             </pre>
           </div>

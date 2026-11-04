@@ -28,6 +28,14 @@ export function logGridCols(aiEnabled: boolean): string {
 export const DESKTOP_LOG_ROW_HEIGHT = 28;
 export const MOBILE_LOG_ROW_HEIGHT = 84;
 
+/** DOM id of a row, for the list's aria-activedescendant. */
+export function logRowId(logId: number): string {
+  return `log-row-${logId}`;
+}
+
+// The keyboard cursor's outline, shown only while the log list has focus
+const CURSOR_CLASS = ' group-focus/loglist:ring-1 group-focus/loglist:ring-inset group-focus/loglist:ring-accent-400';
+
 /** Background and left border: the alert's log (amber) wins over a selected row (accent). */
 function rowStateClass(isSelected: boolean, isFocused: boolean): string {
   if (isFocused) return 'bg-amber-950/50 border-l-amber-400';
@@ -45,8 +53,11 @@ export interface LogRowProps {
   aiEnabled?: boolean;
   /** Highlights the row as the log an alert link pointed at (the log that triggered the alert). */
   isFocused?: boolean;
+  /** The list's keyboard cursor is on this row (outlined while the list has focus). */
+  isCursor?: boolean;
   style: React.CSSProperties;
-  onSelect: (log: LogEntry, index: number, e: React.MouseEvent) => void;
+  /** Ticks or unticks the row; shiftKey ticks the range from the last ticked row. */
+  onSelect: (log: LogEntry, index: number, shiftKey: boolean) => void;
   onClick: (log: LogEntry) => void;
   onDiagnoseAi: (logs: LogEntry[]) => void;
 }
@@ -59,6 +70,7 @@ export function areLogRowPropsEqual(prevProps: LogRowProps, nextProps: LogRowPro
   if (prevProps.isMobile !== nextProps.isMobile) return false;
   if (Boolean(prevProps.aiEnabled) !== Boolean(nextProps.aiEnabled)) return false;
   if (Boolean(prevProps.isFocused) !== Boolean(nextProps.isFocused)) return false;
+  if (Boolean(prevProps.isCursor) !== Boolean(nextProps.isCursor)) return false;
 
   if (
     prevProps.style.transform !== nextProps.style.transform ||
@@ -97,6 +109,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   isMobile,
   aiEnabled = false,
   isFocused = false,
+  isCursor = false,
   style,
   onSelect,
   onClick,
@@ -110,13 +123,16 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   if (isMobile) {
     return (
       <div
+        id={logRowId(log.id)}
+        role="option"
+        aria-selected={isSelected}
         data-index={index}
         data-focused={isFocused || undefined}
         onClick={() => onClick(log)}
         style={style}
         className={`log-row flex flex-col px-3 py-1 border-b border-dark-900 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
           rowStateClass(isSelected, isFocused)
-        }`}
+        }${isCursor ? CURSOR_CLASS : ''}`}
       >
         {/* Line 1: Severity Badge + App Name (Host Name) */}
         <div className="flex items-center gap-1.5 min-w-0 h-5 shrink-0">
@@ -144,6 +160,8 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
                 e.stopPropagation();
                 onDiagnoseAi([log]);
               }}
+              // Inside a list option, so not a Tab stop: keyboard users open the log (Enter) or tick it (Space)
+              tabIndex={-1}
               className="text-accent-400 hover:text-accent-300 min-h-8 px-2 -my-2 flex items-center gap-1 shrink-0"
               title="Explain with AI"
             >
@@ -158,19 +176,25 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
 
   return (
     <div
+      id={logRowId(log.id)}
+      role="option"
+      aria-selected={isSelected}
       data-index={index}
       data-focused={isFocused || undefined}
       onClick={() => onClick(log)}
       style={style}
       className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
         rowStateClass(isSelected, isFocused)
-      }${isHovered ? ' bg-dark-900/60' : ''}`}
+      }${isHovered ? ' bg-dark-900/60' : ''}${isCursor ? CURSOR_CLASS : ''}`}
     >
-      {/* Checkbox */}
+      {/* Checkbox: a mouse target; keyboard users tick the cursor row with Space, and the row's
+          aria-selected tells screen readers */}
       <div
+        data-testid="log-row-checkbox"
+        aria-hidden="true"
         onClick={(e) => {
           e.stopPropagation();
-          onSelect(log, index, e);
+          onSelect(log, index, e.shiftKey);
         }}
         className="h-full w-full flex items-center justify-center text-slate-500 hover:text-slate-200 cursor-pointer select-none"
       >
@@ -216,6 +240,8 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
             onClick={() => {
               onDiagnoseAi([log]);
             }}
+            // Inside a list option, so not a Tab stop: keyboard users open the log (Enter) or tick it (Space)
+            tabIndex={-1}
             title="Explain with AI"
             className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition"
           >

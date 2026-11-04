@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useId, useState, useRef } from 'react';
 import {
   Key,
   Plus,
@@ -22,6 +22,7 @@ import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 import { useClipboard, useMediaQuery } from '../../utils/hooks.ts';
 import { TokenScopeChooser } from './TokenScopeChooser.tsx';
+import { useDialog } from '../../utils/dialogStack.ts';
 import {
   CUSTOM_PRESET_ID,
   FULL_ACCESS_SCOPE,
@@ -45,6 +46,44 @@ const chosenScopes = (presetId: string, selection: ReadonlySet<string>): string[
 // Exact match against SCOPE_PRESETS: the Read Only and AI Assistant / MCP (Read Only) presets grant the
 // same scopes and show as "Read Only"; any other combination is "Custom".
 export const getPresetName = (scopes: string[]): string => findMatchingPreset(scopes)?.name ?? 'Custom';
+
+interface TokenDialogProps {
+  titleId: string;
+  onClose: () => void;
+  closeOnEscape?: boolean;
+  testId?: string;
+  overlayClassName?: string;
+  panelClassName?: string;
+  children: React.ReactNode;
+}
+
+/** The overlay and panel of this tab's dialogs, on the shared dialog stack (focus trap, Esc, focus return). */
+const TokenDialog: React.FC<TokenDialogProps> = ({
+  titleId,
+  onClose,
+  closeOnEscape = true,
+  testId,
+  overlayClassName = 'bg-dark-950/80',
+  panelClassName = '',
+  children,
+}) => {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialog(true, onClose, panelRef, { closeOnEscape });
+  return (
+    <div data-testid={testId} className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClassName} backdrop-blur-xs`}>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full overflow-hidden outline-none animate-in fade-in zoom-in-95 duration-150 ${panelClassName}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
 
 export interface ApiTokensTabProps {
   settings?: Partial<SystemSettings> | null;
@@ -77,6 +116,9 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   const [editPresetId, setEditPresetId] = useState<string>(DEFAULT_PRESET_ID);
   const [editSelection, setEditSelection] = useState<Set<string>>(new Set());
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+
+  // Ids for the dialogs' titles (aria-labelledby)
+  const dialogIdBase = useId();
 
   // One-time created token modal
   const [createdRawToken, setCreatedRawToken] = useState<string | null>(null);
@@ -823,17 +865,22 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
 
       {/* Generate Token Modal */}
       {isGenerateModalOpen && (
-        <div data-testid="generate-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
-          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain animate-in fade-in zoom-in-95 duration-150">
+        <TokenDialog
+          testId="generate-token-modal"
+          titleId={`${dialogIdBase}-generate`}
+          onClose={() => setIsGenerateModalOpen(false)}
+          panelClassName="max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain"
+        >
             <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+              <h2 id={`${dialogIdBase}-generate`} className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                 <Key className="w-4 h-4 text-accent-500" />
                 <span>Generate API Token</span>
-              </h3>
+              </h2>
               <button
                 type="button"
                 onClick={() => setIsGenerateModalOpen(false)}
                 className="text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                aria-label="Close dialog"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -906,19 +953,22 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </TokenDialog>
       )}
 
       {/* Edit Token Modal (name and scopes) */}
       {tokenToEdit && (
-        <div data-testid="edit-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
-          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain animate-in fade-in zoom-in-95 duration-150">
+        <TokenDialog
+          testId="edit-token-modal"
+          titleId={`${dialogIdBase}-edit`}
+          onClose={() => setTokenToEdit(null)}
+          panelClassName="max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain"
+        >
             <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+              <h2 id={`${dialogIdBase}-edit`} className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                 <Edit2 className="w-4 h-4 text-accent-500" />
                 <span>Edit API token</span>
-              </h3>
+              </h2>
               <button
                 type="button"
                 onClick={() => setTokenToEdit(null)}
@@ -1024,23 +1074,29 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </TokenDialog>
       )}
 
       {/* One-Time Raw Token Modal */}
       {createdRawToken && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/85 backdrop-blur-xs">
-          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <TokenDialog
+          titleId={`${dialogIdBase}-created`}
+          onClose={() => setCreatedRawToken(null)}
+          // The token cannot be shown again, so only Done or the close button end this dialog
+          closeOnEscape={false}
+          overlayClassName="bg-dark-950/85"
+          panelClassName="max-w-md"
+        >
             <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
+              <h2 id={`${dialogIdBase}-created`} className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
                 <Check className="w-4 h-4 text-emerald-400" />
                 <span>Token Generated</span>
-              </h3>
+              </h2>
               <button
                 type="button"
                 onClick={() => setCreatedRawToken(null)}
                 className="text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                aria-label="Close dialog"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1099,19 +1155,22 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+        </TokenDialog>
       )}
 
       {/* Revoke Confirmation Modal */}
       {tokenToRevoke && (
-        <div data-testid="revoke-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
-          <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <TokenDialog
+          testId="revoke-token-modal"
+          titleId={`${dialogIdBase}-revoke`}
+          onClose={() => setTokenToRevoke(null)}
+          panelClassName="max-w-sm"
+        >
             <div className="p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+              <h2 id={`${dialogIdBase}-revoke`} className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-red-400" />
                 <span>Revoke Token</span>
-              </h3>
+              </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
                 Are you sure you want to revoke{' '}
                 <strong className="text-white">{tokenToRevoke.name}</strong>? Any service using this
@@ -1141,8 +1200,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 {isRevoking ? 'Revoking...' : 'Yes, Revoke'}
               </button>
             </div>
-          </div>
-        </div>
+        </TokenDialog>
       )}
     </div>
   );

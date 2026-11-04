@@ -354,7 +354,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
       {/* Rendered Full Diagnosis / Incident Summary Card */}
       {item.incident_summary && (
         <div className="bg-dark-950 p-4 rounded-lg border border-dark-700">
-          <h4
+          <h3
             className={`text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5 ${
               isFailed ? 'text-red-400' : 'text-accent-400'
             }`}
@@ -375,7 +375,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                 AI Incident Diagnosis & Remediation
               </>
             )}
-          </h4>
+          </h3>
 
           {isFailed ? (
             <div className="p-3 bg-red-950/30 border border-red-900/60 rounded text-xs text-red-300 leading-relaxed font-mono whitespace-pre-wrap">
@@ -501,9 +501,9 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
         <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
           <div className="flex items-center justify-between p-2.5 px-3 bg-dark-900 border-b border-dark-700 gap-2">
             <div className="flex items-center gap-3 min-w-0">
-              <h4 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
                 Triggering Log Snippet
-              </h4>
+              </h3>
               {consoleUrl && (
                 <a
                   href={consoleUrl}

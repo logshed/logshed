@@ -1319,35 +1319,35 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
             {/* Summary */}
             <div className="bg-dark-950 p-3 rounded-lg border border-dark-700">
-              <h4 className="text-[11px] font-semibold text-accent-400 uppercase tracking-wider mb-1">
+              <h3 className="text-[11px] font-semibold text-accent-400 uppercase tracking-wider mb-1">
                 Summary
-              </h4>
+              </h3>
               <MarkdownRenderer content={analysisResult.summary} />
             </div>
 
             {/* Root Cause */}
             <div className="bg-dark-950 p-3 rounded-lg border border-dark-700">
-              <h4 className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider mb-1">
+              <h3 className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider mb-1">
                 Root Cause Analysis
-              </h4>
+              </h3>
               <MarkdownRenderer content={analysisResult.root_cause} />
             </div>
 
             {/* Actionable Remediation */}
             <div className="bg-dark-950 p-3 rounded-lg border border-dark-700">
-              <h4 className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider mb-1">
+              <h3 className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider mb-1">
                 Actionable Remediation
-              </h4>
+              </h3>
               <MarkdownRenderer content={analysisResult.remediation} />
             </div>
 
             {/* Follow-up Discussion */}
             {analysisResult.audit_id != null && (
               <div className="bg-dark-900/60 p-3 rounded-lg border border-dark-700">
-                <h4 className="text-[11px] font-semibold text-sky-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <h3 className="text-[11px] font-semibold text-sky-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5" />
                   Follow-up Discussion
-                </h4>
+                </h3>
                 <AiFollowUpThread
                   auditId={analysisResult.audit_id}
                   provider={provider}

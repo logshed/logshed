@@ -66,16 +66,21 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
     };
   }, [isOpen]);
 
-  // Handle escape key
+  // Esc closes the menu, and only the menu: captured and stopped before a dialog around the menu
+  // (the mobile filter drawer) sees it. While the menu's own delete or rename dialog is open,
+  // that dialog is on top and takes Esc instead.
+  const ownDialogOpen = viewToDelete !== null || viewToRename !== null;
   useEffect(() => {
+    if (!isOpen || ownDialogOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
         setIsOpen(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, ownDialogOpen]);
 
   // Define deletion confirmation modal
   const deleteConfirmModal = viewToDelete && (

@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [1.3.1] - Unreleased
 
 ### Changed
+- **Keyboard use**: In the Console, the arrow keys move through log rows, Enter opens one and Space ticks it. Dialogs keep focus inside, Esc closes only the dialog on top, and focus goes back where it was when a dialog closes.
 - **Faster first load**: The web interface's files are sent compressed (less than a third of their size) and browsers keep them until the next release, which helps most over a VPN or a phone connection.
 - **Notification links open the incident**: With `APP_URL` set, the link in an alert notification now opens that alert's incident record instead of the Incident History list.
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.

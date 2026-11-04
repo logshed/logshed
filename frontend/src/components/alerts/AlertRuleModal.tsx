@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useId, useState, useEffect, useMemo } from 'react';
 import { Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
 import { AlertRule, AlertRuleCreate, AlertRuleType, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
 import { createAlertRule, updateAlertRule } from '../../api/alerts.ts';
@@ -46,6 +46,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const initialName = activePrefill?.name || '';
   const initialFilterApps = activePrefill?.filterApps || EMPTY_APPS;
   const referenceMessage = activePrefill?.referenceMessage || '';
+  // Ties each visible label to its field (htmlFor and id)
+  const fieldId = useId();
   const [formName, setFormName] = useState<string>('');
   const [formRuleType, setFormRuleType] = useState<AlertRuleType>('threshold');
   const [formChannelId, setFormChannelId] = useState<number | null>(null);
@@ -266,7 +268,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         {/* Rule Name & Doc Link */}
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <label className="text-slate-300 font-medium">Rule Name</label>
+            <label htmlFor={`${fieldId}-rule-name`} className="text-slate-300 font-medium">Rule Name</label>
             <a
               href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#alert-rules"
               target="_blank"
@@ -279,6 +281,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             </a>
           </div>
           <input
+            id={`${fieldId}-rule-name`}
             type="text"
             value={formName}
             onChange={(e) => setFormName(e.target.value)}
@@ -291,8 +294,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         {/* Rule Type & Target Channel */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label className="text-slate-300 font-medium">Rule Type</label>
+            <label htmlFor={`${fieldId}-rule-type`} className="text-slate-300 font-medium">Rule Type</label>
             <select
+              id={`${fieldId}-rule-type`}
               value={formRuleType}
               onChange={(e) => setFormRuleType(e.target.value as AlertRuleType)}
               className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
@@ -304,8 +308,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label className="text-slate-300 font-medium">Target Channel</label>
+            <label htmlFor={`${fieldId}-target-channel`} className="text-slate-300 font-medium">Target Channel</label>
             <select
+              id={`${fieldId}-target-channel`}
               value={formChannelId ?? ''}
               onChange={(e) => setFormChannelId(e.target.value ? Number(e.target.value) : null)}
               className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
@@ -328,8 +333,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-slate-300 font-medium">Rate Threshold (logs / second)</label>
+                <label htmlFor={`${fieldId}-rate-threshold`} className="text-slate-300 font-medium">Rate Threshold (logs / second)</label>
                 <input
+                  id={`${fieldId}-rate-threshold`}
                   type="number"
                   min="1"
                   max="100000"
@@ -345,8 +351,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-300 font-medium">Measurement Window (seconds)</label>
+                <label htmlFor={`${fieldId}-rate-window`} className="text-slate-300 font-medium">Measurement Window (seconds)</label>
                 <input
+                  id={`${fieldId}-rate-window`}
                   type="number"
                   min="1"
                   max="86400"
@@ -375,8 +382,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-slate-300 font-medium">Threshold Count</label>
+                <label htmlFor={`${fieldId}-threshold-count`} className="text-slate-300 font-medium">Threshold Count</label>
                 <input
+                  id={`${fieldId}-threshold-count`}
                   type="number"
                   min="1"
                   max="10000"
@@ -392,8 +400,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-300 font-medium">Window Duration (seconds)</label>
+                <label htmlFor={`${fieldId}-window`} className="text-slate-300 font-medium">Window Duration (seconds)</label>
                 <input
+                  id={`${fieldId}-window`}
                   type="number"
                   min="1"
                   max="86400"
@@ -427,8 +436,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label className="text-slate-300 font-medium">Severity Filter (Optional)</label>
+            <label htmlFor={`${fieldId}-severity`} className="text-slate-300 font-medium">Severity Filter (Optional)</label>
             <select
+              id={`${fieldId}-severity`}
               value={formFilterSeverity}
               onChange={(e) => setFormFilterSeverity(e.target.value === '' ? '' : Number(e.target.value))}
               className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
@@ -448,8 +458,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Match Pattern */}
         <div className="space-y-1">
-          <label className="text-slate-300 font-medium">Match Pattern (Regex or Substring)</label>
+          <label htmlFor={`${fieldId}-pattern`} className="text-slate-300 font-medium">Match Pattern (Regex or Substring)</label>
           <input
+            id={`${fieldId}-pattern`}
             type="text"
             value={formMatchPattern}
             onChange={(e) => setFormMatchPattern(e.target.value)}
@@ -472,8 +483,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Cooldown */}
         <div className="space-y-1">
-          <label className="text-slate-300 font-medium">Cooldown Flap Dampening (seconds)</label>
+          <label htmlFor={`${fieldId}-cooldown`} className="text-slate-300 font-medium">Cooldown Flap Dampening (seconds)</label>
           <input
+            id={`${fieldId}-cooldown`}
             type="number"
             min="0"
             max="86400"

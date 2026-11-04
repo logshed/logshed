@@ -127,6 +127,57 @@ describe('ApiTokensTab Component', () => {
     expect(screen.queryByText('Token Generated')).not.toBeInTheDocument();
   });
 
+  it('keeps the one-time token dialog open on Esc, and names and traps focus in each token dialog', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue(mockTokens);
+    vi.spyOn(tokensApi, 'createApiToken').mockResolvedValue({
+      token: {
+        id: 3,
+        name: 'Cursor MCP',
+        token_prefix: 'ls_live_9999...0000',
+        scopes: ['logs:read'],
+        created_at: '2026-10-09T12:00:00Z',
+        expires_at: null,
+        last_used_at: null,
+      },
+      raw_token: 'ls_live_raw_secret',
+    });
+    render(<ApiTokensTab />);
+    await waitFor(() => {
+      expect(screen.getByText('Active Tokens (2)')).toBeInTheDocument();
+    });
+
+    // Generate: a named dialog that Esc closes, giving focus back to the button that opened it
+    const generateBtn = screen.getByRole('button', { name: /Generate Token/i });
+    generateBtn.focus();
+    fireEvent.click(generateBtn);
+    const generate = screen.getByRole('dialog', { name: 'Generate API Token' });
+    expect(generate.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(generateBtn).toHaveFocus();
+
+    fireEvent.click(generateBtn);
+    fireEvent.change(screen.getByPlaceholderText('e.g. Home Assistant or Claude Desktop'), { target: { value: 'Cursor MCP' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Token/i }));
+    const created = await screen.findByRole('dialog', { name: 'Token Generated' });
+
+    // The token cannot be shown again, so Esc does not close this one
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: 'Token Generated' })).toBe(created);
+    const done = screen.getByRole('button', { name: 'Done' });
+    done.focus();
+    fireEvent.keyDown(done, { key: 'Tab' });
+    expect(created.contains(document.activeElement)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Revoke: named, and Esc cancels
+    fireEvent.click(screen.getAllByTitle('Revoke Token')[0]);
+    expect(screen.getByRole('dialog', { name: 'Revoke Token' })).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('renders active tokens in mobile card layout when viewport matches mobile', async () => {
     vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue(mockTokens);
     vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({

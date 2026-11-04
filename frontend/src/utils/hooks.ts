@@ -45,27 +45,6 @@ export function useClipboard(timeoutMs: number = 2000): UseClipboardReturn {
 }
 
 /**
- * Hook to attach a keydown listener on `window` when `isOpen` is true,
- * invoking `onClose` when Escape is pressed and cleaning up properly.
- */
-export function useEscapeKey(isOpen: boolean, onClose: () => void): void {
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen, onClose]);
-}
-
-/**
  * Hook to evaluate a CSS media query and react to viewport resize / orientation changes.
  */
 export function useMediaQuery(query: string): boolean {
