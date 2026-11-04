@@ -16,8 +16,8 @@ async function renderSettled(ui: ReactElement) {
 }
 
 describe('LogSearchBar Component (Items #6, #22, #31)', () => {
-  it('names the severity and time selects by their visible labels', () => {
-    render(
+  it('names the severity and time selects by their visible labels', async () => {
+    await renderSettled(
       <LogSearchBar
         filters={{}}
         onFilterChange={vi.fn()}
@@ -32,9 +32,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(screen.getByLabelText('Time:').tagName).toBe('SELECT');
   });
 
-  it('hides the Reset button when no filters are active', () => {
+  it('hides the Reset button when no filters are active', async () => {
     const filters: LogFilterParams = {};
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -48,9 +48,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(screen.queryByTitle('Reset all active filters')).toBeNull();
   });
 
-  it('shows the prominent Reset button with active count when query is present', () => {
+  it('shows the prominent Reset button with active count when query is present', async () => {
     const filters: LogFilterParams = { query: 'timeout' };
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -67,14 +67,14 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(resetBtn).toHaveTextContent('1'); // Badge count = 1
   });
 
-  it('shows the prominent Reset button with aggregated count for multi-select hosts and apps', () => {
+  it('shows the prominent Reset button with aggregated count for multi-select hosts and apps', async () => {
     const filters: LogFilterParams = {
       query: 'error',
       severity_max: 3,
       sources: ['pve-node1', 'pve-node2'],
       apps: ['corosync', 'pvedaemon', 'kernel'],
     };
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -91,10 +91,10 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(resetBtn).toHaveTextContent('7');
   });
 
-  it('calls onReset and resets time preset when clicking Reset button', () => {
+  it('calls onReset and resets time preset when clicking Reset button', async () => {
     const handleReset = vi.fn();
     const filters: LogFilterParams = { query: 'panic' };
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -111,9 +111,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(handleReset).toHaveBeenCalledTimes(1);
   });
 
-  it('renders Host/IP and App/Container multi-select dropdowns on the filter row', () => {
+  it('renders Host/IP and App/Container multi-select dropdowns on the filter row', async () => {
     const filters: LogFilterParams = {};
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -132,10 +132,10 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(screen.getByText('Time:')).toBeInTheDocument();
   });
 
-  it('allows opening multi-select dropdown and selecting multiple options', () => {
+  it('allows opening multi-select dropdown and selecting multiple options', async () => {
     const handleFilterChange = vi.fn();
     const filters: LogFilterParams = {};
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={handleFilterChange}
@@ -165,9 +165,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     );
   });
 
-  it('does not display count indicator when no filters are active', () => {
+  it('does not display count indicator when no filters are active', async () => {
     const filters: LogFilterParams = {};
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -182,9 +182,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(screen.queryByText('1,000+ logs')).toBeNull();
   });
 
-  it('displays "1,000+ logs" next to Filter button when filter is active and totalCapped is true rather than literal 1,001', () => {
+  it('displays "1,000+ logs" next to Filter button when filter is active and totalCapped is true rather than literal 1,001', async () => {
     const filters: LogFilterParams = { query: 'timeout' };
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -200,9 +200,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
     expect(screen.queryByText('1,001 logs')).toBeNull();
   });
 
-  it('displays exact log count next to Filter button when filter is active and totalCapped is false', () => {
+  it('displays exact log count next to Filter button when filter is active and totalCapped is false', async () => {
     const filters: LogFilterParams = { query: 'error' };
-    render(
+    await renderSettled(
       <LogSearchBar
         filters={filters}
         onFilterChange={vi.fn()}
@@ -218,9 +218,9 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
 });
 
 describe('LogSearchBar search button and saved view errors', () => {
-  it('calls onSearch without arguments when the Search now button is clicked', () => {
+  it('calls onSearch without arguments when the Search now button is clicked', async () => {
     const onSearch = vi.fn();
-    render(
+    await renderSettled(
       <LogSearchBar filters={{ severity_max: 3 }} onFilterChange={vi.fn()} onSearch={onSearch} onReset={vi.fn()} />
     );
     fireEvent.click(screen.getByLabelText('Search now'));
