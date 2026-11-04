@@ -5,6 +5,7 @@ Tests for packaging, deployment, container privilege dropping, Unraid template, 
 import os
 import pathlib
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 import time
@@ -301,13 +302,54 @@ def docker_available():
     return True
 
 
+# Each run names its image and containers after its own id and labels the containers with it, so two
+# runs at once (two worktrees, or a run beside CI) do not collide, and cleanup removes only this run's.
+E2E_RUN_ID = f"{os.getpid()}-{secrets.token_hex(3)}"
+E2E_RUN_LABEL = f"logshed.e2e-run={E2E_RUN_ID}"
+
+
+def start_test_container(image: str, purpose: str, *docker_args: str) -> str:
+    """Start a detached container for this run and return its name."""
+    name = f"test-logshed-{purpose}-{E2E_RUN_ID}"
+    res = subprocess.run(
+        ["docker", "run", "-d", "--name", name, "--label", E2E_RUN_LABEL, *docker_args, image],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"Failed to start container: {res.stderr}"
+    return name
+
+
+def published_port(container_name: str, container_port: str) -> str:
+    """The host port Docker picked for a container port published as 127.0.0.1::<port>."""
+    res = subprocess.run(
+        ["docker", "port", container_name, f"{container_port}/tcp"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"No published port: {res.stderr}"
+    return res.stdout.splitlines()[0].rsplit(":", 1)[1]
+
+
+def remove_test_containers() -> None:
+    """Remove every container this run started, found by its label."""
+    ids = subprocess.run(
+        ["docker", "ps", "-aq", "--filter", f"label={E2E_RUN_LABEL}"],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    if ids:
+        subprocess.run(["docker", "rm", "-f", *ids], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 @pytest.fixture(scope="module")
 def built_image(docker_available):
-    image_name = "logshed:test-deployment"
+    image_name = f"logshed:test-deployment-{E2E_RUN_ID}"
     build_cmd = ["docker", "build", "-t", image_name, str(REPO_ROOT)]
     res = subprocess.run(build_cmd, capture_output=True, text=True, timeout=300)
     assert res.returncode == 0, f"Docker build failed: {res.stderr}\n{res.stdout}"
     yield image_name
+    remove_test_containers()
     subprocess.run(["docker", "rmi", "-f", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -315,19 +357,10 @@ def built_image(docker_available):
 class TestDockerLiveContainer:
 
     def test_container_default_port_and_healthcheck(self, built_image):
-        container_name = "test-logshed-default-port"
-        host_port = "18080"
-
-        run_cmd = [
-            "docker", "run", "-d",
-            "--name", container_name,
-            "-p", f"{host_port}:8080",
-            built_image,
-        ]
-        res = subprocess.run(run_cmd, capture_output=True, text=True)
-        assert res.returncode == 0, f"Failed to start container: {res.stderr}"
+        container_name = start_test_container(built_image, "default-port", "-p", "127.0.0.1::8080")
 
         try:
+            host_port = published_port(container_name, "8080")
             health_url = f"http://localhost:{host_port}/api/health"
             healthy = False
             for _ in range(30):
@@ -356,24 +389,16 @@ class TestDockerLiveContainer:
             assert "--workers 1" in python_uvicorn_lines[0]
 
         finally:
-            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            remove_test_containers()
 
     def test_container_custom_port_override(self, built_image):
-        container_name = "test-logshed-custom-port"
-        host_port = "19090"
         target_port = "9090"
-
-        run_cmd = [
-            "docker", "run", "-d",
-            "--name", container_name,
-            "-e", f"PORT={target_port}",
-            "-p", f"{host_port}:{target_port}",
-            built_image,
-        ]
-        res = subprocess.run(run_cmd, capture_output=True, text=True)
-        assert res.returncode == 0, f"Failed to start container: {res.stderr}"
+        container_name = start_test_container(
+            built_image, "custom-port", "-e", f"PORT={target_port}", "-p", f"127.0.0.1::{target_port}"
+        )
 
         try:
+            host_port = published_port(container_name, target_port)
             health_url = f"http://localhost:{host_port}/api/health"
             healthy = False
             for _ in range(30):
@@ -389,20 +414,10 @@ class TestDockerLiveContainer:
             assert healthy, f"Container failed to pass GET /api/health on overridden port {target_port} within 30 seconds."
 
         finally:
-            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            remove_test_containers()
 
     def test_container_privilege_drop_and_permissions(self, built_image):
-        container_name = "test-logshed-privilege-test"
-
-        run_cmd = [
-            "docker", "run", "-d",
-            "--name", container_name,
-            "-e", "PUID=1001",
-            "-e", "PGID=1001",
-            built_image,
-        ]
-        res = subprocess.run(run_cmd, capture_output=True, text=True)
-        assert res.returncode == 0, f"Failed to start container: {res.stderr}"
+        container_name = start_test_container(built_image, "privilege-test", "-e", "PUID=1001", "-e", "PGID=1001")
 
         try:
             time.sleep(3)
@@ -423,7 +438,7 @@ class TestDockerLiveContainer:
             assert stat_res.stdout.strip() == "1001:1001"
 
         finally:
-            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            remove_test_containers()
 
 
 # ===================================================================
