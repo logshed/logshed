@@ -380,6 +380,28 @@ def _event_since(event: dict) -> Optional[str]:
     return None
 
 
+def _started_at_since(started_at: Any) -> Optional[str]:
+    """
+    Build a /containers/{id}/logs 'since' value from a container's State.StartedAt, which Docker
+    reports in UTC with up to nanoseconds (2026-11-04T17:00:05.123456789Z). None when it cannot be
+    read, or for a container that never started (0001-01-01T00:00:00Z).
+    """
+    if not isinstance(started_at, str) or not started_at.endswith("Z"):
+        return None
+    base, _, fraction = started_at[:-1].partition(".")
+    try:
+        seconds = int(datetime.datetime.fromisoformat(base).replace(tzinfo=datetime.timezone.utc).timestamp())
+    except ValueError:
+        return None
+    if seconds <= 0:
+        return None
+    if not fraction:
+        return str(seconds)
+    if not fraction.isdigit():
+        return None
+    return f"{seconds}.{fraction[:9].ljust(9, '0')}"
+
+
 def _parse_docker_message_content(message: str, default_severity: int) -> tuple[str, int]:
     """
     Parse container message content to extract message payload and explicit severity
@@ -1034,6 +1056,9 @@ class DockerTailer:
         self._container_last_messages: dict[str, set[str]] = {}
         # container_id -> 'since' value from its latest start event (cleared on die)
         self._container_started_since: dict[str, str] = {}
+        # Containers being tailed when the connection dropped, until the next attach. A running
+        # container not among them started while the events stream was down, so its start event was lost.
+        self._tailed_before_drop: Optional[set[str]] = None
         self._socket_poll_interval = (
             socket_poll_interval
             if socket_poll_interval is not None
@@ -1306,6 +1331,7 @@ class DockerTailer:
                 continue
 
             target_desc = uds_path if uds_path else base_url
+            attached = False
             try:
                 async with _build_client(base_url, uds_path, ssl_context=self.ssl_context) as client:
                     self._current_client = client
@@ -1321,6 +1347,7 @@ class DockerTailer:
 
                         # Start tailing all currently running containers
                         await self._attach_running_containers(client)
+                        attached = True
                         self._is_connected = True
                         self._last_error = None
                         self._last_activity_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -1344,6 +1371,10 @@ class DockerTailer:
                 logger.warning(
                     f"Docker connection error at {target_desc} ({self.name}): {e}. Reconnecting in {backoff:.0f}s..."
                 )
+                # Only after a connection that attached: otherwise (Docker unreachable since start-up)
+                # every container would look new and be read from its start
+                if attached and self._tailed_before_drop is None:
+                    self._tailed_before_drop = set(self._tailers)
                 await self._cleanup_tailers()
                 # Wait before reconnecting, but end at once when stop() is called
                 try:
@@ -1405,8 +1436,14 @@ class DockerTailer:
         return containers
 
     async def _attach_running_containers(self, client: httpx.AsyncClient) -> None:
-        """Enumerate running containers and start a log tailer for each, skipping excluded containers."""
+        """
+        Enumerate running containers and start a log tailer for each, skipping excluded containers.
+
+        After a dropped connection, a container that was not being tailed and has no last seen line
+        started during the gap: it is read from its State.StartedAt. Others open at the end of the log.
+        """
         containers = await self._discover_containers(client)
+        tailed_before_drop = self._tailed_before_drop
         for c in containers:
             cid = c.get("Id", "")
             names = c.get("Names", [])
@@ -1419,7 +1456,23 @@ class DockerTailer:
                 logger.debug(f"Skipping tailing self/excluded container {display_name} ({cid[:12]})")
                 continue
             self._schedule_app_alias_update(raw_name, display_name, source_ip=self._effective_source_ip())
-            self._start_tailer(client, cid, display_name)
+            since = None
+            if tailed_before_drop is not None and cid not in tailed_before_drop and cid not in self._container_last_seen:
+                since = await self._container_start_since(client, cid)
+                if since:
+                    self._container_started_since[cid] = since
+            self._start_tailer(client, cid, display_name, since=since)
+        self._tailed_before_drop = None
+
+    async def _container_start_since(self, client: httpx.AsyncClient, container_id: str) -> Optional[str]:
+        """The 'since' value for a container's latest start, from its inspect result (None if unknown)."""
+        try:
+            resp = await client.get(f"/containers/{container_id}/json")
+            resp.raise_for_status()
+            return _started_at_since(resp.json().get("State", {}).get("StartedAt"))
+        except Exception as e:
+            logger.debug(f"Could not read the start time of container {container_id[:12]}: {e}")
+            return None
 
     def _start_tailer(
         self,

@@ -48,6 +48,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
   - Supervisor backoff: Initial backoff of `1.0s`, doubling on consecutive connection errors up to a maximum ceiling of `60.0s` (`DOCKER_SOCKET_POLL_MAX`), resetting to `1.0s` on successful connection.
   - Container tailer backoff: Initial backoff of `1.0s`, doubling up to `15.0s`, automatically reconnecting when containers restart.
   - Events stream end: when the daemon ends the `/events` stream, cleanly (for example while restarting) or with an error, the supervisor stops every container tailer (they hold the old client), backs off and reconnects, then tails the running containers again on the new connection.
+  - Containers started during such a gap: their start event was lost with the stream. On the reconnect, a running container that was not being tailed when the connection dropped and has no last seen line is read from its `State.StartedAt` (`since=`); every other container resumes from its last seen line or, without one, opens at the end of its log (`tail=0`). A first connection (including one after Docker was unreachable at start-up) opens every running container at the end of its log, so a restart does not import history again.
 
 ---
 

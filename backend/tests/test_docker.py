@@ -30,6 +30,7 @@ from app.collectors.docker_collector import (
     _parse_docker_log_line,
     _parse_docker_message_content,
     _should_ignore_container,
+    _started_at_since,
     _tail_container_logs,
     resolve_container_display_name,
 )
@@ -3070,6 +3071,66 @@ class TestEventsStreamGap:
 
         assert daemon.connections >= 2
         assert {cid[0] for n, cid, _ in daemon.log_requests if n == 2} == {"a", "b"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("clean_end", [False, True], ids=["stream error", "clean end of stream"])
+    async def test_container_started_during_the_gap_is_read_from_its_start(self, monkeypatch, clean_end):
+        daemon = _FakeDockerDaemon(clean_end)
+        await self._run_until_second_connection_tails(monkeypatch, daemon)
+
+        second = {cid[0]: params for n, cid, params in daemon.log_requests if n == 2}
+        # B started while the stream was down: read from its own start time, not from the end of its log
+        assert second["b"].get("since") == "1793811605.123456789"
+        assert "tail" not in second["b"]
+        # A was tailed before the drop and wrote nothing, so it opens at the end of its log as before
+        assert second["a"].get("tail") == "0"
+        assert "since" not in second["a"]
+
+    @pytest.mark.asyncio
+    async def test_unreachable_docker_at_start_up_does_not_read_running_containers_from_their_start(self, monkeypatch):
+        """A failed first connection had no tailers; every container then looked new before the fix's guard."""
+        daemon = _FakeDockerDaemon(clean_end=False)
+        connects = 0
+
+        def client(*args, **kwargs):
+            nonlocal connects
+            connects += 1
+            if connects == 1:
+                raise httpx.ConnectError("Docker is not up yet")
+            return daemon.client()
+
+        monkeypatch.setattr("app.collectors.docker_collector._INITIAL_BACKOFF", 0.01)
+        monkeypatch.setattr("app.collectors.docker_collector._build_client", client)
+        monkeypatch.setenv("DOCKER_HEARTBEAT_INTERVAL", "0")
+        tailer = DockerTailer(
+            KeyedMultilineAssembler(), enable_docker=True, url="tcp://docker:2375", discovery_interval=0
+        )
+        tailer._schedule_app_alias_update = lambda *args, **kwargs: None
+        task = asyncio.create_task(tailer.run())
+        try:
+            await asyncio.wait_for(daemon.a_tailed.wait(), timeout=5)
+        finally:
+            daemon.released.set()
+            await tailer.stop()
+            await asyncio.wait_for(task, timeout=5)
+
+        assert daemon.log_requests[0][2].get("tail") == "0"
+        assert "since" not in daemon.log_requests[0][2]
+
+    @pytest.mark.parametrize(
+        "started_at, expected",
+        [
+            ("2026-11-04T17:00:05.123456789Z", "1793811605.123456789"),
+            ("2026-11-04T17:00:05.5Z", "1793811605.500000000"),
+            ("2026-11-04T17:00:05Z", "1793811605"),
+            ("0001-01-01T00:00:00Z", None),
+            ("2026-11-04T17:00:05+01:00", None),
+            ("not a time", None),
+            (None, None),
+        ],
+    )
+    def test_started_at_since(self, started_at, expected):
+        assert _started_at_since(started_at) == expected
 
     @pytest.mark.asyncio
     async def test_first_connection_opens_every_running_container_at_the_end_of_its_log(self, monkeypatch):
