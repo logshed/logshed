@@ -516,7 +516,7 @@ async def execute_vacuum(
     1. Checks host disk space against database footprint plus safe margin (100 MB).
     2. Pauses QueueConsumer writes while incoming logs continue buffering in _log_queue.
     3. Waits for in-flight writes and FTS indexing to finish, then resets open connections.
-    4. Executes PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM on a worker thread.
+    4. Executes PRAGMA wal_checkpoint(TRUNCATE), VACUUM, then another checkpoint so logs.db shrinks at once.
     5. Resumes QueueConsumer to drain all buffered logs to the compacted database.
     6. Records a fresh storage metrics snapshot and returns size and space reclaimed.
     """
@@ -551,6 +551,10 @@ async def execute_vacuum(
             try:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
                 conn.execute("VACUUM;")
+                # In WAL mode VACUUM writes the repacked pages to the WAL, and logs.db shrinks
+                # only when they are checkpointed. Closing does that only for the last open
+                # connection, and a small result never triggers the automatic checkpoint.
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
             finally:
                 conn.close()
 

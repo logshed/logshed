@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import os
 import shutil
+import sqlite3
 import stat
 from pathlib import Path
 import pytest
@@ -1553,6 +1554,46 @@ class TestDatabaseVacuum:
         metrics = data["metrics"]
         assert metrics["db_size_bytes"] == data["new_size_bytes"]
         assert metrics["total_logs_count"] == 100
+
+    @pytest.mark.asyncio
+    async def test_vacuum_shrinks_file_while_another_connection_is_open(self, tmp_path: Path):
+        """
+        One vacuum shrinks logs.db after every log is deleted, even while another connection
+        stays open. In WAL mode the vacuumed pages sit in the WAL until a checkpoint, and an
+        almost empty result is too small to trigger one automatically.
+        """
+        db_file = tmp_path / "logs.db"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _seed_logs(db_file, [
+            {
+                "timestamp": now,
+                "received_at": now,
+                "source_ip": "192.168.1.100",
+                "source_alias": "test-host",
+                "app_name": "app",
+                "facility": 1,
+                "severity": 6,
+                "message": f"Log entry {i} padding " + ("x" * 500),
+                "raw": f"raw {i}",
+            }
+            for i in range(5000)
+        ])
+        with get_connection(db_file) as conn:
+            conn.execute("DELETE FROM logs")
+            conn.commit()
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        full_size = db_file.stat().st_size
+
+        other = sqlite3.connect(str(db_file))
+        try:
+            other.execute("SELECT COUNT(*) FROM logs").fetchone()
+            result = await execute_vacuum(db_file, queue_consumer=None, fts_worker=None)
+        finally:
+            other.close()
+
+        assert db_file.stat().st_size < full_size / 10
+        assert result["new_size_bytes"] < full_size / 10
+        assert result["reclaimed_bytes"] > full_size * 0.9
 
     @pytest.mark.asyncio
     async def test_vacuum_pauses_and_resumes_queue_consumer(self, tmp_path: Path):
