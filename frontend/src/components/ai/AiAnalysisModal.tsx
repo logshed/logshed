@@ -242,7 +242,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
     if (validLogIds.length > 200) {
       setPreviewError(
-        `Cannot analyze more than 200 logs at once (${validLogIds.length} logs selected). Please reduce your selection to 200 logs or fewer.`
+        `Cannot send more than 200 logs for analysis at once (${validLogIds.length} logs selected). Please reduce your selection to 200 logs or fewer.`
       );
       return;
     }
@@ -483,7 +483,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
     if (validLogIds.length > 200) {
       setAnalysisError(
-        `Cannot analyze more than 200 logs at once (${validLogIds.length} logs selected). Please reduce your selection to 200 logs or fewer.`
+        `Cannot send more than 200 logs for analysis at once (${validLogIds.length} logs selected). Please reduce your selection to 200 logs or fewer.`
       );
       return;
     }
@@ -1145,7 +1145,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <div className="flex items-center gap-2">
                     <RefreshCw className="w-4 h-4 text-accent-400 animate-spin" />
                     <span className="font-semibold text-slate-200 text-xs">
-                      {streamProgress.message || `Analyzing logs with ${streamProgress.currentModel || model}...`}
+                      {streamProgress.message || `Running analysis with ${streamProgress.currentModel || model}...`}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">

@@ -482,13 +482,13 @@ describe('DropRulesCard Component', () => {
     });
 
     // Modal is initially closed
-    expect(screen.queryByText('Drop Presets Catalog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Drop Presets Library')).not.toBeInTheDocument();
 
     // Click Presets button to open modal
     fireEvent.click(screen.getByRole('button', { name: /Presets/i }));
 
     // Modal items visible
-    expect(screen.getByText('Drop Presets Catalog')).toBeInTheDocument();
+    expect(screen.getByText('Drop Presets Library')).toBeInTheDocument();
     expect(screen.getByText('Common Noise Filter Presets')).toBeInTheDocument();
     expect(screen.getByText('Docker Healthcheck Noise')).toBeInTheDocument();
     expect(screen.getByText('Custom Noise Filter')).toBeInTheDocument();

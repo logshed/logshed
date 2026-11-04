@@ -271,7 +271,7 @@ def _demux_stream(buffer: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
         if stream_type not in (1, 2) or buffer[1:4] != b"\x00\x00\x00":
             logger.warning(
                 "Docker stream demux encountered unexpected header (stream_type=%s); "
-                "advancing to resynchronize",
+                "advancing to find the next frame header",
                 stream_type,
             )
             buffer = buffer[1:]
@@ -282,7 +282,7 @@ def _demux_stream(buffer: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
         if payload_size > 16 * 1024 * 1024:  # 16 MB max
             logger.warning(
                 "Docker stream demux encountered invalid payload size %d; "
-                "advancing to resynchronize",
+                "advancing to find the next frame header",
                 payload_size,
             )
             buffer = buffer[1:]

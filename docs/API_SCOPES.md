@@ -88,7 +88,7 @@ The token list shows such tokens as "Custom".
 | Silence alerts during a nightly backup | Maintenance Only |
 | Let an AI assistant investigate problems | AI Assistant / MCP (Read Only) |
 | Let an AI assistant run a service upgrade with a maintenance window | AI Assistant / MCP + Maintenance |
-| A script that pushes its own logs and checks for errors afterwards | `logs:read`, `logs:write` (Custom) |
+| A script that pushes its own logs and then checks for errors | `logs:read`, `logs:write` (Custom) |
 | Scheduled database housekeeping | `system:write` (Custom) |
 
 Give each app or assistant its own token with the fewest scopes it needs. If a token leaks, you can revoke it without affecting anything else.
@@ -114,7 +114,7 @@ The integration reads the token's scopes when it loads. After you change them wi
 - **Removing `maintenance:write` or `system:write`:** the switch or buttons stay until the reload, and using them in the meantime fails with an insufficient scope error.
 - **Removing `system:read`:** Home Assistant can no longer read the sensors and asks you to re-authenticate. Add the scope back (or enter a token that has it).
 
-Maintenance windows started from Home Assistant show `API - <token name>` as their trigger. Renaming the token changes the label of windows started afterwards only.
+Maintenance windows started from Home Assistant show `API - <token name>` as their trigger. Renaming the token changes the label only of windows started after the rename.
 
 ---
 

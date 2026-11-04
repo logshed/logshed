@@ -256,7 +256,7 @@ async def build_diagnosis_context(
     if len(log_ids) > 200:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot analyze more than 200 logs at once.",
+            detail="Cannot send more than 200 logs for analysis at once.",
         )
 
     def _fetch_all(conn: sqlite3.Connection):

@@ -356,7 +356,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
 
 ### 2.4 Asynchronous FTS5 Indexing Model & Worker Architecture
 - **Supervised Background Task:** `FTSIndexWorker` ([`backend/app/services/fts_indexer.py`](../../backend/app/services/fts_indexer.py)) runs as a supervised task under `_supervise_worker` in [`backend/app/main.py`](../../backend/app/main.py). Worker failures are isolated, logged, and restarted with exponential backoff.
-- **Decoupled Ingestion Pipeline:** Ingestion tasks (`QueueConsumer`) commit raw log rows directly to the `logs` table without waiting for FTS tokenization.
+- **Decoupled Ingestion Pipeline:** Ingestion tasks (`QueueConsumer`) commit raw log rows directly to the `logs` table without waiting for FTS indexing.
 - **Catch-Up Latency Target:** Catch-up latency target is <= 1000ms (empirically measured < 250ms).
 - **Single-Statement Bulk Inserts with RETURNING rowid:**
   ```sql

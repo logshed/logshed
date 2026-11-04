@@ -333,7 +333,7 @@ async def verify_api_token(
 
         row = await run_db_query(_lookup)
         if not row:
-            raise _bearer_error("Invalid or unrecognized API token.")
+            raise _bearer_error("Invalid or unknown API token.")
 
         try:
             scopes_list = json.loads(row["scopes"]) if isinstance(row["scopes"], str) else row["scopes"]

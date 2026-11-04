@@ -262,7 +262,7 @@ async def _authenticate_ingest_token(request: Request, response: Response) -> di
     if is_ingest_token_revoked(token.get("id")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or unrecognized API token.",
+            detail="Invalid or unknown API token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token

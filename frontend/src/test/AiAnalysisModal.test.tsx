@@ -348,7 +348,7 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
       />
     );
 
-    expect(await screen.findByText(/Cannot analyze more than 200 logs at once/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Cannot send more than 200 logs for analysis at once/i)).toBeInTheDocument();
     expect(screen.getAllByText(/250 logs selected/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/\(Max 200 logs allowed\)/i)).toBeInTheDocument();
     expect(aiApi.previewAiPrompt).not.toHaveBeenCalled();

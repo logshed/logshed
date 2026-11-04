@@ -31,7 +31,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Alert Presets Catalog"
+      title="Alert Presets Library"
       maxWidth="max-w-4xl"
     >
       <div className="space-y-4">

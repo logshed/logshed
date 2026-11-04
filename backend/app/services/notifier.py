@@ -701,7 +701,7 @@ def _sync_test_channel(
         ap_obj = _new_dispatch_apprise()
         added = ap_obj.add(url.strip())
         if not added:
-            return False, "Failed to initialize notification target. Please check URL syntax."
+            return False, "Failed to set up notification target. Please check URL syntax."
         _configure_apprise_servers(ap_obj)
 
         with _pinned_destination_guard():

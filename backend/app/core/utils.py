@@ -555,7 +555,7 @@ def resolve_severity(val: Any) -> Optional[int]:
     if s in SEVERITY_NAME_MAP:
         return SEVERITY_NAME_MAP[s]
     raise ValueError(
-        f"Unrecognized severity name '{val}'. Valid options: emergency, alert, critical, error, warning, notice, info, debug"
+        f"Unknown severity name '{val}'. Valid options: emergency, alert, critical, error, warning, notice, info, debug"
     )
 
 

@@ -44,7 +44,7 @@ LogShed provides three distinct rule evaluation types:
 
 - **Pattern (Immediate Match)**:
   - Triggers immediately upon a single occurrence of a matching log line (threshold of 1).
-  - Designed for high-severity, critical alarms where even a single event demands immediate attention (for example, kernel panics, system halts, or unauthorized root logins).
+  - Designed for high-severity, critical alarms where even a single event demands immediate attention (for example, kernel panics, system halts, or unexpected root logins).
 
 - **Rate Spike (Velocity Detection)**:
   - Detects sudden surges in log velocity measured in logs per second over rolling time windows.
@@ -176,7 +176,7 @@ LogShed includes a built-in canary alert preset based on `alert_log_storm.json`:
 - **Match Pattern**: `COMMAND=/bin/su|NOT in sudoers`
 - **Cooldown**: `30` seconds
 - **AI Enrichment**: Disabled
-- **Use Case**: Security audit alarm for unexpected root escalation attempts or unauthorized sudo invocations.
+- **Use Case**: Security audit alarm for unexpected root escalation attempts or sudo use that was not approved.
 
 ---
 

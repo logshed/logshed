@@ -279,7 +279,7 @@ class FTSIndexWorker:
                 except asyncio.CancelledError:
                     pass
             if not work.cancelled() and work.exception() is not None:
-                logger.warning(f"FTSIndexWorker pass failed while being cancelled: {work.exception()}")
+                logger.warning(f"FTSIndexWorker pass failed while being stopped: {work.exception()}")
             raise
 
     def _index_pending_chunk(self, batch_size: int) -> int:

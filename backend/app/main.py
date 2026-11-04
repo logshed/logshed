@@ -411,7 +411,7 @@ async def lifespan(app: FastAPI):
         _docker_pool = DockerCollectorPool(assembler=_assembler, db_path=db_path, alias_cache=shared_cache)
         await _docker_pool.start()
         _docker_tailer = _docker_pool.get_tailer(1)
-        logger.info("DockerCollectorPool initialized and workers started.")
+        logger.info("DockerCollectorPool set up and workers started.")
     except Exception as e:
         logger.warning(f"DockerCollectorPool could not be started: {e}")
 

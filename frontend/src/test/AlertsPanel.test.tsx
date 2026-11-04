@@ -188,7 +188,7 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(presetsBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('Alert Presets Catalog')).toBeInTheDocument();
+      expect(screen.getByText('Alert Presets Library')).toBeInTheDocument();
       expect(screen.getByText('Kernel Out-Of-Memory (OOM) Kill')).toBeInTheDocument();
       expect(screen.getByText('Pre-tuned Monitoring Rules')).toBeInTheDocument();
     });
@@ -198,7 +198,7 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(closeDialogBtn);
 
     await waitFor(() => {
-      expect(screen.queryByText('Alert Presets Catalog')).not.toBeInTheDocument();
+      expect(screen.queryByText('Alert Presets Library')).not.toBeInTheDocument();
     });
 
     // Switch to History tab
@@ -575,7 +575,7 @@ describe('AlertsPanel Component', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Presets/i }));
 
     await waitFor(() => {
-      expect(screen.getByText('Alert Presets Catalog')).toBeInTheDocument();
+      expect(screen.getByText('Alert Presets Library')).toBeInTheDocument();
     });
 
     // Select target channel
