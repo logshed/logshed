@@ -390,6 +390,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
           conn.rollback()
   ```
   This rollback guard prevents shared read locks on the WAL index (`-shm`) from blocking write checkpoints, allowing `PRAGMA wal_checkpoint(TRUNCATE)` to complete without contention.
+- **Retiring Connections (`reset_all_db_connections`):** Connections are opened with `check_same_thread=True`, so only their own thread can close them. Each cached entry records the connection generation it was opened in; `reset_all_db_connections()` (called before Compact Database runs `VACUUM`) increments the generation and closes the calling thread's connections at once. Every other thread closes its stale connection and opens a fresh one the next time it calls `get_thread_read_connection`, so no query after a compact runs on a connection from before it. An idle thread keeps its old connection open until its next use.
 - **Connection Teardown Hook:** `close_thread_local_connections()` closes all cached connections on the calling thread and clears the dictionary, ensuring clean test fixture teardown and process exit.
 
 ### 2.6 Retention Pruning

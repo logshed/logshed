@@ -46,8 +46,10 @@ def invalidate_admin_auth_cache() -> None:
 
 
 _thread_local = threading.local()
-_all_connections: set[sqlite3.Connection] = set()
-_all_connections_lock = threading.Lock()
+# Bumped by reset_all_db_connections. A connection belongs to the thread that opened it
+# (check_same_thread), so other threads cannot close it; each thread instead closes and reopens
+# its cached connection on next use when it was opened before the latest reset.
+_connection_generation = 0
 
 
 def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
@@ -59,12 +61,22 @@ def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
         _thread_local.connections = {}
 
     resolved_key = str(Path(db_path).resolve())
-    conn = _thread_local.connections.get(resolved_key)
-    if conn is not None:
-        try:
-            _ = conn.total_changes
-        except sqlite3.ProgrammingError:
+    generation = _connection_generation
+    cached = _thread_local.connections.get(resolved_key)
+    conn = None
+    if cached is not None:
+        conn, conn_generation = cached
+        if conn_generation != generation:
+            try:
+                conn.close()
+            except Exception:
+                pass
             conn = None
+        else:
+            try:
+                _ = conn.total_changes
+            except sqlite3.ProgrammingError:
+                conn = None
 
     if conn is None:
         conn = sqlite3.connect(resolved_key, check_same_thread=True)
@@ -73,9 +85,7 @@ def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA busy_timeout=5000;")
         conn.execute("PRAGMA foreign_keys=ON;")
-        _thread_local.connections[resolved_key] = conn
-        with _all_connections_lock:
-            _all_connections.add(conn)
+        _thread_local.connections[resolved_key] = (conn, generation)
 
     return conn
 
@@ -86,7 +96,7 @@ def close_thread_local_connections() -> None:
     Useful for test fixtures, thread teardown, and process shutdown.
     """
     if hasattr(_thread_local, "connections"):
-        for conn in list(_thread_local.connections.values()):
+        for conn, _ in list(_thread_local.connections.values()):
             try:
                 conn.close()
             except Exception:
@@ -96,16 +106,11 @@ def close_thread_local_connections() -> None:
 
 def reset_all_db_connections() -> None:
     """
-    Close all open SQLite connections across all threads.
-    Thread-local caches will detect the closed connection and automatically reopen on next use.
+    Retire every cached SQLite connection: the calling thread's are closed now, and every other
+    thread closes its own and opens a fresh one the next time it asks for a connection.
     """
-    with _all_connections_lock:
-        for conn in list(_all_connections):
-            try:
-                conn.close()
-            except Exception:
-                pass
-        _all_connections.clear()
+    global _connection_generation
+    _connection_generation += 1
     close_thread_local_connections()
 
 
