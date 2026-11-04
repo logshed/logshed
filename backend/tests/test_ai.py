@@ -363,15 +363,16 @@ Multiple transaction queries deadlock on shared index.
         mock_create = AsyncMock(return_value=mock_response)
         with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
             mock_inst = MagicMock()
-            mock_inst.messages.create = mock_create
+            mock_inst.beta.messages.create = mock_create
             mock_cls.return_value = mock_inst
 
-            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.call_anthropic(
+            text, tokens_in, tokens_out, tokens_thoughts, tokens, served = await ai_engine.call_anthropic(
                 api_key="ant-key",
                 model="claude-3-5-haiku-20241022",
                 prompt="test prompt",
             )
             assert "Claude summary" in text
+            assert served == "claude-3-5-haiku-20241022"
             assert tokens_in == 150
             assert tokens_out == 50
             assert tokens == 200
@@ -392,10 +393,10 @@ Multiple transaction queries deadlock on shared index.
         mock_create = AsyncMock(return_value=mock_response)
         with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
             mock_inst = MagicMock()
-            mock_inst.messages.create = mock_create
+            mock_inst.beta.messages.create = mock_create
             mock_cls.return_value = mock_inst
 
-            text, tokens_in, tokens_out, tokens_thoughts, tokens = await ai_engine.call_anthropic(
+            text, tokens_in, tokens_out, tokens_thoughts, tokens, _served = await ai_engine.call_anthropic(
                 api_key="ant-key",
                 model="claude-sonnet-4-6",
                 prompt="test prompt",
@@ -2850,7 +2851,7 @@ class TestAiFollowUpEngine:
         deltas: list[str] = []
         with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
             client = MagicMock()
-            client.messages.stream = MagicMock(return_value=FakeStreamManager())
+            client.beta.messages.stream = MagicMock(return_value=FakeStreamManager())
             mock_cls.return_value = client
 
             res = await ai_engine.dispatch_multi_turn_anthropic(
@@ -2861,9 +2862,9 @@ class TestAiFollowUpEngine:
                 on_delta=deltas.append,
             )
 
-        assert res == ("Check the firewall.", 210, 6, 0, 216)
+        assert res == ("Check the firewall.", 210, 6, 0, 216, "claude-3-5-haiku")
         assert deltas == ["Check ", "the firewall."]
-        kwargs = client.messages.stream.call_args.kwargs
+        kwargs = client.beta.messages.stream.call_args.kwargs
         assert kwargs["system"] == "SYS"
         assert [m["role"] for m in kwargs["messages"]] == ["user", "assistant", "user"]
 
@@ -3303,7 +3304,7 @@ class TestAiClientLifecycle:
         response = MagicMock(content=[MagicMock(type="text", text=_STRUCTURED_REPLY)], usage=None)
         with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
             inst = _sdk_client_mock(mock_cls)
-            inst.messages.create = AsyncMock(
+            inst.beta.messages.create = AsyncMock(
                 side_effect=RuntimeError("boom") if fail else None, return_value=response
             )
             if fail:
@@ -3337,7 +3338,7 @@ class TestAiClientLifecycle:
 
         with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
             anthropic_inst = _sdk_client_mock(mock_cls)
-            anthropic_inst.messages.stream = MagicMock(side_effect=RuntimeError("boom"))
+            anthropic_inst.beta.messages.stream = MagicMock(side_effect=RuntimeError("boom"))
             with pytest.raises(RuntimeError):
                 await ai_engine.dispatch_multi_turn_anthropic(
                     api_key="k", model="claude-3-5-haiku-20241022", messages=messages, system_prompt="s"
@@ -3410,10 +3411,10 @@ def _provider_call(provider: str, path: str, error: BaseException):
         inst = _sdk_client_mock(patcher.start())
         model = "claude-3-5-haiku-20241022"
         if path == "single":
-            inst.messages.create = AsyncMock(side_effect=error)
+            inst.beta.messages.create = AsyncMock(side_effect=error)
             call = ai_engine.call_anthropic(api_key="k", model=model, prompt="p")
         else:
-            inst.messages.stream = MagicMock(side_effect=error)
+            inst.beta.messages.stream = MagicMock(side_effect=error)
             call = ai_engine.dispatch_multi_turn_anthropic(api_key="k", model=model, messages=messages, system_prompt="s")
     return patcher, call
 
@@ -4319,9 +4320,9 @@ class TestAnthropicRequestsPerModelFamily:
         response = MagicMock(content=[], stop_reason="refusal", usage=MagicMock(input_tokens=10, output_tokens=0))
         with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
             client = MagicMock()
-            client.messages.create = AsyncMock(return_value=response)
+            client.beta.messages.create = AsyncMock(return_value=response)
             mock_cls.return_value = client
-            with pytest.raises(RuntimeError, match="declined"):
+            with pytest.raises(ai_engine.AiRefusalError, match="declined"):
                 await ai_engine.call_anthropic(api_key="key", model="claude-sonnet-5-5", prompt="logs")
 
     def test_default_claude_model_is_sonnet_five_five(self):
@@ -4330,3 +4331,183 @@ class TestAnthropicRequestsPerModelFamily:
 
         assert DEFAULT_AI_MODELS["anthropic"] == "claude-sonnet-5-5"
         assert resolve_ai_provider_settings({"ai_provider": "anthropic"})["model"] == "claude-sonnet-5-5"
+
+
+class TestClaudeRefusalFallback:
+    """A Claude refusal is retried by Anthropic's server-side fallback, then by LogShed's own fallback chain."""
+
+    @staticmethod
+    def _usage(*iterations, input_tokens=100, output_tokens=40):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            thinking_tokens=0,
+            iterations=[SimpleNamespace(**it) for it in iterations] or None,
+        )
+
+    @staticmethod
+    def _text(text):
+        from types import SimpleNamespace
+        return SimpleNamespace(type="text", text=text)
+
+    @pytest.mark.parametrize("model", ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5", "claude-3-5-haiku-20241022"])
+    def test_every_request_asks_for_the_server_side_fallback(self, model):
+        kwargs = ai_engine._anthropic_request_kwargs(model, "SYS", [{"role": "user", "content": "logs"}], "low")
+        assert kwargs["betas"] == ["server-side-fallback-2026-07-01"]
+        assert kwargs["fallbacks"] == "default"
+
+    @pytest.mark.asyncio
+    async def test_an_answer_from_the_fallback_model_names_it_and_counts_every_attempt(self):
+        from types import SimpleNamespace
+        response = SimpleNamespace(
+            content=[SimpleNamespace(type="fallback"), self._text(_STRUCTURED_REPLY)],
+            stop_reason="end_turn",
+            model="claude-sonnet-5",
+            usage=self._usage(
+                {"type": "message", "input_tokens": 120, "output_tokens": 0},
+                {"type": "fallback_message", "model": "claude-sonnet-5", "input_tokens": 120, "output_tokens": 45},
+                input_tokens=120, output_tokens=45,
+            ),
+        )
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            client = _sdk_client_mock(mock_cls)
+            client.beta.messages.create = AsyncMock(return_value=response)
+            text, tokens_in, tokens_out, _thoughts, tokens_used, served = await ai_engine.call_anthropic(
+                api_key="key", model="claude-sonnet-5-5", prompt="logs"
+            )
+        assert text == _STRUCTURED_REPLY
+        assert served == "claude-sonnet-5"
+        assert (tokens_in, tokens_out, tokens_used) == (240, 45, 285)
+
+    @pytest.mark.asyncio
+    async def test_a_reply_without_fallback_keeps_the_top_level_counts(self):
+        from types import SimpleNamespace
+        response = SimpleNamespace(
+            content=[self._text(_STRUCTURED_REPLY)],
+            stop_reason="end_turn",
+            usage=self._usage({"type": "message", "input_tokens": 999, "output_tokens": 999}),
+        )
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            client = _sdk_client_mock(mock_cls)
+            client.beta.messages.create = AsyncMock(return_value=response)
+            _text, tokens_in, tokens_out, _thoughts, _used, served = await ai_engine.call_anthropic(
+                api_key="key", model="claude-sonnet-5-5", prompt="logs"
+            )
+        assert (tokens_in, tokens_out, served) == (100, 40, "claude-sonnet-5-5")
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_after_partial_text_still_fails(self):
+        from types import SimpleNamespace
+        response = SimpleNamespace(content=[self._text("## Summary\nThe attacker")], stop_reason="refusal", usage=self._usage())
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            client = _sdk_client_mock(mock_cls)
+            client.beta.messages.create = AsyncMock(return_value=response)
+            with pytest.raises(ai_engine.AiRefusalError):
+                await ai_engine.call_anthropic(api_key="key", model="claude-sonnet-5-5", prompt="logs")
+
+    @pytest.mark.asyncio
+    async def test_a_streamed_refusal_fails_and_a_streamed_fallback_answer_names_its_model(self):
+        from types import SimpleNamespace
+
+        def manager(chunks, final):
+            class FakeStream:
+                text_stream = _aiter(chunks)
+
+                async def get_final_message(self):
+                    return final
+
+            class FakeStreamManager:
+                async def __aenter__(self):
+                    return FakeStream()
+
+                async def __aexit__(self, *exc):
+                    return False
+
+            return FakeStreamManager()
+
+        messages = [{"role": "user", "content": "q"}]
+        refused = SimpleNamespace(stop_reason="refusal", usage=self._usage())
+        served = SimpleNamespace(
+            stop_reason="end_turn",
+            usage=self._usage(
+                {"type": "message", "input_tokens": 50, "output_tokens": 3},
+                {"type": "fallback_message", "model": "claude-sonnet-5", "input_tokens": 50, "output_tokens": 7},
+            ),
+        )
+        with patch("app.services.ai_engine.AsyncAnthropic") as mock_cls:
+            client = _sdk_client_mock(mock_cls)
+            client.beta.messages.stream = MagicMock(side_effect=[
+                manager(["Partial "], refused),
+                manager(["Partial ", "and the rest."], served),
+            ])
+            with pytest.raises(ai_engine.AiRefusalError):
+                await ai_engine.dispatch_multi_turn_anthropic(
+                    api_key="k", model="claude-sonnet-5-5", messages=messages, system_prompt="s"
+                )
+            res = await ai_engine.dispatch_multi_turn_anthropic(
+                api_key="k", model="claude-sonnet-5-5", messages=messages, system_prompt="s"
+            )
+        assert res == ("Partial and the rest.", 100, 10, 0, 110, "claude-sonnet-5")
+        kwargs = client.beta.messages.stream.call_args.kwargs
+        assert kwargs["fallbacks"] == "default"
+        assert kwargs["betas"] == ["server-side-fallback-2026-07-01"]
+
+    def test_a_refusal_is_retryable(self):
+        assert ai_engine.is_retryable_for_fallback(ai_engine.AiRefusalError("Anthropic model declined the request"))
+
+    @pytest.mark.asyncio
+    async def test_analysis_tries_the_next_configured_model_after_a_refusal(self):
+        calls = []
+
+        async def fake_dispatch(api_key, model, prompt, **kwargs):
+            calls.append(model)
+            if model == "claude-sonnet-5-5":
+                raise ai_engine.AiRefusalError("Anthropic model declined the request (stop_reason: refusal).")
+            return _STRUCTURED_REPLY, 10, 5, 0, 15, model
+
+        with patch("app.services.ai_engine.call_anthropic", side_effect=fake_dispatch):
+            res = await ai_engine.execute_ai_analysis(
+                provider="anthropic", model="claude-sonnet-5-5", api_key="key", base_url=None,
+                source_alias="fw", app_name="sshd", redacted_logs="logs", log_count=1,
+                fallback_models=["claude-opus-5-5"],
+            )
+        assert calls == ["claude-sonnet-5-5", "claude-opus-5-5"]
+        assert res.model_used == "claude-opus-5-5"
+        assert res.fallback_attempts == ["claude-sonnet-5-5 failed: Anthropic model declined the request (stop_reason: refusal)."]
+
+    @pytest.mark.asyncio
+    async def test_analysis_records_the_model_anthropic_fell_back_to(self):
+        async def fake_dispatch(api_key, model, prompt, **kwargs):
+            return _STRUCTURED_REPLY, 10, 5, 0, 15, "claude-sonnet-5"
+
+        with patch("app.services.ai_engine.call_anthropic", side_effect=fake_dispatch):
+            res = await ai_engine.execute_ai_analysis(
+                provider="anthropic", model="claude-sonnet-5-5", api_key="key", base_url=None,
+                source_alias="fw", app_name="sshd", redacted_logs="logs", log_count=1,
+            )
+        assert res.model_used == "claude-sonnet-5"
+        assert res.fallback_attempts == ["claude-sonnet-5-5 declined the request; Anthropic answered with claude-sonnet-5"]
+
+    @pytest.mark.asyncio
+    async def test_follow_up_tries_the_next_configured_model_after_a_refusal(self):
+        calls = []
+
+        async def fake_dispatch(api_key, model, messages, system_prompt, **kwargs):
+            calls.append(model)
+            if model == "claude-sonnet-5-5":
+                raise ai_engine.AiRefusalError("Anthropic model declined the request (stop_reason: refusal).")
+            return "Reply", 10, 5, 0, 15, "claude-sonnet-5"
+
+        with patch("app.services.ai_engine.dispatch_multi_turn_anthropic", side_effect=fake_dispatch):
+            res = await ai_engine.execute_ai_follow_up(
+                provider="anthropic", model="claude-sonnet-5-5", api_key="key", base_url=None,
+                messages=[{"role": "user", "content": "q"}], fallback_models=["claude-opus-5-5"],
+            )
+        text, _in, _out, _thoughts, _used, model_used, attempts = res
+        assert calls == ["claude-sonnet-5-5", "claude-opus-5-5"]
+        assert (text, model_used) == ("Reply", "claude-sonnet-5")
+        assert attempts == [
+            "claude-sonnet-5-5 failed: Anthropic model declined the request (stop_reason: refusal).",
+            "claude-opus-5-5 declined the request; Anthropic answered with claude-sonnet-5",
+        ]

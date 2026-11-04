@@ -1302,7 +1302,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     Model Failover Active
                   </div>
                   <div className="text-[11px] text-amber-200/90">
-                    Primary model encountered a temporary 503 overload or timeout. Diagnosis was successfully generated using fallback model <strong className="font-mono text-amber-100">{analysisResult.model_used}</strong>.
+                    The primary model could not answer (for example a timeout, an overload or a refusal). The diagnosis comes from fallback model <strong className="font-mono text-amber-100">{analysisResult.model_used}</strong>.
                   </div>
                   {analysisResult.fallback_attempts && analysisResult.fallback_attempts.length > 0 && (
                     <div className="pt-1 space-y-0.5">

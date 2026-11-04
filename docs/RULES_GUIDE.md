@@ -113,7 +113,7 @@ Defines how long LogShed must suppress duplicate notifications after an alert fi
 When enabled, LogShed automatically masks sensitive data (passwords, tokens, API keys, IPs) from triggering logs and requests root-cause diagnosis from your configured Large Language Model (Gemini, OpenAI, or local Ollama).
 - Appends diagnosis summary and root cause insights to the incident record.
 - In notification messages, a concise summary is included along with a link to review the full remediation steps in the LogShed UI.
-- If AI providers encounter transient timeouts, LogShed automatically attempts configured fallback models before dispatching the alert.
+- If AI providers encounter transient timeouts, or a Claude model declines the request, LogShed automatically attempts configured fallback models before dispatching the alert.
 
 ### Rate Spike & Culprit Analysis
 

@@ -68,15 +68,19 @@ class AiServiceUnavailableError(RuntimeError):
         self.code = code
 
 
+class AiRefusalError(RuntimeError):
+    """Raised when the model declined the request (Anthropic stop_reason refusal); another model may answer it."""
+
+
 def is_retryable_for_fallback(exc: Exception) -> bool:
     """
     Returns True if an exception represents a 503/504 Service Unavailable, Timeout,
     Deadline Exceeded, Model Overload, Rate Limit / Quota Exhaustion, or 404 Model Not Found error,
-    qualifying the request for failover to a fallback model.
+    or a refusal by the model, qualifying the request for failover to a fallback model.
     """
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError, APITimeoutError, AnthropicTimeoutError, httpx.TimeoutException)):
         return True
-    if isinstance(exc, AiServiceUnavailableError):
+    if isinstance(exc, (AiServiceUnavailableError, AiRefusalError)):
         return True
 
     # Check status code attribute (int or string convertible)
@@ -1088,10 +1092,13 @@ def _claude_version(model: str) -> Optional[tuple[int, int]]:
 
 
 def _require_anthropic_text(text: str, response: Any) -> str:
-    """The reply text, failing clearly when it is empty, also when the model declined the request."""
+    """
+    The reply text, failing clearly when it is empty or the model declined the request. A refusal
+    fails even after partial text, since that text stops mid-answer.
+    """
+    if getattr(response, "stop_reason", None) == "refusal":
+        raise AiRefusalError("Anthropic model declined the request (stop_reason: refusal).")
     if not text:
-        if getattr(response, "stop_reason", None) == "refusal":
-            raise RuntimeError("Anthropic model declined the request (stop_reason: refusal).")
         raise RuntimeError("Anthropic endpoint returned empty response content.")
     return text
 
@@ -1106,14 +1113,45 @@ def _anthropic_text(response: Any) -> str:
 
 
 def _anthropic_token_usage(usage: Any, sent_text: str, text: str) -> tuple[int, int, int, int]:
-    """Token counts from an Anthropic usage object, estimated from the texts when it reports none."""
+    """
+    Token counts from an Anthropic usage object, estimated from the texts when it reports none.
+    After a server-side fallback the top-level counts cover only the model that answered, so the
+    attempts listed in `iterations` (the declined one included) are added up instead.
+    """
     tokens_in = getattr(usage, "input_tokens", 0) or 0
     tokens_out = getattr(usage, "output_tokens", 0) or 0
+    attempts = [
+        entry for entry in _anthropic_iterations(usage)
+        if getattr(entry, "type", None) in ("message", "fallback_message")
+    ]
+    if any(getattr(entry, "type", None) == "fallback_message" for entry in attempts):
+        tokens_in = sum(getattr(entry, "input_tokens", 0) or 0 for entry in attempts)
+        tokens_out = sum(getattr(entry, "output_tokens", 0) or 0 for entry in attempts)
     tokens_thoughts = getattr(usage, "thinking_tokens", 0) or 0
     tokens_used = tokens_in + tokens_out + tokens_thoughts
     if tokens_used == 0:
         return extract_token_usage(sent_text, text, usage)
     return tokens_in, tokens_out, tokens_thoughts, tokens_used
+
+
+def _anthropic_iterations(usage: Any) -> list[Any]:
+    """The per-attempt usage entries of an Anthropic response, or an empty list."""
+    iterations = getattr(usage, "iterations", None)
+    return list(iterations) if isinstance(iterations, (list, tuple)) else []
+
+
+def _anthropic_served_model(response: Any, requested_model: str) -> str:
+    """The model that wrote the reply: the fallback model when Anthropic's server-side fallback answered."""
+    for entry in _anthropic_iterations(getattr(response, "usage", None)):
+        if getattr(entry, "type", None) == "fallback_message" and getattr(entry, "model", None):
+            return str(entry.model)
+    return requested_model
+
+
+# Anthropic's server-side refusal fallback: a request a model declines on policy grounds is run
+# again on the fallback model Anthropic picks for the refusal category, in the same round trip.
+# Models without one run alone, so the request stays declined and LogShed's own chain goes on.
+_ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 def _anthropic_request_kwargs(
@@ -1122,12 +1160,14 @@ def _anthropic_request_kwargs(
     messages: list[dict[str, str]],
     thinking_level: Optional[str],
 ) -> dict[str, Any]:
-    """Build Anthropic Messages API arguments, with the thinking settings for the model's family."""
+    """Build Anthropic beta Messages API arguments: the thinking settings for the model's family and the refusal fallback."""
     return {
         "model": model,
         "system": system_prompt,
         "messages": messages,
         **_claude_thinking_kwargs(model, thinking_level),
+        "betas": [_ANTHROPIC_FALLBACK_BETA],
+        "fallbacks": "default",
     }
 
 
@@ -1162,7 +1202,7 @@ async def _anthropic_session(api_key: str, timeout: float) -> AsyncIterator[Asyn
         raise TimeoutError("Anthropic endpoint timed out")
     except httpx.TimeoutException as te:
         raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
-    except (ValueError, AiServiceUnavailableError):
+    except (ValueError, AiServiceUnavailableError, AiRefusalError):
         raise
     except Exception as e:
         raise _anthropic_error(e) from e
@@ -1178,9 +1218,10 @@ async def call_anthropic(
     timeout: float = DEFAULT_AI_TIMEOUT,
     max_retries: int = 1,
     thinking_level: Optional[str] = None,
-) -> tuple[str, int, int, int, int]:
+) -> tuple[str, int, int, int, int, str]:
     """
     Dispatch request to Anthropic Claude via the anthropic SDK.
+    Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used, model that answered).
     """
     effective_system_prompt = (system_prompt and system_prompt.strip()) or DEFAULT_SYSTEM_PROMPT
     create_kwargs = _anthropic_request_kwargs(
@@ -1191,12 +1232,12 @@ async def call_anthropic(
     )
 
     async with _anthropic_session(api_key, timeout) as client:
-        response = await client.messages.create(**create_kwargs)
+        response = await client.beta.messages.create(**create_kwargs)
         text = _anthropic_text(response)
         tokens_in, tokens_out, tokens_thoughts, tokens_used = _anthropic_token_usage(
             getattr(response, "usage", None), prompt, text
         )
-        return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
+        return text, tokens_in, tokens_out, tokens_thoughts, tokens_used, _anthropic_served_model(response, model)
 
 
 _OPENAI_PROVIDERS = ("openai", "openai_compatible")
@@ -1265,6 +1306,18 @@ def _describe_failover_error(exc: Exception) -> str:
     elif raw_str.startswith("OpenAI endpoint error: "):
         raw_str = raw_str[len("OpenAI endpoint error: "):]
     return raw_str[:300].strip()
+
+
+def _note_server_fallback(requested_model: str, served: list[str], fallback_attempts: list[str]) -> str:
+    """
+    The model that answered: a dispatcher may report one other than the requested model (Anthropic's
+    server-side refusal fallback), which is then noted in fallback_attempts.
+    """
+    model_used = served[0] if served and served[0] else requested_model
+    if model_used != requested_model:
+        fallback_attempts.append(f"{requested_model} declined the request; Anthropic answered with {model_used}")
+        logger.warning(f"Model '{requested_model}' declined the request; Anthropic's fallback model '{model_used}' answered.")
+    return model_used
 
 
 @dataclass
@@ -1359,7 +1412,8 @@ async def execute_ai_analysis(
             dispatch_kwargs["base_url"] = base_url
 
         try:
-            raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used = await dispatch(**dispatch_kwargs)
+            raw_text, tokens_in, tokens_out, tokens_thoughts, tokens_used, *served = await dispatch(**dispatch_kwargs)
+            model_used = _note_server_fallback(current_model, served, fallback_attempts)
 
             summary, root_cause, remediation = parse_structured_ai_response(raw_text)
             return AiAnalysisResult(
@@ -1372,7 +1426,7 @@ async def execute_ai_analysis(
                 tokens_out=tokens_out,
                 tokens_thoughts=tokens_thoughts,
                 tokens_used=tokens_used,
-                model_used=current_model,
+                model_used=model_used,
                 fallback_attempts=fallback_attempts,
             )
 
@@ -1535,18 +1589,19 @@ async def dispatch_multi_turn_anthropic(
     timeout: float = DEFAULT_AI_TIMEOUT,
     thinking_level: Optional[str] = None,
     on_delta: Optional[Callable[[str], Any]] = None,
-) -> tuple[str, int, int, int, int]:
+) -> tuple[str, int, int, int, int, str]:
     """
     Stream a multi-turn conversation to Anthropic Claude via the anthropic SDK.
-    Each text chunk is passed to on_delta as it arrives (thinking blocks are not streamed).
-    Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used).
+    Each text chunk is passed to on_delta as it arrives (thinking blocks are not streamed). When
+    Anthropic's fallback takes over mid-reply, the fallback model continues the partial text.
+    Returns (text, tokens_in, tokens_out, tokens_thoughts, tokens_used, model that answered).
     """
     create_kwargs = _anthropic_request_kwargs(model, system_prompt, messages, thinking_level)
 
     async with _anthropic_session(api_key, timeout) as client:
         chunks: list[str] = []
         async with asyncio.timeout(timeout):
-            async with client.messages.stream(**create_kwargs) as stream:
+            async with client.beta.messages.stream(**create_kwargs) as stream:
                 async for text in stream.text_stream:
                     if text:
                         chunks.append(text)
@@ -1557,7 +1612,7 @@ async def dispatch_multi_turn_anthropic(
         tokens_in, tokens_out, tokens_thoughts, tokens_used = _anthropic_token_usage(
             getattr(final_message, "usage", None), _conversation_text(system_prompt, messages), text
         )
-        return text, tokens_in, tokens_out, tokens_thoughts, tokens_used
+        return text, tokens_in, tokens_out, tokens_thoughts, tokens_used, _anthropic_served_model(final_message, model)
 
 
 async def execute_ai_follow_up(
@@ -1635,8 +1690,9 @@ async def execute_ai_follow_up(
                     thinking_level=thinking_level,
                     on_delta=on_delta,
                 )
-            text, tokens_in, tokens_out, tokens_thoughts, tokens_used = result
-            return text, tokens_in, tokens_out, tokens_thoughts, tokens_used, current_model, fallback_attempts
+            text, tokens_in, tokens_out, tokens_thoughts, tokens_used, *served = result
+            model_used = _note_server_fallback(current_model, served, fallback_attempts)
+            return text, tokens_in, tokens_out, tokens_thoughts, tokens_used, model_used, fallback_attempts
 
         except Exception as exc:
             last_error = exc
