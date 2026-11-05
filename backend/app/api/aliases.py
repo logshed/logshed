@@ -16,6 +16,7 @@ from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
 from app.core.utils import load_docker_source_aliases, load_former_docker_aliases
 from app.models import HostAliasCreate, HostAliasResponse, MessageResponse
+from app.services.alias_rename import alias_in_use, follow_alias_rename, reload_after_alias_rename
 
 router = APIRouter(prefix="/aliases", tags=["Host Aliases"])
 
@@ -162,11 +163,13 @@ async def create_or_update_alias(
     clean_ip = req.ip.strip()
     clean_alias = req.alias.strip()
 
+    followed: list = [None]
+
     def _upsert(conn):
         cursor = conn.cursor()
+        cursor.execute("SELECT alias FROM host_aliases WHERE ip = ?", (clean_ip,))
+        current = cursor.fetchone()
         if clean_ip != "docker":
-            cursor.execute("SELECT alias FROM host_aliases WHERE ip = ?", (clean_ip,))
-            current = cursor.fetchone()
             if not current or current[0] != clean_alias:
                 raise_if_alias_used_by_docker(conn, clean_alias)
         cursor.execute(
@@ -179,6 +182,10 @@ async def create_or_update_alias(
             """,
             (clean_ip, clean_alias, req.notes, now),
         )
+        # Rules and views naming the host by its previous alias follow the rename. A first alias
+        # rewrites nothing: rules written against the host's HOSTNAME or IP are left as they are.
+        if current and current[0] != clean_alias and not alias_in_use(conn, current[0], except_ip=clean_ip):
+            followed[0] = follow_alias_rename(conn, current[0], clean_alias)
         conn.commit()
 
         cursor.execute("SELECT ip, alias, notes, created_at FROM host_aliases WHERE ip = ?", (clean_ip,))
@@ -192,6 +199,7 @@ async def create_or_update_alias(
 
     res = await run_db_query(_upsert)
     await asyncio.to_thread(reload_active_alias_caches)
+    await reload_after_alias_rename(followed[0])
 
     def _run_batch(conn):
         try:
