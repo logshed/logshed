@@ -21,6 +21,7 @@ import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 import * as clipboardModule from '../utils/clipboard.ts';
 import * as dropRuleModalModule from '../components/alerts/CreateDropRuleModal.tsx';
 import { takeAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
+import { chooseOption, shownValue, toolbarSelect } from './selectDropdownHelpers.ts';
 
 // Test control for the virtualizer mock: when edgeRows is set, only the first and last
 // edgeRows rows are "visible" (like a real viewport), so large buffers stay cheap to render.
@@ -836,8 +837,7 @@ describe('LiveLogStream Component', () => {
     expect(screen.queryByText(/Historical Range \(Stream Paused\)/i)).toBeNull();
 
     // Select Custom time preset to reveal From and To inputs
-    const timeSelect = screen.getByDisplayValue('All Time');
-    fireEvent.change(timeSelect, { target: { value: 'custom' } });
+    chooseOption(toolbarSelect('Time'), 'Custom...');
 
     // Enter a past date into the "To:" input
     const datetimeInputs = document.querySelectorAll('input[type="datetime-local"]');
@@ -915,8 +915,7 @@ describe('LiveLogStream Component', () => {
       }),
     );
 
-    const severitySelect = screen.getAllByDisplayValue('All Severities')[0];
-    fireEvent.change(severitySelect, { target: { value: '3' } });
+    chooseOption(toolbarSelect('Severity'), 'Error+ (0-3)');
 
     await waitFor(() => {
       expect(screen.getByText('Updating results...')).toBeInTheDocument();
@@ -1908,8 +1907,7 @@ describe('LiveLogStream loading, connection and selection', () => {
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
-    const severitySelect = screen.getByText('Severity:').parentElement!.querySelector('select') as HTMLSelectElement;
-    fireEvent.change(severitySelect, { target: { value: '3' } });
+    chooseOption(toolbarSelect('Severity'), 'Error+ (0-3)');
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ severity_max: 3 }), expect.anything());
     });
@@ -2052,21 +2050,20 @@ describe('LiveLogStream time zone and time presets', () => {
     await waitFor(() => expect(screen.getByText(serverText)).toBeInTheDocument());
   });
 
-  const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
 
   it('keeps a relative time from a link and shows the matching preset', async () => {
     window.history.replaceState(null, '', '/?time=1h');
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: '1h' }), expect.anything()));
-    expect(desktopTimeSelect().value).toBe('1h');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Last 1h');
   });
 
   it('shows Custom for a digest link with an absolute time', async () => {
     window.history.replaceState(null, '', '/?time=2026-10-13T10%3A00%3A00.000Z&severity=3');
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
-    expect(desktopTimeSelect().value).toBe('custom');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Custom...');
   });
 
   describe('buffer cap', () => {
@@ -2283,7 +2280,7 @@ describe('LiveLogStream time zone and time presets', () => {
     }
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ query: 'nginx', from: '1h' }), expect.anything());
-    expect(desktopTimeSelect().value).toBe('1h');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Last 1h');
   });
 
   it('aborts a superseded log request when a new one starts', async () => {
@@ -2337,7 +2334,6 @@ describe('LiveLogStream capped host list and Today preset', () => {
     vi.spyOn(dockerHostsApi, 'fetchDockerEndpoints').mockResolvedValue([]);
   });
 
-  const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
 
   it('shows the capped note in the host list when the facets were truncated', async () => {
     vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(facets(true) as any);
@@ -2362,11 +2358,11 @@ describe('LiveLogStream capped host list and Today preset', () => {
     const fetchSpy = vi.spyOn(logsApi, 'fetchLogs');
     renderStream();
     await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
-    fireEvent.change(desktopTimeSelect(), { target: { value: 'since_midnight' } });
+    chooseOption(toolbarSelect('Time'), 'Today');
     await waitFor(() =>
       expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }), expect.anything())
     );
-    expect(desktopTimeSelect().value).toBe('since_midnight');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Today');
   });
 });
 
@@ -2885,8 +2881,7 @@ describe('LiveLogStream console controls', () => {
     renderStream();
     await waitForRows();
     expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ from, to }), expect.anything());
-    const select = screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
-    expect(select.value).toBe('custom');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Custom...');
     const pickers = Array.from(document.querySelectorAll('input[type="datetime-local"]')) as HTMLInputElement[];
     expect(pickers.length).toBeGreaterThanOrEqual(2);
     expect(pickers.every((p) => p.value !== '')).toBe(true);

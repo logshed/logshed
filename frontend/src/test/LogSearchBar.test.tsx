@@ -1,9 +1,10 @@
-import type { ReactElement, ReactNode } from 'react';
+import { useState, type ReactElement, type ReactNode } from 'react';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LogSearchBar } from '../components/logs/LogSearchBar.tsx';
 import { LogFilterParams } from '../types.ts';
 import * as savedViewsApi from '../api/savedViews.ts';
+import { chooseOption, panelSelect, shownValue, toolbarSelect } from './selectDropdownHelpers.ts';
 
 /**
  * Renders, then lets the saved views request the search bar starts on mount settle inside act, so
@@ -28,8 +29,8 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
       />
     );
 
-    expect(screen.getByLabelText('Severity:').tagName).toBe('SELECT');
-    expect(screen.getByLabelText('Time:').tagName).toBe('SELECT');
+    expect(screen.getByRole('button', { name: 'Severity: All Severities' })).toHaveAttribute('aria-haspopup', 'listbox');
+    expect(screen.getByRole('button', { name: 'Time: All Time' })).toHaveAttribute('aria-haspopup', 'listbox');
   });
 
   it('hides the Reset button when no filters are active', async () => {
@@ -258,39 +259,38 @@ describe('LogSearchBar time presets', () => {
     await renderSettled(<LogSearchBar filters={filters} onFilterChange={onFilterChange} onSearch={vi.fn()} onReset={vi.fn()} />);
     return onFilterChange;
   };
-  const desktopTimeSelect = () => screen.getByText('Time:').parentElement!.querySelector('select') as HTMLSelectElement;
 
   it('stores a preset as a relative value instead of a fixed timestamp', async () => {
     const onFilterChange = await renderBar({ query: 'x' });
-    fireEvent.change(desktopTimeSelect(), { target: { value: '1h' } });
+    chooseOption(toolbarSelect('Time'), 'Last 1h');
     expect(onFilterChange).toHaveBeenCalledWith({ query: 'x', from: '1h', to: undefined });
   });
 
   it('shows the preset that matches a relative from value (saved view or link)', async () => {
     await renderBar({ from: '24h' });
-    expect(desktopTimeSelect().value).toBe('24h');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Last 24h');
   });
 
   it('shows Custom with the date pickers for an absolute from value', async () => {
     await renderBar({ from: '2026-10-13T10:00:00.000Z' });
-    expect(desktopTimeSelect().value).toBe('custom');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Custom...');
     expect(screen.getAllByText('From:').length).toBeGreaterThan(0);
   });
 
   it('shows All Time when no time bounds are set', async () => {
     await renderBar({});
-    expect(desktopTimeSelect().value).toBe('all');
+    expect(shownValue(toolbarSelect('Time'))).toBe('All Time');
   });
 
   it('turns a relative preset into an absolute start when switching to Custom', async () => {
     const onFilterChange = await renderBar({ from: '1h' });
     const before = Date.now();
-    fireEvent.change(desktopTimeSelect(), { target: { value: 'custom' } });
+    chooseOption(toolbarSelect('Time'), 'Custom...');
     const call = onFilterChange.mock.calls[0][0];
     const from = new Date(call.from).getTime();
     expect(from).toBeGreaterThanOrEqual(before - 3600_000 - 1000);
     expect(from).toBeLessThanOrEqual(Date.now() - 3600_000 + 1000);
-    expect(desktopTimeSelect().value).toBe('custom');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Custom...');
   });
 });
 
@@ -323,11 +323,7 @@ describe('LogSearchBar capped lists and Today preset', () => {
   it('offers a Today preset that sends since_midnight', async () => {
     const onFilterChange = vi.fn();
     await renderSettled(<LogSearchBar {...baseProps} filters={{}} onFilterChange={onFilterChange} />);
-    const select = screen.getAllByRole('combobox').find((el) =>
-      Array.from((el as HTMLSelectElement).options).some((o) => o.value === '15m')
-    ) as HTMLSelectElement;
-    expect(Array.from(select.options).some((o) => o.value === 'since_midnight' && o.text === 'Today')).toBe(true);
-    fireEvent.change(select, { target: { value: 'since_midnight' } });
+    chooseOption(toolbarSelect('Time'), 'Today');
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: 'since_midnight' }));
   });
 
@@ -340,7 +336,7 @@ describe('LogSearchBar capped lists and Today preset', () => {
       await renderSettled(
         <LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={onFilterChange} timeZone="America/New_York" />
       );
-      fireEvent.change(screen.getByLabelText('Time:'), { target: { value: 'custom' } });
+      chooseOption(toolbarSelect('Time'), 'Custom...');
       expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-11-02T05:00:00.000Z' }));
     } finally {
       vi.useRealTimers();
@@ -366,10 +362,7 @@ describe('LogSearchBar capped lists and Today preset', () => {
 
   it('shows Today for a saved view or link carrying since_midnight', async () => {
     await renderSettled(<LogSearchBar {...baseProps} filters={{ from: 'since_midnight' }} onFilterChange={vi.fn()} />);
-    const select = screen.getAllByRole('combobox').find((el) =>
-      Array.from((el as HTMLSelectElement).options).some((o) => o.value === '15m')
-    ) as HTMLSelectElement;
-    expect(select.value).toBe('since_midnight');
+    expect(shownValue(toolbarSelect('Time'))).toBe('Today');
   });
 });
 
@@ -382,9 +375,10 @@ describe('LogSearchBar severity wording', () => {
     await renderSettled(
       <LogSearchBar filters={{ severity_max: 4 }} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
     );
-    const option = screen.getByRole('option', { name: 'Warn+ (0-4)' });
-    const select = option.closest('select') as HTMLSelectElement;
-    expect(select.title).toBe('Warning (4) and more severe');
+    const trigger = toolbarSelect('Severity');
+    expect(shownValue(trigger)).toBe('Warn+ (0-4)');
+    expect(trigger.title).toBe('Warning (4) and more severe');
+    fireEvent.click(trigger);
     expect(screen.getByRole('option', { name: 'Debug+ (0-7)' })).toBeInTheDocument();
   });
 
@@ -393,6 +387,7 @@ describe('LogSearchBar severity wording', () => {
       <LogSearchBar filters={{}} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
     );
     fireEvent.click(screen.getByTitle('Open filters drawer'));
+    fireEvent.click(panelSelect('Severity'));
     expect(screen.getByRole('option', { name: 'Warning (4) and more severe' })).toBeInTheDocument();
     expect(screen.queryByText(/Maximum Severity/)).toBeNull();
   });
@@ -635,7 +630,7 @@ describe('LogSearchBar shows which filters are active', () => {
 
   it('counts Custom without dates as active, as the Reset count does', async () => {
     await renderBar({});
-    fireEvent.change(screen.getByLabelText('Time:'), { target: { value: 'custom' } });
+    chooseOption(toolbarSelect('Time'), 'Custom...');
     expect(activeOf('Time:')).toBe('true');
     expect(screen.getByTitle('Reset all active filters')).toHaveTextContent('1');
   });
@@ -726,5 +721,50 @@ describe('LogSearchBar filter controls name what they show', () => {
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sources: [], source: undefined }));
     // Clearing does not open the list
     expect(hostTrigger).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('LogSearchBar Severity and Time dropdowns', () => {
+  beforeEach(() => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  function Stateful({ initial = {} }: { initial?: LogFilterParams }) {
+    const [filters, setFilters] = useState<LogFilterParams>(initial);
+    return <LogSearchBar filters={filters} onFilterChange={setFilters} onSearch={vi.fn()} onReset={vi.fn()} />;
+  }
+
+  it('shows the From and To fields when Custom... is chosen in the toolbar', async () => {
+    await renderSettled(<Stateful />);
+    expect(screen.queryByText('From:')).toBeNull();
+    chooseOption(toolbarSelect('Time'), 'Custom...');
+    expect(screen.getAllByText('From:').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('To:').length).toBeGreaterThan(0);
+  });
+
+  it('shows the From and To fields when Custom Range... is chosen in the phone panel', async () => {
+    await renderSettled(<Stateful />);
+    fireEvent.click(screen.getByTitle('Open filters drawer'));
+    chooseOption(panelSelect('Time Range'), 'Custom Range...');
+    expect(within(screen.getByRole('dialog', { name: 'Filter Logs' })).getByLabelText('From:')).toBeInTheDocument();
+  });
+
+  it('chooses a severity in the phone panel with the keyboard, and Esc closes only the list', async () => {
+    await renderSettled(<Stateful />);
+    fireEvent.click(screen.getByTitle('Open filters drawer'));
+    const trigger = panelSelect('Severity');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Filter Logs' })).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    fireEvent.keyDown(document.activeElement!, { key: 'e' });
+    fireEvent.keyDown(document.activeElement!, { key: 'e' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
+    // Emergency, then Error: the second e moves on to the next row starting with it
+    expect(shownValue(panelSelect('Severity'))).toBe('Error (3) and more severe');
+    expect(shownValue(toolbarSelect('Severity'))).toBe('Error+ (0-3)');
+    expect(screen.getAllByRole('button', { name: 'Clear severity filter' })).toHaveLength(2);
   });
 });

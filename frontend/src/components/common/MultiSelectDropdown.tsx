@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useId, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check, X, Search, Plus } from 'lucide-react';
+import { FILTER_CLEAR_BUTTON, FILTER_CLEAR_ROOM, filterTriggerClass } from './dropdownStyles.ts';
 
 export interface MultiSelectDropdownProps {
   label: string;
@@ -362,13 +363,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                   ? 'border-accent-500 ring-1 ring-accent-500/20'
                   : 'border-dark-700 hover:border-slate-600 text-slate-200'
               }`
-            : `flex items-center gap-1.5 bg-dark-900 border rounded px-2.5 py-1 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
-                isOpen
-                  ? 'border-accent-500 ring-1 ring-accent-500/20'
-                  : selected.length > 0
-                  ? 'border-accent-600/60 bg-dark-900/90 text-slate-100'
-                  : 'border-dark-700 hover:border-slate-600 text-slate-300'
-              }`
+            : filterTriggerClass(isOpen, selected.length > 0)
         }
         role="button"
         tabIndex={0}
@@ -444,7 +439,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             )}
 
             {/* Room for the clear button, which sits over the trigger rather than inside it */}
-            {selected.length > 0 && <span className="w-[18px] shrink-0" aria-hidden="true" />}
+            {selected.length > 0 && <span className={FILTER_CLEAR_ROOM} aria-hidden="true" />}
 
             <ChevronDown
               className={`w-3 h-3 text-slate-400 transition-transform duration-150 ${
@@ -459,7 +454,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         <button
           type="button"
           onClick={handleClear}
-          className="absolute right-7 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 p-0.5 rounded hover:bg-dark-800 transition"
+          className={FILTER_CLEAR_BUTTON}
           title={`Clear ${label.toLowerCase()} filter`}
           aria-label={`Clear ${label.toLowerCase()} filter`}
         >

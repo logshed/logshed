@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef, useId } from 'react';
-import { Search, RotateCcw, Filter, Clock, X, SlidersHorizontal, CircleHelp } from 'lucide-react';
+import { Search, RotateCcw, X, SlidersHorizontal, CircleHelp } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
+import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel, compactMoreSevereLabel } from '../../utils/severityLabels.ts';
@@ -68,14 +69,32 @@ export function activeFilterControls(filters: LogFilterParams, timePreset: strin
   };
 }
 
-// The active look of the Host and App dropdowns (MultiSelectDropdown), reused for the other controls.
-// The box sets the text colour the value inherits where the theme has no accent-300 shade, as the
-// dropdown button does.
+// Severity choices: the toolbar shows the short names, the phone panel the full ones
+const compactSeverityOptions: SelectOption[] = [
+  { value: '', label: 'All Severities' },
+  ...SEVERITIES.map((s) => ({ value: String(s.value), label: compactMoreSevereLabel(s.value) })),
+];
+const severityOptions: SelectOption[] = [
+  { value: '', label: 'All Severities' },
+  ...SEVERITIES.map((s) => ({ value: String(s.value), label: moreSevereLabel(s.value) })),
+];
+
+/** Time presets; the last one shows the From and To fields. */
+const timeOptions = (customLabel: string): SelectOption[] => [
+  { value: 'all', label: 'All Time' },
+  { value: '15m', label: 'Last 15m' },
+  { value: '1h', label: 'Last 1h' },
+  { value: '6h', label: 'Last 6h' },
+  { value: '24h', label: 'Last 24h' },
+  { value: '7d', label: 'Last 7d' },
+  { value: SINCE_MIDNIGHT, label: 'Today' },
+  { value: 'custom', label: customLabel },
+];
+
+// The active border of the filter dropdowns (dropdownStyles.ts), reused for the search box and the
+// custom time fields.
 const ACTIVE_BORDER = 'border-accent-600/60';
 const IDLE_BORDER = 'border-dark-700';
-const ACTIVE_BOX_TEXT = 'text-slate-100';
-const ACTIVE_VALUE = 'text-accent-300 font-medium';
-const CLEAR_BUTTON = 'text-slate-500 hover:text-slate-200 rounded hover:bg-dark-800 transition cursor-pointer shrink-0';
 
 interface LogSearchBarProps {
   filters: LogFilterParams;
@@ -241,6 +260,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
     });
   }, [filters, onFilterChange, timeZone]);
 
+  const severityValue = filters.severity_max !== undefined && filters.severity_max !== null ? String(filters.severity_max) : '';
+  const handleSeverityChange = (val: string) =>
+    onFilterChange({ ...filters, severity_max: val === '' ? undefined : parseInt(val, 10) });
   const handleClearSeverity = () => onFilterChange({ ...filters, severity_max: undefined });
   const handleClearTime = () => handleTimePresetChange('all');
 
@@ -424,80 +446,31 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         />
 
         {/* Severity Filter Dropdown */}
-        <div
-          data-active={active.severity}
-          className={`flex items-center gap-1.5 bg-dark-900 border ${active.severity ? `${ACTIVE_BORDER} ${ACTIVE_BOX_TEXT}` : IDLE_BORDER} rounded px-2 py-1`}
-        >
-          <Filter className="w-3 h-3 text-slate-400" />
-          <label htmlFor={`${fieldId}-severity`} className="text-slate-400 text-[11px] font-medium">Severity:</label>
-          <select
-            id={`${fieldId}-severity`}
-            value={filters.severity_max !== undefined ? filters.severity_max : ''}
-            onChange={(e) => {
-              const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-              onFilterChange({ ...filters, severity_max: val });
-            }}
-            title={
-              filters.severity_max !== undefined && filters.severity_max !== null
-                ? moreSevereLabel(filters.severity_max)
-                : 'Choose a level to show it and everything more severe'
-            }
-            className={`bg-transparent text-[11px] focus:outline-hidden font-mono ${active.severity ? ACTIVE_VALUE : 'text-slate-200'}`}
-          >
-            <option value="" className="bg-dark-900 text-slate-200">All Severities</option>
-            {SEVERITIES.map((s) => (
-              <option key={s.value} value={s.value} className="bg-dark-900 text-slate-200">
-                {compactMoreSevereLabel(s.value)}
-              </option>
-            ))}
-          </select>
-          {active.severity && (
-            <button
-              type="button"
-              onClick={handleClearSeverity}
-              className={`${CLEAR_BUTTON} p-0.5`}
-              title="Clear severity filter"
-              aria-label="Clear severity filter"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
+        <SelectDropdown
+          label="Severity"
+          options={compactSeverityOptions}
+          value={severityValue}
+          onChange={handleSeverityChange}
+          active={active.severity}
+          onClear={handleClearSeverity}
+          clearLabel="Clear severity filter"
+          title={
+            filters.severity_max !== undefined && filters.severity_max !== null
+              ? moreSevereLabel(filters.severity_max)
+              : 'Choose a level to show it and everything more severe'
+          }
+        />
 
         {/* Time Preset Selector */}
-        <div
-          data-active={active.time}
-          className={`flex items-center gap-1.5 bg-dark-900 border ${active.time ? `${ACTIVE_BORDER} ${ACTIVE_BOX_TEXT}` : IDLE_BORDER} rounded px-2 py-1`}
-        >
-          <Clock className="w-3 h-3 text-slate-400" />
-          <label htmlFor={`${fieldId}-time`} className="text-slate-400 text-[11px] font-medium">Time:</label>
-          <select
-            id={`${fieldId}-time`}
-            value={timePreset}
-            onChange={(e) => handleTimePresetChange(e.target.value)}
-            className={`bg-transparent text-[11px] focus:outline-hidden font-mono ${active.time ? ACTIVE_VALUE : 'text-slate-200'}`}
-          >
-            <option value="all" className="bg-dark-900 text-slate-200">All Time</option>
-            <option value="15m" className="bg-dark-900 text-slate-200">Last 15m</option>
-            <option value="1h" className="bg-dark-900 text-slate-200">Last 1h</option>
-            <option value="6h" className="bg-dark-900 text-slate-200">Last 6h</option>
-            <option value="24h" className="bg-dark-900 text-slate-200">Last 24h</option>
-            <option value="7d" className="bg-dark-900 text-slate-200">Last 7d</option>
-            <option value="since_midnight" className="bg-dark-900 text-slate-200">Today</option>
-            <option value="custom" className="bg-dark-900 text-slate-200">Custom...</option>
-          </select>
-          {active.time && (
-            <button
-              type="button"
-              onClick={handleClearTime}
-              className={`${CLEAR_BUTTON} p-0.5`}
-              title="Clear time filter"
-              aria-label="Clear time filter"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
+        <SelectDropdown
+          label="Time"
+          options={timeOptions('Custom...')}
+          value={timePreset}
+          onChange={handleTimePresetChange}
+          active={active.time}
+          onClear={handleClearTime}
+          clearLabel="Clear time filter"
+        />
 
         {/* Custom Datetime Pickers */}
         {showCustomTime && (
@@ -637,69 +610,36 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Severity Filter */}
           <div>
-            <label htmlFor={`${fieldId}-severity-panel`} className="block text-slate-400 font-medium mb-1.5">Severity</label>
-            <div data-active={active.severity} className={`flex items-center gap-2 ${active.severity ? ACTIVE_BOX_TEXT : ''}`}>
-              <select
-                id={`${fieldId}-severity-panel`}
-                value={filters.severity_max !== undefined ? filters.severity_max : ''}
-                onChange={(e) => {
-                  const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                  onFilterChange({ ...filters, severity_max: val });
-                }}
-                className={`w-full min-w-0 flex-1 bg-dark-950 border ${active.severity ? `${ACTIVE_BORDER} ${ACTIVE_VALUE}` : `${IDLE_BORDER} text-slate-200`} rounded px-3 py-2 text-xs focus:outline-hidden font-mono`}
-              >
-                <option value="" className="text-slate-200">All Severities</option>
-                {SEVERITIES.map((s) => (
-                  <option key={s.value} value={s.value} className="text-slate-200">
-                    {moreSevereLabel(s.value)}
-                  </option>
-                ))}
-              </select>
-              {active.severity && (
-                <button
-                  type="button"
-                  onClick={handleClearSeverity}
-                  className={`${CLEAR_BUTTON} p-1.5`}
-                  title="Clear severity filter"
-                  aria-label="Clear severity filter"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+            <label id={`${fieldId}-severity-panel-label`} htmlFor={`${fieldId}-severity-panel`} className="block text-slate-400 font-medium mb-1.5">Severity</label>
+            <SelectDropdown
+              variant="panel"
+              id={`${fieldId}-severity-panel`}
+              labelledBy={`${fieldId}-severity-panel-label`}
+              label="Severity"
+              options={severityOptions}
+              value={severityValue}
+              onChange={handleSeverityChange}
+              active={active.severity}
+              onClear={handleClearSeverity}
+              clearLabel="Clear severity filter"
+            />
           </div>
 
           {/* Time Preset */}
           <div>
-            <label htmlFor={`${fieldId}-time-panel`} className="block text-slate-400 font-medium mb-1.5">Time Range</label>
-            <div data-active={active.time} className={`flex items-center gap-2 ${active.time ? ACTIVE_BOX_TEXT : ''}`}>
-              <select
-                id={`${fieldId}-time-panel`}
-                value={timePreset}
-                onChange={(e) => handleTimePresetChange(e.target.value)}
-                className={`w-full min-w-0 flex-1 bg-dark-950 border ${active.time ? `${ACTIVE_BORDER} ${ACTIVE_VALUE}` : `${IDLE_BORDER} text-slate-200`} rounded px-3 py-2 text-xs focus:outline-hidden font-mono`}
-              >
-                <option value="all" className="text-slate-200">All Time</option>
-                <option value="15m" className="text-slate-200">Last 15m</option>
-                <option value="1h" className="text-slate-200">Last 1h</option>
-                <option value="6h" className="text-slate-200">Last 6h</option>
-                <option value="24h" className="text-slate-200">Last 24h</option>
-                <option value="7d" className="text-slate-200">Last 7d</option>
-                <option value="since_midnight" className="text-slate-200">Today</option>
-                <option value="custom" className="text-slate-200">Custom Range...</option>
-              </select>
-              {active.time && (
-                <button
-                  type="button"
-                  onClick={handleClearTime}
-                  className={`${CLEAR_BUTTON} p-1.5`}
-                  title="Clear time filter"
-                  aria-label="Clear time filter"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+            <label id={`${fieldId}-time-panel-label`} htmlFor={`${fieldId}-time-panel`} className="block text-slate-400 font-medium mb-1.5">Time Range</label>
+            <SelectDropdown
+              variant="panel"
+              id={`${fieldId}-time-panel`}
+              labelledBy={`${fieldId}-time-panel-label`}
+              label="Time Range"
+              options={timeOptions('Custom Range...')}
+              value={timePreset}
+              onChange={handleTimePresetChange}
+              active={active.time}
+              onClear={handleClearTime}
+              clearLabel="Clear time filter"
+            />
           </div>
 
           {/* Custom Time */}
