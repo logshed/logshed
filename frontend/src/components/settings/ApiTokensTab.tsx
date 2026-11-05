@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Key,
   Plus,
@@ -57,7 +58,10 @@ interface TokenDialogProps {
   children: React.ReactNode;
 }
 
-/** The overlay and panel of this tab's dialogs, on the shared dialog stack (focus trap, Esc, focus return). */
+/**
+ * The overlay and panel of this tab's dialogs, on the shared dialog stack (focus trap, Esc, focus return).
+ * Rendered on the page body, so the tab's child spacing cannot push the overlay down from the top edge.
+ */
 const TokenDialog: React.FC<TokenDialogProps> = ({
   titleId,
   onClose,
@@ -69,7 +73,7 @@ const TokenDialog: React.FC<TokenDialogProps> = ({
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   useDialog(true, onClose, panelRef, { closeOnEscape });
-  return (
+  return createPortal(
     <div data-testid={testId} className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClassName} backdrop-blur-xs`}>
       <div
         ref={panelRef}
@@ -81,7 +85,8 @@ const TokenDialog: React.FC<TokenDialogProps> = ({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -1080,6 +1085,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
       {/* One-Time Raw Token Modal */}
       {createdRawToken && (
         <TokenDialog
+          testId="raw-token-modal"
           titleId={`${dialogIdBase}-created`}
           onClose={() => setCreatedRawToken(null)}
           // The token cannot be shown again, so only Done or the close button end this dialog

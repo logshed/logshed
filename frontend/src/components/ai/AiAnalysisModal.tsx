@@ -103,6 +103,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
   const { copied: copiedPrompt, copy: copyPrompt } = useClipboard();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   // Each preview and diagnosis run gets an id and an AbortController, so a run that finishes
   // after the modal was closed (or reopened for other logs) is cancelled and its result ignored.
@@ -123,6 +124,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
   useEffect(() => cancelInFlightRuns, []);
+
+  // The result replaces the form in the same scrolling dialog body, which keeps its scroll position,
+  // so on a phone the user would land part way down the result. Show it from the top instead.
+  // An error keeps the position, because it is shown next to the Run button.
+  useEffect(() => {
+    if (analysisResult) contentRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [analysisResult]);
 
   const buildCombinedPrompt = (basePrompt: string, ctx: string) => {
     if (!ctx.trim()) return basePrompt;
@@ -629,7 +637,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       title="On-Demand AI Root-Cause Analysis"
       maxWidth="max-w-3xl"
     >
-      <div className="space-y-4 text-xs font-sans">
+      <div ref={contentRef} className="space-y-4 text-xs font-sans scroll-mt-4">
         {/* Host & Target Scope Header */}
         <div className="p-3 bg-dark-950 rounded-lg border border-dark-700 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">

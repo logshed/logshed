@@ -32,6 +32,7 @@ from app.core.config import invalidate_settings_cache
 from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
 from app.core.utils import note_docker_alias_change
+from app.services.alias_rename import AliasRenameResult, alias_in_use, follow_alias_rename, reload_after_alias_rename
 from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
 
 logger = logging.getLogger(__name__)
@@ -397,6 +398,7 @@ async def update_docker_endpoint(
     await _ensure_url_target_allowed(payload.url)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     old_alias_box: list[Optional[str]] = [None]
+    followed_box: list[Optional[AliasRenameResult]] = [None]
     effective_ip_box: list[str] = ["docker"]
 
     def _update(conn: sqlite3.Connection):
@@ -488,6 +490,9 @@ async def update_docker_endpoint(
 
         if alias_val != row["source_alias"]:
             note_docker_alias_change(conn, row["source_alias"], alias_val)
+            # Rules and views naming the host by its previous alias follow the rename
+            if row["source_alias"] and not alias_in_use(conn, row["source_alias"], except_endpoint_id=endpoint_id):
+                followed_box[0] = follow_alias_rename(conn, row["source_alias"], alias_val)
 
         # Synchronize primary endpoint updates back to system_settings
         if endpoint_id == 1:
@@ -538,6 +543,7 @@ async def update_docker_endpoint(
     updated = await run_db_query(_update)
     if endpoint_id == 1:
         invalidate_settings_cache()
+    await reload_after_alias_rename(followed_box[0])
 
     from app.main import get_docker_pool
     pool = get_docker_pool()

@@ -18,6 +18,7 @@ This guide explains how to configure real-time alert rules and ingestion drop ru
 - [Ingestion Drop Rules](#drop-rules)
   - [Purpose & Architecture](#purpose--architecture)
   - [Drop Rule Fields & Filtering](#drop-rule-fields--filtering)
+  - [Renaming a Host](#renaming-a-host)
   - [Severity Range Handling](#severity-range-handling)
   - [1-Click Creation & Testing](#1-click-creation--testing)
   - [Practical Drop Rule Examples](#practical-drop-rule-examples)
@@ -223,6 +224,20 @@ When creating or editing a drop rule, you configure:
 | **Message Pattern** | Keyword substring or regular expression | Matches log payload. Can be a case-insensitive substring or regex. Enter `*` to match all messages |
 | **Regex Toggle** | Regular expression parsing toggle | Enables safe regex evaluation when checked (with a 50 ms limit per match; a rule that times out 20 times in 5 minutes is disabled automatically, see the alert rule notes above), or fast case-insensitive substring matching when unchecked. With the toggle on, write `\\` for a literal backslash |
 | **Severity Range** | Drop only logs at this level or less severe | Preserves critical entries while discarding routine chatter (detailed below) |
+
+### Renaming a Host
+
+When you rename a syslog host alias or a Docker host alias under Settings > Sources, LogShed updates what names the host by its old alias, so it keeps matching the host's new logs. Deleting a syslog host alias works the same way, with the host's IP address as the new name, because its logs show the IP again:
+- drop rules whose Host / Source Pattern is exactly the old alias (any letter case),
+- running maintenance windows aimed at the host,
+- saved views that filter on the host.
+
+Some things are not changed:
+- **Wildcard patterns** such as `nas*`: check that they still fit the new name.
+- **A name another host still uses:** while another syslog host or Docker host has the old alias, the rules and views keep it, because it still matches that host.
+- **A host's first alias:** until a host has an alias, its logs carry the host name it sends (or its IP), and a rule written against that name stops matching once you give the host an alias. Write such rules with the host's IP address, which an alias does not change, or edit them after adding the alias.
+
+Alert rules have no host filter, so a rename does not affect them. Links and bookmarks with the old name in them are not changed.
 
 ### Severity Range Handling
 
