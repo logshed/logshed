@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AiAnalysisModal, MAX_USER_CONTEXT_LENGTH } from '../components/ai/AiAnalysisModal.tsx';
 import { LogEntry } from '../types.ts';
 import * as aiApi from '../api/ai.ts';
@@ -1022,6 +1022,74 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
           expect.any(Object),
         );
       });
+    });
+  });
+  describe('scroll position when the result arrives', () => {
+    let scrollSpy: ReturnType<typeof vi.fn>;
+    const original = Element.prototype.scrollIntoView;
+
+    beforeEach(() => {
+      scrollSpy = vi.fn();
+      Element.prototype.scrollIntoView = scrollSpy as unknown as typeof Element.prototype.scrollIntoView;
+    });
+
+    afterEach(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+
+    const scrollsToTop = () => scrollSpy.mock.calls.filter(([opts]) => opts?.block === 'start');
+
+    it('shows a finished analysis from the top of the dialog, once', async () => {
+      render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+      expect(scrollsToTop()).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+      await screen.findByText('DNS server connection refused.');
+
+      expect(scrollsToTop()).toHaveLength(1);
+      // The dialog's content root is scrolled to, so the dialog body ends at its very top
+      const root = scrollSpy.mock.contexts[0] as HTMLElement;
+      expect(root).toContainElement(screen.getByText('DNS server connection refused.'));
+      expect(root).toContainElement(screen.getByText(/Logs? Inspected/));
+    });
+
+    it('keeps the position when the analysis fails', async () => {
+      vi.spyOn(aiApi, 'diagnoseLogs').mockRejectedValue(new Error('Provider said no'));
+      render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+      await screen.findByText('Provider said no');
+
+      expect(scrollsToTop()).toHaveLength(0);
+    });
+
+    it('does not jump to the top when a follow-up answer arrives', async () => {
+      vi.spyOn(aiApi, 'sendAiFollowUp').mockResolvedValue({
+        message: { id: 2, role: 'assistant', content: 'Port 53.', created_at: '2026-09-04T08:01:00Z' },
+        tokens_in: 1, tokens_out: 1, tokens_thoughts: 0, tokens_used: 2,
+        model_used: 'gemini-3.7-flash', fallback_used: false, fallback_attempts: [],
+        turn_count: 1, max_turns: 10,
+      } as any);
+      vi.spyOn(aiApi, 'fetchConversationMessages').mockResolvedValue({
+        audit_id: 12,
+        messages: [],
+        turn_count: 0,
+        max_turns: 10,
+      });
+      render(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={sampleLogs} />);
+      await screen.findByPlaceholderText('Redacted prompt...');
+      fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
+      const input = await screen.findByLabelText('Follow-up question');
+      expect(scrollsToTop()).toHaveLength(1);
+
+      fireEvent.change(input, { target: { value: 'Which port?' } });
+      fireEvent.click(screen.getByTitle('Send (Ctrl+Enter or Cmd+Enter)'));
+      await waitFor(() => expect(aiApi.sendAiFollowUp).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(aiApi.fetchConversationMessages).toHaveBeenCalledTimes(2));
+
+      expect(scrollsToTop()).toHaveLength(1);
     });
   });
 });
