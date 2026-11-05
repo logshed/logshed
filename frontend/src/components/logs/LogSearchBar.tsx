@@ -56,6 +56,27 @@ export function deriveTimePreset(from?: string, to?: string): string {
   return 'custom';
 }
 
+/**
+ * Which single-value controls are filtering. The Reset count and the highlighted controls both read
+ * this, so they cannot disagree. Time is active for any preset but All Time, or a From or To date.
+ */
+export function activeFilterControls(filters: LogFilterParams, timePreset: string) {
+  return {
+    query: Boolean(filters.query && filters.query.trim()),
+    severity: filters.severity_max !== undefined && filters.severity_max !== null,
+    time: timePreset !== 'all' || Boolean(filters.from) || Boolean(filters.to),
+  };
+}
+
+// The active look of the Host and App dropdowns (MultiSelectDropdown), reused for the other controls.
+// The box sets the text colour the value inherits where the theme has no accent-300 shade, as the
+// dropdown button does.
+const ACTIVE_BORDER = 'border-accent-600/60';
+const IDLE_BORDER = 'border-dark-700';
+const ACTIVE_BOX_TEXT = 'text-slate-100';
+const ACTIVE_VALUE = 'text-accent-300 font-medium';
+const CLEAR_BUTTON = 'text-slate-500 hover:text-slate-200 rounded hover:bg-dark-800 transition cursor-pointer shrink-0';
+
 interface LogSearchBarProps {
   filters: LogFilterParams;
   onFilterChange: (filters: LogFilterParams) => void;
@@ -183,16 +204,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
     return [];
   }, [filters.apps, filters.app_name]);
 
+  const active = activeFilterControls(filters, timePreset);
+
   // Count active filters to conditionally show Reset button with badge
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (filters.query && filters.query.trim()) count += 1;
-    if (filters.severity_max !== undefined && filters.severity_max !== null) count += 1;
-    if (activeSources.length > 0) count += activeSources.length;
-    if (activeApps.length > 0) count += activeApps.length;
-    if (timePreset !== 'all' || filters.from || filters.to) count += 1;
-    return count;
-  }, [filters.query, filters.severity_max, filters.from, filters.to, activeSources, activeApps, timePreset]);
+  const activeFilterCount =
+    Number(active.query) + Number(active.severity) + Number(active.time) + activeSources.length + activeApps.length;
 
   const hasActiveFilters = activeFilterCount > 0;
 
@@ -225,6 +241,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
     });
   }, [filters, onFilterChange, timeZone]);
 
+  const handleClearSeverity = () => onFilterChange({ ...filters, severity_max: undefined });
+  const handleClearTime = () => handleTimePresetChange('all');
+
   const handleResetFilters = useCallback(() => {
     setCustomTimeRequested(false);
     onReset();
@@ -246,7 +265,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               placeholder={SEARCH_PLACEHOLDER}
               aria-label="Search logs"
               enterKeyHint="search"
-              className={`w-full bg-dark-900 border border-dark-700 rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
+              data-active={active.query}
+              className={`w-full bg-dark-900 border ${active.query ? ACTIVE_BORDER : IDLE_BORDER} rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
             />
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
             {/* Search syntax help, left of the clear button. The wrapper is not positioned, so the
@@ -399,7 +419,10 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         />
 
         {/* Severity Filter Dropdown */}
-        <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 rounded px-2 py-1">
+        <div
+          data-active={active.severity}
+          className={`flex items-center gap-1.5 bg-dark-900 border ${active.severity ? `${ACTIVE_BORDER} ${ACTIVE_BOX_TEXT}` : IDLE_BORDER} rounded px-2 py-1`}
+        >
           <Filter className="w-3 h-3 text-slate-400" />
           <label htmlFor={`${fieldId}-severity`} className="text-slate-400 text-[11px] font-medium">Severity:</label>
           <select
@@ -414,42 +437,67 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 ? moreSevereLabel(filters.severity_max)
                 : 'Choose a level to show it and everything more severe'
             }
-            className="bg-transparent text-[11px] text-slate-200 focus:outline-hidden font-mono"
+            className={`bg-transparent text-[11px] focus:outline-hidden font-mono ${active.severity ? ACTIVE_VALUE : 'text-slate-200'}`}
           >
-            <option value="" className="bg-dark-900">All Severities</option>
+            <option value="" className="bg-dark-900 text-slate-200">All Severities</option>
             {SEVERITIES.map((s) => (
-              <option key={s.value} value={s.value} className="bg-dark-900">
+              <option key={s.value} value={s.value} className="bg-dark-900 text-slate-200">
                 {compactMoreSevereLabel(s.value)}
               </option>
             ))}
           </select>
+          {active.severity && (
+            <button
+              type="button"
+              onClick={handleClearSeverity}
+              className={`${CLEAR_BUTTON} p-0.5`}
+              title="Clear severity filter"
+              aria-label="Clear severity filter"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
 
         {/* Time Preset Selector */}
-        <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 rounded px-2 py-1">
+        <div
+          data-active={active.time}
+          className={`flex items-center gap-1.5 bg-dark-900 border ${active.time ? `${ACTIVE_BORDER} ${ACTIVE_BOX_TEXT}` : IDLE_BORDER} rounded px-2 py-1`}
+        >
           <Clock className="w-3 h-3 text-slate-400" />
           <label htmlFor={`${fieldId}-time`} className="text-slate-400 text-[11px] font-medium">Time:</label>
           <select
             id={`${fieldId}-time`}
             value={timePreset}
             onChange={(e) => handleTimePresetChange(e.target.value)}
-            className="bg-transparent text-[11px] text-slate-200 focus:outline-hidden font-mono"
+            className={`bg-transparent text-[11px] focus:outline-hidden font-mono ${active.time ? ACTIVE_VALUE : 'text-slate-200'}`}
           >
-            <option value="all" className="bg-dark-900">All Time</option>
-            <option value="15m" className="bg-dark-900">Last 15m</option>
-            <option value="1h" className="bg-dark-900">Last 1h</option>
-            <option value="6h" className="bg-dark-900">Last 6h</option>
-            <option value="24h" className="bg-dark-900">Last 24h</option>
-            <option value="7d" className="bg-dark-900">Last 7d</option>
-            <option value="since_midnight" className="bg-dark-900">Today</option>
-            <option value="custom" className="bg-dark-900">Custom...</option>
+            <option value="all" className="bg-dark-900 text-slate-200">All Time</option>
+            <option value="15m" className="bg-dark-900 text-slate-200">Last 15m</option>
+            <option value="1h" className="bg-dark-900 text-slate-200">Last 1h</option>
+            <option value="6h" className="bg-dark-900 text-slate-200">Last 6h</option>
+            <option value="24h" className="bg-dark-900 text-slate-200">Last 24h</option>
+            <option value="7d" className="bg-dark-900 text-slate-200">Last 7d</option>
+            <option value="since_midnight" className="bg-dark-900 text-slate-200">Today</option>
+            <option value="custom" className="bg-dark-900 text-slate-200">Custom...</option>
           </select>
+          {active.time && (
+            <button
+              type="button"
+              onClick={handleClearTime}
+              className={`${CLEAR_BUTTON} p-0.5`}
+              title="Clear time filter"
+              aria-label="Clear time filter"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
 
         {/* Custom Datetime Pickers */}
         {showCustomTime && (
-          <div className="flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border border-dark-700 w-full max-w-full md:w-auto">
-            <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
+          <div className={`flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border ${active.time ? ACTIVE_BORDER : IDLE_BORDER} w-full max-w-full md:w-auto`}>
+            <div className={`flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded px-1.5 py-0.5 focus-within:border-accent-500`}>
               <label htmlFor={`${fieldId}-from`} className="text-slate-400 text-[11px] shrink-0">From:</label>
               <input
                 id={`${fieldId}-from`}
@@ -464,7 +512,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
-            <div className="flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border border-dark-700 rounded px-1.5 py-0.5 focus-within:border-accent-500">
+            <div className={`flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded px-1.5 py-0.5 focus-within:border-accent-500`}>
               <label htmlFor={`${fieldId}-to`} className="text-slate-400 text-[11px] shrink-0">To:</label>
               <input
                 id={`${fieldId}-to`}
@@ -585,42 +633,68 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           {/* Severity Filter */}
           <div>
             <label htmlFor={`${fieldId}-severity-panel`} className="block text-slate-400 font-medium mb-1.5">Severity</label>
-            <select
-              id={`${fieldId}-severity-panel`}
-              value={filters.severity_max !== undefined ? filters.severity_max : ''}
-              onChange={(e) => {
-                const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                onFilterChange({ ...filters, severity_max: val });
-              }}
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden font-mono"
-            >
-              <option value="">All Severities</option>
-              {SEVERITIES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {moreSevereLabel(s.value)}
-                </option>
-              ))}
-            </select>
+            <div data-active={active.severity} className={`flex items-center gap-2 ${active.severity ? ACTIVE_BOX_TEXT : ''}`}>
+              <select
+                id={`${fieldId}-severity-panel`}
+                value={filters.severity_max !== undefined ? filters.severity_max : ''}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                  onFilterChange({ ...filters, severity_max: val });
+                }}
+                className={`w-full min-w-0 flex-1 bg-dark-950 border ${active.severity ? `${ACTIVE_BORDER} ${ACTIVE_VALUE}` : `${IDLE_BORDER} text-slate-200`} rounded px-3 py-2 text-xs focus:outline-hidden font-mono`}
+              >
+                <option value="" className="text-slate-200">All Severities</option>
+                {SEVERITIES.map((s) => (
+                  <option key={s.value} value={s.value} className="text-slate-200">
+                    {moreSevereLabel(s.value)}
+                  </option>
+                ))}
+              </select>
+              {active.severity && (
+                <button
+                  type="button"
+                  onClick={handleClearSeverity}
+                  className={`${CLEAR_BUTTON} p-1.5`}
+                  title="Clear severity filter"
+                  aria-label="Clear severity filter"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Time Preset */}
           <div>
             <label htmlFor={`${fieldId}-time-panel`} className="block text-slate-400 font-medium mb-1.5">Time Range</label>
-            <select
-              id={`${fieldId}-time-panel`}
-              value={timePreset}
-              onChange={(e) => handleTimePresetChange(e.target.value)}
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden font-mono"
-            >
-              <option value="all">All Time</option>
-              <option value="15m">Last 15m</option>
-              <option value="1h">Last 1h</option>
-              <option value="6h">Last 6h</option>
-              <option value="24h">Last 24h</option>
-              <option value="7d">Last 7d</option>
-              <option value="since_midnight">Today</option>
-              <option value="custom">Custom Range...</option>
-            </select>
+            <div data-active={active.time} className={`flex items-center gap-2 ${active.time ? ACTIVE_BOX_TEXT : ''}`}>
+              <select
+                id={`${fieldId}-time-panel`}
+                value={timePreset}
+                onChange={(e) => handleTimePresetChange(e.target.value)}
+                className={`w-full min-w-0 flex-1 bg-dark-950 border ${active.time ? `${ACTIVE_BORDER} ${ACTIVE_VALUE}` : `${IDLE_BORDER} text-slate-200`} rounded px-3 py-2 text-xs focus:outline-hidden font-mono`}
+              >
+                <option value="all" className="text-slate-200">All Time</option>
+                <option value="15m" className="text-slate-200">Last 15m</option>
+                <option value="1h" className="text-slate-200">Last 1h</option>
+                <option value="6h" className="text-slate-200">Last 6h</option>
+                <option value="24h" className="text-slate-200">Last 24h</option>
+                <option value="7d" className="text-slate-200">Last 7d</option>
+                <option value="since_midnight" className="text-slate-200">Today</option>
+                <option value="custom" className="text-slate-200">Custom Range...</option>
+              </select>
+              {active.time && (
+                <button
+                  type="button"
+                  onClick={handleClearTime}
+                  className={`${CLEAR_BUTTON} p-1.5`}
+                  title="Clear time filter"
+                  aria-label="Clear time filter"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Custom Time */}
@@ -628,7 +702,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <div className="w-full space-y-2 p-2.5 bg-dark-950 rounded border border-dark-700">
               <div>
                 <label htmlFor={`${fieldId}-from-panel`} className="block text-slate-400 text-[11px] mb-1">From:</label>
-                <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
+                <div className={`w-full bg-dark-900 border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded px-2 py-1.5 focus-within:border-accent-500`}>
                   <input
                     id={`${fieldId}-from-panel`}
                     type="datetime-local"
@@ -645,7 +719,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               </div>
               <div>
                 <label htmlFor={`${fieldId}-to-panel`} className="block text-slate-400 text-[11px] mb-1">To:</label>
-                <div className="w-full bg-dark-900 border border-dark-700 rounded px-2 py-1.5 focus-within:border-accent-500">
+                <div className={`w-full bg-dark-900 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded px-2 py-1.5 focus-within:border-accent-500`}>
                   <input
                     id={`${fieldId}-to-panel`}
                     type="datetime-local"

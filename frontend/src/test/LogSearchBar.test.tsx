@@ -581,3 +581,94 @@ describe('LogSearchBar phone toolbar slot', () => {
     expect(within(reset).getByText('Reset').className).not.toContain('hidden');
   });
 });
+
+describe('LogSearchBar shows which filters are active', () => {
+  beforeEach(() => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  const renderBar = async (filters: LogFilterParams, onFilterChange = vi.fn(), onReset = vi.fn()) => {
+    await renderSettled(
+      <LogSearchBar
+        filters={filters}
+        onFilterChange={onFilterChange}
+        onSearch={vi.fn()}
+        onReset={onReset}
+        availableSources={['host-a']}
+        availableApps={['nginx']}
+      />
+    );
+    return { onFilterChange, onReset };
+  };
+  const activeOf = (label: string) => screen.getByLabelText(label).closest('[data-active]')?.getAttribute('data-active');
+  const openPanel = () => fireEvent.click(screen.getByLabelText('Open filters drawer'));
+
+  it('shows nothing as active when no filter is set, and offers no clear buttons', async () => {
+    await renderBar({});
+    expect(activeOf('Search logs')).toBe('false');
+    expect(activeOf('Severity:')).toBe('false');
+    expect(activeOf('Time:')).toBe('false');
+    expect(screen.queryByRole('button', { name: 'Clear severity filter' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear time filter' })).toBeNull();
+    openPanel();
+    expect(activeOf('Severity')).toBe('false');
+    expect(activeOf('Time Range')).toBe('false');
+  });
+
+  it('marks the search box, Severity and Time active in the toolbar and in the phone panel', async () => {
+    await renderBar({ query: 'timeout', severity_max: 3, from: '24h' });
+    expect(activeOf('Search logs')).toBe('true');
+    expect(activeOf('Severity:')).toBe('true');
+    expect(activeOf('Time:')).toBe('true');
+    // The highlighted controls and the Reset count agree
+    expect(screen.getByTitle('Reset all active filters')).toHaveTextContent('3');
+    openPanel();
+    expect(activeOf('Severity')).toBe('true');
+    expect(activeOf('Time Range')).toBe('true');
+  });
+
+  it('marks Time active for a custom range with only a To date', async () => {
+    await renderBar({ to: '2026-09-04T08:00:00.000Z' });
+    expect(activeOf('Time:')).toBe('true');
+  });
+
+  it('counts Custom without dates as active, as the Reset count does', async () => {
+    await renderBar({});
+    fireEvent.change(screen.getByLabelText('Time:'), { target: { value: 'custom' } });
+    expect(activeOf('Time:')).toBe('true');
+    expect(screen.getByTitle('Reset all active filters')).toHaveTextContent('1');
+  });
+
+  it('clears only the severity filter', async () => {
+    const { onFilterChange } = await renderBar({ query: 'x', severity_max: 3, from: '1h', sources: ['host-a'], source: 'host-a' });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear severity filter' })[0]);
+    expect(onFilterChange).toHaveBeenCalledWith({ query: 'x', severity_max: undefined, from: '1h', sources: ['host-a'], source: 'host-a' });
+  });
+
+  it('clears only the time filter', async () => {
+    const { onFilterChange } = await renderBar({ query: 'x', severity_max: 3, from: '2026-09-04T08:00:00.000Z', to: '2026-09-04T09:00:00.000Z' });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear time filter' })[0]);
+    expect(onFilterChange).toHaveBeenCalledWith({ query: 'x', severity_max: 3, from: undefined, to: undefined });
+  });
+
+  it('offers the same clear buttons in the phone panel', async () => {
+    const { onFilterChange } = await renderBar({ severity_max: 3, from: '1h' });
+    openPanel();
+    // The toolbar's controls stay in the page (hidden by CSS on phones); the panel's come after them
+    const severityClears = screen.getAllByRole('button', { name: 'Clear severity filter' });
+    const timeClears = screen.getAllByRole('button', { name: 'Clear time filter' });
+    expect(severityClears).toHaveLength(2);
+    expect(timeClears).toHaveLength(2);
+    expect(screen.getByLabelText('Severity').closest('[data-active]')).toContainElement(severityClears[1]);
+    fireEvent.click(severityClears[1]);
+    expect(onFilterChange).toHaveBeenLastCalledWith({ severity_max: undefined, from: '1h' });
+    fireEvent.click(timeClears[1]);
+    expect(onFilterChange).toHaveBeenLastCalledWith({ severity_max: 3, from: undefined, to: undefined });
+  });
+
+  it('Reset clears every filter at once', async () => {
+    const { onReset } = await renderBar({ query: 'x', severity_max: 3, from: '1h' });
+    fireEvent.click(screen.getByTitle('Reset all active filters'));
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+});
