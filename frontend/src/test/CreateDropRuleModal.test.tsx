@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CreateDropRuleModal } from '../components/alerts/CreateDropRuleModal.tsx';
 import { splitPatternList } from '../utils/patternList.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
+import * as aliasesApi from '../api/aliases.ts';
 import { DropRule } from '../types.ts';
 
 const mockRule: DropRule = {
@@ -390,5 +391,57 @@ describe('splitPatternList', () => {
     expect(splitPatternList(' sshd ,CRON,, cron , ngin* ')).toEqual(['sshd', 'CRON', 'ngin*']);
     expect(splitPatternList(null)).toEqual([]);
     expect(splitPatternList(' , ')).toEqual([]);
+  });
+});
+
+describe('CreateDropRuleModal host aliases', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([
+      { ip: '172.22.2.25', alias: 'nas', created_at: '2026-11-05T10:00:00Z' },
+    ]);
+  });
+
+  it('shows which IP is which alias, for a rule written against the IP before the alias existed', async () => {
+    render(
+      <CreateDropRuleModal
+        isOpen={true}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        ruleToEdit={{ ...mockRule, source_pattern: '172.22.2.25' }}
+        availableSources={['nas', 'router']}
+      />
+    );
+    expect(await screen.findByTestId('host-ip-alias-note')).toHaveTextContent(
+      '172.22.2.25 is the IP of nas, so this rule drops its logs either way.'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Hosts or IPs/ }));
+    const rows = screen.getAllByRole('button').filter((el) => el.hasAttribute('aria-pressed'));
+    expect(rows.map((el) => [el.textContent, el.getAttribute('aria-pressed')])).toEqual([
+      ['nas172.22.2.25', 'false'],
+      ['router', 'false'],
+      ['172.22.2.25alias nas', 'true'],
+    ]);
+
+    // Searching for the IP finds the alias too
+    fireEvent.change(screen.getByPlaceholderText('Search or add host...'), { target: { value: '172.22' } });
+    const found = screen.getAllByRole('button').filter((el) => el.hasAttribute('aria-pressed'));
+    expect(found.map((el) => el.textContent)).toEqual(['nas172.22.2.25', '172.22.2.25alias nas']);
+  });
+
+  it('shows no note for a host without an alias, or when the aliases cannot be loaded', async () => {
+    vi.spyOn(aliasesApi, 'fetchAliases').mockRejectedValue(new Error('offline'));
+    render(
+      <CreateDropRuleModal
+        isOpen={true}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        ruleToEdit={{ ...mockRule, source_pattern: '172.22.2.25' }}
+        availableSources={['nas']}
+      />
+    );
+    await waitFor(() => expect(aliasesApi.fetchAliases).toHaveBeenCalled());
+    expect(screen.queryByTestId('host-ip-alias-note')).toBeNull();
   });
 });

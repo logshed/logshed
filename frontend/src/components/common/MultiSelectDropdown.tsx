@@ -15,6 +15,8 @@ export interface MultiSelectDropdownProps {
   note?: string;
   /** Form variant: id of the visible label; the trigger is named by it followed by the selection. */
   labelledBy?: string;
+  /** Optional second text for an option, shown after it in the list and matched by the search box. */
+  optionHint?: (option: string) => string | undefined;
 }
 
 export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
@@ -28,6 +30,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   variant = 'filter',
   note,
   labelledBy,
+  optionHint,
 }) => {
   const valueId = useId();
   const countId = useId();
@@ -182,10 +185,11 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
     return Array.from(set);
   }, [options, selected]);
 
-  // Filter options based on search term
-  const filteredOptions = allOptions.filter((opt) =>
-    opt.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter options based on search term (an option's hint matches too)
+  const filteredOptions = allOptions.filter((opt) => {
+    const term = searchTerm.toLowerCase();
+    return opt.toLowerCase().includes(term) || (optionHint?.(opt)?.toLowerCase().includes(term) ?? false);
+  });
 
   // Determine button summary text
   const getSummaryText = () => {
@@ -295,6 +299,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         ) : (
           filteredOptions.map((option) => {
             const isChecked = selected.includes(option);
+            const hint = optionHint?.(option);
             return (
               <div
                 key={option}
@@ -314,8 +319,9 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                     : 'text-slate-300 hover:bg-dark-800 hover:text-slate-100'
                 }`}
               >
-                <span className="truncate pr-2" title={option}>
+                <span className="truncate pr-2" title={hint ? `${option} (${hint})` : option}>
                   {option}
+                  {hint && <span className="text-slate-400 ml-1.5">{hint}</span>}
                 </span>
                 <div
                   className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition shrink-0 ${

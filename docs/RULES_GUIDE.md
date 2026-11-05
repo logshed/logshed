@@ -239,7 +239,7 @@ When you rename a syslog host alias or a Docker host alias under Settings > Sour
 Some things are not changed:
 - **Wildcard patterns** such as `nas*`: check that they still fit the new name.
 - **A name another host still uses:** while another syslog host or Docker host has the old alias, the rules and views keep it, because it still matches that host.
-- **A host's first alias:** until a host has an alias, its logs carry the host name it sends (or its IP), and a rule written against that name stops matching once you give the host an alias. Write such rules with the host's IP address, which an alias does not change, or edit them after adding the alias.
+- **A host's first alias:** until a host has an alias, its logs carry the host name it sends (or its IP), and a rule written against that name stops matching once you give the host an alias. Write such rules with the host's IP address, which an alias does not change, or edit them after adding the alias. A rule that names the IP keeps matching after you add an alias, and the drop rule dialog shows the link: in the host list each alias shows its IP, and an IP that has an alias shows that alias, with a note under the field.
 
 Alert rules have no host filter, so a rename does not affect them. Links and bookmarks with the old name in them are not changed.
 

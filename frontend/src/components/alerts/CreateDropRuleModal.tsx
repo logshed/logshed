@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ExternalLink, Play, RotateCcw } from 'lucide-react';
 import { DropRule } from '../../types.ts';
 import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } from '../../api/dropRules.ts';
+import { fetchAliases } from '../../api/aliases.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
@@ -54,6 +55,42 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [sampleSeverity, setSampleSeverity] = useState<string>('');
   const [testResult, setTestResult] = useState<{ matched?: boolean; error?: string | null } | null>(null);
   const [isTesting, setIsTesting] = useState<boolean>(false);
+
+  // Syslog host aliases (lowercased keys both ways), so the host list can show which IP is which alias
+  const [hostAliases, setHostAliases] = useState<{ ipByAlias: Map<string, string>; aliasByIp: Map<string, string> }>(
+    () => ({ ipByAlias: new Map(), aliasByIp: new Map() })
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchAliases()
+      .then((list) => {
+        if (cancelled) return;
+        const ipByAlias = new Map<string, string>();
+        const aliasByIp = new Map<string, string>();
+        for (const a of list) {
+          if (!a.alias || !a.ip) continue;
+          ipByAlias.set(a.alias.trim().toLowerCase(), a.ip);
+          aliasByIp.set(a.ip.trim().toLowerCase(), a.alias);
+        }
+        setHostAliases({ ipByAlias, aliasByIp });
+      })
+      .catch(() => {
+        // Without the aliases the list simply shows no IP hints
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  const hostHint = (option: string): string | undefined => {
+    const key = option.trim().toLowerCase();
+    const ip = hostAliases.ipByAlias.get(key);
+    if (ip) return ip;
+    const alias = hostAliases.aliasByIp.get(key);
+    return alias ? `alias ${alias}` : undefined;
+  };
 
   const prevIsOpenRef = React.useRef<boolean>(false);
   const prevTargetKeyRef = React.useRef<string>('');
@@ -342,6 +379,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               allowCustomInput={true}
               variant="form"
               labelledBy="modal-host-label"
+              optionHint={hostHint}
             />
             {sourceListTooLong ? (
               <span role="alert" className="text-[11px] text-red-400 mt-1 block">
@@ -352,6 +390,13 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                 Any one must match the alias or IP. Type a pattern such as 192.168.1.* or router* to add it.
               </span>
             )}
+            {sources
+              .filter((src) => hostAliases.aliasByIp.has(src.trim().toLowerCase()))
+              .map((ip) => (
+                <span key={ip} data-testid="host-ip-alias-note" className="text-[11px] text-slate-400 mt-1 block">
+                  {ip} is the IP of {hostAliases.aliasByIp.get(ip.trim().toLowerCase())}, so this rule drops its logs either way.
+                </span>
+              ))}
           </div>
 
           {/* Application or Container Filter */}
