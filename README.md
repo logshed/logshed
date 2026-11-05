@@ -222,9 +222,9 @@ docker run -d \
 
 ### Unraid Installation
 
-LogShed provides an official Unraid Community Applications template in [`unraid-template.xml`](unraid-template.xml).
+LogShed provides an Unraid template in [`unraid-template.xml`](unraid-template.xml). It is not in Community Applications yet.
 
-1. Copy `unraid-template.xml` to `/boot/config/plugins/dockerMan/templates-user/my-LogShed.xml` on your Unraid flash drive, or install it via Community Applications when published.
+1. Copy `unraid-template.xml` to `/boot/config/plugins/dockerMan/templates-user/my-LogShed.xml` on your Unraid flash drive.
 2. Set `/data` directly to your SSD cache pool (for example, `/mnt/cache/appdata/logshed`). Avoid `/mnt/user/` paths due to FUSE file locking constraints.
 3. Map `/var/run/docker.sock` to `/var/run/docker.sock` with read-only (`:ro`) access to tail local containers.
 
