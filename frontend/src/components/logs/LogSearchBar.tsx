@@ -474,8 +474,9 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
         {/* Custom Datetime Pickers */}
         {showCustomTime && (
-          <div className={`flex items-center gap-2 bg-dark-900 px-2 py-1 rounded border ${active.time ? ACTIVE_BORDER : IDLE_BORDER} w-full max-w-full md:w-auto`}>
-            <div className={`flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded px-1.5 py-0.5 focus-within:border-accent-500`}>
+          // From and To as two boxes of the dropdowns' height, so choosing Custom... does not make the row taller
+          <div className="flex items-center gap-2 w-full max-w-full md:w-auto">
+            <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-dark-900 border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded px-2.5 focus-within:border-accent-500`}>
               <label htmlFor={`${fieldId}-from`} className="text-slate-400 text-[11px] shrink-0">From:</label>
               <input
                 id={`${fieldId}-from`}
@@ -490,7 +491,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
               />
             </div>
-            <div className={`flex items-center gap-1 min-w-0 flex-1 bg-dark-950 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded px-1.5 py-0.5 focus-within:border-accent-500`}>
+            <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-dark-900 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded px-2.5 focus-within:border-accent-500`}>
               <label htmlFor={`${fieldId}-to`} className="text-slate-400 text-[11px] shrink-0">To:</label>
               <input
                 id={`${fieldId}-to`}

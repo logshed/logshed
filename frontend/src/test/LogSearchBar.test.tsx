@@ -742,6 +742,17 @@ describe('LogSearchBar Severity and Time dropdowns', () => {
     expect(screen.getAllByText('To:').length).toBeGreaterThan(0);
   });
 
+  it('gives the toolbar From and To boxes the height of the dropdowns, so the row does not grow', async () => {
+    await renderSettled(<Stateful />);
+    chooseOption(toolbarSelect('Time'), 'Custom...');
+    const from = screen.getAllByLabelText('From:')[0].parentElement!;
+    const to = screen.getAllByLabelText('To:')[0].parentElement!;
+    expect(from.className).toContain('h-[26px]');
+    expect(to.className).toContain('h-[26px]');
+    // No box around them adding its own border and padding
+    expect(from.parentElement!.className).not.toContain('border');
+  });
+
   it('shows the From and To fields when Custom Range... is chosen in the phone panel', async () => {
     await renderSettled(<Stateful />);
     fireEvent.click(screen.getByTitle('Open filters drawer'));
