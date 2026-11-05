@@ -1,7 +1,7 @@
 """
-Renaming a host alias (a syslog host alias or a Docker host alias): drop rules, active maintenance
-sessions and saved views that name the host by its old alias follow the new one, so they keep
-matching the host's new logs. Wildcard patterns, ended sessions and names still used by another
+Renaming a host alias (a syslog host alias or a Docker host alias), or deleting a syslog host alias:
+drop rules, active maintenance sessions and saved views that name the host by its old alias follow
+the new name (on a delete, the IP), so they keep matching the host's new logs. Wildcard patterns, ended sessions and names still used by another
 host are left alone.
 """
 
@@ -291,4 +291,43 @@ async def test_rename_logs_one_line_with_counts(client, headers, env, caplog):
         await _rename_syslog(client, headers, IP, "storage")
 
     lines = [r.getMessage() for r in caplog.records if r.name == "app.services.alias_rename"]
-    assert lines == ["Host alias renamed: 2 drop rules, 1 maintenance session and 1 saved view now use the new name"]
+    assert lines == ["Host alias changed: 2 drop rules, 1 maintenance session and 1 saved view now use the new name"]
+
+
+async def _delete_alias(client, headers, ip: str) -> None:
+    resp = await client.delete(f"/api/aliases/{ip}", headers=headers)
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_alias_moves_rules_sessions_and_views_to_the_ip(client, headers, env):
+    # The host's logs go back to its IP, so what named the alias now names the IP
+    _add_alias(env, IP, "nas")
+    rule_id = _add_drop_rule(env, "NAS")
+    wild_id = _add_drop_rule(env, "nas*")
+    _add_session(env, "running", "nas", active=True)
+    _add_session(env, "ended", "nas", active=False)
+    view_id = _add_view(env, "v", {"sources": ["nas", "router"], "source": "nas,router"})
+
+    await _delete_alias(client, headers, IP)
+
+    assert _pattern(env, rule_id) == IP
+    assert _pattern(env, wild_id) == "nas*"
+    assert _session_target(env, "running") == IP
+    assert _session_target(env, "ended") == "nas"
+    assert json.loads(_view_params(env, view_id)) == {"sources": [IP, "router"], "source": f"{IP},router"}
+    # A log from the host after the delete carries its IP as the alias
+    assert get_drop_filter().should_drop(IP, IP, "app", "noise here") == rule_id
+    cached = {s["session_id"]: s["target_host"] for s in maintenance_service.get_cached_maintenance_sessions()}
+    assert cached["running"] == IP
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_alias_another_host_still_has_changes_nothing(client, headers, env):
+    _add_alias(env, IP, "nas")
+    _add_alias(env, OTHER_IP, "nas")
+    rule_id = _add_drop_rule(env, "nas")
+
+    await _delete_alias(client, headers, IP)
+
+    assert _pattern(env, rule_id) == "nas"

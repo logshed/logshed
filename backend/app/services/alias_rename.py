@@ -1,11 +1,12 @@
 """
-Keep rules and views pointing at a host when its alias is renamed.
+Keep rules and views pointing at a host when its alias is renamed or deleted.
 
-Stored logs are rewritten to a host's new alias (`_batch_update_log_aliases`,
-`_batch_update_docker_aliases`), and new logs carry it from the start. Drop rules, active
-maintenance sessions and saved views store the name they were given, so after a rename they would
-silently stop matching the host. `follow_alias_rename` moves the ones that name the host by its
-exact old alias (letter case and surrounding spaces ignored, as the matching does) to the new one.
+Stored logs are rewritten to a host's new alias, or back to its IP when a syslog host alias is
+deleted (`_batch_update_log_aliases`, `_batch_update_docker_aliases`), and new logs carry that name
+from the start. Drop rules, active maintenance sessions and saved views store the name they were
+given, so afterwards they would silently stop matching the host. `follow_alias_rename` moves the
+ones that name the host by its exact old alias (letter case and surrounding spaces ignored, as the
+matching does) to the new name.
 Wildcard patterns are left alone, and so is everything when another host still has the old alias,
 because the old name still matches that host.
 """
@@ -145,7 +146,7 @@ async def reload_after_alias_rename(result: Optional[AliasRenameResult]) -> None
         await run_db_query(refresh_maintenance_cache)
     if result.drop_rules or result.maintenance_sessions or result.saved_views:
         logger.info(
-            "Host alias renamed: %s, %s and %s now use the new name",
+            "Host alias changed: %s, %s and %s now use the new name",
             _plural(result.drop_rules, "drop rule"),
             _plural(result.maintenance_sessions, "maintenance session"),
             _plural(result.saved_views, "saved view"),

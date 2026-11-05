@@ -53,6 +53,7 @@ Read these before updating from 1.2.x. The first start migrates the database to 
 - **AI analysis on phones**: A finished analysis opens at its top instead of where you pressed Run.
 - **Console filters**: Severity and Time are highlighted while they filter, like Host and App, and each can be cleared on its own.
 - **Renaming a host**: Drop rules, running maintenance windows and saved views that name the host by its old alias now follow the new one, instead of silently no longer matching it.
+- **Deleting a host alias**: Drop rules, running maintenance windows and saved views that named the alias now use the host's IP address, which its logs show again.
 - **AI with current models**: Analyses failed with Claude Opus 4.7 and later (including all Claude 5 models), OpenAI reasoning models (o-series, GPT-5 and later) and Gemini 4 models, because LogShed sent settings these models refuse.
 - **Saved AI settings**: Saving Settings no longer stores the default model of every provider, so defaults now follow LogShed's updates.
 - **Alert rules**: Busy rate rules (for example 100 logs per second over 5 minutes) now fire, and editing a drop rule can clear its host or app filter.

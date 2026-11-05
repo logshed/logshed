@@ -227,7 +227,7 @@ When creating or editing a drop rule, you configure:
 
 ### Renaming a Host
 
-When you rename a syslog host alias or a Docker host alias under Settings > Sources, LogShed updates what names the host by its old alias, so it keeps matching the host's new logs:
+When you rename a syslog host alias or a Docker host alias under Settings > Sources, LogShed updates what names the host by its old alias, so it keeps matching the host's new logs. Deleting a syslog host alias works the same way, with the host's IP address as the new name, because its logs show the IP again:
 - drop rules whose Host / Source Pattern is exactly the old alias (any letter case),
 - running maintenance windows aimed at the host,
 - saved views that filter on the host.

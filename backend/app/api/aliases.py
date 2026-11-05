@@ -218,10 +218,17 @@ async def delete_alias(
     user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """Delete a host alias mapping by IP address, reverting existing logs to raw IP."""
+    followed: list = [None]
+
     def _delete(conn):
         cursor = conn.cursor()
+        cursor.execute("SELECT alias FROM host_aliases WHERE ip = ?", (ip,))
+        current = cursor.fetchone()
         cursor.execute("DELETE FROM host_aliases WHERE ip = ?", (ip,))
         deleted = cursor.rowcount > 0
+        # The host's logs go back to its IP, so rules and views naming the alias follow to the IP
+        if current and not alias_in_use(conn, current[0], except_ip=ip):
+            followed[0] = follow_alias_rename(conn, current[0], ip)
         conn.commit()
         return deleted
 
@@ -233,6 +240,7 @@ async def delete_alias(
         )
 
     await asyncio.to_thread(reload_active_alias_caches)
+    await reload_after_alias_rename(followed[0])
 
     def _run_batch_delete(conn):
         try:
