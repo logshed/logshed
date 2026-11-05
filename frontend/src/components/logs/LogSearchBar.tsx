@@ -343,13 +343,16 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             onClick={() => setIsMobileDrawerOpen(true)}
             className={`md:hidden flex items-center gap-1.5 px-2.5 ${mobileToolbar ? 'py-1 bg-dark-800' : 'py-1.5 bg-dark-900'} rounded border border-dark-700 text-slate-300 hover:text-white shrink-0 cursor-pointer`}
             title="Open filters drawer"
-            aria-label="Open filters drawer"
+            aria-haspopup="dialog"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" />
-            {!mobileToolbar && <span>Filters</span>}
+            {/* Named by its text, count included ("Filters 3 active"), so the name matches what is shown */}
+            <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" aria-hidden="true" />
+            <span className={mobileToolbar ? 'sr-only' : ''}>Filters</span>
             {activeFilterCount > 0 && (
               <span className="bg-accent-700 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
+                {' '}
                 {activeFilterCount}
+                <span className="sr-only"> active</span>
               </span>
             )}
           </button>
@@ -370,13 +373,15 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <button
               onClick={handleResetFilters}
               title="Reset all active filters"
-              aria-label="Reset all active filters"
               className={`bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-600/70 px-2.5 ${mobileToolbar ? 'py-1 md:py-1.5' : 'py-1.5 ml-auto md:ml-0'} rounded flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0`}
             >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-              <span className={mobileToolbar ? 'hidden md:inline' : ''}>Reset</span>
+              {/* Named by its text ("Reset 3 active filters"); on the phone toolbar the word is read, not shown */}
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              <span className={mobileToolbar ? 'sr-only md:not-sr-only' : ''}>Reset</span>
               <span className="bg-amber-500/30 text-amber-200 border border-amber-500/50 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-bold leading-none">
+                {' '}
                 {activeFilterCount}
+                <span className="sr-only"> active filters</span>
               </span>
             </button>
           )}

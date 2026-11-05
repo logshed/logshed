@@ -32,6 +32,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   labelledBy,
   optionHint,
 }) => {
+  const labelId = useId();
   const valueId = useId();
   const countId = useId();
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -374,7 +375,11 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-labelledby={
-          isForm && labelledBy ? [labelledBy, valueId, selected.length > 1 ? countId : ''].join(' ').trim() : undefined
+          isForm
+            ? labelledBy
+              ? [labelledBy, valueId, selected.length > 1 ? countId : ''].join(' ').trim()
+              : undefined
+            : [labelId, valueId, selected.length > 1 ? countId : ''].join(' ').trim()
         }
       >
         {isForm ? (
@@ -415,8 +420,9 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         ) : (
           <>
             {icon}
-            <span className="text-slate-400 font-medium text-[11px]">{label}:</span>
+            <span id={labelId} className="text-slate-400 font-medium text-[11px]">{label}:</span>
             <span
+              id={valueId}
               className={`font-mono text-[11px] truncate max-w-[130px] ${
                 selected.length > 0 ? 'text-accent-300 font-medium' : 'text-slate-400'
               }`}
@@ -427,23 +433,18 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
 
             {/* Selected Counter Badge */}
             {selected.length > 1 && (
-              <span className="bg-accent-950 text-accent-300 border border-accent-700/60 text-[10px] font-mono px-1 rounded-full font-semibold">
+              <span
+                id={countId}
+                className="bg-accent-950 text-accent-300 border border-accent-700/60 text-[10px] font-mono px-1 rounded-full font-semibold"
+              >
+                {' '}
                 {selected.length}
+                <span className="sr-only"> selected</span>
               </span>
             )}
 
-            {/* Clear selection 'x' button */}
-            {selected.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClear}
-                className="text-slate-500 hover:text-slate-200 p-0.5 rounded hover:bg-dark-800 transition ml-0.5"
-                title={`Clear ${label.toLowerCase()} filter`}
-                aria-label={`Clear ${label.toLowerCase()} filter`}
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
+            {/* Room for the clear button, which sits over the trigger rather than inside it */}
+            {selected.length > 0 && <span className="w-[18px] shrink-0" aria-hidden="true" />}
 
             <ChevronDown
               className={`w-3 h-3 text-slate-400 transition-transform duration-150 ${
@@ -453,6 +454,18 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
           </>
         )}
       </div>
+
+      {!isForm && selected.length > 0 && (
+        <button
+          type="button"
+          onClick={handleClear}
+          className="absolute right-7 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 p-0.5 rounded hover:bg-dark-800 transition"
+          title={`Clear ${label.toLowerCase()} filter`}
+          aria-label={`Clear ${label.toLowerCase()} filter`}
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
 
       {isForm && selected.length > 0 && (
         <button

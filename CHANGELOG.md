@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - **Sky blue accents**: Highlighted text, active tabs, chips and tinted panels now show the sky blue accent they were meant to have instead of the default text and border shades.
 - **Claude refusals fall back to another model**: When a Claude model declines an analysis, Anthropic's own fallback model answers where one exists, and otherwise LogShed tries your configured fallback models instead of failing.
+- **Console filters with a screen reader**: The Filters and Reset buttons now say how many filters are active, and the Host and App filters' clear buttons are separate buttons rather than part of the dropdown.
 - **First lines after a Docker reconnect**: A container that started while LogShed was reconnecting to its Docker host now keeps the lines it wrote before LogShed caught up.
 
 ## [1.3.0-beta.1] - 2026-11-04

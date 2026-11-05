@@ -1245,7 +1245,7 @@ describe('LiveLogStream Component', () => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
     });
     const line = screen.getByTestId('search-bar-mobile-line');
-    expect(line).toContainElement(screen.getByLabelText('Open filters drawer'));
+    expect(line).toContainElement(screen.getByTitle('Open filters drawer'));
     expect(line).toContainElement(screen.getByTitle('Auto-scroll is on: click to pause'));
     expect(screen.getAllByTitle('Auto-scroll is on: click to pause')).toHaveLength(1);
     expect(screen.queryByText('Quick Filters:')).toBeNull();

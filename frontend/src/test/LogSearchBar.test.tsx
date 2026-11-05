@@ -392,7 +392,7 @@ describe('LogSearchBar severity wording', () => {
     await renderSettled(
       <LogSearchBar filters={{}} onFilterChange={vi.fn()} onSearch={vi.fn()} onReset={vi.fn()} />
     );
-    fireEvent.click(screen.getByLabelText('Open filters drawer'));
+    fireEvent.click(screen.getByTitle('Open filters drawer'));
     expect(screen.getByRole('option', { name: 'Warning (4) and more severe' })).toBeInTheDocument();
     expect(screen.queryByText(/Maximum Severity/)).toBeNull();
   });
@@ -417,7 +417,7 @@ describe('LogSearchBar search button, drawer and syntax help', () => {
 
   it('mobile drawer closes and searches with Done', async () => {
     const onSearch = await renderBar();
-    fireEvent.click(screen.getByLabelText('Open filters drawer'));
+    fireEvent.click(screen.getByTitle('Open filters drawer'));
     expect(screen.queryByText('Apply Filters')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onSearch).toHaveBeenCalledTimes(1);
@@ -522,8 +522,8 @@ describe('LogSearchBar phone layout', () => {
     await renderBar({ query: 'disk', severity_max: 3 });
     const input = screen.getByLabelText('Search logs');
     const inputLine = commonParent(input, screen.getByRole('button', { name: 'Search now' }));
-    expect(inputLine).not.toContainElement(screen.getByLabelText('Open filters drawer'));
-    expect(inputLine).not.toContainElement(screen.getByRole('button', { name: 'Reset all active filters' }));
+    expect(inputLine).not.toContainElement(screen.getByTitle('Open filters drawer'));
+    expect(inputLine).not.toContainElement(screen.getByTitle('Reset all active filters'));
     expect(inputLine).not.toContainElement(screen.getByTestId('search-bar-total-count'));
     // Stacked on phones, one row from the md breakpoint
     expect(inputLine.parentElement!.className).toContain('flex-col');
@@ -532,8 +532,8 @@ describe('LogSearchBar phone layout', () => {
 
   it('shows the Reset label on phones too', async () => {
     await renderBar({ query: 'disk' });
-    const reset = screen.getByRole('button', { name: 'Reset all active filters' });
-    expect(within(reset).getByText('Reset').className).not.toContain('hidden');
+    const reset = screen.getByTitle('Reset all active filters');
+    expect(within(reset).getByText('Reset').className).not.toContain('sr-only');
   });
 
   it('places the syntax help across the input, not off the edge of a narrow screen', async () => {
@@ -566,19 +566,20 @@ describe('LogSearchBar phone toolbar slot', () => {
     await renderBar(<button type="button">Scroll</button>);
     const line = screen.getByTestId('search-bar-mobile-line');
     expect(line).toContainElement(screen.getByRole('button', { name: 'Scroll' }));
-    expect(line).toContainElement(screen.getByLabelText('Open filters drawer'));
-    expect(within(screen.getByLabelText('Open filters drawer')).queryByText('Filters')).toBeNull();
-    const reset = screen.getByRole('button', { name: 'Reset all active filters' });
-    expect(within(reset).getByText('Reset').className).toContain('hidden md:inline');
+    expect(line).toContainElement(screen.getByTitle('Open filters drawer'));
+    // Icons only: the words are still read, not shown
+    expect(within(screen.getByTitle('Open filters drawer')).getByText('Filters').className).toBe('sr-only');
+    const reset = screen.getByTitle('Reset all active filters');
+    expect(within(reset).getByText('Reset').className).toContain('sr-only md:not-sr-only');
     // The count stays visible next to the buttons
     expect(within(line).getByTestId('search-bar-total-count')).toHaveTextContent('110 logs');
   });
 
   it('keeps the labelled buttons when no toolbar is passed', async () => {
     await renderBar();
-    expect(within(screen.getByLabelText('Open filters drawer')).getByText('Filters')).toBeInTheDocument();
-    const reset = screen.getByRole('button', { name: 'Reset all active filters' });
-    expect(within(reset).getByText('Reset').className).not.toContain('hidden');
+    expect(within(screen.getByTitle('Open filters drawer')).getByText('Filters').className).not.toContain('sr-only');
+    const reset = screen.getByTitle('Reset all active filters');
+    expect(within(reset).getByText('Reset').className).not.toContain('sr-only');
   });
 });
 
@@ -601,7 +602,7 @@ describe('LogSearchBar shows which filters are active', () => {
     return { onFilterChange, onReset };
   };
   const activeOf = (label: string) => screen.getByLabelText(label).closest('[data-active]')?.getAttribute('data-active');
-  const openPanel = () => fireEvent.click(screen.getByLabelText('Open filters drawer'));
+  const openPanel = () => fireEvent.click(screen.getByTitle('Open filters drawer'));
 
   it('shows nothing as active when no filter is set, and offers no clear buttons', async () => {
     await renderBar({});
@@ -670,5 +671,60 @@ describe('LogSearchBar shows which filters are active', () => {
     const { onReset } = await renderBar({ query: 'x', severity_max: 3, from: '1h' });
     fireEvent.click(screen.getByTitle('Reset all active filters'));
     expect(onReset).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('LogSearchBar filter controls name what they show', () => {
+  beforeEach(() => {
+    vi.spyOn(savedViewsApi, 'fetchSavedViews').mockResolvedValue([]);
+  });
+
+  const renderBar = async (filters: LogFilterParams, mobileToolbar?: ReactNode, onFilterChange = vi.fn()) => {
+    await renderSettled(
+      <LogSearchBar
+        filters={filters}
+        onFilterChange={onFilterChange}
+        onSearch={vi.fn()}
+        onReset={vi.fn()}
+        availableSources={['host-a', 'host-b']}
+        availableApps={['nginx']}
+        mobileToolbar={mobileToolbar}
+      />
+    );
+    return { onFilterChange };
+  };
+
+  it('puts the active filter count in the names of the Filters and Reset buttons', async () => {
+    await renderBar({ query: 'x', severity_max: 3, from: '1h' });
+    expect(screen.getByRole('button', { name: 'Filters 3 active' })).toHaveTextContent('Filters 3');
+    expect(screen.getByRole('button', { name: 'Reset 3 active filters' })).toHaveTextContent('Reset 3');
+  });
+
+  it('keeps the count in the names when the phone toolbar shows icons only', async () => {
+    await renderBar({ query: 'x' }, <button type="button">Scroll</button>);
+    expect(screen.getByRole('button', { name: 'Filters 1 active' })).toBeInTheDocument();
+    const reset = screen.getByRole('button', { name: 'Reset 1 active filters' });
+    // Out of sight on phones but still read, so the name starts with the word shown from md up
+    expect(within(reset).getByText('Reset').className).toContain('sr-only md:not-sr-only');
+  });
+
+  it('names the Filters button without a count when nothing is filtering', async () => {
+    await renderBar({});
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+  });
+
+  it('keeps the Host and App clear buttons out of the dropdown trigger', async () => {
+    const { onFilterChange } = await renderBar({ sources: ['host-a', 'host-b'], source: 'host-a,host-b', apps: ['nginx'], app_name: 'nginx' });
+    const hostClear = screen.getAllByRole('button', { name: 'Clear host / ip filter' })[0];
+    const hostTrigger = screen.getByRole('button', { name: 'Host / IP: host-a (+1) 2 selected' });
+    expect(hostTrigger).not.toContainElement(hostClear);
+    expect(hostTrigger.parentElement).toContainElement(hostClear);
+    const appClear = screen.getAllByRole('button', { name: 'Clear app / container filter' })[0];
+    expect(screen.getByRole('button', { name: 'App / Container: nginx' })).not.toContainElement(appClear);
+
+    fireEvent.click(hostClear);
+    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sources: [], source: undefined }));
+    // Clearing does not open the list
+    expect(hostTrigger).toHaveAttribute('aria-expanded', 'false');
   });
 });
