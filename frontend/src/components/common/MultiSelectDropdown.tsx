@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useRef, useEffect, useId, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check, X, Search, Plus } from 'lucide-react';
 
@@ -13,6 +13,8 @@ export interface MultiSelectDropdownProps {
   variant?: 'filter' | 'form';
   /** Optional hint shown under the search box, for example when the option list was capped. */
   note?: string;
+  /** Form variant: id of the visible label; the trigger is named by it followed by the selection. */
+  labelledBy?: string;
 }
 
 export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
@@ -25,7 +27,10 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   allowCustomInput = true,
   variant = 'filter',
   note,
+  labelledBy,
 }) => {
+  const valueId = useId();
+  const countId = useId();
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -220,6 +225,8 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               type="button"
               onClick={() => setSearchTerm('')}
               className="absolute right-1.5 top-1.5 text-slate-500 hover:text-slate-300"
+              aria-label="Clear search"
+              title="Clear search"
             >
               <X className="w-3 h-3" />
             </button>
@@ -360,12 +367,16 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         tabIndex={0}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
+        aria-labelledby={
+          isForm && labelledBy ? [labelledBy, valueId, selected.length > 1 ? countId : ''].join(' ').trim() : undefined
+        }
       >
         {isForm ? (
           <>
             <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
               {icon}
               <span
+                id={valueId}
                 className={`truncate ${
                   selected.length > 0 ? 'text-slate-200 font-mono' : 'text-slate-400'
                 }`}
@@ -374,23 +385,20 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                 {selected.length === 0 ? placeholder : selected.join(', ')}
               </span>
               {selected.length > 1 && (
-                <span className="bg-accent-950 text-accent-300 border border-accent-700/60 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-semibold shrink-0">
+                <span
+                  id={countId}
+                  className="bg-accent-950 text-accent-300 border border-accent-700/60 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-semibold shrink-0"
+                >
+                  {/* The space keeps the count a separate word in the text read with the selection (not drawn) */}
+                  {' '}
                   {selected.length}
+                  <span className="sr-only"> selected</span>
                 </span>
               )}
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              {selected.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  className="text-slate-400 hover:text-slate-200 p-0.5 rounded hover:bg-dark-700 transition"
-                  title="Clear selection"
-                  aria-label="Clear selection"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+              {/* Room for the clear button, which sits over the trigger rather than inside it */}
+              {selected.length > 0 && <span className="w-[18px]" aria-hidden="true" />}
               <ChevronDown
                 className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${
                   isOpen ? 'rotate-180 text-accent-400' : ''
@@ -440,6 +448,18 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         )}
       </div>
 
+      {isForm && selected.length > 0 && (
+        <button
+          type="button"
+          onClick={handleClear}
+          className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-0.5 rounded hover:bg-dark-700 transition"
+          title="Clear selection"
+          aria-label="Clear selection"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+
       {/* Popover Dropdown Menu & Click-Away Interceptor */}
       {isOpen && (
         isForm && typeof document !== 'undefined' ? (
@@ -470,7 +490,10 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                 {renderDropdownMenu()}
               </div>
             </>,
-            document.body
+            // Inside the dialog around it, if any: content outside an aria-modal dialog is hidden from
+            // screen readers and out of reach of its Tab trap. The dialog's overlay is fixed to the
+            // viewport, so the fixed popover is still placed against the viewport.
+            containerRef.current?.closest('[role="dialog"]') ?? document.body
           )
         ) : (
           <>

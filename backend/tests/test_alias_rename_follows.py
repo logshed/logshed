@@ -331,3 +331,46 @@ async def test_deleting_an_alias_another_host_still_has_changes_nothing(client, 
     await _delete_alias(client, headers, IP)
 
     assert _pattern(env, rule_id) == "nas"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pattern", "renamed"),
+    [
+        ("router, NAS, nas*", "router, storage, nas*"),
+        ("nas,router", "storage, router"),
+        # The new name is already in the list: it appears once
+        ("nas, Storage", "storage"),
+        ("router, nas*", "router, nas*"),
+    ],
+)
+async def test_rename_replaces_the_alias_inside_a_host_list(client, headers, env, pattern, renamed):
+    _add_alias(env, IP, "nas")
+    rule_id = _add_drop_rule(env, pattern)
+
+    await _rename_syslog(client, headers, IP, "storage")
+
+    assert _pattern(env, rule_id) == renamed
+    if "storage" in renamed:
+        assert get_drop_filter().should_drop("storage", IP, "app", "noise here") == rule_id
+
+
+@pytest.mark.asyncio
+async def test_docker_rename_replaces_the_alias_inside_a_host_list(client, headers, env):
+    _add_docker_host(env, 2, "node2")
+    rule_id = _add_drop_rule(env, "router, node2")
+
+    await _rename_docker(client, headers, 2, "node-two")
+
+    assert _pattern(env, rule_id) == "router, node-two"
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_alias_replaces_it_inside_a_host_list_with_the_ip(client, headers, env):
+    _add_alias(env, IP, "nas")
+    rule_id = _add_drop_rule(env, "router, nas")
+
+    await _delete_alias(client, headers, IP)
+
+    assert _pattern(env, rule_id) == f"router, {IP}"
+    assert get_drop_filter().should_drop(IP, IP, "app", "noise here") == rule_id

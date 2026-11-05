@@ -37,15 +37,37 @@ from app.models import (
 from app.services.drop_filter import CompiledDropRule, get_drop_filter
 from app.services.drop_presets import get_drop_presets, get_drop_preset_by_id
 from app.core.regex_validator import check_regex_safety, compile_user_pattern, validate_regex_pattern
+from app.core.utils import normalize_pattern_list, split_pattern_list
 
 router = APIRouter(prefix="/drop-rules", tags=["Drop Rules"])
 
 _DROP_EXPORT_COLUMNS = "name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, severity_threshold, display_order"
 
 
+# Longest rule name the create and update payloads accept
+_NAME_MAX_LENGTH = 100
+
+
+def _list_name(pattern_list: Optional[str]) -> Optional[str]:
+    """A pattern list as a rule name: the list itself, or its first entry and how many more when too long."""
+    parts = split_pattern_list(pattern_list)
+    if not parts:
+        return None
+    joined = ", ".join(parts)
+    if len(joined) <= _NAME_MAX_LENGTH:
+        return joined
+    suffix = f" and {len(parts) - 1} more"
+    return parts[0][: _NAME_MAX_LENGTH - len(suffix)] + suffix
+
+
 def _default_drop_rule_name(app: Optional[str], source: Optional[str], message: Optional[str]) -> str:
-    """The name shown for a drop rule saved without one: its app, its host, or its message pattern."""
-    return app or source or (f"Drop {message}" if message and message != "*" else "Drop Rule")
+    """The name shown for a drop rule saved without one: its apps, its hosts, or its message pattern."""
+    return _list_name(app) or _list_name(source) or (f"Drop {message}" if message and message != "*" else "Drop Rule")
+
+
+def _pattern_list_key(pattern_list: Optional[str]) -> tuple[str, ...]:
+    """A pattern list compared ignoring letter case, spaces and order (for import de-duplication)."""
+    return tuple(sorted(p.lower() for p in split_pattern_list(pattern_list)))
 
 
 def _row_to_drop_export_item(r: Any) -> DropRuleExportItem:
@@ -177,7 +199,8 @@ async def import_drop_rules(
 ) -> DropRuleImportResponse:
     """
     Import drop rules from a bundle, single rule object, or raw dictionary.
-    Deduplicates rules matching (source_pattern, app_pattern, message_pattern) case-insensitively.
+    Deduplicates rules matching (source_pattern, app_pattern, message_pattern) case-insensitively,
+    with the host and app lists compared in any order.
     """
     items = import_items(payload, "drop_rules", "drop_rule")
     if items is None:
@@ -189,8 +212,8 @@ async def import_drop_rules(
         rows = cur.fetchall()
         return {
             (
-                (r["source_pattern"] or "").lower(),
-                (r["app_pattern"] or "").lower(),
+                _pattern_list_key(r["source_pattern"]),
+                _pattern_list_key(r["app_pattern"]),
                 (r["message_pattern"] or "").lower(),
             )
             for r in rows
@@ -208,14 +231,10 @@ async def import_drop_rules(
             continue
 
         src = raw_item.get("source_pattern")
-        src = str(src).strip() if src is not None else None
-        if src == "":
-            src = None
+        src = normalize_pattern_list(str(src)) if src is not None else None
 
         app = raw_item.get("app_pattern")
-        app = str(app).strip() if app is not None else None
-        if app == "":
-            app = None
+        app = normalize_pattern_list(str(app)) if app is not None else None
 
         msg = raw_item.get("message_pattern")
         msg = str(msg).strip() if msg is not None else "*"
@@ -247,8 +266,8 @@ async def import_drop_rules(
                 continue
 
         dedup_key = (
-            (src or "").lower(),
-            (app or "").lower(),
+            _pattern_list_key(src),
+            _pattern_list_key(app),
             (msg or "").lower(),
         )
 
@@ -290,8 +309,8 @@ async def create_drop_rule(
     user: dict = Depends(get_current_user),
 ) -> DropRuleResponse:
     """Create a new drop rule and refresh the in-memory drop filter cache."""
-    source = payload.source_pattern.strip() if payload.source_pattern else None
-    app = payload.app_pattern.strip() if payload.app_pattern else None
+    source = normalize_pattern_list(payload.source_pattern)
+    app = normalize_pattern_list(payload.app_pattern)
     msg = payload.message_pattern.strip() if payload.message_pattern else "*"
     name = payload.name.strip() if payload.name and payload.name.strip() else _default_drop_rule_name(app, source, msg)
 
@@ -368,8 +387,8 @@ async def update_drop_rule(
         existing_source = existing["source_pattern"] if existing["source_pattern"] else None
         existing_app = existing["app_pattern"] if existing["app_pattern"] else None
 
-        source_normalized = _clean(payload.source_pattern) if "source_pattern" in fields else existing_source
-        app_normalized = _clean(payload.app_pattern) if "app_pattern" in fields else existing_app
+        source_normalized = normalize_pattern_list(payload.source_pattern) if "source_pattern" in fields else existing_source
+        app_normalized = normalize_pattern_list(payload.app_pattern) if "app_pattern" in fields else existing_app
         new_message = (
             payload.message_pattern
             if payload.message_pattern is not None
@@ -536,8 +555,8 @@ async def test_drop_rule(
 
     rule = CompiledDropRule(
         id=0,
-        source_pattern=payload.source_pattern.strip() if payload.source_pattern else None,
-        app_pattern=payload.app_pattern.strip() if payload.app_pattern else None,
+        source_pattern=normalize_pattern_list(payload.source_pattern),
+        app_pattern=normalize_pattern_list(payload.app_pattern),
         message_pattern=msg_pat,
         is_regex=payload.is_regex,
         is_enabled=True,

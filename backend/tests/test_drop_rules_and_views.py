@@ -19,6 +19,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+from app.core.utils import normalize_pattern_list, split_pattern_list
 from app.services.drop_filter import CompiledDropRule, DropFilter, get_drop_filter, init_drop_filter
 
 
@@ -1453,3 +1454,188 @@ class TestSavedViewUniqueNames:
 
         names = sorted(v["name"] for v in (await client.get("/api/saved-views")).json())
         assert names == ["Errors", "Warnings"]
+
+
+def _list_rule(source_pattern=None, app_pattern=None, message_pattern="*") -> CompiledDropRule:
+    return CompiledDropRule(
+        id=1,
+        source_pattern=source_pattern,
+        app_pattern=app_pattern,
+        message_pattern=message_pattern,
+        is_regex=False,
+        is_enabled=True,
+    )
+
+
+class TestDropRulePatternLists:
+    """A drop rule's host and app fields each hold a comma-separated list of patterns."""
+
+    def test_split_and_normalise(self):
+        assert split_pattern_list(None) == []
+        assert split_pattern_list(" , ,") == []
+        assert split_pattern_list(" sshd ,CRON,, cron , ngin* ") == ["sshd", "CRON", "ngin*"]
+        assert normalize_pattern_list(" sshd ,CRON,, cron , ngin* ") == "sshd, CRON, ngin*"
+        assert normalize_pattern_list(" , ") is None
+        assert normalize_pattern_list("nginx") == "nginx"
+
+    @pytest.mark.parametrize(
+        ("pattern", "matching", "other"),
+        [
+            ("sshd, cron", ["sshd", "CRON", " Cron "], ["sshd2", "cro", "", "postfix"]),
+            ("sshd, ngin*", ["sshd", "nginx", "NGINX-proxy"], ["ssh", "apache"]),
+            ("ngin?, *proxy", ["nginx", "traefik-proxy"], ["ngin", "proxy-1"]),
+            ("a,,b,", ["a", "b"], ["", "a,b"]),
+        ],
+    )
+    def test_any_app_in_the_list_matches(self, pattern, matching, other):
+        rule = _list_rule(app_pattern=pattern)
+        for app in matching:
+            assert rule.matches("host", "10.0.0.1", app, "msg"), app
+        for app in other:
+            assert not rule.matches("host", "10.0.0.1", app, "msg"), app
+        assert not rule.matches("host", "10.0.0.1", None, "msg")
+
+    def test_any_host_in_the_list_matches_by_alias_or_ip(self):
+        rule = _list_rule(source_pattern="router, 192.168.1.*, NAS")
+        assert rule.matches("Router", "10.0.0.1", "app", "msg")
+        assert rule.matches("nas", None, "app", "msg")
+        assert rule.matches("printer", "192.168.1.40", "app", "msg")
+        assert rule.matches(None, "192.168.1.40", "app", "msg")
+        assert not rule.matches("printer", "10.0.0.1", "app", "msg")
+        assert not rule.matches(None, None, "app", "msg")
+
+    def test_host_list_and_app_list_must_both_match(self):
+        rule = _list_rule(source_pattern="web-01, web-02", app_pattern="nginx, php-fpm", message_pattern="slow")
+        assert rule.matches("web-02", None, "php-fpm", "slow request")
+        assert not rule.matches("web-03", None, "php-fpm", "slow request")
+        assert not rule.matches("web-01", None, "redis", "slow request")
+        assert not rule.matches("web-01", None, "nginx", "fast request")
+
+    def test_filter_drops_from_each_listed_app(self, tmp_path: Path):
+        db_file = tmp_path / "logs.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            "INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
+            "VALUES (NULL, 'cron, CRON.d, systemd-*', 'session', 0, 1, 0, datetime('now'))"
+        )
+        conn.commit()
+        conn.close()
+
+        flt = DropFilter(db_file)
+        assert flt.should_drop("h", "10.0.0.1", "cron", "session opened") is not None
+        assert flt.should_drop("h", "10.0.0.1", "cron.d", "session opened") is not None
+        assert flt.should_drop("h", "10.0.0.1", "systemd-logind", "session opened") is not None
+        assert flt.should_drop("h", "10.0.0.1", "sshd", "session opened") is None
+
+    @pytest.mark.asyncio
+    async def test_create_and_update_store_the_normalised_list(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await client.post(
+            "/api/drop-rules",
+            json={"source_pattern": " web-01 ,WEB-01,, web-02 ", "app_pattern": "sshd ,cron,SSHD", "message_pattern": "x"},
+        )
+        assert res.status_code == 201, res.text
+        data = res.json()
+        assert data["source_pattern"] == "web-01, web-02"
+        assert data["app_pattern"] == "sshd, cron"
+        # The default name is the app list
+        assert data["name"] == "sshd, cron"
+
+        res = await client.put(f"/api/drop-rules/{data['id']}", json={"app_pattern": "nginx,, ngin* ", "source_pattern": " , "})
+        assert res.status_code == 200, res.text
+        updated = res.json()
+        assert updated["app_pattern"] == "nginx, ngin*"
+        assert updated["source_pattern"] is None
+
+        listed = (await client.get("/api/drop-rules")).json()
+        assert [(r["source_pattern"], r["app_pattern"]) for r in listed] == [(None, "nginx, ngin*")]
+        assert get_drop_filter().should_drop("h", "10.0.0.1", "nginx-proxy", "x") == data["id"]
+
+    @pytest.mark.asyncio
+    async def test_only_commas_is_no_filter(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await client.post("/api/drop-rules", json={"app_pattern": " , ,", "message_pattern": "*"})
+        assert res.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_long_list_default_name_fits_the_name_limit(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        apps = [f"container-number-{i:02d}" for i in range(12)]
+        res = await client.post("/api/drop-rules", json={"app_pattern": ",".join(apps), "message_pattern": "x"})
+        assert res.status_code == 201, res.text
+        name = res.json()["name"]
+        assert name == "container-number-00 and 11 more"
+        # The name can be sent back unchanged when the rule is edited
+        res = await client.put(f"/api/drop-rules/{res.json()['id']}", json={"name": name})
+        assert res.status_code == 200, res.text
+
+    @pytest.mark.asyncio
+    async def test_the_255_character_limit_is_for_the_whole_list(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        too_long = ",".join(["a" * 50] * 6)  # 305 characters
+        res = await client.post("/api/drop-rules", json={"app_pattern": too_long, "message_pattern": "x"})
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_import_skips_the_same_lists_in_another_order_or_case(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await client.post(
+            "/api/drop-rules", json={"source_pattern": "web-01, web-02", "app_pattern": "cron, sshd", "message_pattern": "x"}
+        )
+        assert res.status_code == 201
+
+        res = await client.post(
+            "/api/drop-rules/import",
+            json={
+                "drop_rules": [
+                    {"source_pattern": "WEB-02,web-01", "app_pattern": "sshd , Cron,", "message_pattern": "X"},
+                    {"source_pattern": " web-03 ,web-03", "app_pattern": "cron,sshd", "message_pattern": "x"},
+                    {"source_pattern": "web-03", "app_pattern": "CRON, sshd", "message_pattern": "x"},
+                ]
+            },
+        )
+        assert res.status_code == 200, res.text
+        assert res.json() == {"imported": 1, "skipped": 2, "errors": []}
+        listed = (await client.get("/api/drop-rules")).json()
+        assert [(r["source_pattern"], r["app_pattern"], r["name"]) for r in listed][-1] == ("web-03", "cron, sshd", "cron, sshd")
+
+    @pytest.mark.asyncio
+    async def test_export_and_import_keep_the_list(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await client.post("/api/drop-rules", json={"app_pattern": "cron, sshd", "message_pattern": "x"})
+        rule_id = res.json()["id"]
+        bundle = (await client.get("/api/drop-rules/export")).json()
+        assert bundle["drop_rules"][0]["app_pattern"] == "cron, sshd"
+
+        await client.delete(f"/api/drop-rules/{rule_id}")
+        res = await client.post("/api/drop-rules/import", json=bundle)
+        assert res.json()["imported"] == 1
+        listed = (await client.get("/api/drop-rules")).json()
+        assert listed[0]["app_pattern"] == "cron, sshd"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sample_source", "sample_app", "matched"),
+        [
+            ("web-02", "php-fpm", True),
+            ("10.0.0.4", "NGINX", True),
+            ("web-03", "nginx", False),
+            ("web-01", "redis", False),
+        ],
+    )
+    async def test_dry_run_with_lists(self, client: AsyncClient, auth_cookie: dict, sample_source, sample_app, matched):
+        client.cookies = auth_cookie
+        res = await client.post(
+            "/api/drop-rules/test",
+            json={
+                "source_pattern": "web-01, web-02 ,10.0.0.*",
+                "app_pattern": "nginx,php-*",
+                "message_pattern": "slow",
+                "sample_message": "slow request",
+                "sample_source": sample_source,
+                "sample_app": sample_app,
+            },
+        )
+        assert res.status_code == 200, res.text
+        assert res.json() == {"matched": matched, "error": None}

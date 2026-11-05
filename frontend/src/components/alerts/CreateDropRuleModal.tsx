@@ -3,9 +3,12 @@ import { ExternalLink, Play, RotateCcw } from 'lucide-react';
 import { DropRule } from '../../types.ts';
 import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } from '../../api/dropRules.ts';
 import { Modal } from '../common/Modal.tsx';
+import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
+
 
 interface CreateDropRuleModalProps {
   isOpen: boolean;
@@ -35,10 +38,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [ruleName, setRuleName] = useState<string>('');
   const [messagePattern, setMessagePattern] = useState<string>('');
   const [isRegex, setIsRegex] = useState<boolean>(false);
-  const [sourcePattern, setSourcePattern] = useState<string>('');
-  const [isCustomSource, setIsCustomSource] = useState<boolean>(false);
-  const [appPattern, setAppPattern] = useState<string>('');
-  const [isCustomApp, setIsCustomApp] = useState<boolean>(false);
+  const [sources, setSources] = useState<string[]>([]);
+  const [apps, setApps] = useState<string[]>([]);
   const [severityThreshold, setSeverityThreshold] = useState<number | null>(null);
   const [isEnabled, setIsEnabled] = useState<boolean>(true);
   const [currentCount, setCurrentCount] = useState<number>(0);
@@ -78,25 +79,14 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setIsEnabled(ruleToEdit.is_enabled);
         setCurrentCount(ruleToEdit.dropped_count || 0);
 
-        if (ruleToEdit.source_pattern) {
-          setSourcePattern(ruleToEdit.source_pattern);
-          setIsCustomSource(!availableSources.includes(ruleToEdit.source_pattern));
-        } else {
-          setSourcePattern('');
-          setIsCustomSource(false);
-        }
-
-        if (ruleToEdit.app_pattern) {
-          setAppPattern(ruleToEdit.app_pattern);
-          setIsCustomApp(!availableApps.includes(ruleToEdit.app_pattern));
-        } else {
-          setAppPattern('');
-          setIsCustomApp(false);
-        }
+        const editSources = splitPatternList(ruleToEdit.source_pattern);
+        const editApps = splitPatternList(ruleToEdit.app_pattern);
+        setSources(editSources);
+        setApps(editApps);
 
         setSampleMessage(ruleToEdit.message_pattern || '');
-        setSampleSource(ruleToEdit.source_pattern || '');
-        setSampleApp(ruleToEdit.app_pattern || '');
+        setSampleSource(editSources[0] || '');
+        setSampleApp(editApps[0] || '');
         setSampleSeverity(ruleToEdit.severity_threshold != null ? String(ruleToEdit.severity_threshold) : '');
       } else {
         setRuleName(initialName || (initialApp ? `Drop ${initialApp} Chatter` : (initialSource ? `Drop ${initialSource}` : '')));
@@ -106,21 +96,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         setIsEnabled(true);
         setCurrentCount(0);
 
-        if (initialSource) {
-          setSourcePattern(initialSource);
-          setIsCustomSource(!availableSources.includes(initialSource));
-        } else {
-          setSourcePattern('');
-          setIsCustomSource(false);
-        }
-
-        if (initialApp) {
-          setAppPattern(initialApp);
-          setIsCustomApp(!availableApps.includes(initialApp));
-        } else {
-          setAppPattern('');
-          setIsCustomApp(false);
-        }
+        setSources(splitPatternList(initialSource));
+        setApps(splitPatternList(initialApp));
 
         setSampleMessage(initialMessage);
         setSampleSource(initialSource);
@@ -138,6 +115,11 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
     }
   }, [isOpen]);
 
+  const sourcePattern = joinPatternList(sources);
+  const appPattern = joinPatternList(apps);
+  const sourceListTooLong = sourcePattern.length > RULE_FILTER_MAX_LENGTH;
+  const appListTooLong = appPattern.length > RULE_FILTER_MAX_LENGTH;
+
   const isDirty = useMemo(() => {
     if (!isOpen) return false;
     if (ruleToEdit) {
@@ -146,8 +128,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         ruleName !== initialRuleName ||
         messagePattern !== (ruleToEdit.message_pattern || '') ||
         isRegex !== (ruleToEdit.is_regex || false) ||
-        sourcePattern !== (ruleToEdit.source_pattern || '') ||
-        appPattern !== (ruleToEdit.app_pattern || '') ||
+        sourcePattern !== joinPatternList(splitPatternList(ruleToEdit.source_pattern)) ||
+        appPattern !== joinPatternList(splitPatternList(ruleToEdit.app_pattern)) ||
         severityThreshold !== (ruleToEdit.severity_threshold ?? null) ||
         isEnabled !== ruleToEdit.is_enabled
       );
@@ -157,8 +139,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         ruleName !== defaultName ||
         messagePattern !== (initialMessage || '') ||
         isRegex !== false ||
-        sourcePattern !== (initialSource || '') ||
-        appPattern !== (initialApp || '') ||
+        sourcePattern !== joinPatternList(splitPatternList(initialSource)) ||
+        appPattern !== joinPatternList(splitPatternList(initialApp)) ||
         severityThreshold !== null ||
         isEnabled !== true
       );
@@ -189,7 +171,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   };
 
   const hasFilterCriteria = Boolean(
-    messagePattern.trim() || sourcePattern.trim() || appPattern.trim() || severityThreshold !== null
+    messagePattern.trim() || sourcePattern || appPattern || severityThreshold !== null
   );
 
   const handleTestPattern = async () => {
@@ -200,8 +182,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       const res = await testDropRule({
         message_pattern: messagePattern.trim() || '*',
         is_regex: isRegex,
-        source_pattern: sourcePattern.trim() || undefined,
-        app_pattern: appPattern.trim() || undefined,
+        source_pattern: sourcePattern || undefined,
+        app_pattern: appPattern || undefined,
         severity_threshold: severityThreshold,
         sample_message: sampleMessage,
         sample_source: sampleSource.trim() || undefined,
@@ -236,7 +218,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       setTestResult({ error: 'Rule name is required.' });
       return;
     }
-    if (!hasFilterCriteria) return;
+    if (!hasFilterCriteria || sourceListTooLong || appListTooLong) return;
 
     const effectivePattern = messagePattern.trim() || '*';
     try {
@@ -246,8 +228,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           name: ruleName.trim(),
           message_pattern: effectivePattern,
           is_regex: isRegex,
-          source_pattern: sourcePattern.trim() || null,
-          app_pattern: appPattern.trim() || null,
+          source_pattern: sourcePattern || null,
+          app_pattern: appPattern || null,
           severity_threshold: severityThreshold,
           is_enabled: isEnabled,
         });
@@ -257,8 +239,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           name: ruleName.trim(),
           message_pattern: effectivePattern,
           is_regex: isRegex,
-          source_pattern: sourcePattern.trim() || undefined,
-          app_pattern: appPattern.trim() || undefined,
+          source_pattern: sourcePattern || undefined,
+          app_pattern: appPattern || undefined,
           severity_threshold: severityThreshold ?? undefined,
           is_enabled: isEnabled,
         });
@@ -343,123 +325,63 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Host / IP Filter */}
           <div>
-            <label htmlFor="modal-host-select" className="block text-slate-300 font-medium mb-1">
-              Host / IP Filter (Optional)
-            </label>
-            <select
-              id="modal-host-select"
-              value={isCustomSource ? '__custom__' : (availableSources.includes(sourcePattern) ? sourcePattern : (sourcePattern ? '__custom__' : ''))}
-              onChange={(e) => {
-                if (e.target.value === '__custom__') {
-                  setIsCustomSource(true);
-                  if (availableSources.includes(sourcePattern)) {
-                    setSourcePattern('');
-                  }
-                } else {
-                  setIsCustomSource(false);
-                  setSourcePattern(e.target.value);
-                  if (!sampleSource.trim() && e.target.value) {
-                    setSampleSource(e.target.value);
-                  }
+            <span id="modal-host-label" className="block text-slate-300 font-medium mb-1">
+              Hosts or IPs (Optional)
+            </span>
+            <MultiSelectDropdown
+              label="Host"
+              placeholder="Any host or IP"
+              options={availableSources}
+              selected={sources}
+              onChange={(next) => {
+                setSources(next);
+                if (!sampleSource.trim() && next.length > 0) {
+                  setSampleSource(next[0]);
                 }
               }}
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
-            >
-              <option value="">Any Host / IP (None)</option>
-              <option value="__custom__">+ Custom wildcard pattern...</option>
-              {availableSources.map((src) => (
-                <option key={src} value={src}>{src}</option>
-              ))}
-            </select>
-
-            {isCustomSource && (
-              <div className="mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-150">
-                <input
-                  type="text"
-                  value={sourcePattern}
-                  onChange={(e) => {
-                    setSourcePattern(e.target.value);
-                    if (!sampleSource.trim() && e.target.value) {
-                      setSampleSource(e.target.value);
-                    }
-                  }}
-                  placeholder="e.g. 192.168.1.*, router*, *dns*"
-                  maxLength={RULE_FILTER_MAX_LENGTH}
-                  autoFocus
-                  className="flex-1 bg-dark-950 border border-dark-700 rounded px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCustomSource(false);
-                    setSourcePattern('');
-                  }}
-                  className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 bg-dark-900 border border-dark-700 rounded transition shrink-0 cursor-pointer"
-                >
-                  Select from list
-                </button>
-              </div>
+              allowCustomInput={true}
+              variant="form"
+              labelledBy="modal-host-label"
+            />
+            {sourceListTooLong ? (
+              <span role="alert" className="text-[11px] text-red-400 mt-1 block">
+                The host list is longer than {RULE_FILTER_MAX_LENGTH} characters. Remove some, or use a wildcard pattern.
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Any one must match the alias or IP. Type a pattern such as 192.168.1.* or router* to add it.
+              </span>
             )}
           </div>
 
           {/* Application or Container Filter */}
           <div>
-            <label htmlFor="modal-app-select" className="block text-slate-300 font-medium mb-1">
-              Application or Container (Optional)
-            </label>
-            <select
-              id="modal-app-select"
-              value={isCustomApp ? '__custom__' : (availableApps.includes(appPattern) ? appPattern : (appPattern ? '__custom__' : ''))}
-              onChange={(e) => {
-                if (e.target.value === '__custom__') {
-                  setIsCustomApp(true);
-                  if (availableApps.includes(appPattern)) {
-                    setAppPattern('');
-                  }
-                } else {
-                  setIsCustomApp(false);
-                  setAppPattern(e.target.value);
-                  if (!sampleApp.trim() && e.target.value) {
-                    setSampleApp(e.target.value);
-                  }
+            <span id="modal-app-label" className="block text-slate-300 font-medium mb-1">
+              Apps or Containers (Optional)
+            </span>
+            <MultiSelectDropdown
+              label="App"
+              placeholder="Any app or container"
+              options={availableApps}
+              selected={apps}
+              onChange={(next) => {
+                setApps(next);
+                if (!sampleApp.trim() && next.length > 0) {
+                  setSampleApp(next[0]);
                 }
               }}
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
-            >
-              <option value="">Any App / Container (None)</option>
-              <option value="__custom__">+ Custom wildcard pattern...</option>
-              {availableApps.map((app) => (
-                <option key={app} value={app}>{app}</option>
-              ))}
-            </select>
-
-            {isCustomApp && (
-              <div className="mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-150">
-                <input
-                  type="text"
-                  value={appPattern}
-                  onChange={(e) => {
-                    setAppPattern(e.target.value);
-                    if (!sampleApp.trim() && e.target.value) {
-                      setSampleApp(e.target.value);
-                    }
-                  }}
-                  placeholder="e.g. dnsmasq, smartbulb*, traefik"
-                  maxLength={RULE_FILTER_MAX_LENGTH}
-                  autoFocus
-                  className="flex-1 bg-dark-950 border border-dark-700 rounded px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCustomApp(false);
-                    setAppPattern('');
-                  }}
-                  className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 bg-dark-900 border border-dark-700 rounded transition shrink-0 cursor-pointer"
-                >
-                  Select from list
-                </button>
-              </div>
+              allowCustomInput={true}
+              variant="form"
+              labelledBy="modal-app-label"
+            />
+            {appListTooLong ? (
+              <span role="alert" className="text-[11px] text-red-400 mt-1 block">
+                The app list is longer than {RULE_FILTER_MAX_LENGTH} characters. Remove some, or use a wildcard pattern.
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Any one must match. Type a pattern such as smartbulb* to add it.
+              </span>
             )}
           </div>
         </div>
@@ -632,7 +554,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !hasFilterCriteria}
+              disabled={isSubmitting || !hasFilterCriteria || sourceListTooLong || appListTooLong}
               className="px-3 py-1.5 rounded bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting

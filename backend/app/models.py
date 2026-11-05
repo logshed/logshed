@@ -736,8 +736,16 @@ class AiFollowUpResponse(BaseModel):
 class DropRuleCreate(BaseModel):
     """Payload for creating an ingestion drop rule."""
     name: Optional[str] = Field(None, max_length=100, description="Friendly drop rule name")
-    source_pattern: Optional[str] = Field(None, max_length=255, description="Host IP or alias pattern (supports wildcards)")
-    app_pattern: Optional[str] = Field(None, max_length=255, description="Container or application pattern (supports wildcards)")
+    source_pattern: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Comma-separated host IP or alias patterns (each supports wildcards); any one must match",
+    )
+    app_pattern: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Comma-separated container or application patterns (each supports wildcards); any one must match",
+    )
     message_pattern: Optional[str] = Field("*", max_length=1000, description="Substring, wildcard, or regular expression match pattern")
     is_regex: bool = Field(False, description="Whether message_pattern should be evaluated as a regular expression")
     is_enabled: bool = Field(True, description="Whether the rule is active")
@@ -747,8 +755,8 @@ class DropRuleCreate(BaseModel):
 class DropRuleUpdate(BaseModel):
     """Payload for updating an ingestion drop rule."""
     name: Optional[str] = Field(None, max_length=100, description="Friendly drop rule name")
-    source_pattern: Optional[str] = Field(None, max_length=255)
-    app_pattern: Optional[str] = Field(None, max_length=255)
+    source_pattern: Optional[str] = Field(None, max_length=255, description="Comma-separated host IP or alias patterns")
+    app_pattern: Optional[str] = Field(None, max_length=255, description="Comma-separated container or application patterns")
     message_pattern: Optional[str] = Field(None, max_length=1000)
     is_regex: Optional[bool] = None
     is_enabled: Optional[bool] = None

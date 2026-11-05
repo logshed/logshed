@@ -35,10 +35,21 @@ DROP_RULES = [
     (None, "dnsmasq", "DHCP", False, 0, None),         # disabled: never loaded
     (None, "dnsmasq", "query", False, 1, None),
     ("ROUTER", "dnsmasq", "*", False, 1, None),        # exact app and source
+    (None, "postfix, CRON", "*", False, 1, None),      # list of exact apps: one lookup each
+    ("web-01,web-02", None, "slow", False, 1, None),   # list of exact sources
+    (None, "sshd, ngin*", "accepted", False, 1, None), # a wildcard in the list: always checked
+    ("router, nas-*", "postgres", "vacuum", False, 1, None),  # exact app wins over a wildcard source list
 ]
 
-APPS = ["nginx", "Nginx", " NGINX ", "sshd", "kernel", "dnsmasq", "nginx-proxy", "postgres", "", None]
-SOURCES = [("router", "192.168.1.1"), ("Router", "192.168.1.9"), ("nas-01", "10.0.0.5"), (None, "192.168.1.9"), (None, None)]
+APPS = ["nginx", "Nginx", " NGINX ", "sshd", "kernel", "dnsmasq", "nginx-proxy", "postgres", "cron", "Postfix", "", None]
+SOURCES = [
+    ("router", "192.168.1.1"),
+    ("Router", "192.168.1.9"),
+    ("nas-01", "10.0.0.5"),
+    (None, "192.168.1.9"),
+    ("WEB-02", "10.0.0.8"),
+    (None, None),
+]
 MESSAGES = [
     "GET /health 200",
     "upstream timeout while reading",
@@ -48,6 +59,9 @@ MESSAGES = [
     "pool scrub completed",
     "PANIC: 42 kernel fault",
     "link eth0 up",
+    "slow request",
+    "accepted publickey",
+    "vacuum done",
     "nothing to see",
 ]
 
@@ -90,7 +104,7 @@ class TestDropRuleCandidates:
 
         assert flt.get_all_pending_counts() == dict(expected_counts)
         # The case set reaches most rules, including first-match wins between rules for the same app
-        assert len(expected_counts) >= 9
+        assert len(expected_counts) >= 13
 
     def test_rules_for_other_apps_and_sources_are_never_evaluated(self, tmp_path: Path, monkeypatch):
         flt = _drop_filter(tmp_path)
@@ -104,9 +118,30 @@ class TestDropRuleCandidates:
 
         monkeypatch.setattr(CompiledDropRule, "_matches_keys", counting_matches)
 
-        assert flt.should_drop("web-01", "10.0.0.7", "postgres", "nothing to see", 6) is None
+        assert flt.should_drop("web-03", "10.0.0.7", "redis", "nothing to see", 6) is None
         # Only the rules with a wildcard or no app or source filter: ngin*, nas-*, the bare regex
-        assert [names[i] for i in evaluated] == [("ngin*", None), (None, "nas-*"), (None, None)]
+        assert [names[i] for i in evaluated] == [
+            ("ngin*", None),
+            (None, "nas-*"),
+            (None, None),
+            ("sshd, ngin*", None),
+        ]
+
+        evaluated.clear()
+        # Each exact entry of a list finds its rule: an app list, a source list, an exact app with a source list
+        assert flt.should_drop("web-01", "10.0.0.7", "postgres", "nothing to see", 6) is None
+        assert [names[i] for i in evaluated] == [
+            ("ngin*", None),
+            (None, "nas-*"),
+            (None, None),
+            (None, "web-01,web-02"),
+            ("sshd, ngin*", None),
+            ("postgres", "router, nas-*"),
+        ]
+
+        evaluated.clear()
+        assert flt.should_drop(None, None, " Cron ", "anything", 6) is not None
+        assert [names[i] for i in evaluated] == [("ngin*", None), (None, "nas-*"), (None, None), ("postfix, CRON", None)]
 
         evaluated.clear()
         flt.should_drop("router", "10.0.0.7", "Nginx", "nothing to see", 6)
@@ -117,6 +152,7 @@ class TestDropRuleCandidates:
             (None, "router"),
             (None, "nas-*"),
             (None, None),
+            ("sshd, ngin*", None),
         ]
 
     def test_rule_disabled_after_timeouts_leaves_the_lookup(self, tmp_path: Path):

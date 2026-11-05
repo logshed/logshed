@@ -219,16 +219,20 @@ When creating or editing a drop rule, you configure:
 | Field | Description | Purpose |
 |---|---|---|
 | **Rule Name** | Friendly identifier for the rule | Appears in the Drop Rules table and statistics cards |
-| **Host / Source Pattern** | Filter by originating host or IP | Supports wildcards (for example, `192.168.1.*` or `router-*`). Optional if App or Message is set |
-| **App / Container Pattern** | Filter by application or container name | Supports wildcards (for example, `CRON`, `systemd*`, or `traefik`). Optional if Host or Message is set |
+| **Hosts or IPs** | Filter by originating hosts or IPs | Pick hosts from the list or type patterns with wildcards (for example, `192.168.1.*` or `router-*`). A log matches when any one of them matches its alias or IP. Optional if App or Message is set |
+| **Apps or Containers** | Filter by application or container names | Pick apps from the list or type patterns with wildcards (for example, `CRON`, `systemd*`, or `traefik`). A log matches when any one of them matches. Optional if Host or Message is set |
 | **Message Pattern** | Keyword substring or regular expression | Matches log payload. Can be a case-insensitive substring or regex. Enter `*` to match all messages |
 | **Regex Toggle** | Regular expression parsing toggle | Enables safe regex evaluation when checked (with a 50 ms limit per match; a rule that times out 20 times in 5 minutes is disabled automatically, see the alert rule notes above), or fast case-insensitive substring matching when unchecked. With the toggle on, write `\\` for a literal backslash |
 | **Severity Range** | Drop only logs at this level or less severe | Preserves critical entries while discarding routine chatter (detailed below) |
 
+When a rule has both hosts and apps, a log must match one of the hosts and one of the apps. One rule for `cron, sshd, systemd-logind` replaces three rules with the same message pattern. The rule stores each list as one comma-separated field (`cron, sshd, systemd-logind`, up to 255 characters), which is also how it appears in exports and in the API. Leave a list empty to match every host or app.
+
+LogShed 1.3.0 and earlier read such a list as one name, so after going back to 1.3.0 a rule with several hosts or apps matches nothing until you edit it.
+
 ### Renaming a Host
 
 When you rename a syslog host alias or a Docker host alias under Settings > Sources, LogShed updates what names the host by its old alias, so it keeps matching the host's new logs. Deleting a syslog host alias works the same way, with the host's IP address as the new name, because its logs show the IP again:
-- drop rules whose Host / Source Pattern is exactly the old alias (any letter case),
+- drop rules that list the old alias exactly (any letter case) among their hosts; only that entry changes,
 - running maintenance windows aimed at the host,
 - saved views that filter on the host.
 

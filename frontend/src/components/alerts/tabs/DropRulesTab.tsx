@@ -30,6 +30,7 @@ import { useReorderableList } from '../../../utils/useReorderableList.ts';
 import { downloadRuleExport, importRuleFile } from '../../../utils/ruleTransfer.ts';
 import { lessSevereLabel } from '../../../utils/severityLabels.ts';
 import { CreateDropRuleModal } from '../CreateDropRuleModal.tsx';
+import { splitPatternList } from '../../../utils/patternList.ts';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
 
@@ -311,16 +312,16 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                      <span>
-                        Host:{' '}
+                      <span className="break-words min-w-0">
+                        {splitPatternList(rule.source_pattern).length > 1 ? 'Hosts' : 'Host'}:{' '}
                         {rule.source_pattern ? (
                           <span className="font-mono text-slate-300">{rule.source_pattern}</span>
                         ) : (
                           <span className="text-slate-400 italic">Any</span>
                         )}
                       </span>
-                      <span>
-                        App:{' '}
+                      <span className="break-words min-w-0">
+                        {splitPatternList(rule.app_pattern).length > 1 ? 'Apps' : 'App'}:{' '}
                         {rule.app_pattern ? (
                           <span className="font-mono text-slate-300">{rule.app_pattern}</span>
                         ) : (

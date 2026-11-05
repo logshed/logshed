@@ -68,7 +68,8 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Automated AI Redaction Notice:**
   * When rules with AI enrichment are enabled, the UI renders prominent notices explaining that triggering events are dispatched automatically to external AI providers without manual review, that automated scrubbing operates on a best-effort basis, and that automated triggers consume API tokens.
 * **Drop Rules Tab:**
-  * Pre-storage discard filters (keyword or regex) matching message content, application name, or source, with severity thresholds.
+  * Pre-storage discard filters (keyword or regex) matching message content, application names, or sources, with severity thresholds.
+  * The Create and Edit dialog picks hosts and apps with `MultiSelectDropdown` (`variant="form"`, typed patterns such as `router*` added as entries), as the alert rule dialog's app filter does; each trigger is named by its label and its selection. A saved list opens as one entry per pattern, and a list longer than 255 characters shows an error and keeps Save disabled. The Dry-Run sample host and app start from the first entry. The list shows "Hosts:" and "Apps:" for rules with several. In the form variant, the clear button sits over the trigger as its sibling (not inside it), the count badge is part of the trigger's name ("3 selected"), and the open list is portaled into the enclosing dialog (else `document.body`), so it is inside the `aria-modal` dialog and its Tab trap.
   * Displays live dropped counters per rule, counter reset actions, dry-run testing against recent logs, and JSON export/import.
 * **Alert History Tab:**
   * Unified incident history covering triggered alert rules, automated AI rule enrichments, and scheduled daily analytical digest dispatches.

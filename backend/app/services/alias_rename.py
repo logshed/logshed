@@ -6,7 +6,7 @@ deleted (`_batch_update_log_aliases`, `_batch_update_docker_aliases`), and new l
 from the start. Drop rules, active maintenance sessions and saved views store the name they were
 given, so afterwards they would silently stop matching the host. `follow_alias_rename` moves the
 ones that name the host by its exact old alias (letter case and surrounding spaces ignored, as the
-matching does) to the new name.
+matching does) to the new name; in a drop rule's comma-separated host list, only that entry changes.
 Wildcard patterns are left alone, and so is everything when another host still has the old alias,
 because the old name still matches that host.
 """
@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from app.api.deps import run_db_query
 from app.core.rule_index import exact_match_key
+from app.core.utils import normalize_pattern_list, split_pattern_list
 from app.services.drop_filter import get_drop_filter
 from app.services.maintenance_service import refresh_maintenance_cache
 
@@ -69,6 +70,14 @@ def _rename_in_list(values: list[Any], old_key: str, new_alias: str) -> Optional
     return renamed
 
 
+def _rename_in_pattern_list(pattern_list: str, old_key: str, new_alias: str) -> Optional[str]:
+    """A drop rule's host list with the old alias replaced (duplicates removed, any case), or None when absent."""
+    parts = split_pattern_list(pattern_list)
+    if not any(exact_match_key(p) == old_key for p in parts):
+        return None
+    return normalize_pattern_list(", ".join(new_alias if exact_match_key(p) == old_key else p for p in parts))
+
+
 def _rename_in_view(params: dict[str, Any], old_key: str, new_alias: str) -> bool:
     """Rename the host in a saved view's sources list and source field (comma separated). True when changed."""
     changed = False
@@ -99,13 +108,15 @@ def follow_alias_rename(conn: sqlite3.Connection, old_alias: str, new_alias: str
     if old_key is None or not new_alias or old_alias.strip() == new_alias:
         return result
 
-    rule_ids = [
-        r[0]
-        for r in conn.execute("SELECT id, source_pattern FROM drop_rules WHERE source_pattern IS NOT NULL")
-        if exact_match_key(r[1]) == old_key
-    ]
-    conn.executemany("UPDATE drop_rules SET source_pattern = ? WHERE id = ?", [(new_alias, i) for i in rule_ids])
-    result.drop_rules = len(rule_ids)
+    rule_updates = []
+    for rule_id, pattern_list in conn.execute(
+        "SELECT id, source_pattern FROM drop_rules WHERE source_pattern IS NOT NULL"
+    ):
+        renamed = _rename_in_pattern_list(pattern_list, old_key, new_alias)
+        if renamed is not None:
+            rule_updates.append((renamed, rule_id))
+    conn.executemany("UPDATE drop_rules SET source_pattern = ? WHERE id = ?", rule_updates)
+    result.drop_rules = len(rule_updates)
 
     session_ids = [
         r[0]

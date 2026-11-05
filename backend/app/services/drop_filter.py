@@ -28,7 +28,7 @@ from app.core.regex_validator import (
     user_pattern_search,
 )
 from app.core.rule_index import RuleIndex, exact_match_key
-from app.core.utils import compile_wildcard, wildcard_text_key
+from app.core.utils import compile_wildcard_list, split_pattern_list, wildcard_text_key
 from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CompiledDropRule:
-    """Compiled drop rule representation with a pre-compiled user regex (`regex` engine)."""
+    """
+    Compiled drop rule representation with a pre-compiled user regex (`regex` engine).
+
+    source_pattern and app_pattern each hold a comma-separated list of patterns (one pattern is a
+    list of one); the rule matches when any host pattern and any app pattern match.
+    """
     id: int
     source_pattern: Optional[str]
     app_pattern: Optional[str]
@@ -54,8 +59,8 @@ class CompiledDropRule:
     _message_text_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        self._source_match = compile_wildcard(self.source_pattern)
-        self._app_match = compile_wildcard(self.app_pattern)
+        self._source_match = compile_wildcard_list(self.source_pattern)
+        self._app_match = compile_wildcard_list(self.app_pattern)
         if self.message_pattern and not self.is_regex:
             pattern = self.message_pattern.strip().lower()
             if "*" in pattern or "?" in pattern:
@@ -149,14 +154,20 @@ class CompiledDropRule:
         return True
 
 
+def _exact_keys(pattern_list: Optional[str]) -> Optional[tuple[str, ...]]:
+    """The exact values a pattern list matches, or None when it is empty or any entry has a wildcard."""
+    keys = tuple(exact_match_key(p) for p in split_pattern_list(pattern_list))
+    return keys if keys and all(keys) else None
+
+
 def _drop_rule_exact_keys(rule: CompiledDropRule) -> Optional[tuple[str, tuple[str, ...]]]:
-    """The exact app (or else source) a drop rule requires, or None when it must see every entry."""
-    app = exact_match_key(rule.app_pattern)
-    if app:
-        return ("app", (app,))
-    source = exact_match_key(rule.source_pattern)
-    if source:
-        return ("source", (source,))
+    """The exact apps (or else sources) a drop rule requires, or None when it must see every entry."""
+    apps = _exact_keys(rule.app_pattern)
+    if apps:
+        return ("app", apps)
+    sources = _exact_keys(rule.source_pattern)
+    if sources:
+        return ("source", sources)
     return None
 
 

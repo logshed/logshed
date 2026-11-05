@@ -112,6 +112,50 @@ def compile_wildcard(pattern: Optional[str]) -> Optional[Callable[[str], bool]]:
     return lambda t: t == p
 
 
+def split_pattern_list(text: Optional[str]) -> list[str]:
+    """
+    The patterns in a comma-separated list such as a drop rule's host or app field: trimmed,
+    without empty parts, and with later duplicates that differ only in letter case left out.
+    """
+    if not text:
+        return []
+    parts: list[str] = []
+    seen: set[str] = set()
+    for part in text.split(","):
+        part = part.strip()
+        key = part.lower()
+        if part and key not in seen:
+            seen.add(key)
+            parts.append(part)
+    return parts
+
+
+def normalize_pattern_list(text: Optional[str]) -> Optional[str]:
+    """A comma-separated pattern list in its stored form ("a, b"), or None when it holds no pattern."""
+    parts = split_pattern_list(text)
+    return ", ".join(parts) if parts else None
+
+
+def compile_wildcard_list(text: Optional[str]) -> Optional[Callable[[str], bool]]:
+    """
+    compile_wildcard for a comma-separated list: a function of wildcard_text_key(text) that is
+    true when any pattern in the list matches, or None when the list is empty and matches any text.
+    """
+    parts = split_pattern_list(text)
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return compile_wildcard(parts[0])
+    exact = frozenset(p.lower() for p in parts if "*" not in p and "?" not in p)
+    wild = [p.lower() for p in parts if "*" in p or "?" in p]
+    if not wild:
+        return exact.__contains__
+    match = re.compile("|".join(f"(?:{fnmatch.translate(p)})" for p in wild)).match
+    if not exact:
+        return lambda t: match(t) is not None
+    return lambda t: t in exact or match(t) is not None
+
+
 def parse_iso_to_utc_datetime(val: Any) -> Optional[datetime.datetime]:
     """Parse ISO-8601 string or numeric timestamp to timezone-aware UTC datetime."""
     if val is None:

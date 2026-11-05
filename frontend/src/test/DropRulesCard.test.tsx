@@ -5,6 +5,18 @@ import * as dropRulesApi from '../api/dropRules.ts';
 import { DropRule } from '../types.ts';
 import { stubDownloads } from './downloadStubs.ts';
 
+/** Add a typed pattern to the drop rule dialog's host or app dropdown, as a user does. */
+function addPattern(field: RegExp, searchPlaceholder: string, value: string) {
+  fireEvent.click(screen.getByRole('button', { name: field }));
+  const search = screen.getByPlaceholderText(searchPlaceholder);
+  fireEvent.change(search, { target: { value } });
+  fireEvent.keyDown(search, { key: 'Enter' });
+  fireEvent.click(screen.getByTestId('dropdown-backdrop'));
+}
+
+const addHost = (value: string) => addPattern(/Hosts or IPs/, 'Search or add host...', value);
+const addApp = (value: string) => addPattern(/Apps or Containers/, 'Search or add app...', value);
+
 describe('DropRulesCard Component', () => {
   const mockRules: DropRule[] = [
     {
@@ -226,7 +238,7 @@ describe('DropRulesCard Component', () => {
     });
   });
 
-  it('allows selecting host/app from dropdown or entering custom wildcard', async () => {
+  it('takes typed wildcard patterns for host and app', async () => {
     const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({
       id: 4,
       name: 'Router Timeout Rule',
@@ -254,20 +266,8 @@ describe('DropRulesCard Component', () => {
     const msgInput = screen.getByPlaceholderText(/e\.g\. DHCPACK/i);
     fireEvent.change(msgInput, { target: { value: 'timeout' } });
 
-    // Host: Select custom wildcard
-    const hostSelect = screen.getByLabelText(/Host \/ IP Filter/i) || screen.getAllByRole('combobox')[0];
-    fireEvent.change(hostSelect, { target: { value: '__custom__' } });
-
-    // Custom input appears
-    const customHostInput = screen.getByPlaceholderText('e.g. 192.168.1.*, router*, *dns*');
-    fireEvent.change(customHostInput, { target: { value: 'router*' } });
-
-    // App: Select custom wildcard
-    const appSelect = screen.getByLabelText(/Application or Container/i) || screen.getAllByRole('combobox')[1];
-    fireEvent.change(appSelect, { target: { value: '__custom__' } });
-
-    const customAppInput = screen.getByPlaceholderText('e.g. dnsmasq, smartbulb*, traefik');
-    fireEvent.change(customAppInput, { target: { value: 'traefik' } });
+    addHost('router*');
+    addApp('traefik');
 
     // Submit
     const saveBtn = screen.getByRole('button', { name: 'Create Rule' });
@@ -315,12 +315,7 @@ describe('DropRulesCard Component', () => {
     const nameInput = screen.getByPlaceholderText(/e\.g\. CRON Chatter/i);
     fireEvent.change(nameInput, { target: { value: 'Drop All PveDaemon' } });
 
-    // Select custom app: pvedaemon
-    const appSelect = screen.getByLabelText(/Application or Container/i);
-    fireEvent.change(appSelect, { target: { value: '__custom__' } });
-
-    const customAppInput = screen.getByPlaceholderText('e.g. dnsmasq, smartbulb*, traefik');
-    fireEvent.change(customAppInput, { target: { value: 'pvedaemon' } });
+    addApp('pvedaemon');
 
     // Set message pattern to * (or leave blank)
     const msgInput = screen.getByPlaceholderText(/e\.g\. DHCPACK/i);
@@ -394,11 +389,7 @@ describe('DropRulesCard Component', () => {
     expect(sevSelect).toBeInTheDocument();
     fireEvent.change(sevSelect, { target: { value: '6' } });
 
-    // Select custom app: sshd
-    const appSelect = screen.getByLabelText(/Application or Container/i);
-    fireEvent.change(appSelect, { target: { value: '__custom__' } });
-    const customAppInput = screen.getByPlaceholderText('e.g. dnsmasq, smartbulb*, traefik');
-    fireEvent.change(customAppInput, { target: { value: 'sshd' } });
+    addApp('sshd');
 
     // Fill sample message and test
     const sampleMsg = screen.getByPlaceholderText('Paste a representative log line here...');

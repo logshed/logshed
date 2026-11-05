@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [1.3.1] - Unreleased
 
+### Added
+- **Drop rules for several hosts or apps**: One drop rule can now name several hosts and several apps, picked from lists or typed as patterns, like an alert rule's app filter. A log is dropped when it matches any of them. Going back to 1.3.0 leaves such rules matching nothing until edited.
+
 ### Changed
 - **Keyboard use**: In the Console, the arrow keys move through log rows, Enter opens one and Space ticks it. Dialogs keep focus inside, Esc closes only the dialog on top, and focus goes back where it was when a dialog closes.
 - **Faster first load**: The web interface's files are sent compressed (less than a third of their size) and browsers keep them until the next release, which helps most over a VPN or a phone connection.
