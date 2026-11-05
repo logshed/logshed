@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Key,
   Plus,
@@ -822,7 +823,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
       </section>
 
       {/* Generate Token Modal */}
-      {isGenerateModalOpen && (
+      {isGenerateModalOpen && createPortal(
         <div data-testid="generate-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
           <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain animate-in fade-in zoom-in-95 duration-150">
             <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
@@ -907,11 +908,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Edit Token Modal (name and scopes) */}
-      {tokenToEdit && (
+      {tokenToEdit && createPortal(
         <div data-testid="edit-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
           <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain animate-in fade-in zoom-in-95 duration-150">
             <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
@@ -1025,12 +1027,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* One-Time Raw Token Modal */}
-      {createdRawToken && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/85 backdrop-blur-xs">
+      {createdRawToken && createPortal(
+        <div data-testid="raw-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/85 backdrop-blur-xs">
           <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
@@ -1100,11 +1103,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Revoke Confirmation Modal */}
-      {tokenToRevoke && (
+      {tokenToRevoke && createPortal(
         <div data-testid="revoke-token-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-950/80 backdrop-blur-xs">
           <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-5 space-y-3">
@@ -1142,7 +1146,8 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

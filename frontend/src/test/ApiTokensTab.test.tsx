@@ -427,6 +427,38 @@ describe('ApiTokensTab Component', () => {
     expect(screen.getByText(/Are you sure you want to revoke/i)).toBeInTheDocument();
   });
 
+  describe('dialogs are rendered on the page body', () => {
+    // A dialog inside the tab inherits the tab's child spacing as a top margin, which moves the fixed
+    // overlay down and leaves a strip of the page undimmed. jsdom does no layout, so check the parent.
+    it('renders the generate, one-time token, edit and revoke dialogs as children of document.body', async () => {
+      vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue(mockTokens);
+      vi.spyOn(tokensApi, 'createApiToken').mockResolvedValue({
+        token: { ...mockTokens[0], id: 3, name: 'New One' },
+        raw_token: 'ls_live_raw',
+      });
+      render(<ApiTokensTab />);
+      await waitFor(() => {
+        expect(screen.getByText('Active Tokens (2)')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Generate Token/i }));
+      expect(screen.getByTestId('generate-token-modal').parentElement).toBe(document.body);
+      fireEvent.change(screen.getByPlaceholderText('e.g. Home Assistant or Claude Desktop'), { target: { value: 'New One' } });
+      fireEvent.click(screen.getByRole('button', { name: /Create Token/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('raw-token-modal').parentElement).toBe(document.body);
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Done/i }));
+
+      fireEvent.click(screen.getAllByTitle('Edit Token')[0]);
+      expect(screen.getByTestId('edit-token-modal').parentElement).toBe(document.body);
+      fireEvent.click(within(screen.getByTestId('edit-token-modal')).getByRole('button', { name: /Cancel/i }));
+
+      fireEvent.click(screen.getAllByTitle('Revoke Token')[0]);
+      expect(screen.getByTestId('revoke-token-modal').parentElement).toBe(document.body);
+    });
+  });
+
   describe('custom scope picker in the generate modal', () => {
     const createdToken = {
       token: {
