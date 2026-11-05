@@ -229,6 +229,12 @@ describe('NotificationsCard Component', () => {
     await waitFor(() => {
       expect(screen.getByText('Daily Digest Rollup')).toBeInTheDocument();
       expect(screen.getByText('Send Digest Now')).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /Homelab Discord/ })).toBeInTheDocument();
+    });
+    // The card copies the loaded settings into the digest controls; on a slow runner that can land after
+    // the click below and switch the digest off again, so let the settings load first
+    await act(async () => {
+      await vi.mocked(settingsApi.fetchSettings).mock.results[0]?.value;
     });
 
     // Toggle daily digest enable
@@ -306,8 +312,9 @@ describe('NotificationsCard Component', () => {
     });
 
     render(<NotificationsCard />);
+    // Wait for the channels and settings: the message names the channel only once the list has loaded
     await waitFor(() => {
-      expect(screen.getByText('Send Digest Now')).toBeInTheDocument();
+      expect((screen.getByLabelText(/Target Channel/i) as HTMLSelectElement).value).toBe('1');
     });
     fireEvent.click(screen.getByText('Send Digest Now'));
 

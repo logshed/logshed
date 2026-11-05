@@ -2647,9 +2647,9 @@ describe('LiveLogStream console controls', () => {
     it('ranks host and app chips by buffer volume (ties alphabetical), top 6 each, with group labels', async () => {
       renderStream();
       await screen.findByText('msg 1 from zz');
-      await waitFor(() => expect(chipTexts('quick-filter-app')).toContain('aa'));
+      // The chips are ranked in an effect after the rows render, which a slow runner can run later
+      await waitFor(() => expect(chipTexts('quick-filter-app')).toEqual(['zz', 'yy', 'bb', 'aa', 'cc', 'dd']));
       expect(chipTexts('quick-filter-host')).toEqual(['zeta', 'mid', 'alpha', 'idle-host']);
-      expect(chipTexts('quick-filter-app')).toEqual(['zz', 'yy', 'bb', 'aa', 'cc', 'dd']);
       expect(screen.getByText('Hosts')).toBeInTheDocument();
       expect(screen.getByText('Apps')).toBeInTheDocument();
       // The labels come before their group
@@ -2673,7 +2673,8 @@ describe('LiveLogStream console controls', () => {
         vi.spyOn(logsApi, 'fetchLogFacets').mockResolvedValue(mappedFacets as any);
         renderStream();
         await screen.findByText('msg 1 from zz');
-        await waitFor(() => expect(chipTexts('quick-filter-app')).toContain('aa'));
+        // Wait for the ranking, not just the chips: unranked, zz is not among the top 6
+        await waitFor(() => expect(chipTexts('quick-filter-app')).toEqual(['zz', 'yy', 'bb', 'aa', 'cc', 'dd']));
         return { hostsBefore: chipTexts('quick-filter-host'), appsBefore: chipTexts('quick-filter-app') };
       };
 
@@ -3025,9 +3026,12 @@ describe('Focus on the log an alert link points at', () => {
     window.history.replaceState(null, '', `/?${range}&focus=${sampleLogs[2].id}`);
     renderStream();
 
-    await waitFor(() => expect(focusedRows()).toHaveLength(1));
+    // The row is highlighted when it renders; the scroll follows in an effect, which a slow runner can run later
+    await waitFor(() => {
+      expect(focusedRows()).toHaveLength(1);
+      expect(virtualizerControl.scrollToIndex).toHaveBeenCalledWith(2, { align: 'center' });
+    });
     expect(focusedRows()[0]).toHaveTextContent(sampleLogs[2].message);
-    expect(virtualizerControl.scrollToIndex).toHaveBeenCalledWith(2, { align: 'center' });
     const params = vi.mocked(logsApi.fetchLogs).mock.calls[0][0] as Record<string, unknown>;
     expect(params).not.toHaveProperty('focus');
     // The link's range is kept as filters, with the focus parameter beside them
@@ -3050,10 +3054,12 @@ describe('Focus on the log an alert link points at', () => {
     window.history.replaceState(null, '', `/?${range}&focus=4321`);
     renderStream();
 
-    await waitFor(() => expect(focusedRows()).toHaveLength(1));
+    await waitFor(() => {
+      expect(focusedRows()).toHaveLength(1);
+      expect(virtualizerControl.scrollToIndex).toHaveBeenCalledWith(500, { align: 'center' });
+    });
     expect(focusedRows()[0]).toHaveTextContent('the line that fired the alert');
     expect(vi.mocked(logsApi.fetchLogs).mock.calls.map((c) => (c[0] as any).offset)).toEqual([0, 500]);
-    expect(virtualizerControl.scrollToIndex).toHaveBeenCalledWith(500, { align: 'center' });
   });
 
   it('stops highlighting and drops the focus parameter when the filters change', async () => {
