@@ -32,8 +32,8 @@ cd ..
 # 4. Run the backend test suite
 .venv/bin/pytest backend/tests/ -v
 
-# 5. Start the local development server
-.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
+# 5. Start the local development server (DATA_DIR keeps the database in ./data instead of /data)
+DATA_DIR=./data .venv/bin/python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
 ```
 
 ## Architecture & Coding Guidelines

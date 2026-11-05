@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/logshed/logshed/issues</Support>
   <Project>https://github.com/logshed/logshed</Project>
-  <Overview>LogShed is a lightweight, single-process syslog and Docker log aggregator featuring real-time streaming, SQLite FTS5 search, and user-initiated AI root-cause analysis.</Overview>
+  <Overview>LogShed collects syslog and Docker logs from every host in your lab in one container, with a live console, full-text search, and alerts to 100+ services through Apprise. It also has maintenance windows, a REST API, an MCP server for AI assistants and a Home Assistant integration. AI diagnosis is optional and stays off until you add a provider.</Overview>
   <Category>Tools: System: Status: Network:Management</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
@@ -28,6 +28,6 @@
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Host Docker socket for automated container discovery and log streaming (read-only)." Type="Path" Display="always" Required="false" Mask="false">/var/run/docker.sock</Config>
   <Config Name="PUID" Target="PUID" Default="99" Description="User ID for non-root execution." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Description="Group ID for non-root execution." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
-  <Config Name="Timezone" Target="TZ" Default="UTC" Description="Container timezone." Type="Variable" Display="advanced" Required="false" Mask="false">UTC</Config>
+  <Config Name="Timezone" Target="TZ" Default="UTC" Description="Your own time zone, for example Europe/London or America/New_York. LogShed uses it for syslog timestamps that carry no zone, maintenance schedules and the daily digest." Type="Variable" Display="advanced" Required="false" Mask="false">UTC</Config>
   <Config Name="Internal Log Level" Target="LOGSHED_INTERNAL_LOG_LEVEL" Default="WARNING" Description="Minimum severity level for LogShed internal application logs captured into LogShed (DEBUG, INFO, WARNING, ERROR, CRITICAL, or DISABLED)." Type="Variable" Display="advanced" Required="false" Mask="false">WARNING</Config>
 </Container>
