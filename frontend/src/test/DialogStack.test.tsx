@@ -230,3 +230,21 @@ describe('Dialogs (Modal, SlideOver and the dialog stack)', () => {
     expect(openDialogCount()).toBe(0);
   });
 });
+
+describe('page overscroll while a dialog is open', () => {
+  it('turns off the page overscroll (pull-to-refresh) while any dialog is open, and restores it after the last closes', () => {
+    render(<NestedDialogs />);
+    expect(document.documentElement.style.overscrollBehavior).toBe('');
+    fireEvent.click(screen.getByText('Open drawer'));
+    expect(document.documentElement.style.overscrollBehavior).toBe('none');
+    expect(document.body.style.overscrollBehavior).toBe('none');
+    fireEvent.click(screen.getByText('Open modal'));
+    pressEscape();
+    // The drawer is still open
+    expect(document.documentElement.style.overscrollBehavior).toBe('none');
+    pressEscape();
+    expect(openDialogCount()).toBe(0);
+    expect(document.documentElement.style.overscrollBehavior).toBe('');
+    expect(document.body.style.overscrollBehavior).toBe('');
+  });
+});

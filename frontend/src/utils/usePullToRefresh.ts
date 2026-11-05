@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { openDialogCount } from './dialogStack.ts';
 
 export interface PullTouchHandlers {
   onTouchStart: (e: React.TouchEvent) => void;
@@ -20,6 +21,9 @@ const PULL_MIN_STEEPNESS = 2;
 
 type GestureMode = 'undecided' | 'pull' | 'ignore';
 
+/** Where a swipe never starts a pull: dialogs, open lists, and popovers marked data-no-pull-refresh. */
+const NO_PULL_SELECTOR = '[role="dialog"], [role="listbox"], [data-no-pull-refresh]';
+
 export function usePullToRefresh({
   onRefresh,
   threshold = 60,
@@ -38,6 +42,11 @@ export function usePullToRefresh({
     (e: React.TouchEvent) => {
       if (disabled || isRefreshing) return;
       if (e.touches.length !== 1) return;
+      // Touch events bubble through the React tree, so a swipe in a drawer or an open list rendered
+      // inside the header reaches these handlers too: no pull while a dialog is open or from a list
+      if (openDialogCount() > 0) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest(NO_PULL_SELECTOR)) return;
       startRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       modeRef.current = 'undecided';
       isDraggingRef.current = true;

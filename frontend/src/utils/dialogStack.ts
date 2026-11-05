@@ -84,15 +84,39 @@ function currentOpeners(): HTMLElement[] {
   return [active];
 }
 
+// While a dialog is open, a swipe on its backdrop, or on a dialog too short to scroll, reaches the
+// page; at the top of the page a phone browser takes a downward swipe as pull-to-refresh and reloads.
+// Turning off the page's overscroll stops that; the dialog's own scrolling is not affected.
+let savedOverscroll: { html: string; body: string } | null = null;
+
+function blockPageOverscroll(): void {
+  savedOverscroll = { html: document.documentElement.style.overscrollBehavior, body: document.body.style.overscrollBehavior };
+  document.documentElement.style.overscrollBehavior = 'none';
+  document.body.style.overscrollBehavior = 'none';
+}
+
+function restorePageOverscroll(): void {
+  if (!savedOverscroll) return;
+  document.documentElement.style.overscrollBehavior = savedOverscroll.html;
+  document.body.style.overscrollBehavior = savedOverscroll.body;
+  savedOverscroll = null;
+}
+
 function push(entry: DialogEntry): void {
-  if (stack.length === 0) window.addEventListener('keydown', handleKeyDown);
+  if (stack.length === 0) {
+    window.addEventListener('keydown', handleKeyDown);
+    blockPageOverscroll();
+  }
   stack.push(entry);
 }
 
 function remove(entry: DialogEntry): void {
   const index = stack.indexOf(entry);
   if (index >= 0) stack.splice(index, 1);
-  if (stack.length === 0) window.removeEventListener('keydown', handleKeyDown);
+  if (stack.length === 0) {
+    window.removeEventListener('keydown', handleKeyDown);
+    restorePageOverscroll();
+  }
 }
 
 export interface UseDialogOptions {

@@ -491,6 +491,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
 
               <div
                 ref={popoverRef}
+                data-no-pull-refresh
                 style={{
                   position: 'fixed',
                   top: coords ? `${coords.top}px` : '0px',
@@ -523,6 +524,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
 
             <div
               ref={popoverRef}
+              data-no-pull-refresh
               className="absolute left-0 mt-1 w-64 bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-50 py-1.5 animate-in fade-in-50 zoom-in-95 duration-100"
             >
               {renderDropdownMenu()}

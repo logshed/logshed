@@ -180,6 +180,7 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
 
               <div
                 data-testid="views-dropdown-panel"
+                data-no-pull-refresh
                 className="absolute right-0 top-full mt-1.5 w-64 bg-dark-900 border border-dark-700 rounded-md shadow-xl py-1 z-50 font-sans"
               >
                 {/* Header Actions */}

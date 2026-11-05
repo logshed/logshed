@@ -1,4 +1,5 @@
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, render, screen, fireEvent } from '@testing-library/react';
+import { SlideOver } from '../components/common/SlideOver.tsx';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useClipboard } from '../utils/hooks.ts';
 import { usePullToRefresh } from '../utils/usePullToRefresh.ts';
@@ -236,5 +237,55 @@ describe('usePullToRefresh only reacts to a deliberate downward pull', () => {
     act(() => hook.result.current.touchHandlers.onTouchStart(touch(100, 100)));
     act(() => hook.result.current.touchHandlers.onTouchMove(touch(100, 200)));
     expect(hook.result.current.isPulling).toBe(true);
+  });
+});
+
+describe('usePullToRefresh leaves dialogs and open lists alone', () => {
+  /** A header with the pull handlers, as the Navbar and Console toolbar have, holding a drawer and a list. */
+  function Header({ onRefresh, drawerOpen }: { onRefresh: () => void; drawerOpen: boolean }) {
+    const { touchHandlers } = usePullToRefresh({ onRefresh, threshold: 40 });
+    return (
+      <div {...touchHandlers}>
+        <span>Toolbar</span>
+        <ul role="listbox" aria-label="Hosts">
+          <li role="option" aria-selected={false}>nas</li>
+        </ul>
+        <SlideOver isOpen={drawerOpen} onClose={() => {}} title="Filter Logs">
+          <span>Drawer content</span>
+        </SlideOver>
+      </div>
+    );
+  }
+
+  const pull = async (el: Element) => {
+    fireEvent.touchStart(el, { touches: [{ clientX: 100, clientY: 100 }] });
+    fireEvent.touchMove(el, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(el, { touches: [{ clientX: 100, clientY: 400 }] });
+    await act(async () => {
+      fireEvent.touchEnd(el);
+    });
+  };
+
+  it('refreshes for a pull on the header itself', async () => {
+    const onRefresh = vi.fn();
+    render(<Header onRefresh={onRefresh} drawerOpen={false} />);
+    await pull(screen.getByText('Toolbar'));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh for a downward swipe inside an open drawer, or on the header while a dialog is open', async () => {
+    const onRefresh = vi.fn();
+    render(<Header onRefresh={onRefresh} drawerOpen />);
+    await pull(screen.getByText('Drawer content'));
+    await pull(screen.getByTestId('slideover-backdrop'));
+    await pull(screen.getByText('Toolbar'));
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh for a downward swipe in an open dropdown list', async () => {
+    const onRefresh = vi.fn();
+    render(<Header onRefresh={onRefresh} drawerOpen={false} />);
+    await pull(screen.getByRole('option', { name: 'nas' }));
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });
