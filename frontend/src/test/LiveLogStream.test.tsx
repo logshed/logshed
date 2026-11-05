@@ -1797,6 +1797,18 @@ describe('LiveLogStream Component', () => {
       expect(document.getElementById('log-row-104')!.className).not.toContain('group-focus/loglist:ring-1');
     });
 
+    it('pauses auto-scroll when the cursor moves, so new live rows do not carry the cursor row away', async () => {
+      const list = await loadList();
+      expect(screen.getByText('Auto-Scroll ON')).toBeInTheDocument();
+      key(list, 'Enter'); // no cursor yet: nothing happens, and the stream keeps following
+      expect(screen.getByText('Auto-Scroll ON')).toBeInTheDocument();
+      key(list, 'ArrowDown');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+      key(list, 'ArrowDown');
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-102');
+    });
+
     it('ticks the cursor row with Space and a range with Shift+Space', async () => {
       const list = await loadList();
       key(list, 'ArrowDown');

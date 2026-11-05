@@ -1475,7 +1475,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const isAtTop = scrollTop <= 5;
 
     if (isAtTop) {
-      if (!autoScroll && !isTouchingRef.current) {
+      const scrolledByCursor = performance.now() - cursorScrollAtRef.current < 500;
+      if (!autoScroll && !isTouchingRef.current && !scrolledByCursor) {
         setAutoScroll(true);
         setMissedLogsCount(0);
       }
@@ -1527,6 +1528,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // names the cursor row with aria-activedescendant. Tracked by log id, so it stays on its log
   // when live rows are added above it; -1 when unset or the log has left the buffer.
   const [cursorLogId, setCursorLogId] = useState<number | null>(null);
+  // When the cursor last scrolled the list: reaching the top that way (Home) keeps auto-scroll paused
+  const cursorScrollAtRef = useRef<number>(0);
   const cursorIndex = useMemo(
     () => (cursorLogId === null ? -1 : processedLogs.findIndex((l) => l.id === cursorLogId)),
     [cursorLogId, processedLogs],
@@ -1584,7 +1587,14 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
     e.preventDefault();
     const index = Math.min(count - 1, Math.max(0, next));
+    // Moving the cursor pauses auto-scroll, as scrolling down does, so live rows arriving above it
+    // keep the view (and the cursor row) in place instead of carrying it down the list
+    if (isAutoScrollRef.current) {
+      isAutoScrollRef.current = false;
+      setAutoScroll(false);
+    }
     setCursorLogId(processedLogs[index].id);
+    cursorScrollAtRef.current = performance.now();
     rowVirtualizer.scrollToIndex(index, { align: 'auto' });
   };
   // aria-activedescendant may only name a row that is in the DOM
