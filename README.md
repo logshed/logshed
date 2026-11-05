@@ -297,8 +297,8 @@ cd ..
 # Optional: end-to-end tests (live Docker build and AI provider calls using keys from .env)
 .venv/bin/pytest backend/tests/ -m e2e -v
 
-# 6. Run local development server
-python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
+# 6. Run local development server (DATA_DIR keeps the database in ./data instead of /data)
+DATA_DIR=./data python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
 ```
 
 ### Updating Pinned Dependencies
