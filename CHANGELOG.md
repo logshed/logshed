@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **No reload when swiping on a phone**: Swiping down while the filters panel or another panel or dialog is open no longer reloads the page.
 - **Arrow keys in a busy Console**: Moving through log rows with the arrow keys pauses auto-scroll, so new logs no longer carry the highlighted row down the list and each key moves one row.
 - **First lines after a Docker reconnect**: A container that started while LogShed was reconnecting to its Docker host now keeps the lines it wrote before LogShed caught up.
+- **Log lines starting with a severity word**: Messages starting with words like Error, Warning or Notice (such as "Error on Supervisor API") without a colon or columnar spacing no longer have their first word trimmed in the Console or log detail payload.
 
 ## [1.3.0-beta.1] - 2026-11-04
 

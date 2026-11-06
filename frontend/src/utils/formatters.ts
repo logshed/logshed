@@ -36,14 +36,14 @@ const LEADING_TIMESTAMP_REGEX =
   /^(?:\[\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s+(?:UTC|GMT|CET|EET|WET|MSK|[A-Z]{1,2}[SD]T)(?:[+-]\d{1,4})?|Z|[+-]\d{2}:?\d{2})?\]|\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s+(?:UTC|GMT|CET|EET|WET|MSK|[A-Z]{1,2}[SD]T)(?:[+-]\d{1,4})?|Z|[+-]\d{2}:?\d{2})?|[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2})\s*/;
 
 const SUBSYSTEM_WITH_LEVEL_REGEX = new RegExp(
-  `^(\\[[^\\]]+\\])\\s+(?:${LEVEL_WORDS})\\s*:?\\s+`,
+  `^(\\[[^\\]]+\\])\\s+(?:${LEVEL_WORDS})(?::\\s*|\\s{2,})`,
   'i'
 );
 
 const BRACKET_LEVEL_REGEX = new RegExp(`^\\[(?:${LEVEL_WORDS})\\]\\s*:?\\s*`, 'i');
 
 const WORD_LEVEL_REGEX =
-  /^(?:(?:emerg|emergency|alert|crit|critical|fatal|panic|err|error|warn|warning|notice|info|informational|debug|trace|verbose)\s*:?\s+|log:\s+)/i;
+  /^(?:(?:emerg|emergency|alert|crit|critical|fatal|panic|err|error|warn|warning|notice|info|informational|debug|trace|verbose)(?::\s*|\s{2,})|log:\s*)/i;
 
 /**
  * Additional prefix matchers:

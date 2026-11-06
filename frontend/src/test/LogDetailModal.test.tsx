@@ -413,6 +413,32 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(screen.queryByText('Raw Container Output')).toBeNull();
   });
 
+  it('renders intact message payload for logs starting with an error sentence without a colon', () => {
+    const haLog: LogEntry = {
+      id: 935139,
+      timestamp: '2026-11-06T13:48:59.825872+00:00',
+      received_at: '2026-11-06T13:48:59.826000+00:00',
+      source_ip: '192.168.1.50',
+      source_alias: 'homeassistant',
+      app_name: 'homeassistant',
+      facility: 16,
+      severity: 4,
+      message: 'Error on Supervisor API: Timeout connecting to Supervisor',
+      raw: '<132>1 2026-11-06T13:48:59.825872+00:00 - homeassistant - - [opentelemetry code.file.path="components/hassio/coordinator.py"] Error on Supervisor API: Timeout connecting to Supervisor',
+    };
+
+    render(
+      <LogDetailModal
+        log={haLog}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Error on Supervisor API: Timeout connecting to Supervisor')).toBeInTheDocument();
+  });
+
   it('renders "Edit Docker Host" for active Docker endpoint log and calls onEditDockerHost', () => {
     const dockerLog: LogEntry = {
       id: 201,

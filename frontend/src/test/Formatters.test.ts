@@ -150,6 +150,26 @@ describe('cleanLogMessageForDisplay', () => {
     const expected = '[Plex Scan]: Recently Added Scan Complete';
     expect(cleanLogMessageForDisplay(input)).toBe(expected);
   });
+
+  it('preserves sentences starting with Error when not followed by a colon or columnar spacing', () => {
+    const input = 'Error on Supervisor API: Timeout connecting to Supervisor';
+    expect(cleanLogMessageForDisplay(input)).toBe(input);
+  });
+
+  it('preserves sentences starting with Warning when not followed by a colon or columnar spacing', () => {
+    const input = 'Warning during backup process: connection dropped';
+    expect(cleanLogMessageForDisplay(input)).toBe(input);
+  });
+
+  it('trims unbracketed level word when followed by a colon', () => {
+    const input = 'Error: Connection refused by peer';
+    expect(cleanLogMessageForDisplay(input)).toBe('Connection refused by peer');
+  });
+
+  it('preserves subsystem message starting with Error when not followed by a colon', () => {
+    const input = '[coordinator] Error on Supervisor API: Timeout connecting to Supervisor';
+    expect(cleanLogMessageForDisplay(input)).toBe(input);
+  });
 });
 
 describe('toLocalDatetimeInputString', () => {
