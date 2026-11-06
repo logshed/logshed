@@ -82,9 +82,7 @@ class CompiledDropRule:
             return True
 
         if self.is_regex:
-            if self.compiled_regex is None:
-                return False
-            if not message:
+            if self.compiled_regex is None or message is None:
                 return False
             return user_pattern_search(
                 self.compiled_regex, message, rule_label=f"drop rule {self.id}", on_timeout=self.on_pattern_timeout

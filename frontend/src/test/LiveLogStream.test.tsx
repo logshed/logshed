@@ -29,7 +29,7 @@ const virtualizerControl: {
   edgeRows: number | null;
   headOnly: boolean;
   lastOptions: any;
-  scrollToIndex: ReturnType<typeof vi.fn>;
+  scrollToIndex: any;
 } = {
   edgeRows: null,
   headOnly: false,

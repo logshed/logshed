@@ -131,6 +131,23 @@ class TestDropFilterUnit:
         assert flt.should_drop(None, None, "nginx", "GET /health HTTP/1.1 200") is not None
         assert flt.should_drop(None, None, "nginx", "GET /healthy HTTP/1.1 200") is None
 
+    def test_regex_matching_empty_message(self, tmp_path: Path):
+        db_file = tmp_path / "logs.db"
+        conn = get_connection(db_file)
+        conn.execute(
+            r"""
+            INSERT INTO drop_rules (source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at)
+            VALUES (NULL, 'radarr', '^\s*$', 1, 1, 0, datetime('now'))
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        flt = DropFilter(db_file)
+        assert flt.should_drop(None, None, "radarr", "") is not None
+        assert flt.should_drop(None, None, "radarr", "   ") is not None
+        assert flt.should_drop(None, None, "radarr", "normal line") is None
+
     def test_disabled_rules_ignored(self, tmp_path: Path):
         db_file = tmp_path / "logs.db"
         conn = get_connection(db_file)

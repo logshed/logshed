@@ -129,7 +129,11 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
 
         {/* Line 2: Message Payload (break-all, 2 lines clamp, always two full lines of height) */}
         <div className="text-slate-200 text-xs font-mono break-all line-clamp-2 select-text leading-4 h-8 shrink-0">
-          {displayMessage}
+          {displayMessage.trim() ? (
+            displayMessage
+          ) : (
+            <span className="italic text-slate-500 select-none">(empty message)</span>
+          )}
         </div>
 
         {/* Line 3: Timestamp (left) + AI Action (right, only when AI is on) */}
@@ -206,7 +210,11 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
 
       {/* Raw Text Message without dangerouslySetInnerHTML */}
       <div className="text-slate-200 truncate pr-3 select-text" title={displayTitle}>
-        {displayMessage}
+        {displayMessage.trim() ? (
+          displayMessage
+        ) : (
+          <span className="italic text-slate-500 select-none">(empty message)</span>
+        )}
       </div>
 
       {/* Quick Row Actions (AI only, so the column is dropped when AI is off) */}
