@@ -675,6 +675,10 @@ class KeyedMultilineAssembler:
         if not is_cont and self._buffers.get(stream_key):
             self._flush_stream_internal(stream_key)
 
+        # A standalone blank line (not continuing a multiline buffer) is ignored
+        if not is_cont and not message.strip():
+            return
+
         now = time.monotonic()
 
         # If stream buffer exists, check maximum lifetime
@@ -815,6 +819,9 @@ class KeyedMultilineAssembler:
             merged_entry['message'] = merged_message
             merged_entry['raw'] = merged_raw
             merged_entry['severity'] = min_severity
+
+        if not merged_entry.get("message", "").strip():
+            return
 
         filter_and_enqueue(merged_entry)
 

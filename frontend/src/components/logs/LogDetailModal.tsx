@@ -495,7 +495,11 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto">
             {/* Sanitized text element without dangerouslySetInnerHTML */}
-            {cleanedPayload}
+            {cleanedPayload.trim() ? (
+              cleanedPayload
+            ) : (
+              <span className="italic text-slate-500 select-none">(empty message)</span>
+            )}
           </div>
         </div>
 
@@ -516,7 +520,11 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             </button>
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-400 text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto">
-            {stripAnsi(log.raw)}
+            {stripAnsi(log.raw).trim() ? (
+              stripAnsi(log.raw)
+            ) : (
+              <span className="italic text-slate-500 select-none">(empty)</span>
+            )}
           </div>
         </div>
 

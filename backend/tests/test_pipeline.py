@@ -1016,6 +1016,50 @@ class TestQueueConsumer:
 class TestKeyedMultilineAssemblerLimits:
     """Unit tests for multiline assembler bounds, eviction, and timeout guards."""
 
+    @pytest.mark.asyncio
+    async def test_standalone_empty_line_is_ignored(self):
+        """A standalone empty or whitespace-only line is not enqueued."""
+        asm = KeyedMultilineAssembler(flush_timeout=0.01)
+        q = get_queue()
+
+        await asm.feed("s1:radarr", _make_entry(message=""))
+        await asm.feed("s1:radarr", _make_entry(message="   "))
+        await asyncio.sleep(0.03)
+
+        assert q.empty()
+
+    @pytest.mark.asyncio
+    async def test_empty_line_flushes_pending_non_traceback_entry_without_enqueuing_empty(self):
+        """An empty line flushes previous pending log but does not enqueue itself."""
+        asm = KeyedMultilineAssembler(flush_timeout=10.0)
+        q = get_queue()
+
+        await asm.feed("s1:radarr", _make_entry(message="Server started"))
+        assert q.empty()
+
+        # Feeding empty line flushes 'Server started' and is not enqueued itself
+        await asm.feed("s1:radarr", _make_entry(message=""))
+        assert not q.empty()
+        item = q.get_nowait()
+        assert item["message"] == "Server started"
+        assert q.empty()
+
+    @pytest.mark.asyncio
+    async def test_empty_line_inside_traceback_is_preserved(self):
+        """An empty line inside an active traceback continuation is preserved as part of the multiline entry."""
+        asm = KeyedMultilineAssembler(flush_timeout=0.01)
+        q = get_queue()
+
+        await asm.feed("s1:app", _make_entry(message="Traceback (most recent call last):"))
+        await asm.feed("s1:app", _make_entry(message='  File "main.py", line 1'))
+        await asm.feed("s1:app", _make_entry(message=""))
+        await asm.feed("s1:app", _make_entry(message="ValueError: boom"))
+
+        asm.flush_stream("s1:app")
+        assert not q.empty()
+        item = q.get_nowait()
+        assert item["message"] == 'Traceback (most recent call last):\n  File "main.py", line 1\n\nValueError: boom'
+
     def test_constants_defined(self):
         assert MAX_STREAM_LINES == 500
         assert MAX_STREAM_BYTES == 256 * 1024

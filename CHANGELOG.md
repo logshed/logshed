@@ -68,6 +68,7 @@ Read these before updating from 1.2.x. The first start migrates the database to 
 - **`reset-admin`** asks for the new password twice instead of taking it on the command line.
 
 ### Fixed
+- **Blank log lines**: Standalone blank lines emitted by Docker containers or syslog senders (such as Radarr error spacing) are ignored instead of recording empty INFO rows, while blank lines inside multi-line stack traces are kept intact. Regular expression drop rules can also match empty messages.
 - **Telegram notifications**: Saving or testing a Telegram channel no longer fails with a server error, because the colon in the bot token was read as a port. Thanks to [@marcomosa](https://github.com/marcomosa) ([#2](https://github.com/logshed/logshed/pull/2)).
 - **Docker logs after a daemon restart**: When a Docker host closed its event stream cleanly, for example while the daemon restarted, LogShed stopped collecting that host's container logs until LogShed itself restarted. It now reconnects.
 - **API token dialogs**: The page behind them is now dimmed to the top edge.
