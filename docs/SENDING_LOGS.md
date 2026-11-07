@@ -192,7 +192,7 @@ pfSense generates BSD-style (RFC 3164) log payloads. LogShed natively extracts t
 
 ## Home Assistant
 
-Home Assistant does not natively stream internal application logs to a remote syslog daemon out of the box. Using the **Remote Logger** integration via HACS alongside Home Assistant's native event bus, you can forward Core warnings, errors, and custom integration issues directly to your syslog server with real-time dispatch and zero device telemetry spam.
+Home Assistant does not natively stream internal application logs to a remote syslog daemon out of the box. Using the **Remote Logger** integration from the Home Assistant [Marketplace](https://www.home-assistant.io/integrations/marketplace/) (or HACS on releases before 2026.11) alongside Home Assistant's native event bus, you can forward Core warnings, errors, and custom integration issues directly to your syslog server with real-time dispatch and zero device telemetry spam.
 
 ### Configuration Steps
 
@@ -203,8 +203,8 @@ Home Assistant does not natively stream internal application logs to a remote sy
        fire_event: true
      ```
    - *(By default, Home Assistant does not broadcast UI log entries to the internal event bus; this directive allows the integration to intercept them).*
-2. Install the **Remote Logger** integration via HACS:
-   - In the Home Assistant sidebar, navigate to: **HACS**.
+2. Install the **Remote Logger** integration via the Home Assistant Marketplace (or HACS):
+   - In Home Assistant, navigate to **Settings > Marketplace** (or **HACS** in the sidebar on releases before 2026.11).
    - Search for **Remote Logger** (by Rhizomatics) and click **Download**.
    - Restart Home Assistant under **Settings > System > Restart** to load both the integration and the YAML changes.
 3. In the Home Assistant web interface, navigate to:
