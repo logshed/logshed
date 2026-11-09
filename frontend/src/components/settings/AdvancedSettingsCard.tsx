@@ -11,6 +11,7 @@ import {
   Save,
 } from 'lucide-react';
 import { AiThinkingLevel, SystemSettings } from '../../types.ts';
+import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { updateSettings } from '../../api/settings.ts';
 
 const DEFAULT_THINKING_LEVEL: AiThinkingLevel = 'low';
@@ -240,21 +241,19 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
             </div>
 
             <div>
-              <label htmlFor="ai-thinking-level" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label id="ai-thinking-level-label" htmlFor="ai-thinking-level" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                 Thinking Level
               </label>
-              <select
+              <SelectDropdown
+                variant="panel"
+                fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 text-slate-200"
                 id="ai-thinking-level"
+                labelledBy="ai-thinking-level-label"
+                label="Thinking Level"
+                options={THINKING_LEVEL_OPTIONS}
                 value={aiThinkingLevel}
-                onChange={(e) => setAiThinkingLevel(e.target.value as AiThinkingLevel)}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500"
-              >
-                {THINKING_LEVEL_OPTIONS.map(({ value, label }) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setAiThinkingLevel(v as AiThinkingLevel)}
+              />
             </div>
           </div>
           <p className="text-[11px] text-slate-400">

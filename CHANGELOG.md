@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - **Keyboard use**: In the Console, the arrow keys move through log rows, Enter opens one and Space ticks it. Dialogs keep focus inside, Esc closes only the dialog on top, and focus goes back where it was when a dialog closes.
-- **Console Severity and Time dropdowns**: Severity and Time now open LogShed's own list, like Host and App, instead of the browser's, and work with the same keys as before. Their icons are gone, so all four filters look alike.
+- **LogShed's own dropdowns everywhere**: Every list with one choice (the Console's Severity and Time, the rule, preset, test, schedule and AI analysis dialogs, and Settings) now opens LogShed's own list instead of the browser's, so it looks the same on every system and works with the same keys as before. In a dialog the list stays inside it and scrolls within the screen. The Console's Severity and Time icons are gone, so all four filters look alike.
 - **Faster first load**: The web interface's files are sent compressed (less than a third of their size) and browsers keep them until the next release, which helps most over a VPN or a phone connection.
 - **Notification links open the incident**: With `APP_URL` set, the link in an alert notification now opens that alert's incident record instead of the Incident History list.
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.

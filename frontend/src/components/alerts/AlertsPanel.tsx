@@ -48,6 +48,7 @@ import {
   fromLocalDatetimeInputString,
 } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
+import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
 import { AlertRuleHandoff, takeAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
@@ -1217,19 +1218,17 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           {/* Weekly Day of Week Picker */}
           {scheduleFormRecurrence === 'weekly' && (
             <div>
-              <label className="block text-slate-300 font-medium mb-1">Day of the Week</label>
-              <select
-                aria-label="Day of the Week"
-                value={scheduleFormDayOfWeek}
-                onChange={(e) => setScheduleFormDayOfWeek(Number(e.target.value))}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
-              >
-                {DAYS_OF_WEEK.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
+              <label id="schedule-day-of-week-label" htmlFor="schedule-day-of-week" className="block text-slate-300 font-medium mb-1">Day of the Week</label>
+              <SelectDropdown
+                variant="panel"
+                fieldClassName="bg-dark-950 border-dark-700 rounded-lg px-3 py-2 text-slate-200"
+                id="schedule-day-of-week"
+                labelledBy="schedule-day-of-week-label"
+                label="Day of the Week"
+                options={DAYS_OF_WEEK.map((d) => ({ value: String(d.value), label: d.label }))}
+                value={String(scheduleFormDayOfWeek)}
+                onChange={(v) => setScheduleFormDayOfWeek(Number(v))}
+              />
             </div>
           )}
 

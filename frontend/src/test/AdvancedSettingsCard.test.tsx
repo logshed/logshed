@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AdvancedSettingsCard } from '../components/settings/AdvancedSettingsCard.tsx';
 import * as settingsApi from '../api/settings.ts';
 import { SystemSettings } from '../types.ts';
+import { chooseOption, optionLabels, shownValue } from './selectDropdownHelpers.ts';
 
 vi.mock('../api/settings.ts', () => ({
   updateSettings: vi.fn(),
@@ -47,7 +48,7 @@ describe('AdvancedSettingsCard Component', () => {
     );
 
     expect(screen.getByDisplayValue('45')).toBeInTheDocument();
-    expect(screen.getByLabelText('Thinking Level')).toHaveValue('low');
+    expect(shownValue(screen.getByLabelText('Thinking Level'))).toBe('Low (default)');
     expect(screen.getByDisplayValue('https://logshed.lan')).toBeInTheDocument();
     expect(screen.getByDisplayValue('172.16.0.0/12')).toBeInTheDocument();
     expect(screen.getByDisplayValue('250')).toBeInTheDocument();
@@ -106,14 +107,9 @@ describe('AdvancedSettingsCard Component', () => {
     render(<AdvancedSettingsCard settings={mockBaseSettings} onSettingsSaved={onSaved} />);
 
     const select = screen.getByLabelText('Thinking Level');
-    expect(Array.from((select as HTMLSelectElement).options).map((o) => [o.value, o.text])).toEqual([
-      ['off', 'Off (or the lowest level)'],
-      ['low', 'Low (default)'],
-      ['medium', 'Medium'],
-      ['high', 'High'],
-    ]);
+    expect(optionLabels(select)).toEqual(['Off (or the lowest level)', 'Low (default)', 'Medium', 'High']);
 
-    fireEvent.change(select, { target: { value: 'off' } });
+    chooseOption(select, 'Off (or the lowest level)');
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
@@ -123,7 +119,7 @@ describe('AdvancedSettingsCard Component', () => {
   it('shows the low level when the server sends none', () => {
     const { ai_thinking_level: _omitted, ...withoutLevel } = mockBaseSettings;
     render(<AdvancedSettingsCard settings={withoutLevel} onSettingsSaved={vi.fn()} />);
-    expect(screen.getByLabelText('Thinking Level')).toHaveValue('low');
+    expect(shownValue(screen.getByLabelText('Thinking Level'))).toBe('Low (default)');
     expect(screen.queryByLabelText(/Unsaved changes bar/i)).not.toBeInTheDocument();
   });
 

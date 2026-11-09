@@ -5,6 +5,7 @@ import { splitPatternList } from '../utils/patternList.ts';
 import * as dropRulesApi from '../api/dropRules.ts';
 import * as aliasesApi from '../api/aliases.ts';
 import { DropRule } from '../types.ts';
+import { optionLabels } from './selectDropdownHelpers.ts';
 
 const mockRule: DropRule = {
   id: 10,
@@ -149,9 +150,14 @@ describe('CreateDropRuleModal severity range and whole-line hint', () => {
 
   it('uses "less severe" wording and help text for the severity range', () => {
     render(<CreateDropRuleModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} ruleToEdit={null} />);
-    expect(screen.getByLabelText('Severity Range (Optional)')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Warning (4) and less severe' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Debug (7) and less severe' })).toBeInTheDocument();
+    expect(optionLabels(screen.getByLabelText('Severity Range (Optional)'))).toEqual([
+      'Any severity',
+      'Debug (7) and less severe',
+      'Info (6) and less severe',
+      'Notice (5) and less severe',
+      'Warning (4) and less severe',
+      'Error (3) and less severe',
+    ]);
     expect(
       screen.getByText(
         'Only logs at this level or less severe are dropped. More severe logs are always kept. Leave blank to match every level.'

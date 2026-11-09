@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AlertTestModal } from '../components/alerts/AlertTestModal.tsx';
 import * as alertsApi from '../api/alerts.ts';
 import { AlertRule } from '../types.ts';
+import { chooseOption, optionLabels } from './selectDropdownHelpers.ts';
 
 const mockRule: AlertRule = {
   id: 1,
@@ -124,7 +125,7 @@ describe('AlertTestModal Component', () => {
 
     const appInput = screen.getByLabelText('Sample App');
     fireEvent.change(appInput, { target: { value: 'sshd' } });
-    fireEvent.change(screen.getByLabelText('Sample Severity'), { target: { value: '6' } });
+    chooseOption(screen.getByLabelText('Sample Severity'), '6 - Info');
     fireEvent.click(screen.getByRole('button', { name: 'Run Test' }));
 
     await waitFor(() => {
@@ -156,9 +157,15 @@ describe('AlertTestModal Component', () => {
 
   it('offers all 8 severities for the sample', () => {
     render(<AlertTestModal isOpen={true} rule={mockRule} availableApps={[]} onClose={onClose} />);
-    const select = screen.getByLabelText('Sample Severity') as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['0', '1', '2', '3', '4', '5', '6', '7']);
-    expect(screen.getByRole('option', { name: '0 - Emergency' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '7 - Debug' })).toBeInTheDocument();
+    expect(optionLabels(screen.getByLabelText('Sample Severity'))).toEqual([
+      '0 - Emergency',
+      '1 - Alert',
+      '2 - Critical',
+      '3 - Error',
+      '4 - Warning',
+      '5 - Notice',
+      '6 - Info',
+      '7 - Debug',
+    ]);
   });
 });

@@ -27,13 +27,14 @@ import { fetchVersion } from '../../api/system.ts';
 import { getAiModels } from '../../api/ai.ts';
 import { changePassword } from '../../api/auth.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
-import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
 import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
 import { ApiTokensTab } from './ApiTokensTab.tsx';
 import { DockerHostsTab } from './DockerHostsTab.tsx';
 import { Modal } from '../common/Modal.tsx';
+import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
 
@@ -95,6 +96,27 @@ const OPENAI_COMPATIBLE_PRESETS: { label: string; url: string }[] = [
 ];
 
 /** The preset URL the base URL matches (ignoring a trailing slash), or '' for a custom URL. */
+const BASE_URL_PRESET_OPTIONS: SelectOption[] = [
+  { value: '', label: 'Custom' },
+  ...OPENAI_COMPATIBLE_PRESETS.map((p) => ({ value: p.url, label: p.label })),
+];
+
+const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
+  { value: 'WARNING', label: 'WARNING (Default - warnings & errors)' },
+  { value: 'ERROR', label: 'ERROR (Errors & critical failures only)' },
+  { value: 'CRITICAL', label: 'CRITICAL (Fatal system emergencies only)' },
+  { value: 'INFO', label: 'INFO (All standard informational notices)' },
+  { value: 'DEBUG', label: 'DEBUG (Detailed diagnostic traces)' },
+  { value: 'DISABLED', label: 'DISABLED (Do not ingest internal logs)' },
+];
+
+const AI_PROVIDER_OPTIONS: SelectOption[] = [
+  { value: 'gemini', label: 'Google Gemini' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic Claude' },
+  { value: 'openai_compatible', label: 'OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)' },
+];
+
 function matchBaseUrlPreset(baseUrl: string): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
   return OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === clean)?.url ?? '';
@@ -910,22 +932,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label id="internal-log-level-label" htmlFor="internal-log-level" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                 Internal Log Severity Threshold
               </label>
-              <select
-                aria-label="Internal Log Severity Threshold"
+              <SelectDropdown
+                variant="panel"
+                fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
+                id="internal-log-level"
+                labelledBy="internal-log-level-label"
+                label="Internal Log Severity Threshold"
+                options={INTERNAL_LOG_LEVEL_OPTIONS}
                 value={internalLogLevel}
-                onChange={(e) => setInternalLogLevel(e.target.value)}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
-              >
-                <option value="WARNING">WARNING (Default - warnings &amp; errors)</option>
-                <option value="ERROR">ERROR (Errors &amp; critical failures only)</option>
-                <option value="CRITICAL">CRITICAL (Fatal system emergencies only)</option>
-                <option value="INFO">INFO (All standard informational notices)</option>
-                <option value="DEBUG">DEBUG (Detailed diagnostic traces)</option>
-                <option value="DISABLED">DISABLED (Do not ingest internal logs)</option>
-              </select>
+                onChange={setInternalLogLevel}
+              />
             </div>
             <div className="flex items-center text-xs text-slate-400 sm:pt-4">
               <span>
@@ -991,19 +1010,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label id="ai-provider-label" htmlFor="ai-provider" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                 AI Provider
               </label>
-              <select
+              <SelectDropdown
+                variant="panel"
+                fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
+                id="ai-provider"
+                labelledBy="ai-provider-label"
+                label="AI Provider"
+                options={AI_PROVIDER_OPTIONS}
                 value={aiProvider}
-                onChange={(e) => handleProviderChange(e.target.value as any)}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
-              >
-                <option value="gemini">Google Gemini</option>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic Claude</option>
-                <option value="openai_compatible">OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)</option>
-              </select>
+                onChange={(v) => handleProviderChange(v as any)}
+              />
             </div>
 
             <div>
@@ -1031,20 +1050,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   Custom Base URL (Optional)
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <select
-                    aria-label="Base URL preset"
-                    value={matchBaseUrlPreset(aiBaseUrl)}
-                    onChange={(e) => {
-                      const preset = OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === e.target.value);
-                      if (preset) setAiBaseUrl(preset.url);
-                    }}
-                    className="sm:w-56 shrink-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
-                  >
-                    <option value="">Custom</option>
-                    {OPENAI_COMPATIBLE_PRESETS.map((p) => (
-                      <option key={p.url} value={p.url}>{p.label}</option>
-                    ))}
-                  </select>
+                  <div className="sm:w-56 shrink-0">
+                    <SelectDropdown
+                      variant="panel"
+                      fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
+                      label="Base URL preset"
+                      options={BASE_URL_PRESET_OPTIONS}
+                      value={matchBaseUrlPreset(aiBaseUrl)}
+                      onChange={(v) => {
+                        const preset = OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === v);
+                        if (preset) setAiBaseUrl(preset.url);
+                      }}
+                    />
+                  </div>
                   <input
                     id="ai-base-url"
                     type="text"
@@ -1126,7 +1144,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             {/* Default Primary Model */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-[11px] font-semibold text-slate-400 uppercase">
+                <label id="ai-model-label" htmlFor="ai-model" className="block text-[11px] font-semibold text-slate-400 uppercase">
                   Default Primary Model
                 </label>
                 {isCustomModel && (
@@ -1151,28 +1169,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
 
               {availableModels.length > 0 && !isCustomModel ? (
-                <select
+                <SelectDropdown
+                  variant="panel"
+                  fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-100"
+                  id="ai-model"
+                  labelledBy="ai-model-label"
+                  label="Default Primary Model"
+                  options={[
+                    ...availableModels.filter((m) => m.id === aiModel || !fallbackList.includes(m.id)).map(aiModelOption),
+                    { value: '__custom__', label: 'Custom model name...' },
+                  ]}
                   value={availableModels.some((m) => m.id === aiModel) ? aiModel : '__custom__'}
-                  onChange={(e) => {
-                    if (e.target.value === '__custom__') {
+                  onChange={(v) => {
+                    if (v === '__custom__') {
                       setIsCustomModel(true);
                     } else {
-                      handlePrimaryModelChange(e.target.value);
+                      handlePrimaryModelChange(v);
                     }
                   }}
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 focus:outline-hidden focus:border-accent-500 font-mono"
-                >
-                  {availableModels
-                    .filter((m) => m.id === aiModel || !fallbackList.includes(m.id))
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
-                      </option>
-                    ))}
-                  <option value="__custom__">Custom model name...</option>
-                </select>
+                />
               ) : (
                 <input
+                  id="ai-model"
                   type="text"
                   value={aiModel}
                   onChange={(e) => handlePrimaryModelChange(e.target.value)}
@@ -1257,28 +1275,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <div className="space-y-1.5 pt-1">
                 {!showCustomFallbackInput ? (
                   <div className="flex items-center gap-2 w-full">
-                    <select
-                      value={selectedFallbackToAdd}
-                      onChange={(e) => {
-                        if (e.target.value === '__custom_fallback__') {
-                          setShowCustomFallbackInput(true);
-                          setSelectedFallbackToAdd('');
-                        } else {
-                          setSelectedFallbackToAdd(e.target.value);
-                        }
-                      }}
-                      className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono truncate"
-                    >
-                      <option value="">-- Add Fallback Model --</option>
-                      {availableModels
-                        .filter((m) => m.id !== aiModel && !fallbackList.includes(m.id))
-                        .map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
-                          </option>
-                        ))}
-                      <option value="__custom_fallback__">Custom fallback model...</option>
-                    </select>
+                    <div className="flex-1 min-w-0">
+                      <SelectDropdown
+                        variant="panel"
+                        fieldClassName="bg-dark-950 border-dark-700 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                        label="Add Fallback Model"
+                        options={[
+                          { value: '', label: '-- Add Fallback Model --' },
+                          ...availableModels.filter((m) => m.id !== aiModel && !fallbackList.includes(m.id)).map(aiModelOption),
+                          { value: '__custom_fallback__', label: 'Custom fallback model...' },
+                        ]}
+                        value={selectedFallbackToAdd}
+                        onChange={(v) => {
+                          if (v === '__custom_fallback__') {
+                            setShowCustomFallbackInput(true);
+                            setSelectedFallbackToAdd('');
+                          } else {
+                            setSelectedFallbackToAdd(v);
+                          }
+                        }}
+                      />
+                    </div>
                     <button
                       type="button"
                       disabled={!selectedFallbackToAdd}

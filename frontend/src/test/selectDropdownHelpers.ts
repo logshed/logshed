@@ -9,7 +9,7 @@ export const panelSelect = (label: 'Severity' | 'Time Range'): HTMLElement =>
   screen.getByRole('button', { name: new RegExp(`^${label} `) });
 
 /** Opens a SelectDropdown and clicks one of its rows. */
-export function chooseOption(trigger: HTMLElement, optionLabel: string): void {
+export function chooseOption(trigger: HTMLElement, optionLabel: string | RegExp): void {
   fireEvent.click(trigger);
   fireEvent.click(screen.getByRole('option', { name: optionLabel }));
 }
@@ -17,3 +17,11 @@ export function chooseOption(trigger: HTMLElement, optionLabel: string): void {
 /** The value a SelectDropdown shows. */
 export const shownValue = (trigger: HTMLElement): string | null | undefined =>
   trigger.querySelector('[id$="-value"]')?.textContent;
+
+/** Opens a SelectDropdown, reads the labels of its rows, and closes it again. */
+export function optionLabels(trigger: HTMLElement): string[] {
+  fireEvent.click(trigger);
+  const labels = screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  fireEvent.click(trigger);
+  return labels;
+}

@@ -4,6 +4,7 @@ import { AlertRule } from '../../types.ts';
 import { testAlertRule } from '../../api/alerts.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
+import { SelectDropdown } from '../common/SelectDropdown.tsx';
 
 export interface AlertTestModalProps {
   isOpen: boolean;
@@ -141,25 +142,24 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             )}
           </div>
           <div className="space-y-1">
-            <label htmlFor="test-sample-severity" className="text-slate-300 font-medium">Sample Severity</label>
-            <select
+            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className="text-slate-300 font-medium">Sample Severity</label>
+            <SelectDropdown
+              variant="panel"
+              fieldClassName="bg-dark-800 border-dark-700 rounded px-2.5 py-1.5 text-slate-200"
               id="test-sample-severity"
-              value={testSampleSeverity}
-              onChange={(e) => setTestSampleSeverity(Number(e.target.value))}
-              className="w-full bg-dark-800 border border-dark-700 rounded px-2.5 py-1.5 text-slate-200"
-            >
-              {SEVERITIES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.value} - {s.name}
-                </option>
-              ))}
-            </select>
+              labelledBy="test-sample-severity-label"
+              label="Sample Severity"
+              options={SEVERITIES.map((s) => ({ value: String(s.value), label: `${s.value} - ${s.name}` }))}
+              value={String(testSampleSeverity)}
+              onChange={(v) => setTestSampleSeverity(Number(v))}
+            />
           </div>
         </div>
 
         <div className="space-y-1">
-          <label className="text-slate-300 font-medium">Sample Message</label>
+          <label htmlFor="test-sample-message" className="text-slate-300 font-medium">Sample Message</label>
           <textarea
+            id="test-sample-message"
             rows={3}
             value={testSampleMessage}
             onChange={(e) => setTestSampleMessage(e.target.value)}

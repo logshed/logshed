@@ -4,6 +4,7 @@ import { App } from '../App.tsx';
 import * as settingsApi from '../api/settings.ts';
 import * as aiApi from '../api/ai.ts';
 import * as systemApi from '../api/system.ts';
+import { chooseOption } from './selectDropdownHelpers.ts';
 
 vi.mock('../context/AuthContext.tsx', () => ({
   useAuth: () => ({
@@ -76,8 +77,8 @@ describe('UnsavedChangesGuard Integration', () => {
     });
 
     // Make an edit
-    const select = screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'ERROR' } });
+    const select = screen.getByLabelText('Internal Log Severity Threshold');
+    chooseOption(select, /^ERROR /);
 
     // Attempt to navigate to Storage tab
     const storageTabBtn = screen.getByRole('button', { name: /Storage/i });
@@ -105,7 +106,7 @@ describe('UnsavedChangesGuard Integration', () => {
 
     // Make an edit
     const select = screen.getByLabelText('Internal Log Severity Threshold');
-    fireEvent.change(select, { target: { value: 'ERROR' } });
+    chooseOption(select, /^ERROR /);
 
     // Attempt to navigate to Console View
     const consoleTabBtn = screen.getByRole('button', { name: /Console View/i });
@@ -141,7 +142,7 @@ describe('UnsavedChangesGuard Integration', () => {
 
     // Make an edit
     const select = screen.getByLabelText('Internal Log Severity Threshold');
-    fireEvent.change(select, { target: { value: 'ERROR' } });
+    chooseOption(select, /^ERROR /);
 
     // Attempt to navigate to Storage
     const storageTabBtn = screen.getByRole('button', { name: /Storage/i });
@@ -177,7 +178,7 @@ describe('UnsavedChangesGuard Integration', () => {
 
     // Make an edit
     const select = screen.getByLabelText('Internal Log Severity Threshold');
-    fireEvent.change(select, { target: { value: 'DEBUG' } });
+    chooseOption(select, /^DEBUG /);
 
     // Attempt to navigate to Console View
     const consoleTabBtn = screen.getByRole('button', { name: /Console View/i });
@@ -215,7 +216,7 @@ describe('UnsavedChangesGuard Integration', () => {
 
     // Make an edit
     const select = screen.getByLabelText('Internal Log Severity Threshold');
-    fireEvent.change(select, { target: { value: 'ERROR' } });
+    chooseOption(select, /^ERROR /);
 
     // Click brand logo (title="Go to Console View")
     const brandLogo = screen.getByTitle('Go to Console View');
@@ -258,7 +259,7 @@ describe('UnsavedChangesGuard Integration', () => {
       render(<App />);
       await openSettings();
 
-      fireEvent.change(screen.getByLabelText('Internal Log Severity Threshold'), { target: { value: 'ERROR' } });
+      chooseOption(screen.getByLabelText('Internal Log Severity Threshold'), /^ERROR /);
       fireEvent.click(screen.getByRole('button', { name: /^Advanced$/i }));
       await waitFor(() => {
         expect(screen.getByText('Advanced System Settings')).toBeInTheDocument();
@@ -365,7 +366,7 @@ describe('Unsaved changes guard keeps the URL of a link it held back', () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /^Settings$/i }));
     await waitFor(() => expect(screen.getByText('System Configuration')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('Internal Log Severity Threshold'), { target: { value: 'ERROR' } });
+    chooseOption(screen.getByLabelText('Internal Log Severity Threshold'), /^ERROR /);
     act(() => {
       window.history.pushState(null, '', url);
       window.dispatchEvent(new PopStateEvent('popstate'));

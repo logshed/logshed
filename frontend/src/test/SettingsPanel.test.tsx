@@ -10,6 +10,7 @@ import * as notifApi from '../api/notifications.ts';
 import * as tokensApi from '../api/tokens.ts';
 import * as dockerHostsApi from '../api/dockerHosts.ts';
 import { DEFAULT_SYSTEM_PROMPT } from '../utils/aiPrompt.ts';
+import { chooseOption, optionLabels, shownValue } from './selectDropdownHelpers.ts';
 
 const mockLogout = vi.fn();
 vi.mock('../context/AuthContext.tsx', () => ({
@@ -196,8 +197,7 @@ describe('SettingsPanel Component', () => {
     expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
 
     // Edit Default Model Name via dropdown
-    const modelSelect = screen.getByDisplayValue(/gemini-3.7-flash/i);
-    fireEvent.change(modelSelect, { target: { value: 'gemini-2.5-flash' } });
+    chooseOption(screen.getByLabelText('Default Primary Model'), 'gemini-2.5-flash [Reasoning]');
 
     // Active state: dirty, button is rendered in the sticky action bar
     const saveBtn = screen.getByRole('button', { name: /Save Changes/i });
@@ -223,20 +223,18 @@ describe('SettingsPanel Component', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/On-Demand AI Provider Configuration/i)).toBeInTheDocument();
-      expect(screen.getByDisplayValue(/gemini-3.7-flash/i)).toBeInTheDocument();
+      // Gemini provider default model is selected in dropdown
+      expect(shownValue(screen.getByLabelText('Default Primary Model'))).toMatch(/gemini-3.7-flash/i);
     });
 
-    // Gemini provider default model is selected in dropdown
-    const geminiSelect = screen.getByDisplayValue(/gemini-3.7-flash/i);
-    expect(geminiSelect).toBeInTheDocument();
-
     // Discovered models include reasoning badges
-    expect(screen.getAllByText(/gemini-3.7-flash \[Reasoning\]/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/gemini-2.5-flash \[Reasoning\]/i).length).toBeGreaterThan(0);
+    const models = optionLabels(screen.getByLabelText('Default Primary Model'));
+    expect(models).toContain('gemini-3.7-flash [Reasoning]');
+    expect(models).toContain('gemini-2.5-flash [Reasoning]');
 
     // Switch to OpenAI
-    const providerSelect = screen.getByDisplayValue('Google Gemini');
-    fireEvent.change(providerSelect, { target: { value: 'openai' } });
+    const providerSelect = screen.getByLabelText('AI Provider');
+    chooseOption(providerSelect, 'OpenAI');
 
     await waitFor(() => {
       expect(aiApi.getAiModels).toHaveBeenCalledWith('openai', false);
@@ -270,12 +268,12 @@ describe('SettingsPanel Component', () => {
       expect(screen.getByText('Internal Application Logging')).toBeInTheDocument();
     });
 
-    const select = screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement;
-    expect(select.value).toBe('WARNING');
+    const select = screen.getByLabelText('Internal Log Severity Threshold');
+    expect(shownValue(select)).toMatch(/^WARNING /);
 
     // Change to ERROR
-    fireEvent.change(select, { target: { value: 'ERROR' } });
-    expect(select.value).toBe('ERROR');
+    chooseOption(select, /^ERROR /);
+    expect(shownValue(select)).toMatch(/^ERROR /);
 
     const saveBtn = screen.getByRole('button', { name: /Save Changes/i });
     expect(saveBtn).not.toBeDisabled();
@@ -301,10 +299,11 @@ describe('SettingsPanel Component', () => {
     });
 
     // Select a fallback model from the add dropdown
-    const fallbackSelect = screen.getByDisplayValue('-- Add Fallback Model --');
-    fireEvent.change(fallbackSelect, { target: { value: 'gemini-2.5-flash' } });
+    const fallbackSelect = screen.getByRole('button', { name: /^Add Fallback Model / });
+    expect(shownValue(fallbackSelect)).toBe('-- Add Fallback Model --');
+    chooseOption(fallbackSelect, 'gemini-2.5-flash [Reasoning]');
 
-    const addBtn = screen.getByRole('button', { name: /Add/i });
+    const addBtn = screen.getByRole('button', { name: /^Add$/i });
     fireEvent.click(addBtn);
 
     await waitFor(() => {
@@ -366,7 +365,7 @@ describe('SettingsPanel Component', () => {
     fireEvent.click(promoteBtn);
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue(/gemini-2.5-flash/)).toBeInTheDocument();
+      expect(shownValue(screen.getByLabelText('Default Primary Model'))).toMatch(/gemini-2.5-flash/);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
@@ -401,17 +400,18 @@ describe('SettingsPanel Component', () => {
     });
 
     // In Primary Model dropdown, gemini-2.5-flash should NOT be available as an option because it is already a fallback
-    const primarySelect = screen.getByDisplayValue(/gemini-3.7-flash/);
-    const options = Array.from(primarySelect.querySelectorAll('option')).map((o) => o.value);
-    expect(options).toContain('gemini-3.7-flash');
-    expect(options).not.toContain('gemini-2.5-flash');
+    const primarySelect = screen.getByLabelText('Default Primary Model');
+    expect(shownValue(primarySelect)).toMatch(/gemini-3.7-flash/);
+    const options = optionLabels(primarySelect);
+    expect(options.some((o) => o.startsWith('gemini-3.7-flash'))).toBe(true);
+    expect(options.some((o) => o.startsWith('gemini-2.5-flash'))).toBe(false);
 
     // If user switches to custom mode and enters gemini-2.5-flash as primary
     const useDropdownBtn = screen.queryByRole('button', { name: /Use dropdown instead/i });
     expect(useDropdownBtn).toBeNull();
 
     // Select custom model option from primary dropdown
-    fireEvent.change(primarySelect, { target: { value: '__custom__' } });
+    chooseOption(primarySelect, 'Custom model name...');
     const customInput = screen.getByPlaceholderText(/DEFAULT_AI_MODEL|gemini-3.7-flash/i);
     fireEvent.change(customInput, { target: { value: 'gemini-2.5-flash' } });
 
@@ -435,8 +435,8 @@ describe('SettingsPanel Component', () => {
     expect(screen.queryByText('You have unsaved changes')).toBeNull();
 
     // Modify a field (internal log level)
-    const select = screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'DEBUG' } });
+    const select = screen.getByLabelText('Internal Log Severity Threshold');
+    chooseOption(select, /^DEBUG /);
 
     // Sticky floating bar should appear
     await waitFor(() => {
@@ -466,12 +466,12 @@ describe('SettingsPanel Component', () => {
       expect(screen.getByText('System Configuration')).toBeInTheDocument();
     });
 
-    const select = screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement;
-    expect(select.value).toBe('WARNING');
+    const select = screen.getByLabelText('Internal Log Severity Threshold');
+    expect(shownValue(select)).toMatch(/^WARNING /);
 
     // Change value
-    fireEvent.change(select, { target: { value: 'CRITICAL' } });
-    expect(select.value).toBe('CRITICAL');
+    chooseOption(select, /^CRITICAL /);
+    expect(shownValue(select)).toMatch(/^CRITICAL /);
 
     // Discard button should appear in floating bar
     const discardBtn = screen.getByRole('button', { name: /^Discard$/i });
@@ -481,7 +481,7 @@ describe('SettingsPanel Component', () => {
     fireEvent.click(discardBtn);
 
     // Value should revert to baseline WARNING and floating bar should be removed
-    expect(select.value).toBe('WARNING');
+    expect(shownValue(select)).toMatch(/^WARNING /);
     await waitFor(() => {
       expect(screen.queryByText('You have unsaved changes')).toBeNull();
     });
@@ -499,7 +499,7 @@ describe('SettingsPanel Component', () => {
 
     // Modify a field
     const select = screen.getByLabelText('Internal Log Severity Threshold');
-    fireEvent.change(select, { target: { value: 'INFO' } });
+    chooseOption(select, /^INFO /);
 
     await waitFor(() => {
       expect(onDirtyChange).toHaveBeenCalledWith(true);
@@ -806,7 +806,7 @@ describe('SettingsPanel Component', () => {
 
       // Make change in app subtab
       const select = screen.getByLabelText('Internal Log Severity Threshold');
-      fireEvent.change(select, { target: { value: 'ERROR' } });
+      chooseOption(select, /^ERROR /);
 
       await waitFor(() => {
         expect(onDirtyChange).toHaveBeenLastCalledWith(true);
@@ -1023,18 +1023,18 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
 
       const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
       expect(keyInput.value).toBe('********');
 
       // Switch to OpenAI
-      const providerSelect = screen.getByDisplayValue('Google Gemini');
-      fireEvent.change(providerSelect, { target: { value: 'openai' } });
+      const providerSelect = screen.getByLabelText('AI Provider');
+      chooseOption(providerSelect, 'OpenAI');
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI');
       });
 
       // OpenAI has no configured key: input should be empty and show "Enter API key" placeholder
@@ -1042,10 +1042,10 @@ describe('SettingsPanel Component', () => {
       expect(openaiKeyInput.value).toBe('');
 
       // Switch back to Google Gemini
-      fireEvent.change(providerSelect, { target: { value: 'gemini' } });
+      chooseOption(providerSelect, 'Google Gemini');
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
 
       // Gemini state restored
@@ -1068,7 +1068,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
 
       const keyInput = screen.getByPlaceholderText(/Enter new API key or leave \*\*\*\*\*\*\*\* to preserve/i) as HTMLInputElement;
@@ -1113,7 +1113,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI');
       });
 
       const keyInput = screen.getByPlaceholderText('Enter API key');
@@ -1194,7 +1194,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel onDirtyChange={onDirtyChange} />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)');
       });
 
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
@@ -1219,7 +1219,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)');
       });
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
 
@@ -1233,7 +1233,7 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)');
       });
       const keyInput = screen.getByPlaceholderText(/API key/i);
       fireEvent.change(keyInput, { target: { value: 'typed-key' } });
@@ -1244,21 +1244,20 @@ describe('SettingsPanel Component', () => {
       vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue(keylessCompatSettings);
       render(<SettingsPanel />);
 
-      const preset = (await screen.findByLabelText('Base URL preset')) as HTMLSelectElement;
+      const preset = await screen.findByRole('button', { name: /^Base URL preset / });
       const baseUrl = screen.getByLabelText(/Custom Base URL/i) as HTMLInputElement;
-      expect(preset.value).toBe('');
-      expect(screen.getByDisplayValue('Custom')).toBe(preset);
+      expect(shownValue(preset)).toBe('Custom');
 
-      fireEvent.change(preset, { target: { value: 'https://openrouter.ai/api/v1' } });
+      chooseOption(preset, 'OpenRouter');
       expect(baseUrl.value).toBe('https://openrouter.ai/api/v1');
-      expect(screen.getByDisplayValue('OpenRouter')).toBe(preset);
+      expect(shownValue(preset)).toBe('OpenRouter');
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
 
       fireEvent.change(baseUrl, { target: { value: 'https://api.groq.com/openai/v1/' } });
-      expect(preset.value).toBe('https://api.groq.com/openai/v1');
+      expect(shownValue(preset)).toBe('Groq');
 
       fireEvent.change(baseUrl, { target: { value: 'http://gpu-box.lan:8000/v1' } });
-      expect(preset.value).toBe('');
+      expect(shownValue(preset)).toBe('Custom');
     });
 
     it('emptying the base URL saves an empty string instead of null', async () => {
@@ -1308,18 +1307,18 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
 
-      const levelSelect = screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement;
-      fireEvent.change(levelSelect, { target: { value: 'ERROR' } });
+      const levelSelect = screen.getByLabelText('Internal Log Severity Threshold');
+      chooseOption(levelSelect, /^ERROR /);
 
       const keyInput = screen.getByDisplayValue('********') as HTMLInputElement;
       fireEvent.change(keyInput, { target: { value: '' } });
       fireEvent.blur(keyInput);
 
       expect(updateSpy).not.toHaveBeenCalled();
-      expect((screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement).value).toBe('ERROR');
+      expect(shownValue(screen.getByLabelText('Internal Log Severity Threshold'))).toMatch(/^ERROR /);
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
@@ -1343,18 +1342,18 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
 
-      fireEvent.change(screen.getByDisplayValue('Google Gemini'), { target: { value: 'openai' } });
+      chooseOption(screen.getByLabelText('AI Provider'), 'OpenAI');
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI');
       });
       // Switching provider alone is a change; edit the model, then return to the saved provider.
       fireEvent.change(screen.getByPlaceholderText('gpt-6.1-sol'), { target: { value: 'gpt-4.1' } });
-      fireEvent.change(screen.getByDisplayValue('OpenAI'), { target: { value: 'gemini' } });
+      chooseOption(screen.getByLabelText('AI Provider'), 'Google Gemini');
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
 
       expect(screen.getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
@@ -1365,15 +1364,15 @@ describe('SettingsPanel Component', () => {
       render(<SettingsPanel />);
 
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
-      fireEvent.change(screen.getByDisplayValue('Google Gemini'), { target: { value: 'openai' } });
+      chooseOption(screen.getByLabelText('AI Provider'), 'OpenAI');
       await waitFor(() => {
-        expect(screen.getByDisplayValue('OpenAI')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('OpenAI');
       });
-      fireEvent.change(screen.getByDisplayValue('OpenAI'), { target: { value: 'gemini' } });
+      chooseOption(screen.getByLabelText('AI Provider'), 'Google Gemini');
       await waitFor(() => {
-        expect(screen.getByDisplayValue('Google Gemini')).toBeInTheDocument();
+        expect(shownValue(screen.getByLabelText('AI Provider'))).toBe('Google Gemini');
       });
       expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull();
     });
@@ -1411,7 +1410,7 @@ describe('SettingsPanel Component', () => {
       await waitFor(() => {
         expect(screen.getByText('System Configuration')).toBeInTheDocument();
       });
-      fireEvent.change(screen.getByLabelText('Internal Log Severity Threshold'), { target: { value: 'ERROR' } });
+      chooseOption(screen.getByLabelText('Internal Log Severity Threshold'), /^ERROR /);
       await waitFor(() => {
         expect(onDirtyChange).toHaveBeenLastCalledWith(true);
       });
@@ -1435,7 +1434,7 @@ describe('SettingsPanel Component', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /^Application$/i }));
       await waitFor(() => {
-        expect((screen.getByLabelText('Internal Log Severity Threshold') as HTMLSelectElement).value).toBe('ERROR');
+        expect(shownValue(screen.getByLabelText('Internal Log Severity Threshold'))).toMatch(/^ERROR /);
       });
       expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     });

@@ -24,6 +24,7 @@ import {
 import { fetchSettings, updateSettings } from '../../api/settings.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
+import { SelectDropdown } from '../common/SelectDropdown.tsx';
 
 export interface NotificationsCardProps {
   settings?: SystemSettings | null;
@@ -537,31 +538,33 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           {/* Configuration options */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             <div className="space-y-1 min-w-0">
-              <label htmlFor="digest-target-channel" className="block text-[11px] font-semibold text-slate-400 uppercase">
+              <label id="digest-target-channel-label" htmlFor="digest-target-channel" className="block text-[11px] font-semibold text-slate-400 uppercase">
                 Target Channel
               </label>
-              <select
+              <SelectDropdown
+                variant="panel"
+                fieldClassName="bg-dark-900 border-dark-700 rounded px-3 py-2 text-slate-200"
                 id="digest-target-channel"
-                aria-label="Target Channel"
-                value={currentDigestChannelId ?? ''}
+                labelledBy="digest-target-channel-label"
+                label="Target Channel"
+                options={[
+                  { value: '', label: hasActiveChannel ? 'All Enabled Channels' : 'None (History Only)' },
+                  ...channels.map((ch) => ({
+                    value: String(ch.id),
+                    label: `Channel: ${ch.name}${ch.is_enabled ? '' : ' (Disabled)'}`,
+                  })),
+                ]}
+                value={String(currentDigestChannelId ?? '')}
                 disabled={!currentDigestEnabled || !hasActiveChannel || isSavingDigest || isSavingSettings}
-                onChange={(e) => {
-                  const val = e.target.value ? Number(e.target.value) : null;
+                onChange={(v) => {
+                  const val = v ? Number(v) : null;
                   if (isDigestControlled) {
                     onDigestChannelIdChange?.(val);
                   } else {
                     handleSaveDigest({ daily_digest_channel_id: val });
                   }
                 }}
-                className="w-full bg-dark-900 border border-dark-700 rounded px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 disabled:opacity-50"
-              >
-                <option value="">{hasActiveChannel ? 'All Enabled Channels' : 'None (History Only)'}</option>
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>
-                    Channel: {ch.name}{ch.is_enabled ? '' : ' (Disabled)'}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             <div className="space-y-1 min-w-0">

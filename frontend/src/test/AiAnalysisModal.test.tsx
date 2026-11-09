@@ -4,6 +4,10 @@ import { AiAnalysisModal, MAX_USER_CONTEXT_LENGTH } from '../components/ai/AiAna
 import { LogEntry } from '../types.ts';
 import * as aiApi from '../api/ai.ts';
 import * as clipboardUtil from '../utils/clipboard.ts';
+import { chooseOption, optionLabels, shownValue } from './selectDropdownHelpers.ts';
+
+const modelDropdown = (name: 'Primary Model' | 'AI Provider' | 'Add Fallback Model') =>
+  screen.getByRole('button', { name: new RegExp(`^${name} `) });
 
 describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
   const sampleLogs: LogEntry[] = [
@@ -557,13 +561,14 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     });
 
     // Select custom fallback model option from the Add Fallback dropdown
-    const fallbackSelect = await screen.findByDisplayValue('-- Add Fallback Model --');
-    fireEvent.change(fallbackSelect, { target: { value: '__custom_fallback__' } });
+    await screen.findByRole('button', { name: /^Add Fallback Model / });
+    expect(shownValue(modelDropdown('Add Fallback Model'))).toBe('-- Add Fallback Model --');
+    chooseOption(modelDropdown('Add Fallback Model'), 'Custom fallback model...');
 
     const customInput = await screen.findByPlaceholderText('Enter custom model ID');
     fireEvent.change(customInput, { target: { value: 'custom-fallback-model' } });
 
-    const addBtn = screen.getByRole('button', { name: /Add/i });
+    const addBtn = screen.getByRole('button', { name: /^Add$/i });
     fireEvent.click(addBtn);
 
     await waitFor(() => {
@@ -671,7 +676,7 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Make primary model' }));
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue(/gemini-2.5-flash/)).toBeInTheDocument();
+      expect(shownValue(modelDropdown('Primary Model'))).toMatch(/gemini-2.5-flash/);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Run AI Analysis/i }));
@@ -708,13 +713,14 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     });
 
     // In Primary Model dropdown, gemini-2.5-flash should NOT be available as an option
-    const primarySelect = screen.getByDisplayValue(/gemini-3.7-flash/);
-    const options = Array.from(primarySelect.querySelectorAll('option')).map((o) => o.value);
-    expect(options).toContain('gemini-3.7-flash');
-    expect(options).not.toContain('gemini-2.5-flash');
+    const primarySelect = modelDropdown('Primary Model');
+    expect(shownValue(primarySelect)).toMatch(/gemini-3.7-flash/);
+    const options = optionLabels(primarySelect);
+    expect(options.some((o) => o.startsWith('gemini-3.7-flash'))).toBe(true);
+    expect(options.some((o) => o.startsWith('gemini-2.5-flash'))).toBe(false);
 
     // Switch to custom model and input gemini-2.5-flash
-    fireEvent.change(primarySelect, { target: { value: '__custom__' } });
+    chooseOption(primarySelect, 'Custom model name...');
     const customInput = screen.getByPlaceholderText(/DEFAULT_AI_MODEL|gemini-3.7-flash/i);
     fireEvent.change(customInput, { target: { value: 'gemini-2.5-flash' } });
 
@@ -869,22 +875,24 @@ describe('AiAnalysisModal Component (Items #10, #23, #26, #27, #28)', () => {
     const toggleBtn = screen.getByRole('button', { name: /Model & Provider Settings/i });
     fireEvent.click(toggleBtn);
 
-    const providerSelect = screen.getByDisplayValue('Google Gemini') as HTMLSelectElement;
-    const optionValues = Array.from(providerSelect.querySelectorAll('option')).map((o) => o.value);
-    expect(optionValues).toContain('gemini');
-    expect(optionValues).toContain('openai');
-    expect(optionValues).toContain('anthropic');
-    expect(optionValues).toContain('openai_compatible');
+    const providerSelect = modelDropdown('AI Provider');
+    expect(shownValue(providerSelect)).toBe('Google Gemini');
+    expect(optionLabels(providerSelect)).toEqual([
+      'Google Gemini',
+      'OpenAI',
+      'Anthropic Claude',
+      'OpenAI-Compatible (OpenRouter, Ollama, ...)',
+    ]);
 
     // Switch to OpenAI
-    fireEvent.change(providerSelect, { target: { value: 'openai' } });
+    chooseOption(providerSelect, 'OpenAI');
 
     await waitFor(() => {
       expect(aiApi.getAiModels).toHaveBeenCalledWith('openai');
     });
 
     // Switch to Anthropic Claude
-    fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
+    chooseOption(modelDropdown('AI Provider'), 'Anthropic Claude');
 
     await waitFor(() => {
       expect(aiApi.getAiModels).toHaveBeenCalledWith('anthropic');
@@ -1145,14 +1153,15 @@ describe('AiAnalysisModal model list from an earlier run', () => {
     rerender(<AiAnalysisModal isOpen={false} onClose={vi.fn()} selectedLogs={[]} />);
     rerender(<AiAnalysisModal isOpen={true} onClose={vi.fn()} selectedLogs={logsB} />);
     await waitFor(() => expect(aiApi.getAiModels).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getAllByRole('option', { name: /fresh-model/ }).length).toBeGreaterThan(0));
+    await waitFor(() => expect(optionLabels(modelDropdown('Primary Model'))).toContain('fresh-model'));
 
     await act(async () => {
       resolveFirst(modelsFor('stale-model'));
     });
 
-    expect(screen.queryAllByRole('option', { name: /stale-model/ })).toHaveLength(0);
-    expect(screen.getAllByRole('option', { name: /fresh-model/ }).length).toBeGreaterThan(0);
+    const labels = optionLabels(modelDropdown('Primary Model'));
+    expect(labels).not.toContain('stale-model');
+    expect(labels).toContain('fresh-model');
   });
 });
 

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AlertRuleModal } from '../components/alerts/AlertRuleModal.tsx';
 import * as alertsApi from '../api/alerts.ts';
 import { AlertRule, NotificationChannel } from '../types.ts';
+import { chooseOption, optionLabels, shownValue } from './selectDropdownHelpers.ts';
 
 const mockChannels: NotificationChannel[] = [
   {
@@ -135,6 +136,33 @@ describe('AlertRuleModal Component', () => {
       );
       expect(onSuccess).toHaveBeenCalledWith(updatedRule);
       expect(onClose).toHaveBeenCalled();
+    });
+  });
+
+  it('shows the rule type, channel and severity it edits, and saves the ones chosen', async () => {
+    const updateSpy = vi.spyOn(alertsApi, 'updateAlertRule').mockResolvedValue(mockRule);
+    const channels = [...mockChannels, { ...mockChannels[0], id: 2, name: 'Email', is_enabled: false }];
+    render(
+      <AlertRuleModal isOpen={true} ruleToEdit={mockRule} channels={channels} availableApps={[]} onClose={onClose} onSuccess={onSuccess} />
+    );
+    const ruleType = screen.getByLabelText('Rule Type');
+    const channel = screen.getByLabelText('Target Channel');
+    const severity = screen.getByLabelText('Severity Filter (Optional)');
+    expect(shownValue(ruleType)).toBe('Threshold (Sliding Window)');
+    expect(shownValue(channel)).toBe('Discord Ops');
+    expect(shownValue(severity)).toBe('Error (3) and more severe');
+    expect(optionLabels(channel)).toEqual(['All Enabled Channels', 'Discord Ops', 'Email (Disabled)']);
+
+    chooseOption(ruleType, 'Pattern (Immediate Match)');
+    chooseOption(channel, 'Email (Disabled)');
+    chooseOption(severity, 'Any Severity');
+    fireEvent.click(screen.getByRole('button', { name: 'Update Rule' }));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ rule_type: 'pattern', channel_id: 2, filter_severity: null })
+      );
     });
   });
 
@@ -355,11 +383,8 @@ describe('AlertRuleModal Component', () => {
         onSuccess={onSuccess}
       />
     );
-    expect(screen.getByRole('option', { name: 'Any Severity' })).toBeInTheDocument();
     const texts = ['Emergency (0) and more severe', 'Alert (1) and more severe', 'Critical (2) and more severe', 'Error (3) and more severe', 'Warning (4) and more severe', 'Notice (5) and more severe', 'Info (6) and more severe', 'Debug (7) and more severe'];
-    for (const t of texts) {
-      expect(screen.getByRole('option', { name: t })).toBeInTheDocument();
-    }
+    expect(optionLabels(screen.getByLabelText('Severity Filter (Optional)'))).toEqual(['Any Severity', ...texts]);
   });
 });
 

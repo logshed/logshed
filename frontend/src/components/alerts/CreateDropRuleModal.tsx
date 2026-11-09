@@ -5,10 +5,24 @@ import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule } fr
 import { fetchAliases } from '../../api/aliases.ts';
 import { Modal } from '../common/Modal.tsx';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
+import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
+
+const SEVERITY_RANGE_OPTIONS: SelectOption[] = [
+  { value: '', label: 'Any severity' },
+  ...[7, 6, 5, 4, 3].map((level) => ({ value: String(level), label: lessSevereLabel(level) })),
+];
+
+const SAMPLE_SEVERITY_OPTIONS: SelectOption[] = [
+  { value: '', label: 'Unspecified' },
+  ...['Debug', 'Info', 'Notice', 'Warning', 'Error', 'Critical', 'Alert', 'Emergency'].map((name, i) => ({
+    value: String(7 - i),
+    label: `${name} (${7 - i})`,
+  })),
+];
 
 
 interface CreateDropRuleModalProps {
@@ -432,22 +446,19 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         </div>
 
         <div>
-          <label htmlFor="modal-severity-select" className="block text-slate-300 font-medium mb-1">
+          <label id="modal-severity-select-label" htmlFor="modal-severity-select" className="block text-slate-300 font-medium mb-1">
             Severity Range (Optional)
           </label>
-          <select
+          <SelectDropdown
+            variant="panel"
+            fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-1.5 font-mono text-slate-200"
             id="modal-severity-select"
+            labelledBy="modal-severity-select-label"
+            label="Severity Range (Optional)"
+            options={SEVERITY_RANGE_OPTIONS}
             value={severityThreshold === null ? '' : severityThreshold.toString()}
-            onChange={(e) => setSeverityThreshold(e.target.value === '' ? null : Number(e.target.value))}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
-          >
-            <option value="">Any severity</option>
-            <option value="7">{lessSevereLabel(7)}</option>
-            <option value="6">{lessSevereLabel(6)}</option>
-            <option value="5">{lessSevereLabel(5)}</option>
-            <option value="4">{lessSevereLabel(4)}</option>
-            <option value="3">{lessSevereLabel(3)}</option>
-          </select>
+            onChange={(v) => setSeverityThreshold(v === '' ? null : Number(v))}
+          />
           <span className="text-[11px] text-slate-400 mt-1 block">
             Only logs at this level or less severe are dropped. More severe logs are always kept. Leave blank to match every level.
           </span>
@@ -514,23 +525,17 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               />
             </div>
             <div>
-              <label htmlFor="modal-sample-severity-select" className="block text-slate-400 text-[11px] mb-0.5">Sample Severity</label>
-              <select
+              <label id="modal-sample-severity-select-label" htmlFor="modal-sample-severity-select" className="block text-slate-400 text-[11px] mb-0.5">Sample Severity</label>
+              <SelectDropdown
+                variant="panel"
+                fieldClassName="bg-dark-900 border-dark-800 rounded px-2 py-1 font-mono text-slate-200"
                 id="modal-sample-severity-select"
+                labelledBy="modal-sample-severity-select-label"
+                label="Sample Severity"
+                options={SAMPLE_SEVERITY_OPTIONS}
                 value={sampleSeverity}
-                onChange={(e) => setSampleSeverity(e.target.value)}
-                className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden"
-              >
-                <option value="">Unspecified</option>
-                <option value="7">Debug (7)</option>
-                <option value="6">Info (6)</option>
-                <option value="5">Notice (5)</option>
-                <option value="4">Warning (4)</option>
-                <option value="3">Error (3)</option>
-                <option value="2">Critical (2)</option>
-                <option value="1">Alert (1)</option>
-                <option value="0">Emergency (0)</option>
-              </select>
+                onChange={setSampleSeverity}
+              />
             </div>
           </div>
 

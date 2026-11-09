@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useId, useState, useRef, useMemo } from 'react';
 import {
   Sparkles,
   Copy,
@@ -24,14 +24,22 @@ import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '.
 import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
-import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
 import { Modal } from '../common/Modal.tsx';
+import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { AiFollowUpThread } from './AiFollowUpThread.tsx';
 import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
+
+const PROVIDER_OPTIONS: SelectOption[] = [
+  { value: 'gemini', label: 'Google Gemini' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic Claude' },
+  { value: 'openai_compatible', label: 'OpenAI-Compatible (OpenRouter, Ollama, ...)' },
+];
 
 interface ProviderLocalState {
   hasKey: boolean;
@@ -52,6 +60,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   selectedLogs,
   onNavigateToSettings,
 }) => {
+  const fieldId = useId();
   const [preview, setPreview] = useState<AiPreviewResponse | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -898,24 +907,24 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                    <label id={`${fieldId}-provider-label`} htmlFor={`${fieldId}-provider`} className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                       AI Provider
                     </label>
-                    <select
+                    <SelectDropdown
+                      variant="panel"
+                      fieldClassName="bg-dark-950 border-dark-700 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                      id={`${fieldId}-provider`}
+                      labelledBy={`${fieldId}-provider-label`}
+                      label="AI Provider"
+                      options={PROVIDER_OPTIONS}
                       value={provider}
-                      onChange={(e) => handleProviderChange(e.target.value)}
-                      className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
-                    >
-                      <option value="gemini">Google Gemini</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic Claude</option>
-                      <option value="openai_compatible">OpenAI-Compatible (OpenRouter, Ollama, ...)</option>
-                    </select>
+                      onChange={handleProviderChange}
+                    />
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase">
+                      <label id={`${fieldId}-model-label`} htmlFor={`${fieldId}-model`} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase">
                         <span>Primary Model</span>
                         {isLoadingModels && (
                           <RefreshCw className="w-3 h-3 text-accent-400 animate-spin" />
@@ -943,28 +952,30 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     </div>
 
                     {availableModels.length > 0 && !isCustomModel ? (
-                      <select
+                      <SelectDropdown
+                        variant="panel"
+                        fieldClassName="bg-dark-950 border-dark-700 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                        id={`${fieldId}-model`}
+                        labelledBy={`${fieldId}-model-label`}
+                        label="Primary Model"
+                        options={[
+                          ...availableModels
+                            .filter((m) => m.id === model || !fallbackList.includes(m.id))
+                            .map(aiModelOption),
+                          { value: '__custom__', label: 'Custom model name...' },
+                        ]}
                         value={availableModels.some((m) => m.id === model) ? model : '__custom__'}
-                        onChange={(e) => {
-                          if (e.target.value === '__custom__') {
+                        onChange={(v) => {
+                          if (v === '__custom__') {
                             setIsCustomModel(true);
                           } else {
-                            handlePrimaryModelChange(e.target.value);
+                            handlePrimaryModelChange(v);
                           }
                         }}
-                        className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
-                      >
-                        {availableModels
-                          .filter((m) => m.id === model || !fallbackList.includes(m.id))
-                          .map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
-                            </option>
-                          ))}
-                        <option value="__custom__">Custom model name...</option>
-                      </select>
+                      />
                     ) : (
                       <input
+                        id={`${fieldId}-model`}
                         type="text"
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
@@ -1050,28 +1061,29 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <div className="pt-1">
                     {!showCustomFallbackInput ? (
                       <div className="flex items-center gap-2 w-full">
-                        <select
-                          value={selectedFallbackToAdd}
-                          onChange={(e) => {
-                            if (e.target.value === '__custom_fallback__') {
-                              setShowCustomFallbackInput(true);
-                              setSelectedFallbackToAdd('');
-                            } else {
-                              setSelectedFallbackToAdd(e.target.value);
-                            }
-                          }}
-                          className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono truncate"
-                        >
-                          <option value="">-- Add Fallback Model --</option>
-                          {availableModels
-                            .filter((m) => m.id !== model && !fallbackList.includes(m.id))
-                            .map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.id} {m.supports_thinking ? ' [Reasoning]' : ''}
-                              </option>
-                            ))}
-                          <option value="__custom_fallback__">Custom fallback model...</option>
-                        </select>
+                        <div className="flex-1 min-w-0">
+                          <SelectDropdown
+                            variant="panel"
+                            fieldClassName="bg-dark-950 border-dark-700 rounded px-2 py-1 font-mono text-slate-200"
+                            label="Add Fallback Model"
+                            options={[
+                              { value: '', label: '-- Add Fallback Model --' },
+                              ...availableModels
+                                .filter((m) => m.id !== model && !fallbackList.includes(m.id))
+                                .map(aiModelOption),
+                              { value: '__custom_fallback__', label: 'Custom fallback model...' },
+                            ]}
+                            value={selectedFallbackToAdd}
+                            onChange={(v) => {
+                              if (v === '__custom_fallback__') {
+                                setShowCustomFallbackInput(true);
+                                setSelectedFallbackToAdd('');
+                              } else {
+                                setSelectedFallbackToAdd(v);
+                              }
+                            }}
+                          />
+                        </div>
                         <button
                           type="button"
                           disabled={!selectedFallbackToAdd}

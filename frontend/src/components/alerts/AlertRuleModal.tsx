@@ -3,6 +3,7 @@ import { Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
 import { AlertRule, AlertRuleCreate, AlertRuleType, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
 import { createAlertRule, updateAlertRule } from '../../api/alerts.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
+import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel } from '../../utils/severityLabels.ts';
@@ -17,6 +18,17 @@ export interface AlertRulePrefill {
 }
 
 const EMPTY_APPS: string[] = [];
+
+const RULE_TYPE_OPTIONS: SelectOption[] = [
+  { value: 'threshold', label: 'Threshold (Sliding Window)' },
+  { value: 'pattern', label: 'Pattern (Immediate Match)' },
+  { value: 'rate', label: 'Rate Spike (Logs / Second)' },
+];
+
+const SEVERITY_FILTER_OPTIONS: SelectOption[] = [
+  { value: '', label: 'Any Severity' },
+  ...SEVERITIES.map((s) => ({ value: String(s.value), label: moreSevereLabel(s.value) })),
+];
 
 export interface AlertRuleModalProps {
   isOpen: boolean;
@@ -294,34 +306,34 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         {/* Rule Type & Target Channel */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label htmlFor={`${fieldId}-rule-type`} className="text-slate-300 font-medium">Rule Type</label>
-            <select
+            <label id={`${fieldId}-rule-type-label`} htmlFor={`${fieldId}-rule-type`} className="text-slate-300 font-medium">Rule Type</label>
+            <SelectDropdown
+              variant="panel"
+              fieldClassName="h-[38px] bg-dark-800 border-dark-700 rounded-lg px-3 text-slate-200"
               id={`${fieldId}-rule-type`}
+              labelledBy={`${fieldId}-rule-type-label`}
+              label="Rule Type"
+              options={RULE_TYPE_OPTIONS}
               value={formRuleType}
-              onChange={(e) => setFormRuleType(e.target.value as AlertRuleType)}
-              className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
-            >
-              <option value="threshold">Threshold (Sliding Window)</option>
-              <option value="pattern">Pattern (Immediate Match)</option>
-              <option value="rate">Rate Spike (Logs / Second)</option>
-            </select>
+              onChange={(v) => setFormRuleType(v as AlertRuleType)}
+            />
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`${fieldId}-target-channel`} className="text-slate-300 font-medium">Target Channel</label>
-            <select
+            <label id={`${fieldId}-target-channel-label`} htmlFor={`${fieldId}-target-channel`} className="text-slate-300 font-medium">Target Channel</label>
+            <SelectDropdown
+              variant="panel"
+              fieldClassName="h-[38px] bg-dark-800 border-dark-700 rounded-lg px-3 text-slate-200"
               id={`${fieldId}-target-channel`}
-              value={formChannelId ?? ''}
-              onChange={(e) => setFormChannelId(e.target.value ? Number(e.target.value) : null)}
-              className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
-            >
-              <option value="">All Enabled Channels</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>
-                  {ch.name}{ch.is_enabled ? '' : ' (Disabled)'}
-                </option>
-              ))}
-            </select>
+              labelledBy={`${fieldId}-target-channel-label`}
+              label="Target Channel"
+              options={[
+                { value: '', label: 'All Enabled Channels' },
+                ...channels.map((ch) => ({ value: String(ch.id), label: `${ch.name}${ch.is_enabled ? '' : ' (Disabled)'}` })),
+              ]}
+              value={String(formChannelId ?? '')}
+              onChange={(v) => setFormChannelId(v ? Number(v) : null)}
+            />
           </div>
         </div>
 
@@ -436,20 +448,17 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`${fieldId}-severity`} className="text-slate-300 font-medium">Severity Filter (Optional)</label>
-            <select
+            <label id={`${fieldId}-severity-label`} htmlFor={`${fieldId}-severity`} className="text-slate-300 font-medium">Severity Filter (Optional)</label>
+            <SelectDropdown
+              variant="panel"
+              fieldClassName="h-[38px] bg-dark-800 border-dark-700 rounded-lg px-3 text-slate-200"
               id={`${fieldId}-severity`}
-              value={formFilterSeverity}
-              onChange={(e) => setFormFilterSeverity(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
-            >
-              <option value="">Any Severity</option>
-              {SEVERITIES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {moreSevereLabel(s.value)}
-                </option>
-              ))}
-            </select>
+              labelledBy={`${fieldId}-severity-label`}
+              label="Severity Filter (Optional)"
+              options={SEVERITY_FILTER_OPTIONS}
+              value={String(formFilterSeverity)}
+              onChange={(v) => setFormFilterSeverity(v === '' ? '' : Number(v))}
+            />
             <span className="text-[11px] text-slate-400 block">
               Only logs at this level or more severe are checked.
             </span>

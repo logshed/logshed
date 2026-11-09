@@ -20,11 +20,35 @@ export interface SelectDropdownProps {
   /** Shown as a clear button beside the trigger while active. */
   onClear?: () => void;
   clearLabel?: string;
-  /** Panel variant: id of the visible label; the trigger is named by it followed by the value. */
+  /** Panel variant: id of the visible label; the trigger is named by it followed by the value. Without it, by `label`. */
   labelledBy?: string;
   /** The trigger's id, so a visible label can point at it. */
   id?: string;
   title?: string;
+  /** Greys the trigger out and keeps the list shut. */
+  disabled?: boolean;
+  /**
+   * Panel variant: the field's own look (background, border colour, radius, padding or height, font and
+   * text colour), so it matches the inputs beside it in its form. The list's rows take its font.
+   */
+  fieldClassName?: string;
+}
+
+/** The panel's look without fieldClassName: the Console filter drawer's fields. */
+const DEFAULT_FIELD = 'bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-400';
+
+/** The tallest the list grows before it scrolls (Tailwind's max-h-72). */
+const LIST_MAX_HEIGHT = 288;
+/** Space kept between the panel variant's list and the edge of the viewport. */
+const VIEWPORT_MARGIN = 8;
+
+/** Where the panel variant's list sits: fixed to the viewport, under the trigger or over it. */
+interface PanelPlacement {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width: number;
+  maxHeight: number;
 }
 
 /** Nearest ancestor that scrolls vertically, whose bottom edge also limits room for the list. */
@@ -48,6 +72,11 @@ function scrollParentBounds(el: HTMLElement): { top: number; bottom: number } {
  * operating system's list. Keys follow a native select: Enter, Space, Down, Up or Alt+Down open the
  * list on the chosen row; Up, Down, Home, End and a typed letter move; Enter or Space chooses; Esc and
  * Tab close it, and focus goes back to the trigger.
+ *
+ * The panel variant, used in forms and dialogs, draws its list fixed to the viewport, so a dialog's
+ * scrolling body never clips it, and the list scrolls within the room the viewport leaves above or
+ * below the trigger. It stays beside the trigger in the DOM: inside the dialog's Tab trap and the
+ * page's landmarks.
  */
 export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   label,
@@ -61,6 +90,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   labelledBy,
   id,
   title,
+  disabled = false,
+  fieldClassName = DEFAULT_FIELD,
 }) => {
   const baseId = useId();
   const labelId = `${baseId}-label`;
@@ -71,6 +102,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [placeAbove, setPlaceAbove] = useState(false);
+  const [panelPlacement, setPanelPlacement] = useState<PanelPlacement | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -80,9 +112,27 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   const showClear = active && Boolean(onClear);
 
   const open = () => {
+    if (disabled) return;
     setActiveIndex(Math.max(0, selectedIndex));
     setPlaceAbove(false);
+    setPanelPlacement(null);
     setIsOpen(true);
+  };
+
+  // Panel variant: below the trigger, or above it when the list does not fit below and there is more room above
+  const placePanelList = () => {
+    if (!triggerRef.current || !listRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const roomBelow = window.innerHeight - rect.bottom - 4 - VIEWPORT_MARGIN;
+    const roomAbove = rect.top - 4 - VIEWPORT_MARGIN;
+    const height = Math.min(LIST_MAX_HEIGHT, listRef.current.scrollHeight);
+    const above = height > roomBelow && roomAbove > roomBelow;
+    const maxHeight = Math.max(0, Math.min(LIST_MAX_HEIGHT, above ? roomAbove : roomBelow));
+    setPanelPlacement(
+      above
+        ? { bottom: window.innerHeight - rect.top + 4, left: rect.left, width: rect.width, maxHeight }
+        : { top: rect.bottom + 4, left: rect.left, width: rect.width, maxHeight }
+    );
   };
 
   const close = () => {
@@ -99,12 +149,38 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   // On open: focus the list, and open it upwards when there is no room below but room above
   useLayoutEffect(() => {
     if (!isOpen || !listRef.current || !triggerRef.current) return;
+    if (isPanel) {
+      // Placed before the browser paints, so it never shows where it first rendered
+      placePanelList();
+      listRef.current.focus({ preventScroll: true });
+      return;
+    }
     listRef.current.focus();
     const rect = triggerRef.current.getBoundingClientRect();
     const height = listRef.current.offsetHeight;
     const bounds = scrollParentBounds(triggerRef.current);
     if (rect.bottom + height + 4 > bounds.bottom && rect.top - height - 4 >= bounds.top) setPlaceAbove(true);
   }, [isOpen]);
+
+  // Panel variant: follow the trigger when the page or the dialog scrolls, or the window resizes
+  useEffect(() => {
+    if (!isOpen || !isPanel) return;
+    let frame: number | null = null;
+    const follow = (e: Event) => {
+      if (e.target === listRef.current || frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        placePanelList();
+      });
+    };
+    window.addEventListener('resize', follow, { passive: true });
+    window.addEventListener('scroll', follow, { passive: true, capture: true });
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', follow);
+      window.removeEventListener('scroll', follow, true);
+    };
+  }, [isOpen, isPanel]);
 
   // Keep the active row in view
   useEffect(() => {
@@ -180,15 +256,18 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     }
   };
 
+  // The open and active states mark the border with !important, over the field's own border colour
   const triggerClass = isPanel
-    ? `w-full flex items-center justify-between gap-2 bg-dark-950 border rounded px-3 py-2 text-xs font-mono cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
+    ? `w-full flex items-center justify-between gap-2 border text-xs select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${fieldClassName} ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+      } ${
         isOpen
-          ? 'border-accent-500 ring-1 ring-accent-500/20'
+          ? '!border-accent-500 ring-1 ring-accent-500/20'
           : active
-          ? 'border-accent-600/60 text-accent-300 font-medium'
-          : 'border-dark-700 text-slate-400'
+          ? '!border-accent-600/60 !text-accent-300 font-medium'
+          : ''
       }`
-    : filterTriggerClass(isOpen, active);
+    : `${filterTriggerClass(isOpen, active)}${disabled ? ' opacity-50 cursor-not-allowed' : ''}`;
 
   const chevron = (
     <ChevronDown
@@ -215,52 +294,77 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     </button>
   );
 
-  const list = isOpen && (
+  const rowFont = !isPanel || fieldClassName.split(' ').includes('font-mono') ? 'font-mono' : '';
+  const rows = options.map((option, index) => {
+    const isChosen = index === selectedIndex;
+    const isActive = index === activeIndex;
+    return (
+      <li
+        key={option.value}
+        id={optionId(index)}
+        role="option"
+        aria-selected={isChosen}
+        onClick={() => choose(index)}
+        onMouseMove={() => setActiveIndex(index)}
+        className={`flex items-center justify-between gap-3 cursor-pointer select-none ${rowFont} ${
+          isPanel ? 'px-3 py-2 text-xs' : 'px-2.5 py-1 text-[11px]'
+        } ${isActive ? 'bg-dark-800 ring-1 ring-inset ring-accent-500/60' : ''} ${
+          isChosen ? 'text-accent-200 font-medium' : isActive ? 'text-slate-100' : 'text-slate-300'
+        }`}
+      >
+        {/* A long row (an AI model name) wraps in the panel's fixed width rather than running past it */}
+        <span className={isPanel ? 'min-w-0 break-words' : 'whitespace-nowrap'}>{option.label}</span>
+        <Check aria-hidden="true" className={`w-3 h-3 shrink-0 ${isChosen ? 'text-accent-400' : 'invisible'}`} />
+      </li>
+    );
+  });
+
+  // The list keeps focus; the active row is marked by its ring (aria-activedescendant)
+  const listProps = {
+    ref: listRef,
+    id: listId,
+    role: 'listbox',
+    tabIndex: -1,
+    'aria-labelledby': labelledBy ?? labelId,
+    'aria-activedescendant': optionId(activeIndex),
+    onKeyDown: handleListKeyDown,
+    'data-no-pull-refresh': true,
+  } as const;
+
+  const closeOnBackdrop = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsOpen(false);
+  };
+
+  const toolbarList = isOpen && !isPanel && (
     <>
       {/* Transparent backdrop: a click outside closes the list without reaching what is under it */}
-      <div
-        data-testid="select-dropdown-backdrop"
-        className="fixed inset-0 z-40 bg-transparent"
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen(false);
-        }}
-      />
+      <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-40 bg-transparent" onClick={closeOnBackdrop} />
       <ul
-        ref={listRef}
-        id={listId}
-        role="listbox"
-        tabIndex={-1}
-        aria-labelledby={labelledBy ?? labelId}
-        aria-activedescendant={optionId(activeIndex)}
-        onKeyDown={handleListKeyDown}
-        className={`absolute left-0 ${placeAbove ? 'bottom-full mb-1' : 'top-full mt-1'} ${
-          isPanel ? 'w-full' : 'min-w-full w-max'
-        } max-h-72 overflow-y-auto z-50 outline-none ${POPOVER_PANEL}`}
+        {...listProps}
+        className={`absolute left-0 ${placeAbove ? 'bottom-full mb-1' : 'top-full mt-1'} min-w-full w-max max-h-72 overflow-y-auto z-50 outline-none ${POPOVER_PANEL}`}
       >
-        {/* The list keeps focus; the active row is marked by its ring (aria-activedescendant) */}
-        {options.map((option, index) => {
-          const isChosen = index === selectedIndex;
-          const isActive = index === activeIndex;
-          return (
-            <li
-              key={option.value}
-              id={optionId(index)}
-              role="option"
-              aria-selected={isChosen}
-              onClick={() => choose(index)}
-              onMouseMove={() => setActiveIndex(index)}
-              className={`flex items-center justify-between gap-3 cursor-pointer select-none font-mono ${
-                isPanel ? 'px-3 py-2 text-xs' : 'px-2.5 py-1 text-[11px]'
-              } ${isActive ? 'bg-dark-800 ring-1 ring-inset ring-accent-500/60' : ''} ${
-                isChosen ? 'text-accent-200 font-medium' : isActive ? 'text-slate-100' : 'text-slate-300'
-              }`}
-            >
-              <span className="whitespace-nowrap">{option.label}</span>
-              <Check aria-hidden="true" className={`w-3 h-3 shrink-0 ${isChosen ? 'text-accent-400' : 'invisible'}`} />
-            </li>
-          );
-        })}
+        {rows}
+      </ul>
+    </>
+  );
+
+  const panelList = isOpen && isPanel && (
+    <>
+      <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-[9998] bg-transparent" onClick={closeOnBackdrop} />
+      <ul
+        {...listProps}
+        style={{
+          position: 'fixed',
+          top: panelPlacement?.top,
+          bottom: panelPlacement?.bottom,
+          left: panelPlacement?.left ?? 0,
+          width: panelPlacement?.width,
+          maxHeight: panelPlacement?.maxHeight ?? LIST_MAX_HEIGHT,
+        }}
+        className={`overflow-y-auto z-[9999] outline-none ${POPOVER_PANEL}`}
+      >
+        {rows}
       </ul>
     </>
   );
@@ -272,6 +376,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       type="button"
       onClick={() => (isOpen ? setIsOpen(false) : open())}
       onKeyDown={handleTriggerKeyDown}
+      disabled={disabled}
       aria-haspopup="listbox"
       aria-expanded={isOpen}
       aria-controls={isOpen ? listId : undefined}
@@ -281,6 +386,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     >
       {isPanel ? (
         <>
+          {/* Without a visible label to point at, the panel names itself from its label prop */}
+          {!labelledBy && <span id={labelId} className="sr-only">{label}</span>}
           <span id={valueId} className="truncate">{selectedLabel}</span>
           {chevron}
         </>
@@ -305,7 +412,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       <div data-active={active} className={`flex items-center gap-2 ${active ? 'text-slate-100' : ''}`}>
         <div className="relative flex-1 min-w-0">
           {trigger}
-          {list}
+          {panelList}
         </div>
         {clearButton}
       </div>
@@ -316,7 +423,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     <div data-active={active} className="relative inline-block text-left">
       {trigger}
       {clearButton}
-      {list}
+      {toolbarList}
     </div>
   );
 };

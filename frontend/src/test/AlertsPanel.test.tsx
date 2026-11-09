@@ -11,6 +11,7 @@ import type { SettingsResponseData } from '../api/settings.ts';
 import { setAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 import { stubDownloads } from './downloadStubs.ts';
 import { ApiError } from '../api/client.ts';
+import { chooseOption, shownValue } from './selectDropdownHelpers.ts';
 
 const mockRules: AlertRule[] = [
   {
@@ -637,7 +638,8 @@ describe('AlertsPanel Component', () => {
 
     // Select target channel
     const channelSelect = screen.getByLabelText(/Target Channel:/i);
-    fireEvent.change(channelSelect, { target: { value: '1' } });
+    chooseOption(channelSelect, mockChannels[0].name);
+    expect(shownValue(channelSelect)).toBe(mockChannels[0].name);
 
     // Install OOM killer preset (second preset)
     const installBtns = screen.getAllByRole('button', { name: /Install Rule/i });
@@ -1092,6 +1094,30 @@ describe('AlertsPanel Component', () => {
       expect(setMaintSpy).toHaveBeenCalled();
     });
     expect(setMaintSpy.mock.calls[0][0]).toBe('2026-09-26T22:00:00.000Z');
+  });
+
+  it('saves the weekday chosen for a weekly schedule', async () => {
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null, schedules: [] });
+    const updateSchedulesSpy = vi
+      .spyOn(alertsApi, 'updateMaintenanceSchedules')
+      .mockResolvedValue({ active: false, until: null, schedules: [] });
+
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Schedule' }));
+    fireEvent.change(screen.getByLabelText('Schedule Name'), { target: { value: 'Patch Wednesday' } });
+
+    const day = screen.getByLabelText('Day of the Week');
+    expect(shownValue(day)).toBe('Sunday');
+    chooseOption(day, 'Wednesday');
+    expect(shownValue(day)).toBe('Wednesday');
+    fireEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+    await waitFor(() => {
+      expect(updateSchedulesSpy).toHaveBeenCalledWith([
+        expect.objectContaining({ name: 'Patch Wednesday', recurrence: 'weekly', day_of_week: 3 }),
+      ]);
+    });
   });
 
   it('manages recurring maintenance schedules (add, toggle, delete)', async () => {

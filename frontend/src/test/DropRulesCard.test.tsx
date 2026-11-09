@@ -4,6 +4,7 @@ import { DropRulesCard } from '../components/alerts/tabs/DropRulesTab.tsx';
 import * as dropRulesApi from '../api/dropRules.ts';
 import { DropRule } from '../types.ts';
 import { stubDownloads } from './downloadStubs.ts';
+import { chooseOption } from './selectDropdownHelpers.ts';
 
 /** Add a typed pattern to the drop rule dialog's host or app dropdown, as a user does. */
 function addPattern(field: RegExp, searchPlaceholder: string, value: string) {
@@ -387,7 +388,7 @@ describe('DropRulesCard Component', () => {
     // Select severity threshold: Info (6) and less severe
     const sevSelect = screen.getByLabelText(/Severity Range/i);
     expect(sevSelect).toBeInTheDocument();
-    fireEvent.change(sevSelect, { target: { value: '6' } });
+    chooseOption(sevSelect, 'Info (6) and less severe');
 
     addApp('sshd');
 
@@ -396,7 +397,7 @@ describe('DropRulesCard Component', () => {
     fireEvent.change(sampleMsg, { target: { value: 'Disconnected from authenticating user' } });
 
     const sampleSevSelect = screen.getByLabelText(/Sample Severity/i);
-    fireEvent.change(sampleSevSelect, { target: { value: '7' } });
+    chooseOption(sampleSevSelect, 'Debug (7)');
 
     const testBtn = screen.getByText('Dry-Run Test');
     fireEvent.click(testBtn);

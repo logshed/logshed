@@ -500,7 +500,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                   maxWidth: 'calc(100vw - 24px)',
                   visibility: coords ? 'visible' : 'hidden',
                 }}
-                className="bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-[9999] py-1.5 animate-in fade-in-50 zoom-in-95 duration-100"
+                className="bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-[9999] py-1.5"
               >
                 {renderDropdownMenu()}
               </div>
@@ -525,7 +525,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             <div
               ref={popoverRef}
               data-no-pull-refresh
-              className="absolute left-0 mt-1 w-64 bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-50 py-1.5 animate-in fade-in-50 zoom-in-95 duration-100"
+              className="absolute left-0 mt-1 w-64 bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-50 py-1.5"
             >
               {renderDropdownMenu()}
             </div>

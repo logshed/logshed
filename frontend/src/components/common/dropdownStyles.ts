@@ -21,4 +21,4 @@ export const FILTER_CLEAR_ROOM = 'w-[18px] shrink-0';
 
 /** The open list of a dropdown. */
 export const POPOVER_PANEL =
-  'bg-dark-900 border border-dark-700 rounded-md shadow-2xl py-1.5 animate-in fade-in-50 zoom-in-95 duration-100';
+  'bg-dark-900 border border-dark-700 rounded-md shadow-2xl py-1.5';

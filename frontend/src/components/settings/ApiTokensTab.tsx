@@ -23,6 +23,7 @@ import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
 import { useClipboard, useMediaQuery } from '../../utils/hooks.ts';
 import { TokenScopeChooser } from './TokenScopeChooser.tsx';
+import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { useDialog } from '../../utils/dialogStack.ts';
 import {
   CUSTOM_PRESET_ID,
@@ -37,6 +38,13 @@ import {
 } from './tokenScopes.ts';
 
 const DEFAULT_PRESET_ID = 'ai_mcp';
+
+const EXPIRY_OPTIONS: SelectOption[] = [
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '365', label: '1 year' },
+  { value: 'never', label: 'No expiration' },
+];
 
 /** The scopes a modal would save: the chosen preset's list, or the collapsed custom selection. */
 const chosenScopes = (presetId: string, selection: ReadonlySet<string>): string[] =>
@@ -922,23 +930,19 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               />
 
               <div>
-                <label htmlFor="token-expiry" className="block text-xs font-medium text-slate-300 mb-1">
+                <label id="token-expiry-label" htmlFor="token-expiry" className="block text-xs font-medium text-slate-300 mb-1">
                   Expiration
                 </label>
-                <select
+                <SelectDropdown
+                  variant="panel"
+                  fieldClassName="bg-dark-950 border-dark-700 rounded-lg px-3 py-2 text-slate-200"
                   id="token-expiry"
-                  value={expiresDays === null ? 'never' : expiresDays}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setExpiresDays(val === 'never' ? null : parseInt(val, 10));
-                  }}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500"
-                >
-                  <option value="30">30 days</option>
-                  <option value="90">90 days</option>
-                  <option value="365">1 year</option>
-                  <option value="never">No expiration</option>
-                </select>
+                  labelledBy="token-expiry-label"
+                  label="Expiration"
+                  options={EXPIRY_OPTIONS}
+                  value={expiresDays === null ? 'never' : String(expiresDays)}
+                  onChange={(v) => setExpiresDays(v === 'never' ? null : parseInt(v, 10))}
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">

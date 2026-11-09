@@ -1,3 +1,5 @@
+import { AiModelInfo } from '../types.ts';
+
 /**
  * Shared AI prompt constants and helper functions.
  */
@@ -132,4 +134,7 @@ export function isTextModel(modelId: string): boolean {
   return !NON_TEXT_MODEL_KEYWORDS.some((kw) => low.includes(kw));
 }
 
-
+/** A model as a row of the model dropdowns: its id, marked when it can reason. */
+export function aiModelOption(m: AiModelInfo): { value: string; label: string } {
+  return { value: m.id, label: m.supports_thinking ? `${m.id} [Reasoning]` : m.id };
+}

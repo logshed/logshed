@@ -5,6 +5,7 @@ import * as tokensApi from '../api/tokens.ts';
 import * as settingsApi from '../api/settings.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 import { ApiToken } from '../types.ts';
+import { chooseOption, optionLabels, shownValue } from './selectDropdownHelpers.ts';
 
 const mockTokens: ApiToken[] = [
   {
@@ -545,6 +546,20 @@ describe('ApiTokensTab Component', () => {
     };
 
     const submit = () => fireEvent.click(screen.getByRole('button', { name: /Create Token/i }));
+
+    it('offers the expiry periods, starts at 90 days, and saves no expiry as null', async () => {
+      const createSpy = await openEmptyCustomPicker();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'logs:read' }));
+      const expiry = screen.getByLabelText('Expiration');
+      expect(shownValue(expiry)).toBe('90 days');
+      expect(optionLabels(expiry)).toEqual(['30 days', '90 days', '1 year', 'No expiration']);
+
+      chooseOption(expiry, 'No expiration');
+      submit();
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenLastCalledWith({ name: 'Picker', scopes: ['logs:read'], expires_days: null });
+      });
+    });
 
     it('starts Custom as a copy of the selected preset', async () => {
       vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);

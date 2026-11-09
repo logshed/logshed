@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
+import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { PresetCard } from './PresetCard.tsx';
 import { AlertPreset, AlertRule, NotificationChannel } from '../../types.ts';
 
@@ -46,22 +47,24 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
 
           {channels.length > 0 && (
             <div className="flex items-center gap-2 shrink-0">
-              <label htmlFor="target-channel-select" className="text-xs text-slate-400">
+              <label id="target-channel-select-label" htmlFor="target-channel-select" className="text-xs text-slate-400">
                 Target Channel:
               </label>
-              <select
-                id="target-channel-select"
-                value={presetChannelId ?? ''}
-                onChange={(e) => onSelectChannelId(e.target.value ? Number(e.target.value) : null)}
-                className="bg-dark-800 border border-dark-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:border-accent-500"
-              >
-                <option value="">All Enabled Channels</option>
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>
-                    {ch.name}
-                  </option>
-                ))}
-              </select>
+              <div className="w-52">
+                <SelectDropdown
+                  variant="panel"
+                  fieldClassName="bg-dark-800 border-dark-700 rounded-lg px-2.5 py-1.5 text-slate-200"
+                  id="target-channel-select"
+                  labelledBy="target-channel-select-label"
+                  label="Target Channel"
+                  options={[
+                    { value: '', label: 'All Enabled Channels' },
+                    ...channels.map((ch) => ({ value: String(ch.id), label: ch.name })),
+                  ]}
+                  value={String(presetChannelId ?? '')}
+                  onChange={(v) => onSelectChannelId(v ? Number(v) : null)}
+                />
+              </div>
             </div>
           )}
         </div>

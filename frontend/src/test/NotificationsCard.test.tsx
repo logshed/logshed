@@ -4,6 +4,7 @@ import { NotificationsCard } from '../components/settings/NotificationsCard.tsx'
 import * as notifApi from '../api/notifications.ts';
 import * as settingsApi from '../api/settings.ts';
 import type { SystemSettings } from '../types.ts';
+import { chooseOption, shownValue } from './selectDropdownHelpers.ts';
 
 vi.mock('../api/notifications.ts', () => ({
   fetchNotificationChannels: vi.fn(),
@@ -229,8 +230,10 @@ describe('NotificationsCard Component', () => {
     await waitFor(() => {
       expect(screen.getByText('Daily Digest Rollup')).toBeInTheDocument();
       expect(screen.getByText('Send Digest Now')).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: /Homelab Discord/ })).toBeInTheDocument();
+      expect(screen.getByLabelText('Delete Homelab Discord')).toBeInTheDocument();
     });
+    // The channel list stays shut while the digest is off
+    expect(screen.getByLabelText(/Target Channel/i)).toBeDisabled();
     // The card copies the loaded settings into the digest controls; on a slow runner that can land after
     // the click below and switch the digest off again, so let the settings load first
     await act(async () => {
@@ -248,7 +251,8 @@ describe('NotificationsCard Component', () => {
 
     // Select channel
     const channelSelect = screen.getByLabelText(/Target Channel/i);
-    fireEvent.change(channelSelect, { target: { value: '1' } });
+    expect(channelSelect).not.toBeDisabled();
+    chooseOption(channelSelect, 'Channel: Homelab Discord');
 
     await waitFor(() => {
       expect(settingsApi.updateSettings).toHaveBeenCalledWith({ daily_digest_channel_id: 1 });
@@ -314,7 +318,7 @@ describe('NotificationsCard Component', () => {
     render(<NotificationsCard />);
     // Wait for the channels and settings: the message names the channel only once the list has loaded
     await waitFor(() => {
-      expect((screen.getByLabelText(/Target Channel/i) as HTMLSelectElement).value).toBe('1');
+      expect(shownValue(screen.getByLabelText(/Target Channel/i))).toBe('Channel: Homelab Discord');
     });
     fireEvent.click(screen.getByText('Send Digest Now'));
 
@@ -337,14 +341,14 @@ describe('NotificationsCard Component', () => {
 
     render(<NotificationsCard onSettingsSaved={onSettingsSaved} />);
     await waitFor(() => {
-      expect((screen.getByLabelText(/Target Channel/i) as HTMLSelectElement).value).toBe('1');
+      expect(shownValue(screen.getByLabelText(/Target Channel/i))).toBe('Channel: Homelab Discord');
     });
 
     fireEvent.click(screen.getByLabelText('Delete Homelab Discord'));
     fireEvent.click(screen.getByText('Delete Target'));
 
     await waitFor(() => {
-      expect((screen.getByLabelText(/Target Channel/i) as HTMLSelectElement).value).toBe('');
+      expect(shownValue(screen.getByLabelText(/Target Channel/i))).toBe('None (History Only)');
     });
     expect(onSettingsSaved).toHaveBeenCalled();
   });
