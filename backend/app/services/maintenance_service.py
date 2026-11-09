@@ -51,6 +51,32 @@ def _local_instant(
     return wall.replace(tzinfo=tz).astimezone(datetime.timezone.utc)
 
 
+# Bad start times already reported, so each is logged once rather than on every status check
+_reported_bad_start_times: set[str] = set()
+
+
+def _schedule_start(schedule: MaintenanceSchedule) -> tuple[int, int]:
+    """
+    The schedule's start time as (hour, minute). A malformed or out-of-range value, which only a
+    version without the save-time check could have stored, falls back to 02:00.
+    """
+    try:
+        time_parts = schedule.start_time.split(":")
+        hour = int(time_parts[0])
+        minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+    except (ValueError, IndexError):
+        pass
+    if schedule.start_time not in _reported_bad_start_times:
+        _reported_bad_start_times.add(schedule.start_time)
+        logger.warning(
+            f"Maintenance schedule '{schedule.name}' has an invalid start time '{schedule.start_time}'; "
+            "using 02:00 until it is saved again with a valid time"
+        )
+    return 2, 0
+
+
 def evaluate_schedule(
     schedule: MaintenanceSchedule,
     now_local: datetime.datetime,
@@ -71,13 +97,7 @@ def evaluate_schedule(
     if not schedule.enabled:
         return False, None, None
 
-    try:
-        time_parts = schedule.start_time.split(":")
-        start_hour = int(time_parts[0])
-        start_minute = int(time_parts[1]) if len(time_parts) > 1 else 0
-    except (ValueError, IndexError):
-        start_hour = 2
-        start_minute = 0
+    start_hour, start_minute = _schedule_start(schedule)
 
     duration = datetime.timedelta(minutes=max(1, schedule.duration_minutes))
     recurrence = (schedule.recurrence or "weekly").lower()

@@ -288,3 +288,31 @@ class TestStatusNextRun:
 
         assert status.schedules[0].next_run == "2026-10-25T02:00:00+00:00"
         assert status.schedules[0].is_active is False
+
+
+class TestBadStoredStartTime:
+    """A start time saved before it was validated must not break maintenance status."""
+
+    @pytest.mark.parametrize("start_time", ["25:00", "12:99", "nonsense"])
+    def test_bad_start_time_falls_back_to_two_in_the_morning(self, start_time):
+        now = _local(LONDON, 2026, 7, 1, 12, 0)
+        assert evaluate_schedule(_sched("daily", start_time, 60), now) == evaluate_schedule(
+            _sched("daily", "02:00", 60), now
+        )
+
+    def test_status_works_with_an_out_of_range_row_already_stored(self, tmp_path: Path, monkeypatch):
+        db_path = tmp_path / "logs.db"
+        run_migrations(db_path)
+        monkeypatch.setattr(ms, "_get_server_time_info", lambda: (_local(LONDON, 2026, 7, 1, 12, 0), "BST"))
+
+        conn = get_connection(db_path)
+        try:
+            # Written as an older version would have saved it, without the request validation
+            ms.save_schedules(conn, [_sched("daily", "25:00", 60), _sched("weekly", "03:00", 60, dow=0)])
+            status = ms.get_maintenance_status(conn)
+        finally:
+            conn.close()
+
+        assert len(status.schedules) == 2
+        assert status.schedules[0].next_run == "2026-07-02T02:00:00+01:00"
+        assert status.schedules[1].next_run == "2026-07-05T03:00:00+01:00"

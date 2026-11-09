@@ -588,6 +588,21 @@ class TestMaintenanceWindowApi:
         assert get_data["server_timezone"] is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("start_time", ["25:00", "12:99", "2:00", "02:00:00", ""])
+    async def test_maintenance_schedule_start_time_must_be_hh_mm(
+        self, client: AsyncClient, auth_headers: dict, start_time: str
+    ):
+        schedule = {"name": "Nightly", "enabled": True, "recurrence": "daily", "start_time": start_time, "duration_minutes": 60}
+        res = await client.post("/api/alerts/maintenance/schedules", json={"schedules": [schedule]}, headers=auth_headers)
+        assert res.status_code == 422
+        assert "start_time" in res.text
+
+        # Nothing was saved, so status still works
+        status_res = await client.get("/api/alerts/maintenance", headers=auth_headers)
+        assert status_res.status_code == 200
+        assert status_res.json()["schedules"] == []
+
+    @pytest.mark.asyncio
     async def test_reorder_alert_rules(self, client: AsyncClient, auth_headers: dict):
         # 1. Create three alert rules
         r1 = (await client.post("/api/alerts/rules", json={"name": "Alert Alpha", "rule_type": "threshold"}, headers=auth_headers)).json()

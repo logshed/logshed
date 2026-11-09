@@ -4,6 +4,7 @@ Pydantic v2 schemas and models for LogShed API.
 
 from datetime import datetime
 import ipaddress
+import re
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
@@ -1158,9 +1159,25 @@ class MaintenanceSchedule(BaseModel):
     next_run: Optional[str] = Field(None, description="ISO timestamp of next scheduled window start")
 
 
+_SCHEDULE_START_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
 class MaintenanceSchedulesUpdateRequest(BaseModel):
     """Payload for saving configured maintenance schedules."""
     schedules: list[MaintenanceSchedule]
+
+    # Checked here rather than on MaintenanceSchedule, which also reads rows saved before this check:
+    # one bad stored row must not stop the others from loading
+    @field_validator("schedules")
+    @classmethod
+    def validate_start_times(cls, schedules: list[MaintenanceSchedule]) -> list[MaintenanceSchedule]:
+        for schedule in schedules:
+            if not _SCHEDULE_START_TIME.match(schedule.start_time):
+                raise ValueError(
+                    f"start_time of schedule '{schedule.name}' must be a 24-hour time HH:MM (00:00 to 23:59), "
+                    f"not '{schedule.start_time}'"
+                )
+        return schedules
 
 
 class MaintenanceSessionDetail(BaseModel):
