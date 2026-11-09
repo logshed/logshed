@@ -59,6 +59,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
   * "Create Alert Rule" (next to "Create Drop Rule") switches to Rules & History > Alert Rules and opens the new-rule dialog with the name `Alert on <app>`, the app filter set to the log's app when it is a known app, severity and pattern empty, and a read-only "From log: <message>" line under the pattern field (truncated, full text in the tooltip). The prefill is handed over in memory (`utils/alertRuleHandoff.ts`, read once by `AlertsPanel`), never in the URL. Closing the dialog stays on Alert Rules.
 * **Targeted Log Deletion Modal:**
   * Supports deletion of selected records, filtered ranges, or all historical logs with confirmation guards and dry-run count preview.
+  * The Custom Range From and To fields are read in the server's time zone (`TZ`), like the Console's date pickers, and their labels name that zone.
 
 ### 3.2 Rules & Alerts Hub (`/rules`)
 * **Alert Rules Tab:**

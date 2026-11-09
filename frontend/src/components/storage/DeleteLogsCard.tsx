@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { previewDeleteLogs, deleteLogs, fetchLogFacets } from '../../api/logs.ts';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
+import { fromLocalDatetimeInputString, timeInputZoneLabel } from '../../utils/formatters.ts';
+import { useServerTimezone } from '../../utils/hooks.ts';
 
 interface DeleteLogsCardProps {
   onLogsDeleted?: () => void;
@@ -34,6 +36,9 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
   const [confirmText, setConfirmText] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  // The custom range is read in the server's time zone, like the Console's date pickers
+  const serverTimezone = useServerTimezone();
+  const zoneLabel = timeInputZoneLabel(serverTimezone);
 
   // Load available hosts and apps from database facets
   useEffect(() => {
@@ -59,8 +64,8 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
     }
     if (timePreset === 'custom') {
       return {
-        derivedFrom: customFrom ? new Date(customFrom).toISOString() : undefined,
-        derivedTo: customTo ? new Date(customTo).toISOString() : undefined,
+        derivedFrom: fromLocalDatetimeInputString(customFrom, serverTimezone),
+        derivedTo: fromLocalDatetimeInputString(customTo, serverTimezone),
       };
     }
 
@@ -81,7 +86,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
     }
 
     return { derivedFrom: undefined, derivedTo: undefined };
-  }, [timePreset, customFrom, customTo]);
+  }, [timePreset, customFrom, customTo, serverTimezone]);
 
   const hasActiveCriteria =
     selectedSources.length > 0 ||
@@ -296,18 +301,20 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
           {timePreset === 'custom' && (
             <div className="flex flex-col sm:flex-row gap-3 w-full min-w-0 max-w-full pt-1">
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
-                <span className="text-[11px] text-slate-400 block font-mono">From:</span>
+                <span className="text-[11px] text-slate-400 block font-mono">From ({zoneLabel}):</span>
                 <input
                   type="datetime-local"
+                  aria-label={`From (${zoneLabel})`}
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
                   className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border [color-scheme:dark]"
                 />
               </div>
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
-                <span className="text-[11px] text-slate-400 block font-mono">To:</span>
+                <span className="text-[11px] text-slate-400 block font-mono">To ({zoneLabel}):</span>
                 <input
                   type="datetime-local"
+                  aria-label={`To (${zoneLabel})`}
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
                   className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border [color-scheme:dark]"

@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DeleteLogsCard } from '../components/storage/DeleteLogsCard.tsx';
 import * as logsApi from '../api/logs.ts';
+import * as settingsApi from '../api/settings.ts';
 
 describe('DeleteLogsCard Component', () => {
   beforeEach(() => {
@@ -128,5 +129,49 @@ describe('DeleteLogsCard Component', () => {
 
     expect(queryInput).toHaveValue('');
     expect(screen.getByText(/Select criteria above to preview logs targeted for deletion/i)).toBeInTheDocument();
+  });
+
+  it('reads a custom range in the server time zone, not the browser one', async () => {
+    const originalTz = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+    vi.spyOn(settingsApi, 'getCachedServerTimezone').mockReturnValue('Pacific/Kiritimati');
+    vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({ server_timezone: 'Pacific/Kiritimati' } as any);
+    const previewSpy = vi.spyOn(logsApi, 'previewDeleteLogs').mockResolvedValue({ matched_count: 3 });
+    const deleteSpy = vi.spyOn(logsApi, 'deleteLogs').mockResolvedValue({
+      status: 'ok',
+      deleted_count: 3,
+      message: 'Deleted 3 logs.',
+    });
+    try {
+      const { container } = render(<DeleteLogsCard />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Custom Range' }));
+      const [fromInput, toInput] = Array.from(container.querySelectorAll('input[type="datetime-local"]'));
+      // Kiritimati is UTC+14 all year
+      fireEvent.change(fromInput, { target: { value: '2026-10-13T10:00' } });
+      fireEvent.change(toInput, { target: { value: '2026-10-13T12:30' } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('matched-count-display')).toHaveTextContent('3');
+      });
+      expect(previewSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+        from: '2026-10-12T20:00:00.000Z',
+        to: '2026-10-12T22:30:00.000Z',
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /Delete Matching Logs/i }));
+      await waitFor(() => expect(deleteSpy).toHaveBeenCalled());
+      expect(deleteSpy).toHaveBeenCalledWith(expect.objectContaining({
+        from: '2026-10-12T20:00:00.000Z',
+        to: '2026-10-12T22:30:00.000Z',
+      }));
+      await waitFor(() => expect(screen.getByText('Successfully deleted 3 logs.')).toBeInTheDocument());
+      // The fields say which zone they are read in
+      expect(fromInput).toHaveAccessibleName('From (Pacific/Kiritimati)');
+      expect(toInput).toHaveAccessibleName('To (Pacific/Kiritimati)');
+    } finally {
+      process.env.TZ = originalTz;
+    }
   });
 });
