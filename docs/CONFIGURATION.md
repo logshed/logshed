@@ -260,6 +260,10 @@ All persistent application data is stored under the `/data` directory:
 > [!WARNING]
 > Always host the `/data` directory on a local filesystem (such as ext4, btrfs, or zfs) or an SSD cache pool. Network mounts (NFS, SMB) and Unraid FUSE user shares (`/mnt/user/`) do not reliably support POSIX shared memory (`mmap`) or file locking required for SQLite WAL mode.
 
+### Memory Shown for the Container
+
+`docker stats`, the Unraid Docker page and similar tools count the file cache of `/data/logs.db` as the container's memory. After LogShed reads or writes much of a large database (a search over many days, a large prune, or deleting millions of logs), they can show several GiB while LogShed itself holds a few hundred MiB. In a test that deleted 4 million logs, LogShed's own memory stayed under 250 MiB while the figure shown rose to about 3 GiB. The kernel frees the cache as soon as anything else needs the memory, so it does not take memory from other containers. Compact Database also releases it (to under 400 MiB in that test). To see LogShed's own share, run `docker exec <container> grep -E '^(anon|file) ' /sys/fs/cgroup/memory.stat`: `anon` is LogShed's memory and `file` the cache, both in bytes.
+
 ### Backing Up `/data`
 
 LogShed creates its files with `umask 027`: the `PUID` user can read and write them, the `PGID` group can read them, and other users on the host cannot. `.secret_key` is readable only by the `PUID` user.
