@@ -17,6 +17,7 @@ from app.core.migrations import get_connection
 from app.core.utils import expand_source_aliases, parse_multi_values, source_filter_sql
 from app.models import LogDeleteRequest
 from app.services.log_query import add_fts_filter, execute_with_fts_fallback, to_utc_bound
+from app.services.storage_metrics import note_logs_deleted
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,50 @@ async def count_matching_logs_async(db_path: Union[str, Path], criteria: LogDele
     return await asyncio.to_thread(count_matching_logs, db_path, criteria)
 
 
+def _delete_matching(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    criteria: LogDeleteRequest,
+    where_sql: str,
+    params: dict[str, Any],
+    batch_size: int,
+) -> int:
+    """Delete the logs the criteria select, committing each chunk; return how many went."""
+    total_deleted = 0
+    # If direct log IDs are given, chunk them into groups of 500
+    if criteria.log_ids:
+        chunk_size = 500
+        for i in range(0, len(criteria.log_ids), chunk_size):
+            chunk = criteria.log_ids[i:i + chunk_size]
+            placeholders = ", ".join(f":id_{j}" for j in range(len(chunk)))
+            chunk_params = {f"id_{j}": log_id for j, log_id in enumerate(chunk)}
+            cursor.execute(f"DELETE FROM logs WHERE id IN ({placeholders})", chunk_params)
+            conn.commit()
+            total_deleted += cursor.rowcount
+    else:
+        # Iterative batch deletion by criteria
+        delete_sql = f"""
+            DELETE FROM logs WHERE id IN (
+                SELECT id FROM logs
+                {where_sql}
+                LIMIT :batch_limit
+            )
+        """
+
+        def _delete_batches(run_params: dict[str, Any]) -> int:
+            deleted = 0
+            while True:
+                cursor.execute(delete_sql, {**run_params, "batch_limit": batch_size})
+                count = cursor.rowcount
+                conn.commit()
+                deleted += count
+                if count == 0:
+                    return deleted
+
+        total_deleted += execute_with_fts_fallback(_delete_batches, params, criteria.query, empty=0)
+    return total_deleted
+
+
 def execute_delete_logs(
     db_path: Union[str, Path],
     criteria: LogDeleteRequest,
@@ -157,37 +202,11 @@ def execute_delete_logs(
         where_sql, params = build_deletion_filter(criteria, conn=conn)
         cursor = conn.cursor()
 
-        # If direct log IDs are given, chunk them into groups of 500
-        if criteria.log_ids:
-            chunk_size = 500
-            for i in range(0, len(criteria.log_ids), chunk_size):
-                chunk = criteria.log_ids[i:i + chunk_size]
-                placeholders = ", ".join(f":id_{j}" for j in range(len(chunk)))
-                chunk_params = {f"id_{j}": log_id for j, log_id in enumerate(chunk)}
-                cursor.execute(f"DELETE FROM logs WHERE id IN ({placeholders})", chunk_params)
-                conn.commit()
-                total_deleted += cursor.rowcount
-        else:
-            # Iterative batch deletion by criteria
-            delete_sql = f"""
-                DELETE FROM logs WHERE id IN (
-                    SELECT id FROM logs
-                    {where_sql}
-                    LIMIT :batch_limit
-                )
-            """
-
-            def _delete_batches(run_params: dict[str, Any]) -> int:
-                deleted = 0
-                while True:
-                    cursor.execute(delete_sql, {**run_params, "batch_limit": batch_size})
-                    count = cursor.rowcount
-                    conn.commit()
-                    deleted += count
-                    if count == 0:
-                        return deleted
-
-            total_deleted += execute_with_fts_fallback(_delete_batches, params, criteria.query, empty=0)
+        note_logs_deleted()
+        try:
+            total_deleted = _delete_matching(conn, cursor, criteria, where_sql, params, batch_size)
+        finally:
+            note_logs_deleted()
 
         # Compact FTS5 index if a significant volume of rows was deleted, in short merge steps
         if total_deleted >= 5000:

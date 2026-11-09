@@ -167,6 +167,81 @@ class TestStorageSnapshotCache:
         assert storage_mod.get_cached_storage_metrics(db)["total_logs_count"] == 1
 
 
+class TestKeptLogCount:
+    """The storage snapshot's log count stays exact while counting only the rows added since the last one."""
+
+    def _count(self, db: Path, statements: list[str]) -> int:
+        conn = get_connection(db)
+        try:
+            conn.set_trace_callback(statements.append)
+            return storage_mod.count_logs(conn, db)
+        finally:
+            conn.close()
+
+    def _add(self, db: Path, n: int, minutes_ago: float = 1) -> None:
+        with get_connection(db) as conn:
+            for _ in range(n):
+                _insert(conn, minutes_ago, 6)
+            conn.commit()
+
+    def test_new_rows_are_added_without_counting_every_row(self, tmp_path: Path):
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        self._add(db, 5)
+        first: list[str] = []
+        assert self._count(db, first) == 5
+        assert any("SELECT COUNT(*) FROM logs" == s.strip() for s in first)
+        self._add(db, 3)
+        second: list[str] = []
+        assert self._count(db, second) == 8
+        assert not any("SELECT COUNT(*) FROM logs" == s.strip() for s in second)
+
+    def test_targeted_delete_and_prune_recount(self, tmp_path: Path):
+        from app.models import LogDeleteRequest
+        from app.services.log_deletion import execute_delete_logs
+        from app.services.retention import execute_prune
+
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        self._add(db, 4)
+        self._add(db, 2, minutes_ago=60 * 24 * 40)
+        assert self._count(db, []) == 6
+        execute_prune(db, retention_days=30)
+        assert self._count(db, []) == 4
+        with get_connection(db) as conn:
+            first_id = conn.execute("SELECT MIN(id) FROM logs").fetchone()[0]
+        execute_delete_logs(db, LogDeleteRequest(log_ids=[first_id]))
+        assert self._count(db, []) == 3
+
+    def test_count_taken_during_a_delete_is_not_kept(self, tmp_path: Path):
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        self._add(db, 2)
+        conn = get_connection(db)
+        try:
+            real_execute = conn.execute
+
+            class _DeleteMidCount:
+                def execute(self, sql, *args):
+                    if sql.startswith("SELECT COUNT(*)"):
+                        storage_mod.note_logs_deleted()
+                    return real_execute(sql, *args)
+
+                def rollback(self):
+                    conn.rollback()
+
+            assert storage_mod.count_logs(_DeleteMidCount(), db) == 2
+        finally:
+            conn.close()
+        assert str(db) not in storage_mod._count_state
+
+    def test_snapshot_reports_the_kept_count(self, tmp_path: Path):
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        self._add(db, 7)
+        assert storage_mod.sample_storage_metrics(db)["total_logs_count"] == 7
+
+
 class TestErrorAggregatePlans:
 
     def test_top_error_apps_reads_only_the_24_hour_range(self, tmp_path: Path):

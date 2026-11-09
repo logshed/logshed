@@ -15,7 +15,7 @@ from typing import Any, Optional, Union
 from app.services.operation_guard import OperationInProgressError, run_exclusive
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
-from app.services.storage_metrics import record_metrics, prune_old_metrics
+from app.services.storage_metrics import note_logs_deleted, record_metrics, prune_old_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -275,13 +275,17 @@ def execute_prune(
                 LIMIT 5000
             )
         """
-        while True:
-            cursor.execute(delete_query, {"cutoff_time": cutoff_iso})
-            count = cursor.rowcount
-            conn.commit()
-            total_deleted += count
-            if count == 0:
-                break
+        note_logs_deleted()
+        try:
+            while True:
+                cursor.execute(delete_query, {"cutoff_time": cutoff_iso})
+                count = cursor.rowcount
+                conn.commit()
+                total_deleted += count
+                if count == 0:
+                    break
+        finally:
+            note_logs_deleted()
 
         # 1b. Prune alert history (alerts, digests, on-demand analyses, maintenance windows)
         # older than the cutoff, plus the AI audit records they link to.

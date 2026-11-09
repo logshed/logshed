@@ -16,6 +16,45 @@ from app.core.migrations import get_connection
 logger = logging.getLogger(__name__)
 
 
+# The log count kept between snapshots, so a snapshot counts only the rows added since the last
+# one (a primary key range) instead of every row (about 1 s at 50 million logs). Every path that
+# deletes logs calls note_logs_deleted() before and after, which makes the next snapshot count
+# every row again; a count taken while the generation changed is not kept.
+_count_lock = threading.Lock()
+_count_generation = 0
+_count_state: dict[str, tuple[int, int, int]] = {}  # db path -> (generation, count, max id)
+
+
+def note_logs_deleted() -> None:
+    """Forget the kept log count: rows were or are being deleted."""
+    global _count_generation
+    with _count_lock:
+        _count_generation += 1
+
+
+def count_logs(conn: sqlite3.Connection, db_path: str | Path) -> int:
+    """Exact number of rows in logs, adding the rows since the last count to the kept count."""
+    key = str(db_path)
+    with _count_lock:
+        generation = _count_generation
+        state = _count_state.get(key)
+    # One read transaction, so the maximum id and the count see the same rows
+    conn.execute("BEGIN")
+    try:
+        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM logs").fetchone()[0]
+        if state is not None and state[0] == generation and max_id >= state[2]:
+            added = conn.execute("SELECT COUNT(*) FROM logs WHERE id > ?", (state[2],)).fetchone()[0]
+            total = state[1] + added
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+    finally:
+        conn.rollback()
+    with _count_lock:
+        if generation == _count_generation:
+            _count_state[key] = (generation, total, max_id)
+    return total
+
+
 def sample_storage_metrics(db_path: str | Path) -> dict:
     """
     Collects a single storage metrics snapshot.
@@ -47,11 +86,7 @@ def sample_storage_metrics(db_path: str | Path) -> dict:
     conn = None
     try:
         conn = get_connection(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM logs")
-        row = cursor.fetchone()
-        if row:
-            total_logs = row[0]
+        total_logs = count_logs(conn, db_path)
     except sqlite3.Error as e:
         logger.error(f"Failed to query log count: {e}")
     finally:
@@ -193,8 +228,8 @@ class StorageMetricsWorker:
         return metrics
 
 
-# Short-lived snapshot cache for read-only endpoints. sample_storage_metrics runs a full
-# SELECT COUNT(*) FROM logs, which is too costly to repeat on every metrics or storage poll.
+# Short-lived snapshot cache for read-only endpoints, so every metrics or storage poll does
+# not repeat the file size, disk usage and log count work.
 STORAGE_SNAPSHOT_TTL_SECONDS: float = 15.0
 _snapshot_lock = threading.Lock()
 _snapshot_cache: dict[str, tuple[float, dict]] = {}
@@ -218,6 +253,8 @@ def get_cached_storage_metrics(db_path: str | Path) -> dict:
 
 
 def clear_storage_snapshot_cache() -> None:
-    """Drop cached snapshots (used by tests)."""
+    """Drop cached snapshots and kept log counts (used by tests)."""
     with _snapshot_lock:
         _snapshot_cache.clear()
+    with _count_lock:
+        _count_state.clear()

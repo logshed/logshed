@@ -418,5 +418,6 @@ Saving a lower retention does not prune by itself. Deletion happens at the next 
 - **Sampling Strategy:** Background worker samples metrics hourly and immediately following any manual/automated prune event.
   - Compute total database disk footprint via `os.path.getsize()` across `/data/logs.db`, `/data/logs.db-wal`, and `/data/logs.db-shm`.
   - Read host mount capacity and free space using `shutil.disk_usage("/data")`.
+  - Count logs (`count_logs` in `services/storage_metrics.py`): the count and the highest id are kept between snapshots, so a snapshot counts only the rows added since (a primary key range) instead of every row (about 1 s at 50 million logs). Pruning and log deletion call `note_logs_deleted()` before and after deleting, so the next snapshot counts every row again.
   - Record snapshot into `storage_metrics` table.
 - **Metrics Retention:** Prune records from `storage_metrics` older than 30 days during the daily retention cleanup cycle.
