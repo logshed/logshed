@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { MarkdownRenderer, dedentLines } from '../components/common/MarkdownRenderer.tsx';
+import { MarkdownRenderer, dedentLines, parseMarkdownBlocks } from '../components/common/MarkdownRenderer.tsx';
+import type { BlockNode } from '../components/common/MarkdownRenderer.tsx';
 
 describe('MarkdownRenderer Component', () => {
   it('renders bold and inline code correctly without showing raw asterisks or backticks', () => {
@@ -183,6 +184,29 @@ The kernel log indicates a lockup.
     expect(codeEl).not.toBeNull();
     expect(codeEl?.textContent).toBe('echo "starting"\n  echo "indented step"\necho "finished"');
   });
+
+  it('parses and renders 20,000 nested list levels without overflowing the stack', () => {
+    for (const marker of ['- ', '1. ']) {
+      const deep = marker.repeat(20000) + 'deepest text';
+      expect(() => parseMarkdownBlocks(deep)).not.toThrow();
+      const { container, unmount } = render(<MarkdownRenderer content={deep} />);
+      // The levels past the limit are shown as text, so the innermost words are still there
+      expect(container.textContent).toContain('deepest text');
+      unmount();
+    }
+  });
+
+  it('keeps ten nested list levels as lists and shows deeper content as text', () => {
+    const innermost = (content: string): BlockNode[] => {
+      let blocks = parseMarkdownBlocks(content);
+      for (let level = 1; level <= 10; level++) {
+        expect(blocks).toHaveLength(1);
+        expect(blocks[0].type).toBe('unordered_list');
+        blocks = (blocks[0] as Extract<BlockNode, { type: 'unordered_list' }>).items[0].blocks;
+      }
+      return blocks;
+    };
+    expect(innermost('- '.repeat(10) + 'ten')).toEqual([{ type: 'paragraph', lines: ['ten'] }]);
+    expect(innermost('- '.repeat(12) + 'twelve')).toEqual([{ type: 'paragraph', lines: ['- - twelve'] }]);
+  });
 });
-
-

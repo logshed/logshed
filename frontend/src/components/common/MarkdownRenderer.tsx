@@ -157,11 +157,26 @@ export function dedentLines(lines: string[]): string[] {
   });
 }
 
+// Deepest list nesting parsed as lists. Each level parses its items again, so without a limit
+// thousands of nested markers ("- - - ...") in an AI answer would overflow the call stack.
+const MAX_LIST_DEPTH = 10;
+
+/** A list item's content: its blocks, or one paragraph of its text once lists are MAX_LIST_DEPTH deep. */
+function parseListItem(rawLines: string[], depth: number): BlockNode[] {
+  // Items of a list made at `depth` sit inside depth + 1 lists
+  if (depth + 1 < MAX_LIST_DEPTH) {
+    return parseMarkdownBlocks(rawLines.join('\n'), depth + 1);
+  }
+  const textLines = rawLines.filter((l) => l.trim() !== '');
+  return textLines.length > 0 ? [{ type: 'paragraph', lines: textLines }] : [];
+}
+
 /**
  * Parses markdown into structured Block AST.
  * Handles nested code blocks in list items, preserving code syntax (including YAML dashes).
+ * `depth` is the number of lists around `content`.
  */
-export function parseMarkdownBlocks(content: string): BlockNode[] {
+export function parseMarkdownBlocks(content: string, depth = 0): BlockNode[] {
   if (!content) return [];
   const lines = content.split(/\r?\n/);
   const blocks: BlockNode[] = [];
@@ -276,9 +291,7 @@ export function parseMarkdownBlocks(content: string): BlockNode[] {
         }
 
         // Parse list item's internal content into blocks
-        const itemContent = rawLines.join('\n');
-        const itemBlocks = parseMarkdownBlocks(itemContent);
-        items.push({ num, blocks: itemBlocks });
+        items.push({ num, blocks: parseListItem(rawLines, depth) });
       }
 
       blocks.push({ type: 'ordered_list', items });
@@ -345,9 +358,7 @@ export function parseMarkdownBlocks(content: string): BlockNode[] {
           i++;
         }
 
-        const itemContent = rawLines.join('\n');
-        const itemBlocks = parseMarkdownBlocks(itemContent);
-        items.push({ blocks: itemBlocks });
+        items.push({ blocks: parseListItem(rawLines, depth) });
       }
 
       blocks.push({ type: 'unordered_list', items });
