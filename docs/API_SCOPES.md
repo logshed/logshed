@@ -28,7 +28,7 @@ Tokens are managed in **Settings > API & MCP Access**.
 | `system:read` | Read system metrics (log rates, error counts, queue and storage figures), the installed version and whether an update is available. | Home Assistant, status pages, AI assistants |
 | `system:write` | Delete logs and history older than the retention period, and compact the database (prune and vacuum). | Scheduled housekeeping scripts, Home Assistant automations that run prune and vacuum |
 | `maintenance:read` | Check whether maintenance windows are active and read their details. | Scripts that wait for maintenance to finish |
-| `maintenance:write` | Start and end maintenance windows. A window can silence alerts, or drop incoming error logs from a chosen app or host. | Backup jobs, update scripts, Proxmox hooks, Home Assistant automations, AI assistants that run upgrades |
+| `maintenance:write` | Start and end maintenance windows. A window can silence alerts, or drop incoming error logs from a chosen app or host. Silencing covers every alert notification; an app or host chosen for the window limits only which error logs are dropped. | Backup jobs, update scripts, Proxmox hooks, Home Assistant automations, AI assistants that run upgrades |
 
 A token without the scope a request needs gets a `403` response. Over MCP, a tool the token may not use returns an error that names the missing scope.
 
