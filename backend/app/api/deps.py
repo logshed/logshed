@@ -119,19 +119,34 @@ async def reset_all_db_connections_async() -> None:
     await asyncio.to_thread(reset_all_db_connections)
 
 
-async def run_db_query(fn: Callable[[sqlite3.Connection], T], custom_db_path: Optional[Path] = None) -> T:
+# SQLite virtual machine instructions between two calls of a run_db_query interrupt check
+INTERRUPT_CHECK_INSTRUCTIONS = 10_000
+
+
+async def run_db_query(
+    fn: Callable[[sqlite3.Connection], T],
+    custom_db_path: Optional[Path] = None,
+    should_interrupt: Optional[Callable[[], bool]] = None,
+) -> T:
     """
     Executes a synchronous database function in a worker thread using asyncio.to_thread().
     Reuses thread-local read connections across invocations on the same thread.
+
+    ``should_interrupt`` is polled from the worker thread while statements run; when it returns
+    True, the running statement stops with ``sqlite3.OperationalError("interrupted")``.
     """
     db_path = custom_db_path or get_db_path()
 
     def _execute() -> T:
         conn = get_thread_read_connection(db_path)
+        if should_interrupt is not None:
+            conn.set_progress_handler(should_interrupt, INTERRUPT_CHECK_INSTRUCTIONS)
         try:
             with conn:
                 return fn(conn)
         finally:
+            if should_interrupt is not None:
+                conn.set_progress_handler(None, 0)
             if conn.in_transaction:
                 conn.rollback()
 

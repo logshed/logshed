@@ -9,11 +9,14 @@ They keep FTS5 error handling, the FTS indexer wake-up and time-bound conversion
 identical across the three paths without merging the builders themselves.
 """
 
+import asyncio
 import logging
 import sqlite3
-from typing import Any, Callable, Optional, TypeVar
+import threading
+import time
+from typing import Any, Awaitable, Callable, Optional, TypeVar
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 
 from app.core.utils import (
     escape_fts_tokens,
@@ -36,6 +39,15 @@ DB_BUSY_DETAIL = "The database is busy. Try again in a moment."
 # drive from a relational index (e.g. app_name) and re-run the MATCH per candidate row,
 # rebuilding the full doclist of auto-prefixed terms each time (quadratic cost).
 FTS_MATCH_CLAUSE = "logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)"
+
+# A search still running after this long is stopped (the client gets HTTP 504), so a client
+# with no timeout of its own cannot hold a database thread indefinitely.
+SEARCH_TIME_LIMIT_SECONDS = 120.0
+SEARCH_TIME_LIMIT_DETAIL = (
+    "The search took longer than 2 minutes and was stopped. Narrow the time range or the search terms."
+)
+# How often a running search checks whether its client has gone away.
+DISCONNECT_POLL_SECONDS = 0.25
 
 # Error text SQLite raises when an FTS5 MATCH expression cannot be parsed. "no such column"
 # comes from FTS5 column filters: "foo-bar" parses as "foo" plus an excluded column "bar".
@@ -77,6 +89,49 @@ def add_fts_filter(where_clauses: list[str], params: dict[str, Any], query: Opti
         return
     where_clauses.append(FTS_MATCH_CLAUSE)
     params["fts_term"] = fts_term
+
+
+async def run_search_query(fn: Callable[[sqlite3.Connection], T], request: Optional[Request] = None) -> T:
+    """
+    Run a log search with run_db_query, stopping its SQLite statements when the client
+    disconnects (search as you type abandons each earlier request) or after
+    SEARCH_TIME_LIMIT_SECONDS. Raises HTTP 504 at the time limit and HTTP 499 on disconnect;
+    other database errors propagate unchanged.
+    """
+    from app.api.deps import run_db_query
+
+    disconnected = threading.Event()
+    deadline = time.monotonic() + SEARCH_TIME_LIMIT_SECONDS
+
+    def _should_interrupt() -> bool:
+        return disconnected.is_set() or time.monotonic() > deadline
+
+    task = asyncio.ensure_future(run_db_query(fn, should_interrupt=_should_interrupt))
+    try:
+        if request is not None:
+            await _interrupt_on_disconnect(task, request, disconnected)
+        return await task
+    except asyncio.CancelledError:
+        disconnected.set()
+        raise
+    except sqlite3.OperationalError as exc:
+        if "interrupted" not in str(exc).lower():
+            raise
+        if disconnected.is_set():
+            raise HTTPException(status_code=499, detail="The client closed the request.")
+        logger.warning(f"Search stopped after {SEARCH_TIME_LIMIT_SECONDS:.0f} s")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=SEARCH_TIME_LIMIT_DETAIL)
+
+
+async def _interrupt_on_disconnect(task: Awaitable[Any], request: Request, disconnected: threading.Event) -> None:
+    """Wait for task, setting disconnected as soon as the request's client goes away."""
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=DISCONNECT_POLL_SECONDS)
+        if done:
+            return
+        if await request.is_disconnected():
+            disconnected.set()
+            return
 
 
 def is_fts_syntax_error(exc: BaseException) -> bool:

@@ -8,10 +8,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from fastapi import HTTPException
+
+from app.core.migrations import run_migrations
+from app.services import log_query
 from app.services.fts_indexer import set_fts_worker
 from app.services.log_query import (
     execute_with_fts_fallback,
     is_fts_syntax_error,
+    run_search_query,
     to_utc_bound,
 )
 
@@ -103,3 +108,53 @@ class TestExecuteWithFtsFallback:
     )
     def test_syntax_error_detection(self, message: str, expected: bool):
         assert is_fts_syntax_error(sqlite3.OperationalError(message)) is expected
+
+
+class _Request:
+    def __init__(self, disconnected: bool):
+        self.disconnected = disconnected
+
+    async def is_disconnected(self) -> bool:
+        return self.disconnected
+
+
+# A statement that runs for minutes unless interrupted
+_ENDLESS_SQL = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT COUNT(*) FROM n"
+
+
+class TestRunSearchQuery:
+
+    @pytest.fixture(autouse=True)
+    def _db(self, tmp_path, monkeypatch):
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        monkeypatch.setattr("app.api.deps.get_db_path", lambda: db)
+        monkeypatch.setattr(log_query, "DISCONNECT_POLL_SECONDS", 0.01)
+
+    @pytest.mark.asyncio
+    async def test_returns_the_result(self):
+        assert await run_search_query(lambda conn: conn.execute("SELECT 7").fetchone()[0], _Request(False)) == 7
+
+    @pytest.mark.asyncio
+    async def test_disconnected_client_stops_the_statement(self):
+        with pytest.raises(HTTPException) as exc:
+            await run_search_query(lambda conn: conn.execute(_ENDLESS_SQL).fetchone(), _Request(True))
+        assert exc.value.status_code == 499
+        # The interrupt check is removed, so the thread's connection serves the next query
+        assert await run_search_query(lambda conn: conn.execute("SELECT 1").fetchone()[0]) == 1
+
+    @pytest.mark.asyncio
+    async def test_time_limit_stops_the_statement_with_504(self, monkeypatch):
+        monkeypatch.setattr(log_query, "SEARCH_TIME_LIMIT_SECONDS", 0.05)
+        with pytest.raises(HTTPException) as exc:
+            await run_search_query(lambda conn: conn.execute(_ENDLESS_SQL).fetchone())
+        assert exc.value.status_code == 504
+        assert "narrow" in exc.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_other_database_errors_propagate(self):
+        def _locked(conn):
+            raise sqlite3.OperationalError("database is locked")
+
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            await run_search_query(_locked, _Request(False))

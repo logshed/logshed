@@ -74,6 +74,16 @@ describe('matchesSearchQuery Helper Function', () => {
     expect(matchesSearchQuery(baseLog, 'source:router')).toBe(false);
     expect(matchesSearchQuery(baseLog, 'message:timeout')).toBe(true);
   });
+
+  it('matches terms of one or two letters as whole words, as history search does', () => {
+    const shortLog = { ...baseLog, message: 'disk io error on sd b', app_name: 'kernel' };
+    expect(matchesSearchQuery(shortLog, 'io')).toBe(true);
+    expect(matchesSearchQuery(shortLog, 'er')).toBe(false);
+    expect(matchesSearchQuery(shortLog, 'er*')).toBe(true);
+    expect(matchesSearchQuery(shortLog, 'err')).toBe(true);
+    expect(matchesSearchQuery(shortLog, 'app:ke')).toBe(false);
+    expect(matchesSearchQuery(shortLog, 'app:ker')).toBe(true);
+  });
 });
 
 describe('matchesSearchQuery AND, OR and NOT like history search', () => {

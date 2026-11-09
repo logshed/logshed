@@ -374,6 +374,17 @@ _FTS_COLUMN_ALIASES = {
 }
 
 
+# Search as you type matches a term as the start of a word only from this many characters on.
+# A one or two letter prefix (e*, er*) merges the doclists of thousands of words on every
+# keystroke, so shorter terms match whole words unless the user types the * themselves.
+MIN_AUTO_PREFIX_LENGTH = 3
+
+
+def _auto_prefix(fts_term: str, typed: str) -> str:
+    """Append the search-as-you-type '*' to fts_term when the typed term is long enough."""
+    return f"{fts_term}*" if len(typed) >= MIN_AUTO_PREFIX_LENGTH else fts_term
+
+
 def _needs_fts_quoting(value: str) -> bool:
     """True when an unquoted FTS5 term would be a syntax error (dots and hyphens split tokens)."""
     return "." in value or "-" in value
@@ -392,7 +403,7 @@ def escape_fts_tokens(query_str: str) -> str:
     for w in words:
         clean = w.replace('"', '').replace("'", '').replace('*', '').replace('\x00', '').strip()
         if clean:
-            tokens.append(f'"{clean}"*')
+            tokens.append(_auto_prefix(f'"{clean}"', clean))
     return " ".join(tokens)
 
 
@@ -404,7 +415,8 @@ def format_fts_query(query_str: str) -> str:
       to escaped token prefix queries so queries never trigger an unhandled OperationalError.
     - If user entered quoted phrases (e.g. "exact phrase"), preserve them.
     - If terms do not end in '*' and are not boolean operators (AND, OR, NOT, NEAR),
-      automatically append '*' for search-as-you-type prefix matching.
+      automatically append '*' for search-as-you-type prefix matching, from
+      MIN_AUTO_PREFIX_LENGTH characters on (shorter terms match whole words).
     - If column filters are used (e.g. app_name:nginx), apply wildcard to the value.
     - The shorthand prefixes app:, host:, source: and msg: (any case) map to app_name,
       source_alias, source_alias and message, matching the live stream filter.
@@ -477,9 +489,9 @@ def format_fts_query(query_str: str) -> str:
                 else:
                     clean_val = val.replace('"', '""')
                     if _needs_fts_quoting(clean_val):
-                        formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
+                        formatted_tokens.append(_auto_prefix(f'{col_lower}:"{clean_val}"', val))
                     else:
-                        formatted_tokens.append(f"{col_lower}:{clean_val}*")
+                        formatted_tokens.append(_auto_prefix(f"{col_lower}:{clean_val}", val))
                 continue
             else:
                 # Column is not allowlisted - treat as literal token wrapped in quotes
@@ -487,7 +499,7 @@ def format_fts_query(query_str: str) -> str:
                 if clean_token.endswith("*") and not clean_token.startswith("*"):
                     formatted_tokens.append(f'"{clean_token[:-1]}"*')
                 else:
-                    formatted_tokens.append(f'"{clean_token}"*')
+                    formatted_tokens.append(_auto_prefix(f'"{clean_token}"', token))
                 continue
 
         if token.startswith("*"):
@@ -503,9 +515,9 @@ def format_fts_query(query_str: str) -> str:
         else:
             clean_token = token.replace('"', '""')
             if _needs_fts_quoting(clean_token):
-                formatted_tokens.append(f'"{clean_token}"*')
+                formatted_tokens.append(_auto_prefix(f'"{clean_token}"', token))
             else:
-                formatted_tokens.append(f"{clean_token}*")
+                formatted_tokens.append(_auto_prefix(clean_token, token))
 
     if not formatted_tokens:
         return escape_fts_tokens(q)

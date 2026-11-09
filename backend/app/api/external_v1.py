@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import require_api_token, require_auth_or_token, run_db_query
 from app.core.config import get_db_path
@@ -81,6 +81,7 @@ from app.services.log_query import (
     context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
+    run_search_query,
     to_utc_bound,
 )
 from app.services.storage_metrics import get_cached_storage_metrics
@@ -735,6 +736,7 @@ async def search_logs_v1(
         description="Opaque pagination cursor from the previous page's next_cursor (newest first)",
     ),
     include_raw: bool = Query(False, description="Include the raw syslog packet in each entry"),
+    request: Request = None,  # type: ignore[assignment]
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> ExternalLogListResponse:
     """Search and filter logs (newest first) with keyset pagination via next_cursor."""
@@ -799,7 +801,7 @@ async def search_logs_v1(
         return logs_list, total, next_cursor
 
     try:
-        logs_out, total_count, next_cursor = await run_db_query(_query_db)
+        logs_out, total_count, next_cursor = await run_search_query(_query_db, request)
     except sqlite3.OperationalError as exc:
         raise db_busy_exception(exc, "searching logs")
     return ExternalLogListResponse(
@@ -822,6 +824,7 @@ async def count_logs_v1(
     to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
     group_by: Optional[str] = Query(None, description="Group breakdown by 'severity', 'app', or 'source'"),
     group_limit: int = Query(25, ge=1, le=200, description="Max groups returned for 'app' and 'source' grouping"),
+    request: Request = None,  # type: ignore[assignment]
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogCountResponse:
     """Count logs matching filters with optional grouping by severity, app, or source."""
@@ -899,7 +902,7 @@ async def count_logs_v1(
         return execute_with_fts_fallback(run, params, query, empty=(0, label, {}, False))
 
     try:
-        total, grouped_by_out, breakdown_out, truncated_out = await run_db_query(_count_db)
+        total, grouped_by_out, breakdown_out, truncated_out = await run_search_query(_count_db, request)
     except sqlite3.OperationalError as exc:
         raise db_busy_exception(exc, "counting logs")
     return LogCountResponse(

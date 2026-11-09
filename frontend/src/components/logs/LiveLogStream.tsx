@@ -397,10 +397,17 @@ function wordsOccur(fieldWords: string[], words: string[], prefix: boolean): boo
   return false;
 }
 
-/** A term's words, and whether its last word is a prefix: yes unless the term is a quoted phrase. */
+// As in history search: a term shorter than this matches whole words unless it ends in *.
+const MIN_AUTO_PREFIX_LENGTH = 3;
+
+/**
+ * A term's words, and whether its last word is a prefix: yes unless the term is a quoted phrase
+ * or shorter than MIN_AUTO_PREFIX_LENGTH characters without a trailing *.
+ */
 function termWords(raw: string): { words: string[]; prefix: boolean } {
   const quoted = raw.length >= 2 && (raw[0] === '"' || raw[0] === "'") && raw[raw.length - 1] === raw[0];
-  return { words: searchWords(quoted ? raw.slice(1, -1) : raw), prefix: !quoted };
+  const prefix = !quoted && (raw.endsWith('*') || raw.length >= MIN_AUTO_PREFIX_LENGTH);
+  return { words: searchWords(quoted ? raw.slice(1, -1) : raw), prefix };
 }
 
 /** The words of each searchable field of one log, split once per log and only when a term needs them. */

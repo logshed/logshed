@@ -1111,3 +1111,24 @@ class TestBearerSchemeCase:
             res = await client.get(path, headers={"Authorization": value})
             assert res.status_code == 401
             assert res.headers["WWW-Authenticate"] == "Bearer"
+
+
+class TestSearchesStopWithTheirClient:
+
+    @pytest.mark.asyncio
+    async def test_search_and_count_watch_their_request(self, client: AsyncClient, logs_token_headers: dict, monkeypatch):
+        """Both routes pass their request on, so a disconnected client stops its query."""
+        from app.api import external_v1 as v1_mod
+        from app.services.log_query import run_search_query
+
+        seen = []
+
+        async def _spy(fn, request=None):
+            seen.append(request)
+            return await run_search_query(fn, request)
+
+        monkeypatch.setattr(v1_mod, "run_search_query", _spy)
+        for path in ("/api/v1/logs", "/api/v1/logs/count"):
+            res = await client.get(path, params={"query": "anything"}, headers=logs_token_headers)
+            assert res.status_code == 200
+        assert len(seen) == 2 and all(hasattr(r, "is_disconnected") for r in seen)

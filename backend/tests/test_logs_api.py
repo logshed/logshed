@@ -1185,12 +1185,17 @@ class _LockedFtsConnection:
 
 
 def _patch_locked_fts(monkeypatch, module) -> None:
-    real_run_db_query = module.run_db_query
+    """Make FTS statements fail as locked, for module's own queries and its searches."""
+    from app.api import deps
+
+    real_run_db_query = deps.run_db_query
 
     async def _locked_run_db_query(fn, *args, **kwargs):
         return await real_run_db_query(lambda conn: fn(_LockedFtsConnection(conn)), *args, **kwargs)
 
     monkeypatch.setattr(module, "run_db_query", _locked_run_db_query)
+    # Searches reach run_db_query through run_search_query, which imports it from deps
+    monkeypatch.setattr(deps, "run_db_query", _locked_run_db_query)
 
 
 def _utc_row(ts: str, app_name: str = "web", message: str = "boundary row") -> dict:
@@ -1725,3 +1730,23 @@ class TestSearchBooleanOperators:
         res = await client.get("/api/logs", params={"query": query})
         assert res.status_code == 200
         assert {log["message"] for log in res.json()["logs"]} == expected_messages
+
+
+class TestSearchesStopWithTheirClient:
+
+    @pytest.mark.asyncio
+    async def test_search_watches_its_request(self, client: AsyncClient, auth_cookie: dict, monkeypatch):
+        """The endpoint passes its request on, so a disconnected client stops its query."""
+        from app.api import logs as logs_mod
+        from app.services.log_query import run_search_query
+
+        seen = []
+
+        async def _spy(fn, request=None):
+            seen.append(request)
+            return await run_search_query(fn, request)
+
+        monkeypatch.setattr(logs_mod, "run_search_query", _spy)
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        assert (await client.get("/api/logs", params={"query": "anything"})).status_code == 200
+        assert len(seen) == 1 and hasattr(seen[0], "is_disconnected")

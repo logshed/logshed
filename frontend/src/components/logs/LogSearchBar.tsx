@@ -36,6 +36,7 @@ export const SEARCH_PLACEHOLDER = 'Search logs, e.g. "disk full", error OR timeo
 /** The search syntax listed in the help popover; each entry works in the history search. */
 export const SEARCH_SYNTAX_HELP: { example: string; text: string }[] = [
   { example: 'disk time', text: 'Every word must match, as the start of a word (time finds timeout).' },
+  { example: 'io*', text: 'A word of one or two letters matches only that word; add * to match the start of longer ones.' },
   { example: '"exact phrase"', text: 'The words in this order.' },
   { example: 'error OR timeout', text: 'Either word.' },
   { example: 'auth NOT cron', text: 'The first word without the second. OR and NOT work in any case.' },

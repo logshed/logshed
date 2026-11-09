@@ -523,3 +523,34 @@ class TestFormatFtsQueryHyphens:
 
         assert format_fts_query("host:pve-node2") == 'source_alias:"pve-node2"*'
         assert format_fts_query("app_name:my-app*") == 'app_name:"my-app"*'
+
+
+class TestFormatFtsQueryShortTerms:
+    """One and two letter terms match whole words: a short prefix merges thousands of doclists."""
+
+    @pytest.mark.parametrize(
+        "query, expected",
+        [
+            ("e", "e"),
+            ("er", "er"),
+            ("err", "err*"),
+            ("disk io", "disk* io"),
+            ("e*", "e*"),
+            ("er*", "er*"),
+            ("app:ng", "app_name:ng"),
+            ("app:ngi", "app_name:ngi*"),
+            ("app:ng*", "app_name:ng*"),
+            ("a.b", '"a.b"*'),
+            ("-1", '"-1"'),
+            ("x:", '"x:"'),
+        ],
+    )
+    def test_short_terms_are_not_prefixes(self, query, expected):
+        from app.core.utils import format_fts_query
+
+        assert format_fts_query(query) == expected
+
+    def test_escaped_fallback_applies_the_same_rule(self):
+        from app.core.utils import escape_fts_tokens
+
+        assert escape_fts_tokens('er "timeout') == '"er" "timeout"*'

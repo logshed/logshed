@@ -37,6 +37,7 @@ from app.services.log_query import (
     context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
+    run_search_query,
     to_utc_bound,
 )
 
@@ -66,6 +67,7 @@ async def list_logs(
     to: Optional[str] = Query(None, description="ISO datetime end filter or relative duration"),
     limit: int = Query(100, ge=1, le=1000, description="Max logs to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    request: Request = None,  # type: ignore[assignment]
     user: dict = Depends(get_current_user),
 ) -> LogListResponse:
     """
@@ -161,7 +163,7 @@ async def list_logs(
         return logs, total, total_capped
 
     try:
-        logs, total, total_capped = await run_db_query(_query_db)
+        logs, total, total_capped = await run_search_query(_query_db, request)
     except sqlite3.OperationalError as exc:
         raise db_busy_exception(exc, "listing logs")
     return LogListResponse(
