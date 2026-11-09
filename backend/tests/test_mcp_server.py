@@ -1558,6 +1558,166 @@ class TestMCPDisableMaintenance:
         assert "No active maintenance session with id 'nope'" in tool_error_text(result)
 
 
+class StreamableGetStream:
+    """Drives a Streamable HTTP standalone GET stream over ASGI, so it stays open while the test acts."""
+
+    def __init__(self, raw_token: str, session_id: str, path: str = "/mcp"):
+        self.raw_token, self.session_id, self.path = raw_token, session_id, path
+        self.status: Optional[int] = None
+        self._started = asyncio.Event()
+        self._disconnect = asyncio.Event()
+        self._body_sent = False
+        self.task: Optional[asyncio.Task] = None
+
+    async def _receive(self):
+        # As a server does: the (empty) GET body first, then a disconnect when the client leaves
+        if not self._body_sent:
+            self._body_sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await self._disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def _send(self, message):
+        if message["type"] == "http.response.start":
+            self.status = message["status"]
+            self._started.set()
+
+    async def open(self) -> "StreamableGetStream":
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": self.path,
+            "raw_path": self.path.encode(),
+            "query_string": b"",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"authorization", f"Bearer {self.raw_token}".encode()),
+                (b"accept", b"text/event-stream"),
+                (b"mcp-session-id", self.session_id.encode()),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+        self.task = asyncio.create_task(create_app()(scope, self._receive, self._send))
+        await asyncio.wait_for(self._started.wait(), timeout=5.0)
+        return self
+
+    async def close(self) -> None:
+        self._disconnect.set()
+        if self.task is not None:
+            await asyncio.wait_for(asyncio.gather(self.task, return_exceptions=True), timeout=5.0)
+
+
+class TestStreamableGetStreamRevocation:
+    """An open standalone GET stream ends when its token is revoked or loses logs:read, like legacy SSE."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["/mcp", "/api/v1/mcp", "/api/v1/mcp/sse"])
+    async def test_stream_ends_when_its_token_is_revoked(self, client: AsyncClient, auth_headers: dict, path: str):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        other = await create_token(client, auth_headers, FULL_MCP_SCOPES, name="Other")
+        sid = await http_initialize(client, token["raw"])
+        other_sid = await http_initialize(client, other["raw"])
+        stream = await StreamableGetStream(token["raw"], sid, path).open()
+        other_stream = await StreamableGetStream(other["raw"], other_sid, path).open()
+        try:
+            assert stream.status == 200
+            await asyncio.sleep(0.05)
+            assert not stream.task.done()
+
+            assert (await client.delete(f"/api/tokens/{token['id']}", headers=auth_headers)).status_code == 200
+            await asyncio.wait_for(asyncio.shield(stream.task), timeout=5.0)
+            assert token["id"] not in mcp_api_mod._streamable_get_streams
+            # Another token's stream is left open
+            assert not other_stream.task.done()
+            assert other["id"] in mcp_api_mod._streamable_get_streams
+        finally:
+            await stream.close()
+            await other_stream.close()
+        assert mcp_api_mod._streamable_get_streams == {}
+
+    @pytest.mark.asyncio
+    async def test_stream_ends_when_its_token_loses_logs_read(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sid = await http_initialize(client, token["raw"])
+        stream = await StreamableGetStream(token["raw"], sid).open()
+        try:
+            res = await client.patch(f"/api/tokens/{token['id']}", json={"name": "Renamed"}, headers=auth_headers)
+            assert res.status_code == 200
+            await asyncio.sleep(0.05)
+            assert not stream.task.done()
+
+            res = await client.patch(
+                f"/api/tokens/{token['id']}", json={"scopes": ["alerts:read", "system:read"]}, headers=auth_headers
+            )
+            assert res.status_code == 200
+            await asyncio.wait_for(asyncio.shield(stream.task), timeout=5.0)
+            assert mcp_api_mod._streamable_get_streams == {}
+        finally:
+            await stream.close()
+
+
+class TestMcpBodyLimit:
+    """MCP request bodies are capped, as the ingest body is."""
+
+    TOO_LARGE = mcp_api_mod.MCP_MAX_BODY_BYTES + 1
+
+    @staticmethod
+    def _chunks(data: bytes, size: int = 65536):
+        async def gen():
+            for i in range(0, len(data), size):
+                yield data[i:i + size]
+        return gen()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["/mcp", "/api/v1/mcp"])
+    async def test_oversized_streamable_http_body_is_refused(self, client: AsyncClient, auth_headers: dict, path: str):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        body = json.dumps(INIT_PAYLOAD).encode() + b" " * self.TOO_LARGE
+        headers = _streamable_headers(token["raw"])
+
+        # With Content-Length, refused before the body is read
+        res = await client.post(path, content=body, headers=headers)
+        assert res.status_code == 413
+        assert "limit" in res.json()["detail"]
+        # Without it (chunked), refused once the body passes the limit
+        res = await client.post(path, content=self._chunks(body), headers=headers)
+        assert "content-length" not in res.request.headers
+        assert res.status_code == 413
+
+    @pytest.mark.asyncio
+    async def test_body_under_the_limit_reaches_the_server_whole(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        body = json.dumps(INIT_PAYLOAD).encode() + b" " * (mcp_api_mod.MCP_MAX_BODY_BYTES - 1000)
+        res = await client.post("/mcp", content=self._chunks(body), headers=_streamable_headers(token["raw"]))
+        assert res.status_code == 200, res.text
+        assert "serverInfo" in _sse_body_json(res.text)["result"]
+
+    @pytest.mark.asyncio
+    async def test_oversized_legacy_sse_message_is_refused(self, client: AsyncClient, auth_headers: dict):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, FULL_MCP_SCOPES)
+        sse = await LegacySseClient(token["raw"]).connect()
+        try:
+            body = json.dumps(INIT_PAYLOAD).encode() + b" " * self.TOO_LARGE
+            headers = {"Content-Type": "application/json"}
+            res = await client.post(sse.endpoint, content=body, headers=headers)
+            assert res.status_code == 413
+            res = await client.post(sse.endpoint, content=self._chunks(body), headers=headers)
+            assert res.status_code == 413
+            # The session still works
+            await sse_initialize(client, sse)
+        finally:
+            await sse.close()
+
+
 class TestMCPStdio:
     """The stdio transport uses --db-path and reports what a separate process cannot see."""
 

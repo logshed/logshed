@@ -72,6 +72,12 @@ class _SseSession:
 
 # Legacy SSE session id -> owning token, filled when the endpoint event is sent and emptied on disconnect.
 _sse_sessions: dict[UUID, _SseSession] = {}
+# Token id -> cancel scopes of its open Streamable HTTP GET streams, so revoking the token ends them
+_streamable_get_streams: dict[int, set[anyio.CancelScope]] = {}
+
+# Largest accepted MCP request body. JSON-RPC messages are a few KB, and the MCP library reads a whole
+# body into memory, so the routes read it first and refuse anything larger (413).
+MCP_MAX_BODY_BYTES = 1024 * 1024
 # Token id -> (monotonic time cached, token record) for session-only /messages posts.
 _sse_token_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 
@@ -292,11 +298,24 @@ def _close_token_sse_sessions(token_id: int) -> int:
     return closed
 
 
+def _close_token_get_streams(token_id: int) -> int:
+    """End every open Streamable HTTP GET stream opened with the given token."""
+    scopes = _streamable_get_streams.pop(token_id, set())
+    for cancel_scope in scopes:
+        cancel_scope.cancel()
+    return len(scopes)
+
+
+def _close_token_streams(token_id: int) -> int:
+    """Close the token's legacy SSE sessions and Streamable HTTP GET streams."""
+    return _close_token_sse_sessions(token_id) + _close_token_get_streams(token_id)
+
+
 def on_token_revoked(token_id: int) -> None:
-    """Called when an API token is deleted: its live SSE streams are closed and its cached record dropped."""
-    closed = _close_token_sse_sessions(token_id)
+    """Called when an API token is deleted: its live streams are closed and its cached record dropped."""
+    closed = _close_token_streams(token_id)
     if closed:
-        logger.info("Closed %d MCP SSE session(s) for revoked API token %d", closed, token_id)
+        logger.info("Closed %d MCP stream(s) for revoked API token %d", closed, token_id)
 
 
 def on_token_updated(token_id: int, new_scopes: Optional[list[str]]) -> None:
@@ -306,10 +325,10 @@ def on_token_updated(token_id: int, new_scopes: Optional[list[str]]) -> None:
     streams are closed straight away when the new scopes no longer allow connecting to MCP.
     """
     if new_scopes is not None and not has_scope_permission(new_scopes, REQUIRED_MCP_SCOPES):
-        closed = _close_token_sse_sessions(token_id)
+        closed = _close_token_streams(token_id)
         if closed:
             logger.info(
-                "Closed %d MCP SSE session(s) for API token %d, whose scopes no longer include %s",
+                "Closed %d MCP stream(s) for API token %d, whose scopes no longer include %s",
                 closed,
                 token_id,
                 ", ".join(REQUIRED_MCP_SCOPES),
@@ -403,6 +422,70 @@ async def _reverify_sse_session_token(session: _SseSession) -> dict[str, Any]:
     return dict(record)
 
 
+def _body_too_large() -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail=f"MCP request body exceeds the limit of {MCP_MAX_BODY_BYTES} bytes.",
+    )
+
+
+async def _receive_with_capped_body(request: Request) -> Receive:
+    """
+    Read the request body, refusing it (413) above MCP_MAX_BODY_BYTES, and return a receive callable
+    that hands the body to the MCP library and then passes on later messages (such as a disconnect).
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_len = int(declared)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Content-Length header.")
+        if declared_len > MCP_MAX_BODY_BYTES:
+            raise _body_too_large()
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MCP_MAX_BODY_BYTES:
+            raise _body_too_large()
+
+    replayed = False
+    raw_receive = request.receive
+
+    async def receive() -> Message:
+        nonlocal replayed
+        if not replayed:
+            replayed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+        return await raw_receive()
+
+    return receive
+
+
+async def _handle_streamable_request(request: Request, scope: Scope, token_info: dict[str, Any]) -> None:
+    """
+    Pass a Streamable HTTP request to the session manager. A GET opens a long-lived event stream, which is
+    registered under its token so that revoking the token, or removing its logs:read scope, ends it.
+    Other requests carry a body, read first under the size cap.
+    """
+    sm = await ensure_session_manager_started()
+    if request.method != "GET":
+        receive = await _receive_with_capped_body(request)
+        await sm.handle_request(scope, receive, request._send)
+        return
+
+    token_id = int(token_info["id"])
+    with anyio.CancelScope() as cancel_scope:
+        streams = _streamable_get_streams.setdefault(token_id, set())
+        streams.add(cancel_scope)
+        try:
+            await sm.handle_request(scope, request.receive, request._send)
+        finally:
+            streams.discard(cancel_scope)
+            if not streams and _streamable_get_streams.get(token_id) is streams:
+                _streamable_get_streams.pop(token_id, None)
+
+
 async def _dispatch_streamable_http(request: Request, token: Optional[str] = None) -> Response:
     """Validate token and dispatch request to the Streamable HTTP session manager."""
     # 1. Verify enable_mcp setting
@@ -441,8 +524,7 @@ async def _dispatch_streamable_http(request: Request, token: Optional[str] = Non
         scope["headers"] = headers
 
     # 4. Dispatch to Streamable HTTP session manager
-    sm = await ensure_session_manager_started()
-    await sm.handle_request(scope, request.receive, request._send)
+    await _handle_streamable_request(request, scope, token_info)
     return AlreadySentResponse()
 
 
@@ -499,8 +581,7 @@ async def handle_mcp_sse(
     # 3. If mcp-session-id header is present, dispatch to Streamable HTTP standalone GET stream
     if "mcp-session-id" in request.headers:
         request.scope[MCP_ACCESS_SCOPE_KEY] = McpAccess.from_token(token_info)
-        sm = await ensure_session_manager_started()
-        await sm.handle_request(request.scope, request.receive, request._send)
+        await _handle_streamable_request(request, request.scope, token_info)
         return AlreadySentResponse()
 
     # 4. Otherwise connect legacy FastMCP SSE stream, bound to the token that opened it
@@ -567,5 +648,6 @@ async def handle_mcp_messages(
     # 3. Deliver message to SSE session writer. The server loop runs in the GET request's task, but the
     # library passes this POST request along with the message, so tools see the freshly verified token.
     request.scope[MCP_ACCESS_SCOPE_KEY] = McpAccess.from_token(token_info)
-    await sse.handle_post_message(request.scope, request.receive, request._send)
+    receive = await _receive_with_capped_body(request)
+    await sse.handle_post_message(request.scope, receive, request._send)
     return AlreadySentResponse()
