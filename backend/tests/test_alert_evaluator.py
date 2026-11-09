@@ -29,6 +29,27 @@ def _turn_ai_on(db_file: Path) -> None:
 class TestCompiledAlertRule:
     """Tests for single rule match evaluation."""
 
+    def test_plain_pattern_matches_raw_only_when_it_differs(self):
+        """A plain text rule finds its pattern in raw when the message lacks it, and raw equal to message adds nothing."""
+        rule = CompiledAlertRule(
+            id=1,
+            name="Timeout Rule",
+            rule_type="threshold",
+            channel_id=None,
+            filter_app=None,
+            filter_severity=None,
+            match_pattern="Timed Out",
+            threshold_count=1,
+            window_seconds=60,
+            cooldown_seconds=60,
+            ai_enrichment=False,
+            is_enabled=True,
+        )
+        assert rule.matches({"message": "request timed out", "raw": "request timed out"}) is True
+        assert rule.matches({"message": "request failed", "raw": 'level=error msg="request timed out"'}) is True
+        assert rule.matches({"message": "request failed", "raw": "request failed"}) is False
+        assert rule.matches({"message": "request failed", "raw": None}) is False
+
     def test_app_filter_exact_and_wildcard(self):
         rule = CompiledAlertRule(
             id=1,

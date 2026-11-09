@@ -229,7 +229,10 @@ class CompiledAlertRule:
 
             if not self._has_regex_metachars:
                 pat_lower = self._match_pattern_lower
-                if pat_lower not in message.lower() and (not raw or pat_lower not in raw.lower()):
+                if pat_lower not in message.lower() and (
+                    # Scanning identical text again cannot change the result
+                    not raw or raw == message or pat_lower not in raw.lower()
+                ):
                     return False
             else:
                 if self.compiled_regex is None:
