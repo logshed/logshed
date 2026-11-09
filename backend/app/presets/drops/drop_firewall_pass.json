@@ -1,0 +1,11 @@
+{
+  "id": "firewall_pass",
+  "name": "Firewall Pass Entries",
+  "category": "Network",
+  "description": "Drops OPNsense and pfSense firewall log (filterlog) lines for passed traffic. Blocked and rejected traffic is kept.",
+  "source_pattern": null,
+  "app_pattern": "filterlog",
+  "message_pattern": ",match,pass,(?:in|out),",
+  "is_regex": true,
+  "severity_threshold": 6
+}

@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { PresetCard } from './PresetCard.tsx';
+import { PresetCategoryFilter, usePresetCategoryFilter } from './PresetCategoryFilter.tsx';
 import { AlertPreset, AlertRule, NotificationChannel } from '../../types.ts';
 
 export interface AlertPresetsModalProps {
@@ -28,6 +29,8 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
   onInstallPreset,
   installingPresetId,
 }) => {
+  const { category, setCategory, options, visible } = usePresetCategoryFilter(presets, isOpen);
+
   return (
     <Modal
       isOpen={isOpen}
@@ -36,37 +39,42 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
       maxWidth="max-w-4xl"
     >
       <div className="space-y-4">
-        {/* Intro and Channel Selector */}
+        {/* Intro, Category Filter and Channel Selector */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-dark-750">
           <div>
             <p className="text-xs text-slate-300 font-medium">Pre-tuned Monitoring Rules</p>
             <p className="text-xs text-slate-400 mt-0.5">
-              Instant deployment with automated threat signature detection.
+              Ready-made rules for failing disks, backups, power, network trouble and security events.
             </p>
           </div>
 
-          {channels.length > 0 && (
-            <div className="flex items-center gap-2 shrink-0">
-              <label id="target-channel-select-label" htmlFor="target-channel-select" className="text-xs text-slate-400">
-                Target Channel:
-              </label>
-              <div className="w-52">
-                <SelectDropdown
-                  variant="panel"
-                  fieldClassName="bg-dark-800 border-dark-700 rounded-lg px-2.5 py-1.5 text-slate-200"
-                  id="target-channel-select"
-                  labelledBy="target-channel-select-label"
-                  label="Target Channel"
-                  options={[
-                    { value: '', label: 'All Enabled Channels' },
-                    ...channels.map((ch) => ({ value: String(ch.id), label: ch.name })),
-                  ]}
-                  value={String(presetChannelId ?? '')}
-                  onChange={(v) => onSelectChannelId(v ? Number(v) : null)}
-                />
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2 shrink-0">
+            {presets.length > 0 && (
+              <PresetCategoryFilter idPrefix="alert-presets" value={category} options={options} onChange={setCategory} />
+            )}
+            {channels.length > 0 && (
+              <div className="flex items-center gap-2 shrink-0">
+                <label id="target-channel-select-label" htmlFor="target-channel-select" className="text-xs text-slate-400 w-24 sm:w-auto">
+                  Target Channel:
+                </label>
+                <div className="w-52">
+                  <SelectDropdown
+                    variant="panel"
+                    fieldClassName="bg-dark-800 border-dark-700 rounded-lg px-2.5 py-1.5 text-slate-200"
+                    id="target-channel-select"
+                    labelledBy="target-channel-select-label"
+                    label="Target Channel"
+                    options={[
+                      { value: '', label: 'All Enabled Channels' },
+                      ...channels.map((ch) => ({ value: String(ch.id), label: ch.name })),
+                    ]}
+                    value={String(presetChannelId ?? '')}
+                    onChange={(v) => onSelectChannelId(v ? Number(v) : null)}
+                  />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Presets Grid */}
@@ -74,7 +82,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
           <div className="py-8 text-center text-xs text-slate-400">No alert presets found.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {presets.map((preset) => {
+            {visible.map((preset) => {
               const alreadyInstalled = rules.some(
                 (r) => r.name.toLowerCase() === preset.name.toLowerCase()
               );

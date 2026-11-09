@@ -427,71 +427,459 @@ class TestPresetEdgeCasesAndConventions:
 
 
 
-# A sample log line per shipped preset that the preset is meant to catch
+# Real lines (formats from each tool's source or documentation) that each shipped alert preset must
+# match ("match") and must not match ("miss"). Every preset with a pattern has an entry.
 ALERT_PRESET_SAMPLES = {
-    "oom_killer": "Out of memory: Killed process 1234 (node) total-vm:1024kB",
-    "proxy_auth_flood": '192.168.1.1 - - [18/Sep/2026:12:00:00 +0000] "GET /admin HTTP/1.1" 401 123',
-    "ssh_bruteforce": "FAILED PASSWORD for invalid user admin from 10.0.0.5 port 22 ssh2",
-    "sudo_escalation": "alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/bin/bash",
+    "oom_killer": {
+        "match": ["Out of memory: Killed process 1234 (node) total-vm:1024kB"],
+        "miss": [],
+    },
+    "proxy_auth_flood": {
+        "match": ['192.168.1.1 - - [18/Sep/2026:12:00:00 +0000] "GET /admin HTTP/1.1" 401 123'],
+        "miss": [],
+    },
+    "ssh_bruteforce": {
+        "match": ["FAILED PASSWORD for invalid user admin from 10.0.0.5 port 22 ssh2"],
+        "miss": [],
+    },
+    "sudo_escalation": {
+        "match": ["alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/bin/bash"],
+        "miss": [],
+    },
+    "disk_smart_failure": {
+        "match": [
+            "Device: /dev/sda [SAT], FAILED SMART self-check. BACK UP DATA NOW!",
+            "Device: /dev/sdb [SAT], 8 Currently unreadable (pending) sectors",
+            "Device: /dev/sdb [SAT], 2 Offline uncorrectable sectors",
+            "Device: /dev/sdc [SAT], SMART Prefailure Attribute: 5 Reallocated_Sector_Ct changed from 100 to 99",
+            "Device: /dev/sda [SAT], Self-Test Log error count increased from 0 to 1",
+            "Device: /dev/sda [SAT], ATA error count increased from 0 to 3",
+        ],
+        "miss": [
+            "Device: /dev/sda [SAT], SMART Usage Attribute: 194 Temperature_Celsius changed from 64 to 63",
+            "Device: /dev/sda [SAT], opened",
+            'Device: /dev/sda [SAT], is SMART capable. Adding to "monitor" list.',
+        ],
+    },
+    "zfs_pool_errors": {
+        "match": [
+            "eid=42 class=checksum pool='tank' vdev=sdb1 algorithm=fletcher4 size=131072 offset=4194304 priority=0 err=52 flags=0x180880",
+            "eid=9 class=io pool='backup' vdev=sdd1 size=4096 offset=270336 priority=0 err=5 flags=0x8881",
+            "eid=7 class=statechange pool='tank' vdev=sdc1 vdev_state=FAULTED",
+            "eid=8 class=statechange pool='tank' vdev=sdc1 vdev_state=DEGRADED",
+        ],
+        "miss": [
+            "eid=12 class=statechange pool='tank' vdev=sdc1 vdev_state=ONLINE",
+            "eid=3 class=scrub_finish pool='tank'",
+            "eid=1 class=history_event pool='tank'",
+            "eid=5 class=config_sync pool='tank'",
+        ],
+    },
+    "mdadm_degraded": {
+        "match": [
+            "DegradedArray event detected on md device /dev/md/0",
+            "Fail event detected on md device /dev/md0, component device /dev/sdb1",
+            "md/raid1:md0: Disk failure on sdb1, disabling device.",
+            "md/raid:md1: Disk failure on sdc1, disabling device.",
+        ],
+        "miss": [
+            "NewArray event detected on md device /dev/md0",
+            "RebuildFinished event detected on md device /dev/md0",
+            "SparesMissing event detected on md device /dev/md0",
+            "md/raid1:md0: active with 2 out of 2 mirrors",
+        ],
+    },
+    "filesystem_errors": {
+        "match": [
+            "EXT4-fs error (device sda1): ext4_find_entry:1455: inode #2: comm ls: reading directory lblock 0",
+            'XFS (sdb1): metadata I/O error in "xfs_imap_to_bp+0x5c/0xa0" at daddr 0x3c0 len 32 error 5',
+            "XFS (dm-0): Corruption detected. Unmount and run xfs_repair",
+            "BTRFS error (device sdc1): bdev /dev/sdc1 errs: wr 0, rd 1, flush 0, corrupt 0, gen 0",
+            "Buffer I/O error on dev sda1, logical block 0, async page read",
+            "I/O error, dev sda, sector 2048 op 0x0:(READ) flags 0x0 phys_seg 1 prio class 2",
+        ],
+        "miss": [
+            "EXT4-fs (sda1): mounted filesystem with ordered data mode. Quota mode: none.",
+            "XFS (sdb1): Mounting V5 Filesystem",
+            "BTRFS info (device sdc1): disk space caching is enabled",
+        ],
+    },
+    "backup_failure": {
+        "match": [
+            "ERROR: Backup of VM 101 failed - unable to create temporary directory '/mnt/pve/nas/dump/vzdump-qemu-101.tmp'",
+            "INFO: Backup job finished with errors",
+            "terminating with error status, rc 2",
+            "Fatal: wrong password or no key found",
+            "Fatal: unable to open config file: Stat: stat /srv/restic/config: no such file or directory",
+            "Fatal: unable to create lock in backend: repository is already locked by PID 1234",
+        ],
+        "miss": [
+            "INFO: Finished Backup of VM 101 (00:01:10)",
+            "INFO: Backup job finished successfully",
+            "terminating with success status, rc 0",
+            "terminating with warning status, rc 1",
+        ],
+    },
+    "ups_power": {
+        "match": [
+            "Power failure.",
+            "Running on UPS batteries.",
+            "UPS ups@localhost on battery",
+            "UPS ups@localhost battery is low",
+            "UPS ups@localhost battery needs to be replaced",
+            "Communications with UPS ups@localhost lost",
+        ],
+        "miss": [
+            "UPS ups@localhost on line power",
+            "Power is back. UPS running on mains.",
+            "Communications with UPS ups@localhost established",
+        ],
+    },
+    "cert_renewal_failure": {
+        "match": [
+            "Failed to renew certificate example.com with error: Some challenges have failed.",
+            "All renewals failed. The following certificates could not be renewed:",
+            'ERR Unable to obtain ACME certificate for domains error="acme: error: 429" domains=["a.example.com"]',
+            "[Mon Nov  9 03:00:01 UTC 2026] Error renewing example.com.",
+            '{"level":"error","ts":1762689600.1,"logger":"tls.obtain","msg":"could not get certificate from issuer","identifier":"example.com"}',
+        ],
+        "miss": [
+            "Congratulations, all renewals succeeded:",
+            '{"level":"info","logger":"tls.renew","msg":"certificate renewed successfully","identifier":"example.com"}',
+            "Certificate not yet due for renewal",
+        ],
+    },
+    "proxmox_cluster": {
+        "match": [
+            "[KNET  ] link: host: 2 link: 0 is down",
+            "[status] notice: node lost quorum",
+            "[QUORUM] This node is within the non-primary component and will NOT provide any services.",
+            "[TOTEM ] A processor failed, forming new configuration: token timed out (3000ms)",
+            "node 'pve2': state changed from 'unknown' => 'fence'",
+            "fencing: acknowledged - got agent lock for node 'pve2'",
+        ],
+        "miss": [
+            "[KNET  ] host: host: 2 (passive) best link: 0 (pri: 1)",
+            "[status] notice: node has quorum",
+            "[QUORUM] This node is within the primary component and will provide service.",
+            "node 'pve2': state changed from 'unknown' => 'online'",
+        ],
+    },
+    "wan_gateway_alarm": {
+        "match": [
+            "WAN_DHCP 203.0.113.1: Alarm latency 612000us stddev 4500us loss 0%",
+            "WAN_DHCP is down, omitting from routing group WANGROUP; 203.0.113.1|203.0.113.10|down|0ms|0ms|100%",
+            "WAN_DHCP has packet loss, omitting from routing group WANGROUP; 203.0.113.1|203.0.113.10|loss|0ms|0ms|25%",
+            "ALERT: WAN_DHCP (Addr: 203.0.113.1 Alarm: none -> down RTT: 0.0 ms RTTd: 0.0 ms Loss: 100.0 %)",
+            "INFO [Gateway Monitoring] >>> Gateway alarm: WAN_DHCP (Addr:203.0.113.1 Alarm:1 RTT:612.0ms RTTsd:4.5ms Loss:0%)",
+        ],
+        "miss": [
+            "WAN_DHCP 203.0.113.1: Clear latency 18000us stddev 900us loss 0%",
+            "WAN_DHCP is available now, adding to routing group WANGROUP",
+            "MONITOR: WAN_DHCP (Addr: 203.0.113.1 Alarm: down -> none RTT: 18.0 ms RTTd: 0.9 ms Loss: 0.0 %)",
+            "INFO [Gateway Monitoring] >>> Gateway alarm: WAN_DHCP (Addr:203.0.113.1 Alarm:0 RTT:18.0ms RTTsd:0.9ms Loss:0%)",
+        ],
+    },
+    "segfault": {
+        "match": [
+            "node[2345]: segfault at 0 ip 00007f1c2b3d4e5f sp 00007ffd1a2b3c40 error 4 in libc.so.6[7f1c2b200000+195000]",
+            "traps: python3[812] general protection fault ip:7f4e5c1d2e3f sp:7ffc9a8b7c60 error:0 in libpython3.11.so",
+        ],
+        "miss": ["Installed segfault handler for worker threads"],
+    },
+    "systemd_unit_failed": {
+        "match": [
+            "nginx.service: Failed with result 'exit-code'.",
+            "mnt-nas.mount: Failed with result 'exit-code'.",
+        ],
+        "miss": [
+            "nginx.service: Deactivated successfully.",
+            "nginx.service: Scheduled restart job, restart counter is at 1.",
+        ],
+    },
+    "fail2ban_bans": {
+        "match": [
+            "fail2ban.actions        [1234]: NOTICE  [sshd] Ban 192.0.2.10",
+            "NOTICE  [nginx-http-auth] Ban 2001:db8::1",
+        ],
+        "miss": [
+            "NOTICE  [sshd] Unban 192.0.2.10",
+            "NOTICE  [sshd] Restore Ban 192.0.2.10",
+            "INFO    [sshd] Found 192.0.2.10 - 2026-11-09 12:00:00",
+        ],
+    },
+    "hardware_errors": {
+        "match": [
+            "mce: [Hardware Error]: Machine check events logged",
+            "EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0 (channel:1 slot:0 page:0x12345)",
+            "EDAC MC0: 1 UE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0 (channel:1 slot:0 page:0x12345)",
+            "pcieport 0000:00:1c.0: AER: Uncorrected (Fatal) error received: 0000:01:00.0",
+        ],
+        "miss": [
+            "pcieport 0000:00:1c.0: AER: Corrected error received: 0000:01:00.0",
+            "EDAC MC0: Giving out device to module ie31200_edac controller IE31200: DEV 0000:00:00.0 (POLLED)",
+            "mce: CPU0: Thermal monitoring enabled (TM1)",
+        ],
+    },
+    "temperature_warning": {
+        "match": [
+            "CPU3: Core temperature above threshold, cpu clock throttled (total events = 1)",
+            "CPU0: Package temperature above threshold, cpu clock throttled (total events = 5)",
+            "Device: /dev/sda [SAT], Temperature 56 Celsius reached limit of 55 Celsius (Min/Max 24/56)",
+            "Device: /dev/sda [SAT], Temperature 61 Celsius reached critical limit of 60 Celsius (Min/Max 24/61)",
+        ],
+        "miss": [
+            "CPU3: Core temperature/speed normal",
+            "Device: /dev/sda [SAT], SMART Usage Attribute: 194 Temperature_Celsius changed from 64 to 63",
+        ],
+    },
 }
+
+# Lines each shipped drop preset must drop and must keep, as (app name, message, severity).
+# "keep" includes the warnings and errors a preset must never drop.
 DROP_PRESET_SAMPLES = {
-    "cron_noise": "(root) CMD (run-parts /etc/cron.hourly)",
-    "docker_healthcheck": "container 3f2a health_status: healthy",
-    "systemd_session": "pam_unix(systemd-user:session): session closed for user bob",
+    "cron_noise": {
+        "drop": [("CRON", "(root) CMD (run-parts /etc/cron.hourly)", None)],
+        "keep": [("sshd", "(root) CMD (run-parts /etc/cron.hourly)", None)],
+    },
+    "docker_healthcheck": {
+        "drop": [(None, "container 3f2a health_status: healthy", None)],
+        "keep": [(None, "routine heartbeat ok", None)],
+    },
+    "systemd_session": {
+        "drop": [("systemd", "pam_unix(systemd-user:session): session closed for user bob", None)],
+        "keep": [("systemd", "pam_unix(sshd:session): session opened for user ben", None)],
+    },
+    "dns_query_chatter": {
+        "drop": [
+            ("dnsmasq", "query[A] example.com from 192.168.1.20", 6),
+            ("dnsmasq", "query[AAAA] example.com from 192.168.1.20", 6),
+            ("pihole-FTL", "forwarded example.com to 1.1.1.1", 6),
+            ("dnsmasq", "reply example.com is 93.184.215.14", 6),
+            ("dnsmasq", "cached example.com is 93.184.215.14", 6),
+            ("dnsmasq", "config example.lan is NXDOMAIN", 6),
+        ],
+        "keep": [
+            ("dnsmasq", "gravity blocked ads.example.com is 0.0.0.0", 6),
+            ("dnsmasq", "failed to send packet: Network is unreachable", 3),
+            ("dnsmasq", "Maximum number of concurrent DNS queries reached (max: 150)", 4),
+            ("dnsmasq", "reply example.com is 93.184.215.14", 4),
+        ],
+    },
+    "firewall_pass": {
+        "drop": [
+            ("filterlog", "5,,,1000000103,igb0,match,pass,in,4,0x0,,64,0,0,DF,6,tcp,60,192.168.1.20,203.0.113.5,51514,443,0,S", 6),
+            ("filterlog", "77,,,fae559338f65e11c53669fc3642c93c2,vtnet0,match,pass,out,4,0x0,,127,61953,0,none,17,udp,76", 6),
+        ],
+        "keep": [
+            ("filterlog", "5,,,1000000103,igb0,match,block,in,4,0x0,,64,0,0,DF,6,tcp,60,198.51.100.7,192.168.1.1,4444,22,0,S", 6),
+            ("kernel", "5,,,1000000103,igb0,match,pass,in,4,0x0,,64", 6),
+        ],
+    },
+    "health_endpoint_access": {
+        "drop": [
+            ("nginx", '172.18.0.1 - - [09/Nov/2026:12:00:00 +0000] "GET /health HTTP/1.1" 200 2 "-" "curl/8.5.0"', 6),
+            ("traefik", '10.0.0.2 - - [09/Nov/2026:12:00:00 +0000] "GET /ping HTTP/1.1" 200 2 "-" "Go-http-client/1.1" 42 "ping@internal" "-" 0ms', 6),
+            ("nginx", '172.18.0.1 - - [09/Nov/2026:12:00:00 +0000] "HEAD /healthz HTTP/1.1" 204 0 "-" "kube-probe"', 6),
+            ("prometheus", '172.18.0.5 - - [09/Nov/2026:12:00:00 +0000] "GET /metrics?format=prometheus HTTP/1.1" 200 1234 "-" "Prometheus/2.53"', 6),
+            ("caddy", '{"level":"info","ts":1762689600.5,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"172.18.0.1","method":"GET","host":"app.example.com","uri":"/health","headers":{"User-Agent":["curl/8.5.0"]}},"size":2,"status":200}', 6),
+        ],
+        "keep": [
+            ("nginx", '172.18.0.1 - - [09/Nov/2026:12:00:00 +0000] "GET /health HTTP/1.1" 503 19 "-" "curl/8.5.0"', 6),
+            ("nginx", '172.18.0.1 - - [09/Nov/2026:12:00:00 +0000] "GET /healthy-recipes HTTP/1.1" 200 512 "-" "Firefox"', 6),
+            ("nginx", '172.18.0.1 - - [09/Nov/2026:12:00:00 +0000] "POST /api/ping HTTP/1.1" 200 2 "-" "curl/8.5.0"', 6),
+            ("caddy", '{"level":"error","logger":"http.log.access","msg":"handled request","request":{"method":"GET","uri":"/health"},"status":503}', 3),
+        ],
+    },
+    "proxmox_status_chatter": {
+        "drop": [
+            ("pveproxy", "worker 12345 started", 6),
+            ("pveproxy", "worker 12340 finished", 6),
+            ("pvedaemon", "starting 1 worker(s)", 6),
+            ("pvestatd", "status update time (6.123 seconds)", 6),
+        ],
+        "keep": [
+            ("pvedaemon", "<root@pam> successful auth for user 'root@pam'", 6),
+            ("pveproxy", "proxy detected vanished client connection", 6),
+            ("nginx", "worker 12345 started", 6),
+        ],
+    },
+    "systemd_timer_chatter": {
+        "drop": [
+            ("systemd", "Created slice user-1000.slice - User Slice of UID 1000.", 6),
+            ("systemd", "Removed slice user-1000.slice - User Slice of UID 1000.", 6),
+            ("systemd", "Started session-12.scope - Session 12 of User root.", 6),
+            ("systemd", "Started Session 12 of user root.", 6),
+            ("systemd", "Finished logrotate.service - Rotate log files.", 6),
+            ("systemd", "phpsessionclean.service: Deactivated successfully.", 6),
+            ("systemd", "logrotate.service: Consumed 1.234s CPU time, 12.3M memory peak.", 6),
+        ],
+        "keep": [
+            ("systemd", "Failed to start nginx.service - A high performance web server and a reverse proxy server.", 3),
+            ("systemd", "nginx.service: Failed with result 'exit-code'.", 4),
+            ("systemd", "Started nginx.service - A high performance web server and a reverse proxy server.", 6),
+            ("systemd", "Stopped nginx.service - A high performance web server and a reverse proxy server.", 6),
+        ],
+    },
+    "rsyslog_mark": {
+        "drop": [("rsyslogd", "-- MARK --", 6)],
+        "keep": [("kernel", "Reboot requested", 6)],
+    },
+    "smartd_attribute_chatter": {
+        "drop": [
+            ("smartd", "Device: /dev/sda [SAT], SMART Usage Attribute: 194 Temperature_Celsius changed from 64 to 63", 6),
+            ("smartd", "Device: /dev/sdb [SAT], SMART Prefailure Attribute: 1 Raw_Read_Error_Rate changed from 118 to 117", 6),
+        ],
+        "keep": [
+            ("smartd", "Device: /dev/sdc [SAT], SMART Prefailure Attribute: 5 Reallocated_Sector_Ct changed from 100 to 99", 6),
+            ("smartd", "Device: /dev/sdc [SAT], SMART Usage Attribute: 197 Current_Pending_Sector changed from 100 to 99", 6),
+            ("smartd", "Device: /dev/sda [SAT], 8 Currently unreadable (pending) sectors", 2),
+        ],
+    },
+    "arr_chatter": {
+        "drop": [
+            ("radarr", "[Info] RefreshMovieService: Updating info for The Matrix", 6),
+            ("sonarr", "[Info] RefreshSeriesService: Updating Example Show", 6),
+            ("radarr", "[Info] DiskScanService: Scanning disk for The Matrix", 6),
+            ("radarr", "[Info] DiskScanService: Completed scanning disk for The Matrix", 6),
+            ("sonarr", "[Info] DiskScanService: Scanning Example Show", 6),
+            ("radarr", "[Info] ExistingMetadataImporter: Found 0 existing metadata files", 6),
+            ("sonarr", "[Info] ExistingSubtitleImporter: Found 0 existing subtitle files", 6),
+            ("radarr", "[Info] ExistingOtherExtraImporter: Found 0 existing other extra files", 6),
+            ("radarr", "[Info] ExistingExtraFileService: Found 0 possible extra files, imported 0 files.", 6),
+        ],
+        "keep": [
+            ("radarr", "[Warn] DiskScanService: Movie folder doesn't exist: /movies/The Matrix", 4),
+            ("sonarr", "[Info] ExistingSubtitleImporter: Found 2 existing subtitle files", 6),
+            ("radarr", "[Error] RefreshMovieService: Couldn't refresh info for The Matrix", 3),
+            ("radarr", "[Info] DownloadDecisionMaker: Processing 100 releases", 6),
+        ],
+    },
+    "ha_custom_integration": {
+        "drop": [
+            ("homeassistant", "We found a custom integration hacs which has not been tested by Home Assistant. This component might cause stability problems, be sure to disable it if you experience issues with Home Assistant", 4),
+            ("homeassistant", "2026-11-09 12:00:00.123 WARNING (SyncWorker_0) [homeassistant.loader] We found a custom integration logshed which has not been tested by Home Assistant. This component might cause stability problems, be sure to disable it if you experience issues with Home Assistant", 4),
+        ],
+        "keep": [
+            ("homeassistant", "Error setting up entry for hacs", 3),
+            ("homeassistant", "We found a custom integration hacs which has not been tested by Home Assistant", 3),
+        ],
+    },
 }
+
+PRESET_CATEGORIES = {
+    "Security", "Storage and disks", "Backups", "Power", "Network", "VMs and containers", "System", "Apps",
+}
+
+
+def _compiled_alert_rule(preset: dict):
+    from app.services.alert_evaluator import CompiledAlertRule
+
+    return CompiledAlertRule(
+        id=1, name=preset["name"], rule_type=preset["rule_type"], channel_id=None,
+        filter_app=preset.get("filter_app"), filter_severity=preset.get("filter_severity"),
+        match_pattern=preset.get("match_pattern"), threshold_count=preset["threshold_count"],
+        window_seconds=preset["window_seconds"], cooldown_seconds=preset["cooldown_seconds"],
+        ai_enrichment=False, is_enabled=True,
+    )
+
+
+def _drop_filter_for(preset: dict, tmp_path: Path):
+    """A drop filter holding the preset as installed: its hosts, apps, pattern and severity range."""
+    from app.core.migrations import get_connection
+    from app.services.drop_filter import DropFilter
+
+    db_file = tmp_path / "preset_drop.db"
+    run_migrations(db_file)
+    conn = get_connection(db_file)
+    conn.execute(
+        "INSERT INTO drop_rules (name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, "
+        "severity_threshold, dropped_count, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, 0, datetime('now'))",
+        (
+            preset["name"], preset.get("source_pattern"), preset.get("app_pattern"), preset["message_pattern"],
+            1 if preset.get("is_regex") else 0, preset.get("severity_threshold"),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    flt = DropFilter(db_file)
+    assert len(flt._rules) == 1, "preset must compile on the drop rule engine"
+    return flt
 
 
 class TestShippedPresetsWithUserRegexEngine:
-    """Every shipped preset still validates and still matches its sample on the `regex` engine."""
+    """Every shipped preset validates, and matches its real sample lines (and only those) on the `regex` engine."""
 
-    def test_every_alert_preset_with_a_pattern_has_a_sample(self):
+    def test_every_preset_with_a_pattern_has_samples(self):
         with_pattern = {p["id"] for p in get_alert_presets() if p.get("match_pattern")}
         assert with_pattern == set(ALERT_PRESET_SAMPLES)
         drop_ids = {p["id"] for p in get_drop_presets()}
         assert drop_ids == set(DROP_PRESET_SAMPLES)
 
+    def test_every_shipped_preset_has_a_known_category_and_plain_text(self):
+        for preset in get_alert_presets() + get_drop_presets():
+            assert preset.get("category") in PRESET_CATEGORIES, preset["id"]
+            for field in ("name", "description"):
+                assert preset[field].isascii(), f"{preset['id']} {field} must be plain ASCII"
+
+    def test_existing_preset_ids_are_kept(self):
+        alert_ids = {p["id"] for p in get_alert_presets()}
+        drop_ids = {p["id"] for p in get_drop_presets()}
+        assert {"ssh_bruteforce", "proxy_auth_flood", "sudo_escalation", "oom_killer", "log_storm_detection"} <= alert_ids
+        assert {"cron_noise", "docker_healthcheck", "systemd_session"} <= drop_ids
+
     @pytest.mark.parametrize("preset_id", sorted(ALERT_PRESET_SAMPLES))
-    def test_alert_preset_validates_and_matches_sample(self, preset_id: str):
+    def test_alert_preset_validates_and_matches_samples(self, preset_id: str):
         from app.core.regex_validator import check_regex_safety
-        from app.services.alert_evaluator import CompiledAlertRule
 
         preset = get_alert_preset_by_id(preset_id)
         assert check_regex_safety(preset["match_pattern"]) == (True, None)
-        rule = CompiledAlertRule(
-            id=1, name=preset["name"], rule_type=preset["rule_type"], channel_id=None,
-            filter_app=None, filter_severity=None, match_pattern=preset["match_pattern"],
-            threshold_count=1, window_seconds=60, cooldown_seconds=60, ai_enrichment=False, is_enabled=True,
-        )
-        sample = ALERT_PRESET_SAMPLES[preset_id]
-        assert rule.matches({"message": sample, "raw": sample}) is True
-        assert rule.matches({"message": "routine heartbeat ok", "raw": "routine heartbeat ok"}) is False
+        rule = _compiled_alert_rule(preset)
+        samples = ALERT_PRESET_SAMPLES[preset_id]
+        app = preset.get("filter_app") or "app"
+        for line in samples["match"]:
+            assert rule.matches({"message": line, "raw": line, "app_name": app, "severity": 6}) is True, line
+        for line in samples["miss"] + ["routine heartbeat ok"]:
+            assert rule.matches({"message": line, "raw": line, "app_name": app, "severity": 6}) is False, line
+
+    def test_critical_severity_preset_matches_by_severity_only(self):
+        rule = _compiled_alert_rule(get_alert_preset_by_id("critical_severity"))
+        for severity in (0, 1, 2):
+            assert rule.matches({"message": "anything", "app_name": "kernel", "severity": severity}) is True
+        for severity in (3, 4, 6):
+            assert rule.matches({"message": "anything", "app_name": "kernel", "severity": severity}) is False
+
+    def test_fail2ban_preset_waits_for_several_bans(self):
+        preset = get_alert_preset_by_id("fail2ban_bans")
+        assert preset["rule_type"] == "threshold"
+        assert preset["threshold_count"] > 1
 
     @pytest.mark.parametrize("preset_id", sorted(DROP_PRESET_SAMPLES))
-    def test_drop_preset_validates_and_matches_sample(self, preset_id: str, tmp_path: Path):
-        from app.core.migrations import get_connection
+    def test_drop_preset_validates_and_drops_only_its_samples(self, preset_id: str, tmp_path: Path):
         from app.core.regex_validator import check_regex_safety
-        from app.services.drop_filter import DropFilter
 
         preset = get_drop_preset_by_id(preset_id)
         if preset.get("is_regex"):
             assert check_regex_safety(preset["message_pattern"]) == (True, None)
-        db_file = tmp_path / "preset_drop.db"
-        run_migrations(db_file)
-        conn = get_connection(db_file)
-        conn.execute(
-            "INSERT INTO drop_rules (name, source_pattern, app_pattern, message_pattern, is_regex, is_enabled, dropped_count, created_at) "
-            "VALUES (?, NULL, NULL, ?, ?, 1, 0, datetime('now'))",
-            (preset["name"], preset["message_pattern"], 1 if preset.get("is_regex") else 0),
-        )
-        conn.commit()
-        conn.close()
-        flt = DropFilter(db_file)
-        assert len(flt._rules) == 1, "preset must compile on the drop rule engine"
-        assert flt.should_drop(None, None, None, DROP_PRESET_SAMPLES[preset_id]) is not None
-        assert flt.should_drop(None, None, None, "routine heartbeat ok") is None
+        flt = _drop_filter_for(preset, tmp_path)
+        samples = DROP_PRESET_SAMPLES[preset_id]
+        for app, line, severity in samples["drop"]:
+            assert flt.should_drop(None, "192.168.1.10", app, line, severity) is not None, line
+        for app, line, severity in samples["keep"] + [("app", "routine heartbeat ok", 6)]:
+            assert flt.should_drop(None, "192.168.1.10", app, line, severity) is None, line
+
+    @pytest.mark.parametrize("preset_id", sorted(DROP_PRESET_SAMPLES))
+    def test_drop_preset_never_drops_errors(self, preset_id: str, tmp_path: Path):
+        """A preset with a severity range keeps its own lines when they arrive as errors."""
+        preset = get_drop_preset_by_id(preset_id)
+        if preset.get("severity_threshold") is None:
+            pytest.skip("preset drops at any severity")
+        flt = _drop_filter_for(preset, tmp_path)
+        for app, line, _ in DROP_PRESET_SAMPLES[preset_id]["drop"]:
+            assert flt.should_drop(None, "192.168.1.10", app, line, 3) is None, line
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("preset_id", sorted(ALERT_PRESET_SAMPLES) + ["log_storm_detection"])
+    @pytest.mark.parametrize("preset_id", sorted(ALERT_PRESET_SAMPLES) + ["log_storm_detection", "critical_severity"])
     async def test_every_alert_preset_installs(self, client: AsyncClient, auth_headers: dict, preset_id: str):
         res = await client.post(f"/api/alerts/presets/{preset_id}/install", headers=auth_headers)
         assert res.status_code == 201
@@ -501,6 +889,23 @@ class TestShippedPresetsWithUserRegexEngine:
     async def test_every_drop_preset_installs(self, client: AsyncClient, auth_headers: dict, preset_id: str):
         res = await client.post(f"/api/drop-rules/presets/{preset_id}/install", headers=auth_headers)
         assert res.status_code == 201
+
+    @pytest.mark.asyncio
+    async def test_presets_list_carries_categories(self, client: AsyncClient, auth_headers: dict):
+        alerts = (await client.get("/api/alerts/presets", headers=auth_headers)).json()
+        drops = (await client.get("/api/drop-rules/presets", headers=auth_headers)).json()
+        assert {p["id"]: p["category"] for p in alerts}["ups_power"] == "Power"
+        assert {p["id"]: p["category"] for p in drops}["arr_chatter"] == "Apps"
+
+    @pytest.mark.asyncio
+    async def test_installing_a_preset_twice_adds_a_second_rule(self, client: AsyncClient, auth_headers: dict):
+        for _ in range(2):
+            assert (await client.post("/api/drop-rules/presets/rsyslog_mark/install", headers=auth_headers)).status_code == 201
+            assert (await client.post("/api/alerts/presets/ups_power/install", headers=auth_headers)).status_code == 201
+        drops = (await client.get("/api/drop-rules", headers=auth_headers)).json()
+        assert sum(1 for r in drops if r["message_pattern"] == "-- MARK --") == 2
+        alerts = (await client.get("/api/alerts/rules", headers=auth_headers)).json()
+        assert sum(1 for r in alerts if r["name"] == "UPS On Battery or Low Battery") == 2
 
     @pytest.mark.asyncio
     async def test_custom_alert_preset_with_dangerous_pattern_is_refused(

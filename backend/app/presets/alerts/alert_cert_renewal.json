@@ -1,0 +1,14 @@
+{
+  "id": "cert_renewal_failure",
+  "name": "Certificate Renewal Failures",
+  "category": "Security",
+  "description": "Catches failed certificate renewals from certbot, acme.sh, Traefik and Caddy. These tools retry for days before a certificate expires, so it alerts at most every 6 hours.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "Failed to renew certificate|All renewals failed|Unable to obtain ACME certificate|Error renewing|could not get certificate from issuer",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 21600,
+  "ai_enrichment": true
+}

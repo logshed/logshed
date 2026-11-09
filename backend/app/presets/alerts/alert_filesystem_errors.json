@@ -1,0 +1,14 @@
+{
+  "id": "filesystem_errors",
+  "name": "Filesystem and Disk I/O Errors",
+  "category": "Storage and disks",
+  "description": "Catches kernel errors from EXT4, XFS and Btrfs and block layer I/O errors (Buffer I/O error, I/O error on a sector). A failing disk logs many of these at once, so it alerts at most every 30 minutes.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "EXT4-fs error|XFS \\([^)]+\\): (?:metadata I/O error|log I/O error|Corruption)|BTRFS (?:error|critical)|Buffer I/O error on dev|I/O error, dev \\S+, sector",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 1800,
+  "ai_enrichment": true
+}

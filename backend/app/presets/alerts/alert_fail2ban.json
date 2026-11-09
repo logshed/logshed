@@ -1,0 +1,14 @@
+{
+  "id": "fail2ban_bans",
+  "name": "Fail2ban Ban Wave",
+  "category": "Security",
+  "description": "Alerts when fail2ban bans 5 or more addresses within 10 minutes, in any jail. Bans restored after a fail2ban restart are not counted. Lower the threshold to 1 to hear about every ban.",
+  "rule_type": "threshold",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "\\[[\\w.-]+\\] Ban [0-9A-Fa-f.:]+",
+  "threshold_count": 5,
+  "window_seconds": 600,
+  "cooldown_seconds": 3600,
+  "ai_enrichment": true
+}

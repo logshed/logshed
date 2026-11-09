@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal } from '../common/Modal.tsx';
 import { PresetCard } from './PresetCard.tsx';
+import { PresetCategoryFilter, usePresetCategoryFilter } from './PresetCategoryFilter.tsx';
 import { DropPreset, DropRule } from '../../types.ts';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 
@@ -21,6 +22,8 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
   onInstallPreset,
   installingPresetId,
 }) => {
+  const { category, setCategory, options, visible } = usePresetCategoryFilter(presets, isOpen);
+
   return (
     <Modal
       isOpen={isOpen}
@@ -30,11 +33,16 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
     >
       <div className="space-y-4">
         {/* Intro */}
-        <div className="pb-3 border-b border-dark-750">
-          <p className="text-xs text-slate-300 font-medium">Common Noise Filter Presets</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            1-click deployment of pre-configured drop rules for high-volume logs and background chatter.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-dark-750">
+          <div>
+            <p className="text-xs text-slate-300 font-medium">Common Noise Filter Presets</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              1-click deployment of pre-configured drop rules for high-volume logs and background chatter.
+            </p>
+          </div>
+          {presets.length > 0 && (
+            <PresetCategoryFilter idPrefix="drop-presets" value={category} options={options} onChange={setCategory} />
+          )}
         </div>
 
         {/* Presets Grid */}
@@ -42,7 +50,7 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
           <div className="py-8 text-center text-xs text-slate-400">No drop presets found.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {presets.map((preset) => {
+            {visible.map((preset) => {
               const alreadyInstalled = rules.some(
                 (r) =>
                   r.message_pattern === preset.message_pattern &&

@@ -1,6 +1,7 @@
 {
   "id": "systemd_session",
   "name": "Systemd Session Chatter",
+  "category": "System",
   "description": "Filters routine systemd PAM user session opened and closed logs.",
   "source_pattern": null,
   "app_pattern": "systemd*",

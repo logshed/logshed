@@ -1,6 +1,7 @@
 {
   "id": "cron_noise",
   "name": "Routine CRON Noise",
+  "category": "System",
   "description": "Filters routine CRON execution and service reload notices.",
   "source_pattern": null,
   "app_pattern": "CRON",

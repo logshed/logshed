@@ -539,6 +539,8 @@ export interface AlertTestResponse {
 export interface AlertPreset {
   id: string;
   name: string;
+  /** Groups the preset in its dialog; custom presets may leave it out. */
+  category?: string | null;
   description: string;
   rule_type: string;
   filter_app?: string | null;
@@ -554,6 +556,8 @@ export interface AlertPreset {
 export interface DropPreset {
   id: string;
   name: string;
+  /** Groups the preset in its dialog; custom presets may leave it out. */
+  category?: string | null;
   description: string;
   source_pattern?: string | null;
   app_pattern?: string | null;

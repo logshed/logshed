@@ -1,0 +1,11 @@
+{
+  "id": "proxmox_status_chatter",
+  "name": "Proxmox Worker and Status Chatter",
+  "category": "VMs and containers",
+  "description": "Drops Proxmox VE daemon worker restarts (worker started, finished, starting workers) and pvestatd's status update time notices. A status update time line means a status cycle took over 5 seconds, often slow storage: leave this preset off while you look into that.",
+  "source_pattern": null,
+  "app_pattern": "pveproxy, pvedaemon, spiceproxy, pvestatd, pvescheduler",
+  "message_pattern": "^(?:worker \\d+ (?:started|finished)|starting \\d+ worker\\(s\\)|status update time \\(\\d+(?:\\.\\d+)? seconds\\))$",
+  "is_regex": true,
+  "severity_threshold": 6
+}

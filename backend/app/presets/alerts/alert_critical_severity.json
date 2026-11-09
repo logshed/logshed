@@ -1,0 +1,14 @@
+{
+  "id": "critical_severity",
+  "name": "Critical or Worse",
+  "category": "System",
+  "description": "Alerts on any log at Critical (2), Alert (1) or Emergency (0) severity, from any app. Some apps log routine messages as critical: add a drop rule for those, or raise the bar to Alert (1).",
+  "rule_type": "threshold",
+  "filter_app": null,
+  "filter_severity": 2,
+  "match_pattern": null,
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 900,
+  "ai_enrichment": true
+}

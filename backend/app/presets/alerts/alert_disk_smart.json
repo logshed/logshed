@@ -1,0 +1,14 @@
+{
+  "id": "disk_smart_failure",
+  "name": "Disk Health Warning (SMART)",
+  "category": "Storage and disks",
+  "description": "Catches smartd reports of a failing disk: a failed health self-check, a failed attribute, pending or offline uncorrectable sectors, a change in the reallocated or pending sector attributes, and new self-test or ATA errors. Needs smartd running on the host. Disks behind some RAID controllers report nothing to smartd.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "FAILED SMART self-check|Failed SMART \\w+ Attribute|Currently unreadable \\(pending\\) sectors|Offline uncorrectable sectors|Prefailure Attribute: (?:5|197|198) \\S+ changed from|Self-Test Log error count increased|ATA error count increased",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 21600,
+  "ai_enrichment": true
+}

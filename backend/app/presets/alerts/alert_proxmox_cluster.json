@@ -1,0 +1,14 @@
+{
+  "id": "proxmox_cluster",
+  "name": "Proxmox Cluster Trouble",
+  "category": "VMs and containers",
+  "description": "Catches corosync link loss, a node losing quorum, a lost cluster member and HA fencing in a Proxmox VE cluster. A single-node install never logs these.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "link: \\d+ is down|node lost quorum|will NOT provide any services|A processor failed, forming new configuration|=> 'fence'|fencing: acknowledged",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 1800,
+  "ai_enrichment": true
+}

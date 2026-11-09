@@ -1,0 +1,11 @@
+{
+  "id": "arr_chatter",
+  "name": "Radarr and Sonarr Refresh Chatter",
+  "category": "Apps",
+  "description": "Drops the routine library refresh lines of Radarr, Sonarr, Lidarr and Readarr: updating info, scanning disk, and finding no existing metadata, subtitle or extra files. Matched on the message, so it works whatever the containers are called.",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "\\bRefresh(?:Movie|Series|Artist|Author|Book)Service: Updating |\\bDiskScanService: (?:Completed scanning disk for|Scanning) |\\bFound 0 existing (?:metadata|subtitle|other extra) files\\b|\\bFound 0 possible extra files, imported 0 files\\b",
+  "is_regex": true,
+  "severity_threshold": 6
+}

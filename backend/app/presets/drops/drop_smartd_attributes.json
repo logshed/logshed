@@ -1,0 +1,11 @@
+{
+  "id": "smartd_attribute_chatter",
+  "name": "SMART Attribute Changes",
+  "category": "Storage and disks",
+  "description": "Drops smartd notices of routine SMART attributes changing: temperature, read and seek error rates, ECC recovered, spin-up time, hours, load cycles and wear. Changes to every other attribute, including reallocated, pending and uncorrectable sectors, are kept.",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "SMART (?:Usage|Prefailure) Attribute: \\d+ (?:Temperature_Celsius|Airflow_Temperature_Cel|Temperature_Case|Raw_Read_Error_Rate|Seek_Error_Rate|Hardware_ECC_Recovered|Spin_Up_Time|Power_On_Hours|Head_Flying_Hours|Load_Cycle_Count|High_Fly_Writes|Total_LBAs_Written|Total_LBAs_Read|Wear_Leveling_Count|Media_Wearout_Indicator) changed from \\d+ to \\d+",
+  "is_regex": true,
+  "severity_threshold": 6
+}

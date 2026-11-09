@@ -1,0 +1,14 @@
+{
+  "id": "ups_power",
+  "name": "UPS On Battery or Low Battery",
+  "category": "Power",
+  "description": "Catches apcupsd and NUT (upsmon) notices for a power failure, running on battery, a low or exhausted battery, a battery that needs replacing and lost communication with the UPS. Power coming back is not matched.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "Power failure|Running on UPS batteries|UPS \\S+ on battery|UPS \\S+ battery is low|Battery power exhausted|Reached run time limit on batteries|Battery charge below low limit|battery needs to be replaced|UPS battery must be replaced|Communications with UPS \\S+ lost",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 900,
+  "ai_enrichment": true
+}

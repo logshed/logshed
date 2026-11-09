@@ -1,0 +1,14 @@
+{
+  "id": "hardware_errors",
+  "name": "Hardware Errors (MCE, ECC, PCIe)",
+  "category": "System",
+  "description": "Catches machine check exceptions, corrected and uncorrected ECC memory errors (EDAC) and uncorrected PCIe errors (AER). Corrected PCIe errors are not matched.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "\\[Hardware Error\\]|EDAC MC\\d+: \\d+ (?:CE|UE) |AER: (?:Multiple )?Uncorrected",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 3600,
+  "ai_enrichment": true
+}

@@ -22,6 +22,7 @@ This guide explains how to configure real-time alert rules and ingestion drop ru
   - [Severity Range Handling](#severity-range-handling)
   - [1-Click Creation & Testing](#1-click-creation--testing)
   - [Practical Drop Rule Examples](#practical-drop-rule-examples)
+  - [Built-in Presets](#built-in-presets)
   - [Preset Bundles & Sharing](#preset-bundles--sharing)
 
 ---
@@ -299,7 +300,58 @@ LogShed makes rule creation effortless:
 - **Severity Range**: None
 - **Use Case**: Prevents public-facing reverse proxy search indexes from being inundated by automated bot vulnerability scans.
 
+### Built-in Presets
+
+**Presets** on the Alert Rules and Drop Rules tabs opens a library of ready-made rules. Choose a category to show only its presets, then **Install Rule** to add one as a normal rule that you can edit, test or delete. Installing a preset again adds a second copy. Each preset is tested against sample lines in its tools' own formats, and a drop preset with a severity range never drops a warning or an error.
+
+Most presets match on the message, not the app name, because app and container names differ between installs. Check a preset with **Test rule** on your own logs before you rely on it.
+
+#### Alert presets
+
+| Preset | Category | What it catches | What to adjust |
+|---|---|---|---|
+| **Certificate Renewal Failures** (`cert_renewal_failure`) | Security | Catches failed certificate renewals from certbot, acme.sh, Traefik and Caddy. These tools retry for days before a certificate expires, so it alerts at most every 6 hours. | None usually. |
+| **Fail2ban Ban Wave** (`fail2ban_bans`) | Security | Alerts when fail2ban bans 5 or more addresses within 10 minutes, in any jail. Bans restored after a fail2ban restart are not counted. Lower the threshold to 1 to hear about every ban. | Set the threshold to 1 for every ban, or raise it on a busy host. |
+| **Web Proxy 401/403 Auth Flood** (`proxy_auth_flood`) | Security | Detects high-volume bursts of 401 Unauthorized and 403 Forbidden responses from proxies. | Raise the threshold if a login page sees many failed logins. |
+| **SSH Brute-Force Detection** (`ssh_bruteforce`) | Security | Detects repeated failed SSH authentication attempts from offending IP addresses. | Raise the threshold on a host exposed to the internet. |
+| **Sudo Privilege Escalation** (`sudo_escalation`) | Security | Detects execution of commands run with elevated root privileges via sudo. | Set an app filter or a longer cooldown if scripts run sudo often. |
+| **Disk Health Warning (SMART)** (`disk_smart_failure`) | Storage and disks | Catches smartd reports of a failing disk: a failed health self-check, a failed attribute, pending or offline uncorrectable sectors, a change in the reallocated or pending sector attributes, and new self-test or ATA errors. Needs smartd running on the host. Disks behind some RAID controllers report nothing to smartd. | Pending sectors repeat at every smartd check, so the cooldown is 6 hours. |
+| **Filesystem and Disk I/O Errors** (`filesystem_errors`) | Storage and disks | Catches kernel errors from EXT4, XFS and Btrfs and block layer I/O errors (Buffer I/O error, I/O error on a sector). A failing disk logs many of these at once, so it alerts at most every 30 minutes. | None usually. |
+| **Software RAID Degraded (mdadm)** (`mdadm_degraded`) | Storage and disks | Catches mdadm monitor events for a degraded array, a failed member or spare and a vanished device, and the kernel's disk failure notice for md arrays. Needs mdadm --monitor (enabled by most distributions). | None usually. |
+| **ZFS Pool Errors** (`zfs_pool_errors`) | Storage and disks | Catches ZFS event daemon (zed) lines for checksum, I/O and data errors and for a device going DEGRADED, FAULTED, REMOVED or UNAVAIL. Needs zed with its syslog script (the default). Repeated errors on one pool alert once an hour. | None usually; a scrub that finds errors alerts too. |
+| **Backup Failures** (`backup_failure`) | Backups | Catches failed Proxmox VE backups (vzdump, including jobs to Proxmox Backup Server), borg runs that end with an error (only with --show-rc), and common restic failures (wrong password, repository not found or locked). Tools that do not write to syslog or Docker logs, such as Duplicati, are not covered. | Add your backup tool's own failure text to the pattern. |
+| **UPS On Battery or Low Battery** (`ups_power`) | Power | Catches apcupsd and NUT (upsmon) notices for a power failure, running on battery, a low or exhausted battery, a battery that needs replacing and lost communication with the UPS. Power coming back is not matched. | Lengthen the cooldown if the power flickers often. |
+| **Gateway Down or Packet Loss** (`wan_gateway_alarm`) | Network | Catches dpinger gateway alarms on OPNsense and pfSense (high latency or packet loss) and gateways dropped from a gateway group. A gateway coming back is not matched. | Raise dpinger's alarm thresholds on the firewall if a busy link alarms often. |
+| **Proxmox Cluster Trouble** (`proxmox_cluster`) | VMs and containers | Catches corosync link loss, a node losing quorum, a lost cluster member and HA fencing in a Proxmox VE cluster. A single-node install never logs these. | None usually. |
+| **Critical or Worse** (`critical_severity`) | System | Alerts on any log at Critical (2), Alert (1) or Emergency (0) severity, from any app. Some apps log routine messages as critical: add a drop rule for those, or raise the bar to Alert (1). | Raise the severity to Alert (1), or drop the apps that log routine lines as critical. |
+| **Hardware Errors (MCE, ECC, PCIe)** (`hardware_errors`) | System | Catches machine check exceptions, corrected and uncorrected ECC memory errors (EDAC) and uncorrected PCIe errors (AER). Corrected PCIe errors are not matched. | None usually. |
+| **Log Storm & Rate Spike Detection** (`log_storm_detection`) | System | Alerts when incoming log volume exceeds 100 logs/second over 30s and identifies culprit services. | Raise the rate on a busy install. |
+| **Kernel Out-Of-Memory (OOM) Kill** (`oom_killer`) | System | Detects Linux kernel out-of-memory killer invocations and terminated container tasks. | None usually. |
+| **Program Crashes (Segfaults)** (`segfault`) | System | Catches kernel reports of a program crashing with a segmentation fault or general protection fault. A crash loop alerts at most every 30 minutes. | Add an app filter to watch only some programs. |
+| **Systemd Unit Failed** (`systemd_unit_failed`) | System | Catches systemd units (services, mounts, timers, sockets) entering the failed state. Containers without systemd never log this. | None usually. |
+| **CPU or Disk Overheating** (`temperature_warning`) | System | Catches the kernel's CPU throttling notices and smartd disk temperature limits (smartd needs a limit set with -W). Alerts at most once an hour. | None usually. |
+
+#### Drop presets
+
+| Preset | Category | What it catches | What to adjust |
+|---|---|---|---|
+| **SMART Attribute Changes** (`smartd_attribute_chatter`) | Storage and disks | Drops smartd notices of routine SMART attributes changing: temperature, read and seek error rates, ECC recovered, spin-up time, hours, load cycles and wear. Changes to every other attribute, including reallocated, pending and uncorrectable sectors, are kept. | None usually. |
+| **DNS Query Chatter** (`dns_query_chatter`) | Network | Drops the per-query lines of dnsmasq and Pi-hole (query, forwarded, reply, cached). Blocked queries (gravity blocked) and warnings are kept. | None usually. |
+| **Firewall Pass Entries** (`firewall_pass`) | Network | Drops OPNsense and pfSense firewall log (filterlog) lines for passed traffic. Blocked and rejected traffic is kept. | None usually. |
+| **Health and Metrics Endpoint Requests** (`health_endpoint_access`) | Network | Drops successful (2xx) GET and HEAD requests to /health, /healthz, /healthcheck, /ping, /metrics, /ready, /readyz and /livez in nginx, Apache, Traefik (common log format) and Caddy (JSON) access logs. Failing health checks are kept. | Add your own health paths to the pattern. |
+| **Docker Healthcheck Noise** (`docker_healthcheck`) | VMs and containers | Filters repetitive container health checks and status probe messages. | None usually. |
+| **Proxmox Worker and Status Chatter** (`proxmox_status_chatter`) | VMs and containers | Drops Proxmox VE daemon worker restarts (worker started, finished, starting workers) and pvestatd's status update time notices. A status update time line means a status cycle took over 5 seconds, often slow storage: leave this preset off while you look into that. | Leave it off while you look into slow storage. |
+| **Routine CRON Noise** (`cron_noise`) | System | Filters routine CRON execution and service reload notices. | None usually. |
+| **Rsyslog MARK Lines** (`rsyslog_mark`) | System | Drops the -- MARK -- lines that rsyslog and syslogd write at a fixed interval to show they are alive. | None usually. |
+| **Systemd Session Chatter** (`systemd_session`) | System | Filters routine systemd PAM user session opened and closed logs. | None usually. |
+| **Systemd Timer and Slice Chatter** (`systemd_timer_chatter`) | System | Drops systemd's routine lines for user slices and sessions being created and removed, timer jobs finishing, units stopping cleanly (Deactivated successfully) and CPU time used. Failures and units starting are kept. | None usually. |
+| **Radarr and Sonarr Refresh Chatter** (`arr_chatter`) | Apps | Drops the routine library refresh lines of Radarr, Sonarr, Lidarr and Readarr: updating info, scanning disk, and finding no existing metadata, subtitle or extra files. Matched on the message, so it works whatever the containers are called. | None usually. |
+| **Home Assistant Custom Integration Warnings** (`ha_custom_integration`) | Apps | Drops the warning Home Assistant logs at every start for each custom integration (for example those installed with HACS): "We found a custom integration ... which has not been tested by Home Assistant". | None usually. |
+
+#### Your own presets
+
+JSON files in `/data/presets/alerts/` and `/data/presets/drops/` appear in the same libraries, marked **Custom**. A file with the `id` of a built-in preset replaces it. Give a file a `category` to list it under one of the categories above, or a new one; without it, the preset is listed under **Other**.
+
 ### Preset Bundles & Sharing
 
-- **1-Click Presets**: Choose from built-in community presets directly in the UI to immediately filter common Linux and Docker noise patterns.
 - **JSON Export & Import**: Export all configured drop rules as a clean, human-readable JSON bundle. Import rules across multiple LogShed instances with automatic conflict resolution and deduplication.

@@ -1,0 +1,14 @@
+{
+  "id": "zfs_pool_errors",
+  "name": "ZFS Pool Errors",
+  "category": "Storage and disks",
+  "description": "Catches ZFS event daemon (zed) lines for checksum, I/O and data errors and for a device going DEGRADED, FAULTED, REMOVED or UNAVAIL. Needs zed with its syslog script (the default). Repeated errors on one pool alert once an hour.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "class=(?:checksum|io|data|probe_failure)\\b|vdev_state=(?:DEGRADED|FAULTED|REMOVED|UNAVAIL)\\b",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 3600,
+  "ai_enrichment": true
+}

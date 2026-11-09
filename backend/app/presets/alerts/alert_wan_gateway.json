@@ -1,0 +1,14 @@
+{
+  "id": "wan_gateway_alarm",
+  "name": "Gateway Down or Packet Loss",
+  "category": "Network",
+  "description": "Catches dpinger gateway alarms on OPNsense and pfSense (high latency or packet loss) and gateways dropped from a gateway group. A gateway coming back is not matched.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": ": Alarm latency \\d+us stddev \\d+us loss \\d+%|(?:is down|has packet loss|has high latency), omitting from routing group|\\bALERT: \\S+ \\(Addr: |>>> Gateway alarm: \\S+ \\(Addr:\\S* Alarm:1\\b",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 900,
+  "ai_enrichment": true
+}

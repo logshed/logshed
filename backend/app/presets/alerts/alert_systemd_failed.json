@@ -1,0 +1,14 @@
+{
+  "id": "systemd_unit_failed",
+  "name": "Systemd Unit Failed",
+  "category": "System",
+  "description": "Catches systemd units (services, mounts, timers, sockets) entering the failed state. Containers without systemd never log this.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "\\.(?:service|socket|mount|timer|path|swap): Failed with result '",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 900,
+  "ai_enrichment": true
+}

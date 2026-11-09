@@ -1,0 +1,14 @@
+{
+  "id": "backup_failure",
+  "name": "Backup Failures",
+  "category": "Backups",
+  "description": "Catches failed Proxmox VE backups (vzdump, including jobs to Proxmox Backup Server), borg runs that end with an error (only with --show-rc), and common restic failures (wrong password, repository not found or locked). Tools that do not write to syslog or Docker logs, such as Duplicati, are not covered.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "Backup of VM \\d+ failed|Backup job finished with errors|terminating with (?:error|signal|abnormal) status, rc \\d+|Fatal: (?:wrong password or no key found|unable to open (?:config file|repository)|unable to create lock in backend)",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 3600,
+  "ai_enrichment": true
+}

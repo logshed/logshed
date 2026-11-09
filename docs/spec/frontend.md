@@ -82,8 +82,9 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Maintenance Window Tab:**
   * Configure active on-demand alert suppression periods or recurring schedules by day of week and time window to silence alerts during routine maintenance.
   * The presets (1, 4, 8 and 24 hours) and the specific end time each start a new session; their label reads "Set end time from now", or "Start a new window" while one is running. "Active Concurrent Sessions" lists every active session (web UI, API token or MCP) with "+1h" (aria-label "Extend session <reason> by one hour", which calls `POST /api/alerts/maintenance/sessions/{session_id}/extend`) and "Stop Session".
-* **Security Canary Presets Modal:**
-  * 1-click installation of production-tested security canary alerts (SSH brute force, OOM killer, sudo privilege escalation, proxy authentication floods) and drop rule presets (Docker healthchecks, noisy background daemons).
+* **Alert and Drop Presets Dialogs:**
+  * 1-click installation of the alert presets (20: security, disks and storage, backups, power, network, Proxmox, system) and drop presets (12: DNS, firewall, health checks, Proxmox, systemd, smartd, Radarr and Sonarr, Home Assistant) listed in `docs/RULES_GUIDE.md`. Installing a preset again adds another rule.
+  * A **Category** field (`SelectDropdown` panel, `PresetCategoryFilter.tsx`) above the cards shows all categories or one, each with its count. Cards are sorted by category in a fixed order (Security, Storage and disks, Backups, Power, Network, VMs and containers, System, Apps, then any custom category, then Other for custom presets without one). The choice goes back to all categories when the dialog closes.
 
 ### 3.3 On-Demand AI Analysis Modal
 * **Scrubbed Preview:** Redacted log preview displaying the exact scrubbed text to be dispatched (with one-click clipboard copy).

@@ -1,0 +1,11 @@
+{
+  "id": "health_endpoint_access",
+  "name": "Health and Metrics Endpoint Requests",
+  "category": "Network",
+  "description": "Drops successful (2xx) GET and HEAD requests to /health, /healthz, /healthcheck, /ping, /metrics, /ready, /readyz and /livez in nginx, Apache, Traefik (common log format) and Caddy (JSON) access logs. Failing health checks are kept.",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "\\\"(?:GET|HEAD) /(?:health|healthz|healthcheck|ping|metrics|ready|readyz|livez)(?:[/?][^\\\" ]*)? HTTP/[0-9.]+\\\" 2\\d\\d\\b|\\\"uri\\\":\\\"/(?:health|healthz|healthcheck|ping|metrics|ready|readyz|livez)(?:[/?][^\\\"]*)?\\\".*\\\"status\\\":2\\d\\d\\b",
+  "is_regex": true,
+  "severity_threshold": 6
+}

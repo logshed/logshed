@@ -1,0 +1,11 @@
+{
+  "id": "ha_custom_integration",
+  "name": "Home Assistant Custom Integration Warnings",
+  "category": "Apps",
+  "description": "Drops the warning Home Assistant logs at every start for each custom integration (for example those installed with HACS): \"We found a custom integration ... which has not been tested by Home Assistant\".",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "We found a custom integration * which has not been tested by Home Assistant",
+  "is_regex": false,
+  "severity_threshold": 4
+}

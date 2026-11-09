@@ -810,6 +810,8 @@ class DropPresetResponse(BaseModel):
     """Predefined log drop rule preset."""
     id: str
     name: str
+    # Groups the preset in the presets dialog; custom presets without one are shown as "Other"
+    category: Optional[str] = None
     description: str
     source_pattern: Optional[str] = None
     app_pattern: Optional[str] = None
@@ -1036,6 +1038,8 @@ class AlertPresetResponse(BaseModel):
     """Predefined alert preset."""
     id: str
     name: str
+    # Groups the preset in the presets dialog; custom presets without one are shown as "Other"
+    category: Optional[str] = None
     description: str
     rule_type: str
     filter_app: Optional[str] = None

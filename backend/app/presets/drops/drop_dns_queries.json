@@ -1,0 +1,11 @@
+{
+  "id": "dns_query_chatter",
+  "name": "DNS Query Chatter",
+  "category": "Network",
+  "description": "Drops the per-query lines of dnsmasq and Pi-hole (query, forwarded, reply, cached). Blocked queries (gravity blocked) and warnings are kept.",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "\\b(?:query\\[[A-Za-z0-9]+\\]|forwarded|reply|cached(?:-stale)?|config) \\S+ (?:from|to|is)\\b",
+  "is_regex": true,
+  "severity_threshold": 6
+}

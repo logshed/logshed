@@ -1,6 +1,7 @@
 {
   "id": "log_storm_detection",
   "name": "Log Storm & Rate Spike Detection",
+  "category": "System",
   "description": "Alerts when incoming log volume exceeds 100 logs/second over 30s and identifies culprit services.",
   "rule_type": "rate",
   "filter_app": null,

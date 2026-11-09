@@ -240,8 +240,8 @@ class TestAlertsApi:
         res = await client.get("/api/alerts/presets", headers=auth_headers)
         assert res.status_code == 200
         presets = res.json()
-        assert len(presets) == 5
         preset_ids = [p["id"] for p in presets]
+        assert len(set(preset_ids)) == len(presets)
         assert "ssh_bruteforce" in preset_ids
         assert "proxy_auth_flood" in preset_ids
         assert "sudo_escalation" in preset_ids

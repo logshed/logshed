@@ -1,0 +1,14 @@
+{
+  "id": "mdadm_degraded",
+  "name": "Software RAID Degraded (mdadm)",
+  "category": "Storage and disks",
+  "description": "Catches mdadm monitor events for a degraded array, a failed member or spare and a vanished device, and the kernel's disk failure notice for md arrays. Needs mdadm --monitor (enabled by most distributions).",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "(?:DegradedArray|Fail|FailSpare|DeviceDisappeared) event detected on md device|md/raid\\d*:\\S+: Disk failure on",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 3600,
+  "ai_enrichment": true
+}

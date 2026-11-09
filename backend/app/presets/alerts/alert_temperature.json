@@ -1,0 +1,14 @@
+{
+  "id": "temperature_warning",
+  "name": "CPU or Disk Overheating",
+  "category": "System",
+  "description": "Catches the kernel's CPU throttling notices and smartd disk temperature limits (smartd needs a limit set with -W). Alerts at most once an hour.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "temperature above threshold, cpu clock throttled|Celsius reached (?:critical )?limit of",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 3600,
+  "ai_enrichment": true
+}

@@ -1,0 +1,11 @@
+{
+  "id": "systemd_timer_chatter",
+  "name": "Systemd Timer and Slice Chatter",
+  "category": "System",
+  "description": "Drops systemd's routine lines for user slices and sessions being created and removed, timer jobs finishing, units stopping cleanly (Deactivated successfully) and CPU time used. Failures and units starting are kept.",
+  "source_pattern": null,
+  "app_pattern": "systemd",
+  "message_pattern": "^(?:(?:Created|Removed) slice |Started session-\\d+\\.scope\\b|Started Session \\d+ of [Uu]ser |Finished \\S+\\.service\\b|\\S+\\.(?:service|scope|timer): (?:Deactivated successfully|Consumed .+ CPU time))",
+  "is_regex": true,
+  "severity_threshold": 6
+}

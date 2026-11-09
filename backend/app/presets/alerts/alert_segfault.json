@@ -1,0 +1,14 @@
+{
+  "id": "segfault",
+  "name": "Program Crashes (Segfaults)",
+  "category": "System",
+  "description": "Catches kernel reports of a program crashing with a segmentation fault or general protection fault. A crash loop alerts at most every 30 minutes.",
+  "rule_type": "pattern",
+  "filter_app": null,
+  "filter_severity": null,
+  "match_pattern": "\\bsegfault at [0-9a-f]+ ip [0-9a-f]+|traps: \\S+ general protection fault",
+  "threshold_count": 1,
+  "window_seconds": 60,
+  "cooldown_seconds": 1800,
+  "ai_enrichment": true
+}

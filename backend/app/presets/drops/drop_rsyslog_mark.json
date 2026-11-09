@@ -1,0 +1,11 @@
+{
+  "id": "rsyslog_mark",
+  "name": "Rsyslog MARK Lines",
+  "category": "System",
+  "description": "Drops the -- MARK -- lines that rsyslog and syslogd write at a fixed interval to show they are alive.",
+  "source_pattern": null,
+  "app_pattern": null,
+  "message_pattern": "-- MARK --",
+  "is_regex": false,
+  "severity_threshold": 6
+}
