@@ -414,44 +414,48 @@ def _started_at_since(started_at: Any) -> Optional[str]:
     return f"{seconds}.{fraction[:9].ljust(9, '0')}"
 
 
+# Valkey / Redis server line: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
+_VALKEY_LINE_RE = re.compile(
+    r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)"
+)
+_VALKEY_SEVERITY = {"#": 4, "*": 5, ".": 7, "-": 7}
+# Maintainerr pipe format: [app] | DD/MM/YYYY HH:MM:SS [LEVEL] ...
+_APP_PIPE_LINE_RE = re.compile(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)")
+_BRACKET_LEVEL_RE = re.compile(r"^\[([a-zA-Z]+)\]\s*(.*)")
+# Logfmt format: time="2026-..." level=info msg="..."
+_LOGFMT_MSG_RE = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
+_LOGFMT_LEVEL_RE = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""")
+
+
 def _parse_docker_message_content(message: str, default_severity: int) -> tuple[str, int]:
     """
     Parse container message content to extract message payload and explicit severity
     from common formats (logfmt msg="...", Valkey/Redis, Maintainerr app pipe)
     while keeping the raw line intact.
     """
-    # 1. Valkey / Redis server line: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
-    m_valkey = re.match(
-        r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)",
-        message,
-    )
+    # 1. Valkey / Redis server line (starts with a digit)
+    m_valkey = _VALKEY_LINE_RE.match(message)
     if m_valkey:
-        level_char = m_valkey.group(6)
-        valkey_sev_map = {"#": 4, "*": 5, ".": 7, "-": 7}
-        return m_valkey.group(7), valkey_sev_map.get(level_char, default_severity)
+        return m_valkey.group(7), _VALKEY_SEVERITY.get(m_valkey.group(6), default_severity)
 
-    # 2. Maintainerr pipe format: [app] | DD/MM/YYYY HH:MM:SS [LEVEL] ...
-    m_app_pipe = re.match(
-        r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)",
-        message,
-    )
+    # 2. Maintainerr pipe format
+    m_app_pipe = _APP_PIPE_LINE_RE.match(message)
     if m_app_pipe:
         rem = m_app_pipe.group(4)
-        m_level = re.match(r"^\[([a-zA-Z]+)\]\s*(.*)", rem)
+        m_level = _BRACKET_LEVEL_RE.match(rem)
         if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
             return m_level.group(2), _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
         return rem, default_severity
 
-    # 3. Logfmt format: time="2026-..." level=info msg="..."
-    if message.startswith(("time=", "ts=")) or re.search(r"""\bmsg=(?:"[^"]*"|'[^']*'|\S+)""", message):
-        m_msg = re.search(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""", message)
-        if m_msg:
-            extracted_msg = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
-            m_level = re.search(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""", message)
-            sev = default_severity
-            if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
-                sev = _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
-            return extracted_msg, sev
+    # 3. Logfmt format (searched once: the match that decides is the one captured)
+    m_msg = _LOGFMT_MSG_RE.search(message)
+    if m_msg:
+        extracted_msg = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
+        m_level = _LOGFMT_LEVEL_RE.search(message)
+        sev = default_severity
+        if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
+            sev = _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+        return extracted_msg, sev
 
     return message, default_severity
 
@@ -492,7 +496,11 @@ def _make_log_entry(
                 resolved_alias = alias_cache.resolve("docker")
 
     clean_message = _clean_text(message)[:MAX_MESSAGE_BYTES]
-    clean_raw = _clean_text(raw if raw is not None else message)[:MAX_MESSAGE_BYTES]
+    # Most lines are stored unchanged, so raw is the message itself: clean it once
+    if raw is None or raw is message or raw == message:
+        clean_raw = clean_message
+    else:
+        clean_raw = _clean_text(raw)[:MAX_MESSAGE_BYTES]
 
     return {
         "timestamp": timestamp or now,

@@ -162,6 +162,27 @@ class TestDockerLogParsing:
         assert entry["message"] == "2026-09-11T19:40:00.041Z [info][Plex Scan]: Beginning scan err "
         assert entry["raw"] == "2026-09-11T19:40:00.041Z [info][Plex Scan]: Beginning scan err "
 
+    def test_make_log_entry_cleans_a_different_raw_on_its_own(self):
+        """When the parsed message differs from the raw line, each is cleaned separately."""
+        entry = _make_log_entry(
+            "traefik", "c124", "Router \x1b[33mready\x1b[0m",
+            raw='time="x" level=info msg="Router \x1b[33mready\x1b[0m"\x07',
+        )
+        assert entry["message"] == "Router ready"
+        assert entry["raw"] == 'time="x" level=info msg="Router ready"'
+
+    def test_clean_log_text_keeps_printable_and_layout_characters(self):
+        """Printable text (any script) comes back unchanged; tabs and newlines stay; controls and escapes go."""
+        from app.core.pipeline import clean_log_text
+
+        plain = "GET /api/v1/items 200 41ms caf\u00e9 \u65e5\u672c"
+        assert clean_log_text(plain) is plain
+        assert clean_log_text("a\tb\nc\r\n") == "a\tb\nc\r\n"
+        assert clean_log_text("no\u00a0break") == "no\u00a0break"
+        assert clean_log_text("bell\x07 and nul\x00") == "bell and nul"
+        assert clean_log_text("\x1b[1;31merror\x1b[0m\tdone") == "error\tdone"
+        assert clean_log_text("") == ""
+
     def test_should_ignore_container(self, monkeypatch):
         """Self-containers and explicitly excluded containers should be ignored."""
         # Default self-container names

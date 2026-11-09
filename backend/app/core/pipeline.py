@@ -409,9 +409,12 @@ _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 def clean_log_text(text: str) -> str:
     """Strip ANSI color/formatting codes and non-printable control characters."""
-    if not text:
+    # Most lines hold neither: an escape (\x1b) and the stripped controls are all non-printable
+    if not text or text.isprintable():
         return text
-    return _CONTROL_CHARS_RE.sub("", _ANSI_ESCAPE_RE.sub("", text))
+    if "\x1b" in text:
+        text = _ANSI_ESCAPE_RE.sub("", text)
+    return _CONTROL_CHARS_RE.sub("", text)
 
 
 _SURROGATES_RE = re.compile("[\ud800-\udfff]")
