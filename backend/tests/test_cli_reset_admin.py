@@ -122,3 +122,23 @@ class TestResetAdminFunction:
         finally:
             conn.close()
         assert PasswordHasher().verify(_stored_hash(db), "pass3")
+
+
+class TestNewerDatabase:
+    def test_reset_admin_refuses_a_newer_database_without_changing_it(self, tmp_path, monkeypatch, capsys):
+        import sqlite3
+
+        db = tmp_path / "newer.db"
+        run_migrations(db)
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA user_version = 99")
+        conn.close()
+        before = db.read_bytes()
+
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, db, "--password", "ValidPassword123")
+
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "newer version of LogShed" in err and "Traceback" not in err
+        assert db.read_bytes() == before

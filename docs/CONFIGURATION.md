@@ -267,3 +267,18 @@ LogShed creates its files with `umask 027`: the `PUID` user can read and write t
 - Backup tools that run as root, such as Unraid's Appdata Backup plugin or a root `rsync` or cron job, are not affected.
 - A backup tool that runs as another user can read the database if that user is in the `PGID` group, or if the tool runs as the `PUID` user. To include `.secret_key`, run it as `PUID` or as root.
 - Stop the container before copying, so `logs.db` and `logs.db-wal` are copied in a consistent state.
+
+### Going back to an older version
+
+An upgrade can change the database's schema (its structure). The schema version is stored in `logs.db`, and each LogShed release understands the schemas up to its own. LogShed 1.3.1 and later refuse to start on a database upgraded by a newer version, because running on it could fail in odd places or write data the newer version misreads. Nothing in the database is changed. The log shows an error such as:
+
+```
+The database at /data/logs.db was upgraded by a newer version of LogShed (schema 4); this version understands schema 3 at most. LogShed will not start, ...
+```
+
+With a restart policy (such as Docker's `unless-stopped`), the container starts, logs this error and exits again in a loop. That is expected: nothing is written while it does. To recover, do one of these:
+
+- **Start the newer version again** (set the image tag back). Its data is all there.
+- **Restore a copy of `/data` made before the upgrade.** Stop the container, put the old files back (`logs.db` and, if you copied them, `logs.db-wal` and `logs.db-shm`; delete any newer `-wal` and `-shm` files), then start the older version. Logs and settings changed after that copy was made are lost. Keep `.secret_key` with the database: the stored secrets can only be read with the key they were encrypted with.
+
+So take a copy of `/data` before an upgrade you might want to undo (see [Backing Up `/data`](#backing-up-data)). An upgrade that does not change the schema (a patch release such as 1.3.0 to 1.3.1) can be undone by switching the image tag back.

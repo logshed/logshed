@@ -1509,3 +1509,42 @@ class TestRetiredOpenAiDefaultModel:
         run_migrations(p)
 
         assert _settings(p, ("ai_model_openai",)) == {"ai_model_openai": "gpt-4o"}
+
+
+def _make_newer_database(path: Path, version: int) -> bytes:
+    """A real current database whose user_version claims a newer schema; returns the file's bytes."""
+    run_migrations(path)
+    conn = sqlite3.connect(str(path))
+    conn.execute(f"PRAGMA user_version = {version}")
+    conn.close()
+    return path.read_bytes()
+
+
+class TestDatabaseNewerThanApp:
+    def test_a_newer_database_is_refused_and_left_unchanged(self, tmp_path: Path, caplog):
+        p = tmp_path / "logs.db"
+        latest = MIGRATIONS[-1][0]
+        before = _make_newer_database(p, latest + 1)
+
+        with caplog.at_level(logging.INFO, logger="app.core.migrations"):
+            with pytest.raises(migrations_mod.DatabaseNewerThanAppError) as exc:
+                run_migrations(p)
+
+        assert exc.value.found_version == latest + 1
+        assert exc.value.latest_version == latest
+        message = str(exc.value)
+        assert str(p) in message
+        assert f"schema {latest + 1}" in message and f"schema {latest} at most" in message
+        assert p.read_bytes() == before
+        conn = sqlite3.connect(str(p))
+        assert get_user_version(conn) == latest + 1
+        conn.close()
+        assert not any("Migrating" in r.getMessage() for r in caplog.records)
+
+    def test_the_newest_known_version_still_starts(self, tmp_path: Path):
+        p = tmp_path / "logs.db"
+        run_migrations(p)
+        run_migrations(p)
+        conn = get_connection(p)
+        assert get_user_version(conn) == MIGRATIONS[-1][0]
+        conn.close()

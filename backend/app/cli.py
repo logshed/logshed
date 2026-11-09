@@ -13,7 +13,7 @@ import datetime
 import getpass
 import sys
 
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import DatabaseNewerThanAppError, get_connection, run_migrations
 from app.core.security import hash_password
 
 # Default database path inside the container
@@ -261,9 +261,17 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-        reset_admin(password, args.db_path)
+        try:
+            reset_admin(password, args.db_path)
+        except DatabaseNewerThanAppError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
     elif args.command == "seed-logs":
-        seed_logs(args.count, args.days, args.db_path)
+        try:
+            seed_logs(args.count, args.days, args.db_path)
+        except DatabaseNewerThanAppError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
         parser.print_help()
         sys.exit(1)

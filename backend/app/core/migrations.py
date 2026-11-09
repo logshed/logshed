@@ -592,6 +592,22 @@ MIGRATIONS = [
     (3, migrate_v3),
 ]
 
+
+class DatabaseNewerThanAppError(RuntimeError):
+    """The database's schema is newer than this version of LogShed knows, so it must not be used."""
+
+    def __init__(self, found_version: int, latest_version: int, db_path: Union[str, Path] = "the database"):
+        self.found_version = found_version
+        self.latest_version = latest_version
+        self.db_path = db_path
+        super().__init__(
+            f"The database at {db_path} was upgraded by a newer version of LogShed (schema {found_version}); "
+            f"this version understands schema {latest_version} at most. LogShed will not start, so that it does "
+            "not change data the newer version wrote. Start the newer version again, or go back by restoring "
+            "the copy of the data folder made before that upgrade, or a backup the newer version made. "
+            "See 'Going back to an older version' in docs/CONFIGURATION.md."
+        )
+
 # Indexes made redundant by another index: the UNIQUE autoindex on api_tokens.token_hash, or the
 # leading columns of idx_alert_history_rule_time and the idx_*_rules_order indexes.
 REDUNDANT_INDEXES = (
@@ -699,6 +715,9 @@ def run_migrations(db_path: Union[str, Path]) -> None:
     user_version bump commit together in one transaction, then repair_v3 runs in
     its own transaction.
 
+    A database whose user_version is above the newest migration was upgraded by a newer
+    LogShed: it is closed without any change and DatabaseNewerThanAppError is raised.
+
     Args:
         db_path: Path to the SQLite database file.
     """
@@ -712,6 +731,9 @@ def run_migrations(db_path: Union[str, Path]) -> None:
     try:
         current_version = get_user_version(conn)
         logger.info(f"Current database version: {current_version}")
+        latest_version = MIGRATIONS[-1][0] if MIGRATIONS else 0
+        if current_version > latest_version:
+            raise DatabaseNewerThanAppError(current_version, latest_version, db_path)
 
         for target_version, migration_func in MIGRATIONS:
             if current_version >= target_version:

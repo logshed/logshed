@@ -11,14 +11,14 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 import app.main as main_mod
 from app.core import pipeline as pipeline_mod
 from app.core.config import get_docker_additional_hosts
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import DatabaseNewerThanAppError, get_connection, run_migrations
 from app.core.security import decrypt_value, encrypt_value, get_or_create_master_key, reset_crypto_cache
 
 CLIENT_KEY = "-----BEGIN PRIVATE KEY-----\nMIIBVQIBADANBgkqhkiG9w0BAQEFAASCAT8wggE7AgEAAkEA\n-----END PRIVATE KEY-----"
@@ -223,3 +223,30 @@ class TestModelRefreshWorker:
 
         assert waits == [60, 12 * 3600]
         assert self._cache(startup_env, "anthropic") == self.MODELS
+
+
+class TestDatabaseNewerThanApp:
+    async def test_start_up_fails_with_the_message_and_starts_nothing(self, startup_env, monkeypatch, caplog):
+        conn = sqlite3.connect(str(startup_env))
+        conn.execute("PRAGMA user_version = 99")
+        conn.close()
+        before = startup_env.read_bytes()
+        master_key = Mock()
+        queue_consumer = Mock()
+        syslog_server = Mock()
+        monkeypatch.setattr(main_mod, "get_or_create_master_key", master_key)
+        monkeypatch.setattr(main_mod, "QueueConsumer", queue_consumer)
+        monkeypatch.setattr(main_mod, "SyslogServer", syslog_server)
+
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            with pytest.raises(DatabaseNewerThanAppError):
+                await _start_and_stop()
+
+        errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR and r.name == "app.main"]
+        assert len(errors) == 1
+        assert str(startup_env) in errors[0] and "schema 99" in errors[0]
+        assert "Going back to an older version" in errors[0]
+        master_key.assert_not_called()
+        queue_consumer.assert_not_called()
+        syslog_server.assert_not_called()
+        assert startup_env.read_bytes() == before

@@ -6,6 +6,8 @@
 Database path: `/data/logs.db`. WAL mode enabled (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;`).
 Schema migrations managed via [`backend/app/core/migrations.py`](../../backend/app/core/migrations.py) using `PRAGMA user_version`.
 
+Before any migration step, `run_migrations` compares `user_version` with the newest version in `MIGRATIONS`. A higher value means a newer LogShed upgraded the database: the connection is closed without writing anything and `DatabaseNewerThanAppError` is raised, before `repair_v3` and before the encryption key is read or created. The web process logs the error (naming the database path, its schema and the newest one this version knows) and start-up fails, so the container exits; the `reset-admin` and `seed-logs` commands print it and exit with status 1. Going back after a schema upgrade is a restore of an older copy of `/data` (see "Going back to an older version" in [CONFIGURATION.md](../CONFIGURATION.md)).
+
 ### 2.1 Core DDL (Migration v1)
 ```sql
 PRAGMA user_version = 1;
