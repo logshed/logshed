@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 import socket
+import time
 import pytest
 import httpx
 
@@ -1471,7 +1472,7 @@ class TestDockerDemuxFrameResync:
         assert len(frames) == 1
         assert frames[0] == (1, valid_msg)
         assert remaining == b""
-        assert "unexpected header (stream_type=153)" in caplog.text
+        assert "skipped 3 bytes that were not a frame header (first byte 153)" in caplog.text
 
     def test_demux_stream_corrupted_padding_resyncs(self, caplog):
         """Invalid padding bytes (non-zero) are skipped to resync."""
@@ -1502,7 +1503,46 @@ class TestDockerDemuxFrameResync:
         assert len(frames) == 1
         assert frames[0] == (1, valid_msg)
         assert remaining == b""
-        assert "invalid payload size 52428800" in caplog.text
+        assert "skipped 8 bytes that were not a frame header" in caplog.text
+
+    def test_demux_stream_unframed_text_logs_one_warning(self, caplog):
+        """64 KB of text read as a framed stream is skipped in one step, with one warning."""
+        caplog.set_level(logging.WARNING, logger="app.collectors.docker_collector")
+        text = (b"plain text from a TTY container, no frame headers here\n" * 1300)[:65536]
+
+        start = time.perf_counter()
+        frames, remaining = _demux_stream(text)
+        elapsed = time.perf_counter() - start
+
+        assert frames == []
+        assert remaining == text[-3:]
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "skipped 65533 bytes" in warnings[0].getMessage()
+        # The byte-by-byte scan took seconds here; a linear scan takes well under a millisecond
+        assert elapsed < 0.5
+
+    def test_demux_stream_resyncs_past_a_false_header_start(self, caplog):
+        """Bytes that look like the start of a header but announce a corrupt size are skipped too."""
+        caplog.set_level(logging.WARNING)
+        valid_msg = b"after the noise"
+        valid_frame = bytes([2, 0, 0, 0]) + len(valid_msg).to_bytes(4, "big") + valid_msg
+        noise = b"xx" + bytes([1, 0, 0, 0]) + (99 * 1024 * 1024).to_bytes(4, "big") + b"yy"
+
+        frames, remaining = _demux_stream(noise + valid_frame)
+        assert frames == [(2, valid_msg)]
+        assert remaining == b""
+        assert caplog.text.count("skipped") == 1
+
+    def test_demux_stream_keeps_a_header_split_across_chunks(self):
+        """A resync that reaches the end of the chunk keeps the bytes that may begin the next header."""
+        msg = b"split header"
+        frame = bytes([1, 0, 0, 0]) + len(msg).to_bytes(4, "big") + msg
+        frames1, rem1 = _demux_stream(b"garbage bytes" + frame[:2])
+        assert frames1 == []
+        frames2, rem2 = _demux_stream(rem1 + frame[2:])
+        assert frames2 == [(1, msg)]
+        assert rem2 == b""
 
     def test_demux_stream_partial_frame_buffering(self):
         """Partial frame header or payload is buffered until complete."""

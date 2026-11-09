@@ -249,6 +249,19 @@ def _build_client(
         )
 
 
+# Largest payload a frame header may announce before it is treated as corrupt (avoids OOM)
+_MAX_DEMUX_PAYLOAD = 16 * 1024 * 1024
+
+
+def _is_frame_header(buffer: bytes, pos: int) -> bool:
+    """True when an 8-byte Docker frame header can start at pos (stdout or stderr, zero padding, sane size)."""
+    return (
+        buffer[pos] in (1, 2)
+        and buffer[pos + 1:pos + 4] == b"\x00\x00\x00"
+        and int.from_bytes(buffer[pos + 4:pos + 8], "big") <= _MAX_DEMUX_PAYLOAD
+    )
+
+
 def _demux_stream(buffer: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
     """
     Parse multiplexed Docker log stream frames from a byte buffer.
@@ -256,48 +269,47 @@ def _demux_stream(buffer: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
     Header format: [stream_type(1)][padding(3)][payload_size(4 big-endian)][payload]
     Stream types: 1=stdout, 2=stderr.
 
-    On unexpected stream type or invalid header, advances byte-by-byte to resynchronize
-    to the next valid frame header instead of permanently mutating is_tty.
+    On an invalid header, scans forward to the next byte that can start a valid header and logs
+    one warning with the number of bytes skipped, instead of permanently mutating is_tty.
+    The buffer is read by offset and cut once, so a chunk of many frames costs linear time.
 
     Returns:
         (frames, remaining_buffer)
         where frames is a list of (stream_type, payload_bytes).
     """
     frames: list[tuple[int, bytes]] = []
-    while len(buffer) >= 8:
-        stream_type = buffer[0]
-        # Docker stream header: stream_type must be 1 (stdout) or 2 (stderr),
-        # and bytes 1..3 must be 0x00 padding.
-        if stream_type not in (1, 2) or buffer[1:4] != b"\x00\x00\x00":
+    size = len(buffer)
+    pos = 0
+    while size - pos >= 8:
+        payload_size = int.from_bytes(buffer[pos + 4:pos + 8], "big")
+        if buffer[pos] not in (1, 2) or buffer[pos + 1:pos + 4] != b"\x00\x00\x00" or payload_size > _MAX_DEMUX_PAYLOAD:
+            skip_from = pos
+            pos += 1
+            while True:
+                found = [i for i in (buffer.find(b"\x01\x00\x00\x00", pos), buffer.find(b"\x02\x00\x00\x00", pos)) if i >= 0]
+                if not found:
+                    # The last 3 bytes could still begin a header that the next chunk completes
+                    pos = max(pos, size - 3)
+                    break
+                pos = min(found)
+                if size - pos < 8 or _is_frame_header(buffer, pos):
+                    break
+                pos += 1
             logger.warning(
-                "Docker stream demux encountered unexpected header (stream_type=%s); "
-                "advancing to find the next frame header",
-                stream_type,
+                "Docker stream demux skipped %d bytes that were not a frame header (first byte %s)",
+                pos - skip_from,
+                buffer[skip_from],
             )
-            buffer = buffer[1:]
-            continue
-
-        payload_size = int.from_bytes(buffer[4:8], "big")
-        # Sanity-check payload size to avoid OOM on corrupt frames
-        if payload_size > 16 * 1024 * 1024:  # 16 MB max
-            logger.warning(
-                "Docker stream demux encountered invalid payload size %d; "
-                "advancing to find the next frame header",
-                payload_size,
-            )
-            buffer = buffer[1:]
             continue
 
         frame_total = 8 + payload_size
-        if len(buffer) < frame_total:
+        if size - pos < frame_total:
             # Incomplete frame, wait for more data from stream
             break
+        frames.append((buffer[pos], buffer[pos + 8:pos + frame_total]))
+        pos += frame_total
 
-        payload = buffer[8:frame_total]
-        buffer = buffer[frame_total:]
-        frames.append((stream_type, payload))
-
-    return frames, buffer
+    return frames, buffer[pos:]
 
 
 def _parse_docker_log_line(raw_bytes: bytes) -> str:

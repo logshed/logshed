@@ -61,7 +61,8 @@ _RE_LOGFMT_LEVEL = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?
 _RE_LOGFMT_MSG = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
 _RE_UTC_SUFFIX = re.compile(r"\s+(?:UTC|GMT)\b", flags=re.IGNORECASE)
 _RE_ZONE_ABBREVIATION = re.compile(r"\s+[A-Z]{2,5}(?=$|[+-])")
-_RE_OCTET_COUNTED_FRAME = re.compile(rb"^(\d+) <\d+>")
+# Matched at an offset with .match(buffer, pos), so no "^" anchor
+_RE_OCTET_COUNTED_FRAME = re.compile(rb"(\d+) <\d+>")
 
 def _correct_future_timestamp(dt_utc: datetime.datetime, now: datetime.datetime) -> datetime.datetime:
     """
@@ -986,16 +987,19 @@ class SyslogTCPProtocol(asyncio.Protocol):
         if self._stopping:
             return
         self._reset_inactivity_timer()
-        self.buffer += data
-        while self.buffer:
-            # Strip leading carriage returns or newlines between frames
-            if self.buffer.startswith(b"\r") or self.buffer.startswith(b"\n"):
-                self.buffer = self.buffer.lstrip(b"\r\n")
-                if not self.buffer:
-                    break
+        buffer = self.buffer + data if self.buffer else data
+        # Frames are read by offset and the buffer is cut once at the end, so a chunk holding
+        # many frames costs linear time instead of a copy of the rest per frame
+        size = len(buffer)
+        pos = 0
+        while pos < size:
+            # Skip carriage returns or newlines between frames
+            if buffer[pos] in (13, 10):
+                pos += 1
+                continue
 
             # RFC 6587 octet counting: <MSG-LEN> SP <MSG> (verifying priority header prefix)
-            match = _RE_OCTET_COUNTED_FRAME.match(self.buffer)
+            match = _RE_OCTET_COUNTED_FRAME.match(buffer, pos)
             if match:
                 msg_len = int(match.group(1))
                 header_len = len(match.group(1)) + 1
@@ -1004,45 +1008,32 @@ class SyslogTCPProtocol(asyncio.Protocol):
                     logger.warning(
                         f"Syslog TCP octet-counted frame length {msg_len} exceeds limit {MAX_TCP_BUFFER} from {self.peername}. Closing connection."
                     )
-                    self.buffer = b""
+                    buffer, pos, size = b"", 0, 0
                     if self.transport:
                         self.transport.close()
                     break
 
-                if len(self.buffer) < header_len + msg_len:
+                frame_end = pos + header_len + msg_len
+                if size < frame_end:
                     # Incomplete frame; wait for subsequent chunks
                     break
 
-                frame = self.buffer[header_len : header_len + msg_len]
-                self.buffer = self.buffer[header_len + msg_len :]
-
+                frame = buffer[pos + header_len:frame_end]
+                pos = frame_end
                 if frame:
-                    source_ip = self.peername[0] if self.peername else "unknown"
-                    self._ensure_workers()
-                    try:
-                        self.queue.put_nowait((frame, source_ip))
-                    except asyncio.QueueFull:
-                        from app.core.pipeline import increment_dropped_count
-                        increment_dropped_count(1)
-                        logger.warning("Syslog TCP queue full (5000 items). Message dropped.")
+                    self._enqueue_frame(frame)
             else:
                 # Non-transparent framing: trailer/newline delimitation (\n)
-                if b"\n" in self.buffer:
-                    line, self.buffer = self.buffer.split(b"\n", 1)
-                    line = line.rstrip(b"\r")
-                    if line:
-                        source_ip = self.peername[0] if self.peername else "unknown"
-                        self._ensure_workers()
-                        try:
-                            self.queue.put_nowait((line, source_ip))
-                        except asyncio.QueueFull:
-                            from app.core.pipeline import increment_dropped_count
-                            increment_dropped_count(1)
-                            logger.warning("Syslog TCP queue full (5000 items). Message dropped.")
-                else:
+                newline = buffer.find(b"\n", pos)
+                if newline < 0:
                     # No newline found and does not match octet framing; wait for more data
                     break
+                line = buffer[pos:newline].rstrip(b"\r")
+                pos = newline + 1
+                if line:
+                    self._enqueue_frame(line)
 
+        self.buffer = buffer[pos:] if pos else buffer
         if len(self.buffer) > MAX_TCP_BUFFER:
             logger.warning(
                 f"Syslog TCP buffer exceeded {MAX_TCP_BUFFER} bytes without frame boundary from {self.peername}. Closing connection."
@@ -1051,6 +1042,16 @@ class SyslogTCPProtocol(asyncio.Protocol):
             if self.transport:
                 self.transport.close()
                 
+    def _enqueue_frame(self, frame: bytes) -> None:
+        source_ip = self.peername[0] if self.peername else "unknown"
+        self._ensure_workers()
+        try:
+            self.queue.put_nowait((frame, source_ip))
+        except asyncio.QueueFull:
+            from app.core.pipeline import increment_dropped_count
+            increment_dropped_count(1)
+            logger.warning("Syslog TCP queue full (5000 items). Message dropped.")
+
     async def process_message(self, data: bytes, source_ip: str):
         await dispatch_syslog_message(data, source_ip, self.alias_cache, self.assembler)
 

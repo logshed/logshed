@@ -110,7 +110,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 - **Field cleanup:** An empty severity is stored as info (6); ANSI and control characters are removed from `raw`.
 - **Body shapes:** A JSON array, one object (on one line or pretty-printed) or NDJSON. Invalid JSON is refused with `400` naming the line (`Invalid JSON payload on line N: ...`), and so is a body or NDJSON line that is a bare value instead of an object (`Log entry on line N is not a JSON object.`); nothing from such a request is stored. Values that are not objects inside an array are skipped.
 - **Response:** `{"status": "ok", "accepted": int, "dropped": int}`: `accepted` counts entries queued and `dropped` entries removed by drop rules or maintenance sessions, or lost to a full queue.
-- **Docker streams:** Container output that arrives without newlines (non-TTY) is split into 64 KB entries instead of growing an unbounded buffer.
+- **Docker streams:** Container output that arrives without newlines (non-TTY) is split into 64 KB entries instead of growing an unbounded buffer. A non-TTY stream is read as Docker's 8-byte frames; bytes that do not form a valid frame header (for example a TTY container whose inspect call failed) are skipped up to the next valid header, with one warning giving the number of bytes skipped.
 
 ## 6. Internal Application Logs (`InternalLogHandler`)
 
