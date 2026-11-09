@@ -908,6 +908,10 @@ class TestCorsAndBearerHardening:
             res_post = await no_header_client.post("/api/auth/login", json={"password": "any"})
             assert res_post.status_code == 403
             assert "X-Requested-With" in res_post.json()["detail"]
+            # The CSRF refusal still carries the security headers (that middleware is outermost)
+            assert res_post.headers["X-Frame-Options"] == "DENY"
+            assert res_post.headers["Cache-Control"] == "no-store"
+            assert "frame-ancestors 'none'" in res_post.headers["Content-Security-Policy"]
 
             # GET requests without header must succeed
             res_get = await no_header_client.get("/api/auth/status")

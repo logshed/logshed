@@ -1132,6 +1132,8 @@ class TestMCPApiAndTransport:
         app_task = None
 
         async def fake_receive():
+            # A connected client: nothing arrives until the test cancels the request
+            await asyncio.Event().wait()
             return {"type": "http.disconnect"}
 
         async def fake_send(message):

@@ -52,6 +52,21 @@ _thread_local = threading.local()
 _connection_generation = 0
 
 
+# Resolved form of each database path asked for. Path.resolve() makes system calls for every
+# path component (about 50 us), and every run_db_query call looks its connection up here.
+_resolved_db_paths: dict[str, str] = {}
+
+
+def _resolved_db_path(db_path: Path) -> str:
+    raw = str(db_path)
+    resolved = _resolved_db_paths.get(raw)
+    if resolved is None:
+        if len(_resolved_db_paths) >= 64:
+            _resolved_db_paths.clear()
+        resolved = _resolved_db_paths[raw] = str(Path(raw).resolve())
+    return resolved
+
+
 def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
     """
     Get or open a cached thread-local read connection for the given database path.
@@ -60,7 +75,7 @@ def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
     if not hasattr(_thread_local, "connections"):
         _thread_local.connections = {}
 
-    resolved_key = str(Path(db_path).resolve())
+    resolved_key = _resolved_db_path(db_path)
     generation = _connection_generation
     cached = _thread_local.connections.get(resolved_key)
     conn = None
@@ -111,6 +126,7 @@ def reset_all_db_connections() -> None:
     """
     global _connection_generation
     _connection_generation += 1
+    _resolved_db_paths.clear()
     close_thread_local_connections()
 
 

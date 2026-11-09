@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Lighter metrics polling on large databases**: The 24-hour error figures behind `/api/v1/system/metrics` and the Home Assistant integration take 0.4 s instead of 1.5 s at 50 million logs (the top error apps alone 0.16 s instead of 1.2 s). The log total there and on the Storage page now counts only the logs added since the last count, instead of every log (about 1 s each time at 50 million), and counts everything again after a prune or delete.
 - **Faster Delete All**: Deleting every log in Storage now clears the search index in one step instead of log by log: 4 million logs took 87 s instead of 130 s in a test. Logs that arrive while it runs are kept (before, they were deleted too), and become searchable once it finishes.
 - **Faster host and app lists for hosts without an alias**: The Console's Host and App filter lists (and `/api/v1/logs/facets`) now find the apps of hosts without an alias in one pass instead of reading every log of each such host in turn: with 200 such hosts and 300,000 logs, 0.1 s instead of 0.8 s, and the gap grows with the database.
+- **Quicker API answers**: Every request to the web interface, the REST API, HTTP ingest and MCP spends less time in LogShed's own request handling: a health check took 1.0 ms instead of 1.9 ms in a test. Database reads no longer look up the database file's full path each time.
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
 
 ### Fixed

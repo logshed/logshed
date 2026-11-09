@@ -22,6 +22,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api import ai, alerts, aliases, auth, docker_hosts, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
 from app.api.deps import get_optional_user, require_auth_or_token, run_db_query
@@ -577,6 +579,75 @@ _CONTENT_SECURITY_POLICY = (
     "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
 )
 
+_CSRF_METHODS = frozenset(("POST", "PUT", "DELETE", "PATCH"))
+
+
+class CSRFMiddleware:
+    """
+    Refuses mutating /api requests without the X-Requested-With header, unless they carry a
+    Bearer token or go to MCP. A plain ASGI middleware: Starlette's @app.middleware("http")
+    wraps every request and response in extra tasks and streams.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            path = scope["path"]
+            if (
+                path.startswith("/api/")
+                and scope["method"].upper() in _CSRF_METHODS
+                # Health checks and log stream (GET) are exempted
+                and not path.startswith("/api/health")
+                and path != "/api/logs/stream"
+            ):
+                headers = Headers(scope=scope)
+                # MCP routes authenticate by API token only (never the session cookie), so there is no
+                # ambient credential for CSRF to abuse; clients may send a raw token or ?token= without Bearer.
+                is_mcp_path = path == "/api/v1/mcp" or path.startswith("/api/v1/mcp/")
+                if not (headers.get("authorization", "").lower().startswith("bearer ") or is_mcp_path):
+                    if not headers.get("x-requested-with"):
+                        response = JSONResponse(
+                            status_code=403,
+                            content={"detail": "Forbidden: missing required X-Requested-With header."},
+                        )
+                        await response(scope, receive, send)
+                        return
+        await self.app(scope, receive, send)
+
+
+class SecurityHeadersMiddleware:
+    """Adds the security headers to every HTTP response, and no-store to API responses."""
+
+    def __init__(self, app: ASGIApp, docs_paths: set[str], docs_policy: str) -> None:
+        self.app = app
+        self.docs_paths = docs_paths
+        self.docs_policy = docs_policy
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        policy = self.docs_policy if path in self.docs_paths else _CONTENT_SECURITY_POLICY
+        # API responses can hold secrets (new API tokens, settings) and must not be cached
+        no_store = path == "/api" or path.startswith("/api/")
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Frame-Options"] = "DENY"
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+                headers["Content-Security-Policy"] = policy
+                if no_store:
+                    headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 # API docs (Swagger UI at /docs, ReDoc at /redoc, and /openapi.json) need the web login;
 # /openapi.json also accepts any valid API token. Both pages load Swagger UI and ReDoc from
 # /docs-assets/ (copied there by the frontend build) and LogShed's own favicon, so nothing
@@ -696,24 +767,8 @@ def create_app() -> FastAPI:
     # Full-text searches wake the FTS indexer from the shared query path
     # (app.services.log_query.execute_with_fts_fallback), which MCP calls also pass through.
 
-    # CSRF protection middleware for mutating endpoints
-    @app.middleware("http")
-    async def csrf_protection(request: Request, call_next):
-        if request.url.path.startswith("/api/") and request.method.upper() in ("POST", "PUT", "DELETE", "PATCH"):
-            # Health checks and log stream (GET) are exempted
-            if not request.url.path.startswith("/api/health") and request.url.path != "/api/logs/stream":
-                auth_header = request.headers.get("authorization", "")
-                path = request.url.path
-                # MCP routes authenticate by API token only (never the session cookie), so there is no
-                # ambient credential for CSRF to abuse; clients may send a raw token or ?token= without Bearer.
-                is_mcp_path = path == "/api/v1/mcp" or path.startswith("/api/v1/mcp/")
-                if not (auth_header.lower().startswith("bearer ") or is_mcp_path):
-                    if not request.headers.get("x-requested-with"):
-                        return JSONResponse(
-                            status_code=403,
-                            content={"detail": "Forbidden: missing required X-Requested-With header."},
-                        )
-        return await call_next(request)
+    # CSRF protection for mutating endpoints (innermost of the three)
+    app.add_middleware(CSRFMiddleware)
 
     # CORS Middleware allowing credentials for Vite frontend development
     app.add_middleware(
@@ -724,22 +779,9 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "X-Requested-With", "Authorization"],
     )
 
-    # Security headers middleware. Registered last so it is the outermost middleware and also
-    # covers responses produced by the CSRF and CORS middleware (such as CSRF 403s).
-    @app.middleware("http")
-    async def add_security_headers(request: Request, call_next):
-        response = await call_next(request)
-        path = request.url.path
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            docs_policy if path in docs_paths else _CONTENT_SECURITY_POLICY
-        )
-        if path == "/api" or path.startswith("/api/"):
-            # API responses can hold secrets (new API tokens, settings) and must not be cached
-            response.headers["Cache-Control"] = "no-store"
-        return response
+    # Security headers. Registered last so it is the outermost middleware and also covers
+    # responses produced by the CSRF and CORS middleware (such as CSRF 403s).
+    app.add_middleware(SecurityHeadersMiddleware, docs_paths=docs_paths, docs_policy=docs_policy)
 
     # Mount API routers
     api_router = APIRouter(prefix="/api")
