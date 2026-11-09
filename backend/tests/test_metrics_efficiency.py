@@ -165,3 +165,24 @@ class TestStorageSnapshotCache:
         assert storage_mod.get_cached_storage_metrics(db)["total_logs_count"] == 0
         storage_mod.record_metrics(db)
         assert storage_mod.get_cached_storage_metrics(db)["total_logs_count"] == 1
+
+
+class TestErrorAggregatePlans:
+
+    def test_top_error_apps_reads_only_the_24_hour_range(self, tmp_path: Path):
+        """The app ranking uses the time index, not a walk over every app's range."""
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        statements: list[str] = []
+        with get_connection(db) as conn:
+            for minutes, app in ((5, "a"), (10, "a"), (20, "b"), (60 * 30, "c")):
+                _insert(conn, minutes, 3, app_name=app)
+            conn.execute("ANALYZE")
+            conn.commit()
+            conn.row_factory = sqlite3.Row
+            conn.set_trace_callback(statements.append)
+            result = ext_v1_mod._fetch_error_aggregates(conn)
+            apps_sql = next(s for s in statements if "GROUP BY +app_name" in s)
+            plan = [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + apps_sql)]
+        assert [(e.name, e.count) for e in result["top_apps"]] == [("a", 2), ("b", 1)]
+        assert any("idx_logs_time_sev" in step for step in plan)

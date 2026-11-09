@@ -252,13 +252,15 @@ def _fetch_error_aggregates(conn) -> dict[str, Any]:
     )
     counts = cur.fetchone()
 
-    # Top error apps (24h)
+    # Top error apps (24h). The unary + keeps SQLite on the 24-hour range of idx_logs_time_sev:
+    # left to itself it walks every app's range of idx_logs_app_time (1.3 s instead of 0.13 s at
+    # 50 million logs).
     cur.execute(
         """
         SELECT app_name, COUNT(*) as cnt
         FROM logs
-        WHERE severity <= 3 AND timestamp >= ? AND app_name IS NOT NULL AND app_name != ''
-        GROUP BY app_name
+        WHERE severity <= 3 AND timestamp >= ? AND +app_name IS NOT NULL AND +app_name != ''
+        GROUP BY +app_name
         ORDER BY cnt DESC
         LIMIT 5
         """,
