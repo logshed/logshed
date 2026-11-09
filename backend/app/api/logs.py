@@ -374,18 +374,47 @@ async def get_log_facets(
             or len(pairs) >= _FACET_PAIR_LIMIT
         )
 
-        # Edge case: Mappings for fallback IPs where source_alias was empty
+        # Edge case: Mappings for fallback IPs where source_alias was empty. One skip-scan over
+        # idx_logs_source_app_ip lists every (app, IP) pair of alias-less logs with one index seek
+        # per pair, instead of one query per IP that read all of that IP's logs.
         if fallback_ips:
-            for ip in fallback_ips:
-                cursor.execute(
-                    "SELECT DISTINCT app_name FROM logs WHERE source_alias = '' AND source_ip = ? AND app_name != '' LIMIT ?",
-                    (ip, FACET_LIMIT + 1),
+            cursor.execute(
+                f"""
+                WITH RECURSIVE ip_apps(a, ip) AS (
+                    SELECT * FROM (
+                        SELECT app_name, source_ip FROM logs
+                        WHERE source_alias = '' AND app_name != '' AND source_ip != ''
+                        ORDER BY source_alias, app_name, source_ip
+                        LIMIT 1
+                    )
+                    UNION ALL
+                    SELECT nxt.app_name, nxt.source_ip
+                    FROM ip_apps
+                    JOIN logs nxt ON nxt.id = COALESCE(
+                        (SELECT id FROM logs WHERE source_alias = '' AND app_name = ip_apps.a AND source_ip > ip_apps.ip
+                         ORDER BY source_alias, app_name, source_ip LIMIT 1),
+                        (SELECT id FROM logs WHERE source_alias = '' AND app_name > ip_apps.a AND source_ip != ''
+                         ORDER BY source_alias, app_name, source_ip LIMIT 1)
+                    )
+                    LIMIT {_FACET_PAIR_LIMIT}
                 )
-                ip_apps = cursor.fetchall()
+                SELECT a, ip FROM ip_apps;
+                """
+            )
+            ip_app_rows = cursor.fetchall()
+            if len(ip_app_rows) >= _FACET_PAIR_LIMIT:
+                truncated = True
+            listed_ips = set(fallback_ips)
+            apps_by_ip: dict[str, list[str]] = {}
+            for app_name, ip in ip_app_rows:
+                if ip in listed_ips:
+                    apps_by_ip.setdefault(ip, []).append(app_name)
+            for ip in fallback_ips:
+                ip_apps = apps_by_ip.get(ip, [])
                 if len(ip_apps) > FACET_LIMIT:
                     truncated = True
-                for r in ip_apps:
-                    pairs.append((ip, r[0], ip))
+                for app_name in ip_apps[:FACET_LIMIT + 1]:
+                    pairs.append((ip, app_name, ip))
 
         cursor.execute("SELECT ip, alias FROM host_aliases")
         alias_rows = cursor.fetchall()
