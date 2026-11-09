@@ -181,6 +181,51 @@ def _delete_matching(
     return total_deleted
 
 
+def _delete_everything(conn: sqlite3.Connection, batch_size: int) -> int:
+    """
+    Delete every log stored when the delete starts; return how many went.
+
+    logs_fts is emptied in one step ('delete-all') instead of row by row through the logs_ad
+    trigger, which is most of the work of a large delete and leaves delete markers that the
+    merge afterwards has to rewrite. last_indexed_id goes back to 0 in the same transaction,
+    so the trigger does not fire for the rows still to be deleted. Logs that arrive meanwhile
+    have higher ids: they are kept, and the indexer, starting again from 0, finds only them
+    once the old rows are gone. If the delete stops halfway, the indexer indexes the rows left.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    with conn:
+        last_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM logs").fetchone()[0]
+        conn.execute("INSERT INTO logs_fts(logs_fts) VALUES('delete-all')")
+        conn.execute(
+            "UPDATE fts_index_state SET last_indexed_id = 0, updated_at = datetime('now') WHERE id = 1"
+        )
+
+    deleted = 0
+    while True:
+        cursor = conn.execute(
+            "DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE id <= ? ORDER BY id LIMIT ?)",
+            (last_id, batch_size),
+        )
+        count = cursor.rowcount
+        conn.commit()
+        deleted += count
+        if count == 0:
+            return deleted
+        wait_for_ingest_write()
+
+
+def _deletes_everything(criteria: LogDeleteRequest) -> bool:
+    """True when the request deletes all logs (delete_all with no filter). Reads no database."""
+    if not criteria.delete_all or parse_multi_values(criteria.sources):
+        return False
+    try:
+        # Without sources, building the filter looks up no host aliases
+        where_sql, _ = build_deletion_filter(criteria.model_copy(update={"sources": None}))
+    except ValueError:
+        return False
+    return not where_sql
+
+
 def execute_delete_logs(
     db_path: Union[str, Path],
     criteria: LogDeleteRequest,
@@ -189,18 +234,10 @@ def execute_delete_logs(
 ) -> dict[str, Any]:
     """
     Execute deletion of matching logs in iterative chunks to avoid write-lock starvation.
-    Ensures pending FTS indexes are drained before deletion so the logs_ad trigger
-    consistently purges all deleted tokens from logs_fts.
+    A filtered delete first drains pending FTS indexing so the logs_ad trigger consistently
+    purges all deleted tokens from logs_fts; deleting everything empties logs_fts instead.
     """
     db_path_obj = Path(db_path)
-
-    # Pre-drain unindexed logs so logs_ad trigger cleans all target rows from logs_fts
-    if index_pending:
-        from app.services.fts_indexer import index_pending_logs
-        try:
-            index_pending_logs(db_path_obj)
-        except Exception as e:
-            logger.warning(f"Failed to index pending logs prior to deletion: {e}")
 
     total_deleted = 0
     conn = get_connection(db_path_obj)
@@ -208,9 +245,20 @@ def execute_delete_logs(
         where_sql, params = build_deletion_filter(criteria, conn=conn)
         cursor = conn.cursor()
 
+        # Pre-drain unindexed logs so logs_ad trigger cleans all target rows from logs_fts
+        if index_pending and where_sql:
+            from app.services.fts_indexer import index_pending_logs
+            try:
+                index_pending_logs(db_path_obj)
+            except Exception as e:
+                logger.warning(f"Failed to index pending logs prior to deletion: {e}")
+
         note_logs_deleted()
         try:
-            total_deleted = _delete_matching(conn, cursor, criteria, where_sql, params, batch_size)
+            if where_sql:
+                total_deleted = _delete_matching(conn, cursor, criteria, where_sql, params, batch_size)
+            else:
+                total_deleted = _delete_everything(conn, batch_size)
         finally:
             note_logs_deleted()
 
@@ -251,11 +299,23 @@ async def execute_delete_logs_async(
     batch_size: int = 5000,
     index_pending: bool = True,
 ) -> dict[str, Any]:
-    """Async wrapper executing execute_delete_logs on a worker thread."""
-    return await asyncio.to_thread(
-        execute_delete_logs,
-        db_path,
-        criteria,
-        batch_size=batch_size,
-        index_pending=index_pending,
-    )
+    """
+    Async wrapper executing execute_delete_logs on a worker thread. Deleting everything pauses
+    the FTS indexer meanwhile, which would otherwise index the old rows about to be deleted.
+    """
+    from app.services.fts_indexer import get_fts_worker
+
+    fts_worker = get_fts_worker() if _deletes_everything(criteria) else None
+    if fts_worker is not None:
+        await fts_worker.pause_indexing()
+    try:
+        return await asyncio.to_thread(
+            execute_delete_logs,
+            db_path,
+            criteria,
+            batch_size=batch_size,
+            index_pending=index_pending,
+        )
+    finally:
+        if fts_worker is not None:
+            fts_worker.resume_indexing()

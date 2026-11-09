@@ -810,3 +810,26 @@ class TestFTSIndexWorkerCancelledPass:
             if not run_task.done():
                 run_task.cancel()
                 await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_indexing_resumes_only_when_every_pause_has_resumed(tmp_path):
+    """A compaction and a delete of all logs can each pause the indexer while the other runs."""
+    db_file = tmp_path / "logs.db"
+    run_migrations(db_file)
+    worker = FTSIndexWorker(db_file)
+    try:
+        await worker.pause_indexing()
+        await worker.pause_indexing()
+        worker.resume_indexing()
+        assert worker.is_paused
+        worker.resume_indexing()
+        assert not worker.is_paused
+        # A resume without a pause does not leave a later pause ineffective
+        worker.resume_indexing()
+        await worker.pause_indexing()
+        assert worker.is_paused
+        worker.resume_indexing()
+        assert not worker.is_paused
+    finally:
+        fts_indexer_mod.set_fts_worker(None)

@@ -163,6 +163,8 @@ class FTSIndexWorker:
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
         self._paused = False
+        # Callers that paused indexing and have not resumed it yet (a compaction and a delete can overlap)
+        self._pause_count = 0
         self._resume_event = asyncio.Event()
         self._resume_event.set()
         self._index_lock = asyncio.Lock()
@@ -199,6 +201,7 @@ class FTSIndexWorker:
         Waits for any in-flight indexing batch to complete and closes the persistent connection
         for database maintenance.
         """
+        self._pause_count += 1
         self._paused = True
         self._resume_event.clear()
         async with self._index_lock:
@@ -206,8 +209,11 @@ class FTSIndexWorker:
 
     def resume_indexing(self) -> None:
         """
-        Resume FTS indexing passes.
+        Resume FTS indexing passes once every caller that paused them has resumed.
         """
+        self._pause_count = max(0, self._pause_count - 1)
+        if self._pause_count:
+            return
         self._paused = False
         self._resume_event.set()
         self._wake_event.set()
