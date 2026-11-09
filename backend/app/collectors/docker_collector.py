@@ -361,6 +361,23 @@ def _extract_docker_timestamp(line: str) -> tuple[Optional[str], str]:
     return None, line
 
 
+def _canonical_utc_timestamp(ts: str) -> str:
+    """
+    Docker's UTC timestamp (2026-11-09T12:00:00.123456789Z) in the form the queue consumer
+    stores, which datetime.isoformat() gives: microseconds (cut, not rounded; left out when zero)
+    and +00:00. The consumer then stores it without parsing it again. Other forms pass unchanged.
+    """
+    if not ts.endswith("Z"):
+        return ts
+    head, dot, fraction = ts[:-1].partition(".")
+    if not dot:
+        return head + "+00:00"
+    if not fraction.isdigit():
+        return ts
+    micro = fraction[:6].ljust(6, "0")
+    return f"{head}+00:00" if micro == "000000" else f"{head}.{micro}+00:00"
+
+
 def _iso_to_unix_timestamp(ts_str: str) -> str:
     """
     Convert an RFC 3339 / ISO 8601 timestamp string to Unix epoch seconds string for Docker API.
@@ -503,7 +520,7 @@ def _make_log_entry(
         clean_raw = _clean_text(raw)[:MAX_MESSAGE_BYTES]
 
     return {
-        "timestamp": timestamp or now,
+        "timestamp": _canonical_utc_timestamp(timestamp) if timestamp else now,
         "received_at": now,
         "source_ip": source_ip,
         "source_alias": resolved_alias,

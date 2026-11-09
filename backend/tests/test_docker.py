@@ -22,6 +22,7 @@ from app.collectors.docker_collector import (
     DockerTailer,
     _batch_update_app_aliases,
     _build_client,
+    _canonical_utc_timestamp,
     _demux_stream,
     _detect_severity,
     _event_since,
@@ -170,6 +171,31 @@ class TestDockerLogParsing:
         )
         assert entry["message"] == "Router ready"
         assert entry["raw"] == 'time="x" level=info msg="Router ready"'
+
+    def test_docker_timestamps_take_the_stored_form(self):
+        """Docker's timestamps leave the collector in the form the queue consumer would store."""
+        from app.collectors.docker_collector import _canonical_utc_timestamp
+        from app.core.pipeline import QueueConsumer
+
+        received = "2030-01-01T00:00:00+00:00"
+        for ts in [
+            "2026-11-09T12:00:00.123456789Z",
+            "2026-11-09T12:00:00.999999999Z",
+            "2026-11-09T12:00:00.000000400Z",
+            "2026-11-09T12:00:00.5Z",
+            "2026-11-09T12:00:00Z",
+            "2026-11-09T12:00:00.000000Z",
+        ]:
+            canonical = _canonical_utc_timestamp(ts)
+            parsed = [{"timestamp": ts, "received_at": received}]
+            QueueConsumer._normalize_timestamps(parsed)
+            assert canonical == parsed[0]["timestamp"], ts
+            stored = [{"timestamp": canonical, "received_at": received}]
+            QueueConsumer._normalize_timestamps(stored)
+            assert stored[0]["timestamp"] == canonical
+        assert _canonical_utc_timestamp("2026-11-09T12:00:00.123+02:00") == "2026-11-09T12:00:00.123+02:00"
+        entry = _make_log_entry("app", "c1", "hello", timestamp="2026-11-09T12:00:00.123456789Z")
+        assert entry["timestamp"] == "2026-11-09T12:00:00.123456+00:00"
 
     def test_clean_log_text_keeps_printable_and_layout_characters(self):
         """Printable text (any script) comes back unchanged; tabs and newlines stay; controls and escapes go."""
@@ -687,7 +713,7 @@ class TestDockerTimestampAndAccurateResume:
         """_make_log_entry should preserve provided timestamp."""
         ts = "2026-09-07T10:15:30.123456789Z"
         entry = _make_log_entry("nginx", "c123", "Worker process started", severity=6, timestamp=ts)
-        assert entry["timestamp"] == ts
+        assert entry["timestamp"] == _canonical_utc_timestamp(ts)
         assert entry["message"] == "Worker process started"
         assert entry["raw"] == "Worker process started"
 
@@ -852,9 +878,9 @@ class TestDockerTimestampAndAccurateResume:
         # Both entries parsed, messages stripped cleanly
         assert len(entries) == 2
         assert entries[0]["message"] == "First line before drop"
-        assert entries[0]["timestamp"] == ts1
+        assert entries[0]["timestamp"] == _canonical_utc_timestamp(ts1)
         assert entries[1]["message"] == "Second line after resume"
-        assert entries[1]["timestamp"] == ts2
+        assert entries[1]["timestamp"] == _canonical_utc_timestamp(ts2)
 
         # Memory tracker updated
         assert last_seen_map["cid_resume"] == ts2
@@ -1738,9 +1764,9 @@ class TestDockerDemuxFrameResync:
 
         assert len(entries) == 2
         assert entries[0]["message"] == "TTY First line"
-        assert entries[0]["timestamp"] == ts1
+        assert entries[0]["timestamp"] == _canonical_utc_timestamp(ts1)
         assert entries[1]["message"] == "TTY Second line"
-        assert entries[1]["timestamp"] == ts2
+        assert entries[1]["timestamp"] == _canonical_utc_timestamp(ts2)
 
     @pytest.mark.asyncio
     async def test_heartbeat_disabled_when_zero_or_negative(self):
@@ -1979,9 +2005,9 @@ class TestDockerDemuxFrameResync:
         # Exactly 2 entries emitted: frame1 is NOT duplicated despite being replayed by Docker
         assert len(entries) == 2
         assert entries[0]["message"] == "Line at boundary"
-        assert entries[0]["timestamp"] == ts1
+        assert entries[0]["timestamp"] == _canonical_utc_timestamp(ts1)
         assert entries[1]["message"] == "New line after resume"
-        assert entries[1]["timestamp"] == ts2
+        assert entries[1]["timestamp"] == _canonical_utc_timestamp(ts2)
 
     @pytest.mark.asyncio
     async def test_empty_log_line_with_timestamp_preserved(self):
@@ -2030,7 +2056,7 @@ class TestDockerDemuxFrameResync:
 
         assert len(entries) == 1
         assert entries[0]["message"] == ""
-        assert entries[0]["timestamp"] == ts
+        assert entries[0]["timestamp"] == _canonical_utc_timestamp(ts)
         assert entries[0]["severity"] == 6
 
     @pytest.mark.asyncio
@@ -2085,7 +2111,7 @@ class TestDockerDemuxFrameResync:
 
         assert len(entries) == 1
         assert entries[0]["message"] == "Final unbuffered status"
-        assert entries[0]["timestamp"] == ts
+        assert entries[0]["timestamp"] == _canonical_utc_timestamp(ts)
 
     @pytest.mark.asyncio
     async def test_multiplexed_stream_chunk_line_buffering(self):
