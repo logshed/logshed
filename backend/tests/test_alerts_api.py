@@ -724,6 +724,45 @@ class TestAlertRuleRegressions:
         assert res.status_code == 404
 
     @pytest.mark.asyncio
+    async def test_import_applies_the_create_limits(self, client: AsyncClient, auth_headers: dict):
+        """Imported rules get the same length limits as created ones; a too-long rule is skipped with an error."""
+        res = await client.post(
+            "/api/alerts/rules/import",
+            json={
+                "alert_rules": [
+                    {"name": "N" * 101, "rule_type": "threshold"},
+                    {"name": "Long app", "filter_app": "a" * 101},
+                    {"name": "Long pattern", "rule_type": "pattern", "match_pattern": "x" * 1001},
+                    {"name": "N" * 100, "filter_app": "a" * 100, "match_pattern": "x" * 1000},
+                ]
+            },
+            headers=auth_headers,
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["imported"] == 1
+        assert len(body["errors"]) == 3
+        assert "Item #1: name is longer than 100 characters." in body["errors"]
+        assert any("Long app" in e and "filter_app" in e for e in body["errors"])
+        assert any("Long pattern" in e and "match_pattern" in e for e in body["errors"])
+        names = [r["name"] for r in (await client.get("/api/alerts/rules", headers=auth_headers)).json()]
+        assert "N" * 100 in names
+        assert "N" * 101 not in names
+
+    @pytest.mark.asyncio
+    async def test_import_of_more_than_500_rules_is_refused(self, client: AsyncClient, auth_headers: dict):
+        rules = [{"name": f"Rule {i}"} for i in range(501)]
+        res = await client.post("/api/alerts/rules/import", json={"alert_rules": rules}, headers=auth_headers)
+        assert res.status_code == 422
+        assert "500" in res.json()["detail"]
+        before = len((await client.get("/api/alerts/rules", headers=auth_headers)).json())
+
+        res = await client.post("/api/alerts/rules/import", json={"alert_rules": rules[:500]}, headers=auth_headers)
+        assert res.status_code == 200
+        assert res.json()["imported"] == 500
+        assert len((await client.get("/api/alerts/rules", headers=auth_headers)).json()) == before + 500
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("pattern", [r"(a|a)+$", r"(\w|\d)+$", r"(\s|\W)+$", r"(.*a){20}", r".*.*.*.*="])
     async def test_bypass_patterns_rejected_on_create_update_import_and_test(
         self, client: AsyncClient, auth_headers: dict, pattern: str

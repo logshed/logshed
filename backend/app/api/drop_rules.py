@@ -15,10 +15,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from app.api.deps import get_current_user, run_db_query
 from app.api.rule_transfer import (
     INVALID_IMPORT_PAYLOAD,
+    check_import_size,
     export_response,
     import_items,
     next_display_order,
     reorder_rules,
+    too_long,
 )
 from app.models import (
     DropPresetResponse,
@@ -205,6 +207,7 @@ async def import_drop_rules(
     items = import_items(payload, "drop_rules", "drop_rule")
     if items is None:
         return DropRuleImportResponse(imported=0, skipped=0, errors=[INVALID_IMPORT_PAYLOAD])
+    check_import_size(items)
 
     def _get_existing(conn):
         cur = conn.cursor()
@@ -240,6 +243,18 @@ async def import_drop_rules(
         msg = str(msg).strip() if msg is not None else "*"
         if not msg:
             msg = "*"
+
+        name = (raw_item.get("name") or "").strip()
+        label = f"Item #{idx + 1}"
+        length_error = (
+            too_long(label, "name", name, 100)
+            or too_long(label, "source_pattern", src, 255)
+            or too_long(label, "app_pattern", app, 255)
+            or too_long(label, "message_pattern", msg, 1000)
+        )
+        if length_error:
+            errors.append(length_error)
+            continue
 
         is_regex = bool(raw_item.get("is_regex", False))
         is_enabled = bool(raw_item.get("is_enabled", True))
@@ -277,7 +292,7 @@ async def import_drop_rules(
 
         existing_keys.add(dedup_key)
         to_insert.append({
-            "name": (raw_item.get("name") or "").strip() or _default_drop_rule_name(app, src, msg),
+            "name": name or _default_drop_rule_name(app, src, msg),
             "source_pattern": src,
             "app_pattern": app,
             "message_pattern": msg,

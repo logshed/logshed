@@ -507,3 +507,43 @@ async def test_delete_logs_with_complex_fts_query_fallback(client: AsyncClient, 
     assert del_res.status_code == 200
     assert del_res.json()["deleted_count"] == 0
 
+
+
+# ===================================================================
+# Request size limits
+# ===================================================================
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["/api/logs/delete", "/api/logs/delete/preview"])
+async def test_delete_request_lists_are_capped(client: AsyncClient, auth_cookie: dict, route: str):
+    """Above the caps the request is refused with 422, not a misleading 'database busy' 503."""
+    client.cookies = auth_cookie
+    for body in (
+        {"log_ids": list(range(1, 20_002))},
+        {"log_ids": list(range(1, 40_000))},
+        {"sources": [f"host-{i}" for i in range(501)]},
+        {"apps": [f"app-{i}" for i in range(501)]},
+    ):
+        res = await client.post(route, json=body)
+        assert res.status_code == 422, (route, list(body))
+
+
+@pytest.mark.asyncio
+async def test_delete_accepts_as_many_ids_as_the_console_holds(client: AsyncClient, auth_cookie: dict):
+    client.cookies = auth_cookie
+    db_path = get_db_path()
+    _seed_test_logs(db_path)
+    ids = [log["id"] for log in (await client.get("/api/logs")).json()["logs"]]
+
+    many = ids + list(range(10_000_000, 10_000_000 + 20_000 - len(ids)))
+    assert len(many) == 20_000
+    preview = await client.post("/api/logs/delete/preview", json={"log_ids": many})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["matched_count"] == len(ids)
+
+    res = await client.post("/api/logs/delete", json={"log_ids": many})
+    assert res.status_code == 200, res.text
+    assert res.json()["deleted_count"] == len(ids)
+
+    res = await client.post("/api/logs/delete/preview", json={"sources": [f"host-{i}" for i in range(500)]})
+    assert res.status_code == 200

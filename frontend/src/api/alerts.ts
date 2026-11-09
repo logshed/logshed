@@ -51,7 +51,7 @@ export async function installAlertPreset(
   presetId: string,
   channelId?: number | null
 ): Promise<AlertRule> {
-  return apiFetch<AlertRule>('/api/alerts/presets/' + presetId + '/install', {
+  return apiFetch<AlertRule>('/api/alerts/presets/' + encodeURIComponent(presetId) + '/install', {
     method: 'POST',
     body: JSON.stringify({ channel_id: channelId ?? null }),
   });

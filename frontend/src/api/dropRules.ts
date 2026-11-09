@@ -55,7 +55,7 @@ export async function fetchDropPresets(): Promise<DropPreset[]> {
 }
 
 export async function installDropPreset(presetId: string): Promise<DropRule> {
-  return apiFetch<DropRule>(`/api/drop-rules/presets/${presetId}/install`, {
+  return apiFetch<DropRule>(`/api/drop-rules/presets/${encodeURIComponent(presetId)}/install`, {
     method: 'POST',
   });
 }

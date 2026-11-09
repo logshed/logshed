@@ -124,9 +124,11 @@ class LogFacetsResponse(BaseModel):
 
 class LogDeleteRequest(BaseModel):
     """Payload specifying criteria or IDs for log deletion."""
-    log_ids: Optional[list[int]] = Field(None, description="Specific log IDs to delete")
-    sources: Optional[list[str]] = Field(None, description="Filter by source_alias or source_ip (multi-value supported)")
-    apps: Optional[list[str]] = Field(None, description="Filter by app_name (multi-value supported)")
+    # The caps match what the web UI can send: the Console holds at most 20,000 rows, and the host
+    # and app lists come from the facets, which list at most 500 values each
+    log_ids: Optional[list[int]] = Field(None, max_length=20_000, description="Specific log IDs to delete (at most 20,000)")
+    sources: Optional[list[str]] = Field(None, max_length=500, description="Filter by source_alias or source_ip (multi-value supported, at most 500)")
+    apps: Optional[list[str]] = Field(None, max_length=500, description="Filter by app_name (multi-value supported, at most 500)")
     severity_max: Optional[int] = Field(None, ge=0, le=7, description="Max severity (0-7, lower is more severe)")
     from_: Optional[str] = Field(None, alias="from", description="ISO datetime start filter")
     to: Optional[str] = Field(None, description="ISO datetime end filter")

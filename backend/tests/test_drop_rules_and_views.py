@@ -1595,6 +1595,40 @@ class TestDropRulePatternLists:
         assert res.status_code == 422
 
     @pytest.mark.asyncio
+    async def test_import_applies_the_create_limits(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        res = await client.post(
+            "/api/drop-rules/import",
+            json={
+                "drop_rules": [
+                    {"name": "N" * 101, "message_pattern": "one"},
+                    {"source_pattern": ",".join(c * 50 for c in "abcdef"), "message_pattern": "two"},
+                    {"app_pattern": ",".join(c * 50 for c in "abcdef"), "message_pattern": "three"},
+                    {"message_pattern": "m" * 1001},
+                    {"name": "N" * 100, "app_pattern": "cron", "message_pattern": "m" * 1000},
+                ]
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["imported"] == 1
+        assert body["errors"] == [
+            "Item #1: name is longer than 100 characters.",
+            "Item #2: source_pattern is longer than 255 characters.",
+            "Item #3: app_pattern is longer than 255 characters.",
+            "Item #4: message_pattern is longer than 1000 characters.",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_import_of_more_than_500_rules_is_refused(self, client: AsyncClient, auth_cookie: dict):
+        client.cookies = auth_cookie
+        rules = [{"app_pattern": f"app-{i}", "message_pattern": "x"} for i in range(501)]
+        res = await client.post("/api/drop-rules/import", json={"drop_rules": rules})
+        assert res.status_code == 422
+        assert "500" in res.json()["detail"]
+        assert (await client.get("/api/drop-rules")).json() == []
+
+    @pytest.mark.asyncio
     async def test_import_skips_the_same_lists_in_another_order_or_case(self, client: AsyncClient, auth_cookie: dict):
         client.cookies = auth_cookie
         res = await client.post(

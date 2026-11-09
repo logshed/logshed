@@ -42,6 +42,25 @@ def import_items(payload: Any, bundle_key: str, single_key: str) -> Optional[lis
 
 INVALID_IMPORT_PAYLOAD = "Invalid payload format: expected JSON object or array."
 
+# Most rules one import file may hold
+MAX_IMPORT_RULES = 500
+
+
+def check_import_size(items: list[Any]) -> None:
+    """Refuse (422) an import file holding more rules than MAX_IMPORT_RULES."""
+    if len(items) > MAX_IMPORT_RULES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"An import file may hold at most {MAX_IMPORT_RULES} rules; this one holds {len(items)}.",
+        )
+
+
+def too_long(label: str, field: str, value: Optional[str], limit: int) -> Optional[str]:
+    """The import error for a field longer than the limit that creating a rule applies, or None."""
+    if value is not None and len(value) > limit:
+        return f"{label}: {field} is longer than {limit} characters."
+    return None
+
 
 def next_display_order(conn: sqlite3.Connection, table: str) -> int:
     """The display order that puts a new rule after every existing rule in table."""

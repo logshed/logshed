@@ -15,10 +15,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, st
 from app.api.deps import get_current_user, run_db_query
 from app.api.rule_transfer import (
     INVALID_IMPORT_PAYLOAD,
+    check_import_size,
     export_response,
     import_items,
     next_display_order,
     reorder_rules,
+    too_long,
 )
 from app.models import (
     AlertHistoryItem,
@@ -381,6 +383,7 @@ async def import_alert_rules(
     items = import_items(payload, "alert_rules", "alert_rule")
     if items is None:
         return AlertRuleImportResponse(imported=0, skipped=0, errors=[INVALID_IMPORT_PAYLOAD])
+    check_import_size(items)
 
     def _get_existing(conn):
         cur = conn.cursor()
@@ -405,6 +408,10 @@ async def import_alert_rules(
             continue
 
         name = str(raw_name).strip()
+        name_error = too_long(f"Item #{idx + 1}", "name", name, 100)
+        if name_error:
+            errors.append(name_error)
+            continue
         rule_type = str(raw_item.get("rule_type", "threshold")).strip().lower()
         if rule_type not in ("threshold", "pattern", "rate"):
             rule_type = "threshold"
@@ -429,6 +436,13 @@ async def import_alert_rules(
         match_pattern = str(match_pattern).strip() if match_pattern is not None else None
         if match_pattern == "":
             match_pattern = None
+
+        length_error = too_long(f"Rule '{name}'", "filter_app", filter_app, 100) or too_long(
+            f"Rule '{name}'", "match_pattern", match_pattern, 1000
+        )
+        if length_error:
+            errors.append(length_error)
+            continue
 
         if match_pattern:
             is_safe, err_str = check_regex_safety(match_pattern)
