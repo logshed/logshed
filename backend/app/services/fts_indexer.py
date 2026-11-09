@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from app.core.migrations import get_connection
+from app.core.pipeline import wait_for_ingest_write
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,8 @@ def merge_fts_index(
     'optimize' does. Later steps use a positive count so they continue that merge without
     restarting it when the indexer adds new b-trees meanwhile. The loop stops when a step
     changes fewer than two rows (nothing left to merge) or after max_steps; an unfinished merge
-    carries on at the next run. The connection must not have a transaction open.
+    carries on at the next run. A waiting ingest write goes between steps. The connection must
+    not have a transaction open.
 
     Returns:
         Number of merge steps that did work.
@@ -125,6 +127,7 @@ def merge_fts_index(
         if conn.total_changes - before < 2:
             break
         steps += 1
+        wait_for_ingest_write()
     return steps
 
 

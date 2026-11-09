@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **MCP streams end when their token is revoked**: An open Streamable HTTP event stream now closes as soon as its API token is revoked or loses `logs:read`, as legacy SSE streams already did. MCP request bodies over 1 MiB are refused with `413`.
 - **Deeply nested lists in AI answers**: An AI answer with thousands of nested list markers no longer fails to display. Lists are shown up to 10 levels deep, and anything deeper as plain text.
 - **Refuses a database from a newer version**: LogShed now refuses to start on a database upgraded by a newer version, instead of running on it. Going back to an older image after an upgrade that changed the database (for example from a future 1.4.0) used to run without a word, and could fail in odd places or write data the newer version misreads. Now the log names the database, its schema and the newest one this version knows, nothing is written, and the container exits; see "Going back to an older version" in `docs/CONFIGURATION.md`.
+- **No lost logs during large deletes and prunes**: Deleting or pruning millions of logs now lets incoming logs be stored between its steps. Before, the delete took the database back straight after each step, so new logs waited for seconds and, once LogShed's queue was full, were lost: deleting 4 million logs in a test while 2,000 logs/s arrived lost 3,904 of them, and now none.
 
 ## [1.3.0] - 2026-11-09
 

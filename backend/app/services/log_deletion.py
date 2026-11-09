@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from app.core.migrations import get_connection
+from app.core.pipeline import wait_for_ingest_write
 from app.core.utils import expand_source_aliases, parse_multi_values, source_filter_sql
 from app.models import LogDeleteRequest
 from app.services.log_query import add_fts_filter, execute_with_fts_fallback, to_utc_bound
@@ -139,7 +140,10 @@ def _delete_matching(
     params: dict[str, Any],
     batch_size: int,
 ) -> int:
-    """Delete the logs the criteria select, committing each chunk; return how many went."""
+    """
+    Delete the logs the criteria select, committing each chunk and letting a waiting ingest
+    write go between chunks; return how many went.
+    """
     total_deleted = 0
     # If direct log IDs are given, chunk them into groups of 500
     if criteria.log_ids:
@@ -151,6 +155,7 @@ def _delete_matching(
             cursor.execute(f"DELETE FROM logs WHERE id IN ({placeholders})", chunk_params)
             conn.commit()
             total_deleted += cursor.rowcount
+            wait_for_ingest_write()
     else:
         # Iterative batch deletion by criteria
         delete_sql = f"""
@@ -170,6 +175,7 @@ def _delete_matching(
                 deleted += count
                 if count == 0:
                     return deleted
+                wait_for_ingest_write()
 
         total_deleted += execute_with_fts_fallback(_delete_batches, params, criteria.query, empty=0)
     return total_deleted

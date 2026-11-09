@@ -5,6 +5,7 @@ Provides the shared queue, multiline assembly, and SQLite batch consumer.
 
 import asyncio
 import datetime
+import functools
 import logging
 import re
 import sqlite3
@@ -239,6 +240,33 @@ _dropped_logs_lock = threading.Lock()
 _dropped_by_filter_total: int = 0
 _dropped_by_filter_lock = threading.Lock()
 _QUEUE_MAXSIZE = 10000
+
+# Clear while the QueueConsumer stores a batch (waiting for the write lock or holding it). Long
+# deletes and prunes commit in chunks and wait on it between chunks: without that, their next
+# chunk usually takes the lock again before the consumer's busy handler retries, the consumer
+# waits for seconds, and the queue fills until logs are lost.
+_ingest_write_idle = threading.Event()
+_ingest_write_idle.set()
+# Longest wait for one consumer write, so a stuck writer cannot stall a delete
+INGEST_TURN_TIMEOUT = 1.0
+
+
+def wait_for_ingest_write() -> None:
+    """Between two chunks of a long write: let a waiting ingest batch store first."""
+    _ingest_write_idle.wait(INGEST_TURN_TIMEOUT)
+
+
+def _takes_ingest_turn(fn):
+    """Mark the ingest write as pending while the decorated method runs (in a worker thread)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        _ingest_write_idle.clear()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _ingest_write_idle.set()
+    return wrapper
+
 
 def get_queue() -> asyncio.Queue:
     """Returns the singleton log queue, creating it if needed."""
@@ -1165,6 +1193,7 @@ class QueueConsumer:
         await asyncio.to_thread(self._close_conn)
         logger.info("QueueConsumer stopped: all pending logs drained and committed.")
 
+    @_takes_ingest_turn
     def _insert_batch(self, batch: list[dict]) -> None:
         """Synchronous: insert batch into SQLite using chunked multi-row queries and assign generated row IDs."""
         if not batch:
@@ -1209,6 +1238,7 @@ class QueueConsumer:
                 self._close_conn()
             raise e
 
+    @_takes_ingest_turn
     def _insert_rows_separately(self, batch: list[dict]) -> tuple[list[dict], list[tuple[dict, Exception]]]:
         """
         Synchronous: store a batch that failed as a whole one row at a time, each in its own

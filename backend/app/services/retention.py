@@ -15,6 +15,7 @@ from typing import Any, Optional, Union
 from app.services.operation_guard import OperationInProgressError, run_exclusive
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
+from app.core.pipeline import wait_for_ingest_write
 from app.services.storage_metrics import note_logs_deleted, record_metrics, prune_old_metrics
 
 logger = logging.getLogger(__name__)
@@ -284,6 +285,7 @@ def execute_prune(
                 total_deleted += count
                 if count == 0:
                     break
+                wait_for_ingest_write()
         finally:
             note_logs_deleted()
 

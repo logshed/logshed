@@ -402,17 +402,20 @@ Daily task runs iterative batch pruning coordinated with the FTS indexing waterm
 1. Drain unindexed logs via `index_pending_logs(db_path)` to ensure all historical records are searchable prior to purge.
 2. Loop batch deletions until no matching rows remain, guarded by `last_indexed_id`:
    `DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE timestamp < datetime('now', '-' || :retention_days || ' days') AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1) LIMIT 5000);`
+   After each chunk commits, the prune waits (at most 1 s) while a `QueueConsumer` batch is waiting for the write lock or being stored (`wait_for_ingest_write` in `backend/app/core/pipeline.py`), so ingestion writes between chunks. Without the wait, the next chunk usually took the lock again before the consumer's busy handler retried, and a large prune left the consumer waiting for seconds while the ingest queue filled.
 3. Prune alert history and AI audit records older than the cutoff (all history follows the global `retention_days`):
    - Non-maintenance `alert_history` rows (alert firings, Daily Digest, On-Demand Analysis) are deleted when `triggered_at` is older than the cutoff.
    - Maintenance window rows are deleted when their session has ended and `ended_at` is older than the cutoff (a maintenance row whose session no longer exists falls back to `triggered_at`); running sessions are never deleted. Ended sessions older than the cutoff are then deleted too.
    - The `ai_audit_log` row linked by `ai_audit_id` is deleted with its history row unless a kept history row still references it. Unreferenced `ai_audit_log` rows older than the cutoff are deleted as well. Follow-up conversation threads in `ai_conversation_messages` are removed with their `ai_audit_log` row by cascade.
    - The prune result reports `deleted_logs` (logs only), `deleted_history` and `deleted_ai_audit` separately.
 4. Compact the FTS5 index in short merge steps:
-   `INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', N);` (`merge_fts_index` in `backend/app/services/fts_indexer.py`). Each step writes 500 pages and commits on its own, with at most 200 steps per run; the first step (a negative page count) starts a full merge and later steps continue it, and an unfinished merge carries on at the next run. A single `optimize` is not used because it held the write lock until the whole index was rewritten, long enough to make ingestion inserts wait or fail.
+   `INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', N);` (`merge_fts_index` in `backend/app/services/fts_indexer.py`). Each step writes 500 pages and commits on its own, with at most 200 steps per run; the first step (a negative page count) starts a full merge and later steps continue it, and an unfinished merge carries on at the next run. Between steps it waits for a pending ingest batch as in step 2. A single `optimize` is not used because it held the write lock until the whole index was rewritten, long enough to make ingestion inserts wait or fail.
 5. Checkpoint and truncate the WAL:
    `PRAGMA wal_checkpoint(TRUNCATE);`
 
 Saving a lower retention does not prune by itself. Deletion happens at the next `PruneWorker` run (at startup, then 24 hours after each run) or when the user chooses to purge immediately. `GET /api/maintenance/prune/preview` returns the counts a prune would delete using the same predicates (including the `last_indexed_id` guard), so the UI can confirm before anything is removed. The worker publishes its next scheduled run time in memory for the preview.
+
+Deleting logs (`POST /api/logs/delete`, [`backend/app/services/log_deletion.py`](../../backend/app/services/log_deletion.py)) uses the same 5,000-row chunks (500 for a list of IDs) and waits for a pending ingest batch between them. It first indexes pending logs, so the `logs_ad` trigger removes each deleted row from `logs_fts`, and runs the merge steps above after deleting 5,000 rows or more.
 
 ### 2.7 Storage Metrics & Disk Monitoring
 - **Sampling Strategy:** Background worker samples metrics hourly and immediately following any manual/automated prune event.
