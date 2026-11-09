@@ -720,3 +720,48 @@ class TestRedactorInputCap:
         result = redact(["short", self._big_text(MAX_REDACT_INPUT_CHARS + 10)])
         assert result[0] == "short"
         assert result[1].endswith("\n" + TRUNCATION_MARKER)
+
+
+class TestRedactorPatternGuards:
+    """Patterns are skipped on ASCII text that lacks every string a match needs."""
+
+    def test_every_pattern_has_a_guard(self):
+        from app.core.redactor import _PATTERN_GUARDS, _PATTERNS
+
+        assert {name for name, _, _ in _PATTERNS} == set(_PATTERN_GUARDS)
+
+    def test_each_guard_string_appears_in_its_patterns_matches(self):
+        """A sample secret for every pattern is redacted, so no guard skips a pattern that applies."""
+        samples = {
+            "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----",
+            "bearer_token": "AUTHORIZATION: Bearer abc.def.ghi",
+            "cookie_header": "Set-Cookie: sid=abc123",
+            "api_key": "ACCESS_KEY=abcdefgh12345",
+            "x_api_key_header": "x-Api-KEY: abcdef123456",
+            "password_field": "DB_PWD=hunter2",
+            "pass_field": "PASS=hunter2",
+            "token_field": "Refresh_Token=abcdef123456",
+            "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop",
+            "aws_access_key": "key AKIAIOSFODNN7EXAMPLE here",
+            "connection_string": "postgres://user:secretpw@db:5432/app",
+            "curl_auth": "curl -u admin:hunter2 http://x",
+            "sk_token": "sk-proj-abcdefghijklmnopqrstuvwxyz",
+            "github_token": "ghp_" + "a" * 36,
+            "google_api_key": "AIza" + "c" * 35,
+            "telegram_bot_token": "123456789:" + "d" * 35,
+            "slack_webhook": "https://HOOKS.slack.com/services/T0/B0/xyz",
+            "url_signature": "https://x/y?Signature=abc123",
+            "sshpass_auth": "SSHPASS -p hunter2 ssh host",
+            "docker_registry_auth": "REGISTRY_AUTH=abcdef123456",
+        }
+        for name, text in samples.items():
+            assert REDACTED in redact(text), name
+
+    def test_non_ascii_text_runs_every_pattern(self):
+        """IGNORECASE matches the long s to "s", which lowercasing cannot show, so such text skips no pattern."""
+        assert redact("pa\u017fsword=hunter2") == f"pa\u017fsword={REDACTED}"
+        assert redact("caf\u00e9 PassWord=hunter2") == f"caf\u00e9 PassWord={REDACTED}"
+
+    def test_plain_lines_are_unchanged(self):
+        line = "GET /api/v1/items HTTP/1.1 200 412 41ms"
+        assert redact(line) == line

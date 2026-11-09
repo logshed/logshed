@@ -23,7 +23,7 @@ every pattern must run in linear time on hostile input:
 """
 
 import re
-from typing import Union
+from typing import Optional, Union
 
 # Placeholder used for redacted values
 REDACTED = "[REDACTED]"
@@ -351,6 +351,50 @@ _PATTERNS: list[tuple[str, re.Pattern, str]] = [
 ]
 
 
+# Lowercase text that every match of a pattern contains (one of the strings is enough). On ASCII
+# text, a pattern is skipped when none of its strings occurs, which saves running most of the
+# patterns over ordinary log lines. Non-ASCII text runs every pattern, because IGNORECASE also
+# matches a few non-ASCII letters to ASCII ones (the long s to "s", the Kelvin sign to "k").
+# Replacements only add REDACTED, which holds none of these strings, so an earlier
+# substitution cannot give a skipped pattern a new match.
+_PATTERN_GUARDS: dict[str, tuple[str, ...]] = {
+    "private_key": ("-----begin",),
+    "bearer_token": ("authorization",),
+    "basic_auth": ("authorization",),
+    "cookie_header": ("cookie",),
+    "api_key": ("api", "access", "secret"),
+    "x_api_key_header": ("x-api-key",),
+    "password_field": ("password", "passwd", "pwd"),
+    "pass_field": ("pass",),
+    "token_field": ("token",),
+    "jwt": ("eyj",),
+    "aws_access_key": ("a3t", "akia", "asia", "aida", "aroa", "anpa", "aipa", "anva", "apka"),
+    "aws_secret_key": ("secret",),
+    "connection_string": ("://",),
+    "curl_auth": ("-u",),
+    "logshed_api_token": ("ls_live_",),
+    "sk_token": ("sk-",),
+    "stripe_key": ("_live_", "_test_"),
+    "github_token": ("ghp_", "gho_", "ghu_", "ghs_", "ghr_"),
+    "github_fine_grained_pat": ("github_pat_",),
+    "gitlab_pat": ("glpat-",),
+    "google_api_key": ("aiza",),
+    "telegram_bot_token": (":",),
+    "telegram_bot_api_url": ("api.telegram.org/bot",),
+    "pushover_token": ("pushover",),
+    "slack_webhook": ("hooks.slack.com",),
+    "discord_webhook": ("discord",),
+    "url_signature": ("sig=", "signature="),
+    "generic_secret": ("secret",),
+    "sshpass_auth": ("sshpass",),
+    "docker_registry_auth": ("registry",),
+}
+# Every pattern with its guard (None: always run)
+_GUARDED_PATTERNS: list[tuple[re.Pattern, str, Optional[tuple[str, ...]]]] = [
+    (pattern, replacement, _PATTERN_GUARDS.get(name)) for name, pattern, replacement in _PATTERNS
+]
+
+
 def redact(text: Union[str, list[str]]) -> Union[str, list[str]]:
     """
     Scrub sensitive secrets from log text.
@@ -410,6 +454,9 @@ def _cap_input(text: str) -> str:
 def _redact_single(text: str) -> str:
     """Apply all redaction patterns to a single string."""
     result = _truncate_long_lines(_cap_input(text))
-    for _name, pattern, replacement in _PATTERNS:
+    lowered = result.lower() if result.isascii() else None
+    for pattern, replacement, guard in _GUARDED_PATTERNS:
+        if guard is not None and lowered is not None and not any(g in lowered for g in guard):
+            continue
         result = pattern.sub(replacement, result)
     return result
