@@ -81,6 +81,7 @@ from app.services.log_query import (
     context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
+    run_newest_first,
     run_search_query,
     to_utc_bound,
 )
@@ -783,7 +784,19 @@ async def search_logs_v1(
             db_cursor.execute(select_sql, {**run_params, **cursor_params, "fetch_limit": limit + 1})
             return run_total, db_cursor.fetchall()
 
-        total, rows = execute_with_fts_fallback(_run, params, query, empty=(0, []))
+        def _oldest_needed(result: tuple[int, list]) -> Optional[str]:
+            run_total, run_rows = result
+            if run_total >= _TOTAL_CAP and len(run_rows) > limit:
+                return run_rows[-1]["timestamp"]
+            # Too few matches: still complete when the window covers the whole time range
+            return params.get("from_ts")
+
+        total, rows = execute_with_fts_fallback(
+            lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], _TOTAL_CAP),
+            params,
+            query,
+            empty=(0, []),
+        )
 
         # One extra row signals another page exists
         has_more = len(rows) > limit

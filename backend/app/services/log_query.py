@@ -38,7 +38,15 @@ DB_BUSY_DETAIL = "The database is busy. Try again in a moment."
 # Uncorrelated subquery: FTS5 evaluates the MATCH exactly once. A JOIN lets the planner
 # drive from a relational index (e.g. app_name) and re-run the MATCH per candidate row,
 # rebuilding the full doclist of auto-prefixed terms each time (quadratic cost).
-FTS_MATCH_CLAUSE = "logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term)"
+# :fts_min_rowid is 0 (every row) unless run_newest_first narrows the match to the newest rows.
+FTS_MATCH_CLAUSE = (
+    "logs.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH :fts_term AND rowid >= :fts_min_rowid)"
+)
+
+# Newest-first searches first match only the newest this many rows, widening in turn and then
+# to every row. FTS5 seeks a rowid range in its doclists, so a common term or phrase no longer
+# looks up and sorts every match in the database to show the newest page.
+NEWEST_FIRST_WINDOWS = (100_000, 1_000_000, 10_000_000)
 
 # A search still running after this long is stopped (the client gets HTTP 504), so a client
 # with no timeout of its own cannot hold a database thread indefinitely.
@@ -89,6 +97,55 @@ def add_fts_filter(where_clauses: list[str], params: dict[str, Any], query: Opti
         return
     where_clauses.append(FTS_MATCH_CLAUSE)
     params["fts_term"] = fts_term
+    params["fts_min_rowid"] = 0
+
+
+def run_newest_first(
+    conn: sqlite3.Connection,
+    params: dict[str, Any],
+    run: Callable[[dict[str, Any]], T],
+    oldest_needed: Callable[[T], Optional[str]],
+    matches: Callable[[T], int],
+    needed: int,
+) -> T:
+    """
+    Run a newest-first search ``run(params)``, matching full-text terms in the newest rows first.
+
+    ``run`` executes the count and page statements of one attempt. ``oldest_needed`` returns
+    the timestamp of the oldest row the caller needs from that attempt (the last row of a full
+    page, with the capped count reached; with too few matches, the search's lower time bound),
+    or None when only a search over every row can tell. A window's result is used only when
+    every row at least that new lies inside the window, so results are exactly those of a
+    search over every row; otherwise a wider window is tried, and the last attempt matches
+    every row. ``matches`` is an attempt's capped match count and ``needed`` the count that
+    fills a page and the total's cap: windows too small to hold that many at the density just
+    seen are skipped, so a rare term goes straight to every row. Queries without a full-text
+    term run once, unchanged.
+    """
+    if "fts_term" not in params:
+        return run(params)
+    max_id = conn.execute("SELECT MAX(id) FROM logs").fetchone()[0]
+    if max_id is not None:
+        smallest_useful_span = 0.0
+        for span in NEWEST_FIRST_WINDOWS:
+            if span < smallest_useful_span:
+                continue
+            min_rowid = max_id - span + 1
+            if min_rowid <= 1:
+                break
+            result = run({**params, "fts_min_rowid": min_rowid})
+            cutoff = oldest_needed(result)
+            if cutoff is not None:
+                # MIN(+id) keeps SQLite on the timestamp index: rows are mostly in id order, but
+                # a late or back-dated row outside the window could still belong on the page.
+                oldest_id = conn.execute(
+                    "SELECT MIN(+id) FROM logs WHERE timestamp >= ?", (cutoff,)
+                ).fetchone()[0]
+                if oldest_id is not None and oldest_id >= min_rowid:
+                    return result
+            found = matches(result)
+            smallest_useful_span = span * needed / found if found else float("inf")
+    return run({**params, "fts_min_rowid": 0})
 
 
 async def run_search_query(fn: Callable[[sqlite3.Connection], T], request: Optional[Request] = None) -> T:

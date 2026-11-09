@@ -37,6 +37,7 @@ from app.services.log_query import (
     context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
+    run_newest_first,
     run_search_query,
     to_utc_bound,
 )
@@ -141,7 +142,19 @@ async def list_logs(
             cursor.execute(select_sql, run_params)
             return run_total, cursor.fetchall()
 
-        total, rows = execute_with_fts_fallback(_run, params, query, empty=(0, []))
+        def _oldest_needed(result: tuple[int, list]) -> Optional[str]:
+            run_total, run_rows = result
+            if run_total >= count_limit and len(run_rows) >= limit:
+                return run_rows[-1]["timestamp"]
+            # Too few matches: still complete when the window covers the whole time range
+            return from_time
+
+        total, rows = execute_with_fts_fallback(
+            lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], count_limit),
+            params,
+            query,
+            empty=(0, []),
+        )
 
         logs = [
             LogEntry(
