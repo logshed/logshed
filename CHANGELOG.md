@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Log storm alerts redact the top message**: The most frequent message of a rate (Log Storm) alert, shown as Top Pattern, is now redacted like the rest of the alert before it goes to a notification channel or the AI provider. Before, a storm of lines holding a password sent it in that one field.
 - **Code fences in alert AI prompts**: A log line holding three backticks can no longer close the code block that holds the logs in an alert's AI enrichment prompt. They are replaced as in manual analysis, so the model reads the whole line as log text.
 - **Delete Logs custom range uses the server time zone**: In Storage, the Custom Range From and To times of Targeted Log Deletion are now read in the server's time zone, like the Console's date pickers, and the fields name that zone. Before, they were read in the browser's zone, so when the two differed the deletion covered a range shifted by the difference.
+- **Encryption key kept when it cannot be read**: If `/data/.secret_key` exists but cannot be read (a disk error or wrong permissions, for example), LogShed now stops at start-up with an error naming the file. Before, it wrote a new key over it, and every stored secret (AI keys, notification URLs, Docker TLS keys) and every session was lost for good.
 
 ## [1.3.0] - 2026-11-09
 

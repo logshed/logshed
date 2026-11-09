@@ -253,7 +253,7 @@ All persistent application data is stored under the `/data` directory:
 | `/data/logs.db` | Primary SQLite database holding ingested logs, alert rules, drop rules, and settings. |
 | `/data/logs.db-wal` | SQLite Write-Ahead Log file for concurrent writes and non-blocking reads. |
 | `/data/logs.db-shm` | SQLite shared-memory index file for WAL checkpointing. |
-| `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). Anyone holding a backup of `/data` also holds this key. To keep the key out of `/data` backups, set `LOGSHED_SECRET_KEY` instead (see above) and store the value separately. |
+| `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). Anyone holding a backup of `/data` also holds this key. To keep the key out of `/data` backups, set `LOGSHED_SECRET_KEY` instead (see above) and store the value separately. If the file exists but cannot be read, or is not a regular file, LogShed stops at start-up with an error naming it rather than replace the key; an empty file is replaced. |
 | `/data/presets/alerts/` | Directory for custom and community alert rule JSON definitions. |
 | `/data/presets/drops/` | Directory for custom and community ingestion drop rule JSON definitions. |
 

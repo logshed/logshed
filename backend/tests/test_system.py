@@ -766,6 +766,58 @@ class TestSettingsEncryptionAndKeyManagement:
         mode = stat.S_IMODE(os.stat(key_file).st_mode)
         assert mode == 0o600
 
+    def test_unreadable_secret_key_is_kept_and_start_up_fails(self, tmp_path: Path, monkeypatch):
+        """A read error must not replace the key: every stored secret depends on it."""
+        reset_crypto_cache()
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        key_file = tmp_path / ".secret_key"
+        key_file.write_bytes(b"existing-key-material")
+        real_read_bytes = Path.read_bytes
+
+        def failing_read_bytes(self):
+            if self == key_file:
+                raise OSError(5, "Input/output error")
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", failing_read_bytes)
+        with pytest.raises(RuntimeError, match=str(key_file)):
+            get_or_create_master_key(key_file)
+        monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
+        assert key_file.read_bytes() == b"existing-key-material"
+        reset_crypto_cache()
+
+    def test_secret_key_path_that_is_not_a_readable_file_is_left_alone(self, tmp_path: Path, monkeypatch):
+        reset_crypto_cache()
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        target = tmp_path / "elsewhere" / "key"
+        link = tmp_path / "linked_secret_key"
+        link.symlink_to(target)
+        with pytest.raises(RuntimeError, match=str(link)):
+            get_or_create_master_key(link)
+        assert link.is_symlink()
+        assert not target.exists()
+
+        directory = tmp_path / "dir_key"
+        directory.mkdir()
+        with pytest.raises(RuntimeError, match=str(directory)):
+            get_or_create_master_key(directory)
+        reset_crypto_cache()
+
+    def test_existing_secret_key_is_reused_and_an_empty_one_replaced(self, tmp_path: Path, monkeypatch):
+        reset_crypto_cache()
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        key_file = tmp_path / ".secret_key"
+        first = get_or_create_master_key(key_file)
+        reset_crypto_cache()
+        assert get_or_create_master_key(key_file) == first
+
+        reset_crypto_cache()
+        key_file.write_bytes(b"")
+        replaced = get_or_create_master_key(key_file)
+        assert replaced and key_file.read_bytes() == replaced
+        assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600
+        reset_crypto_cache()
+
     def test_secret_key_environment_variable_override(self, monkeypatch):
         reset_crypto_cache()
         override_key = "custom_super_secret_override_key_12345"

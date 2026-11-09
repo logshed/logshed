@@ -92,23 +92,34 @@ def get_or_create_master_key(custom_key_path: Optional[Path] = None) -> bytes:
     key_path = custom_key_path or get_secret_key_path()
     key_path = Path(key_path)
 
-    # 2. Key file exists
-    if key_path.is_file():
+    # 2. Key file exists. A key that exists but cannot be read is never replaced: every stored
+    # secret is encrypted with it, so a new key would lose them all for good.
+    if os.path.lexists(key_path):
+        if key_path.is_symlink() or not key_path.is_file():
+            raise RuntimeError(
+                f"The encryption key path {key_path} is not a regular file. LogShed will not replace it; "
+                "fix or remove it, then start LogShed again."
+            )
         try:
             content = key_path.read_bytes().strip()
-            if content:
-                derived = _derive_fernet_key(content)
-                _cached_key = derived
-                _cached_fernet = Fernet(derived)
-                return derived
-        except Exception as e:
-            logger.error(f"Failed to read secret key from {key_path}: {e}")
+        except OSError as e:
+            raise RuntimeError(
+                f"Cannot read the encryption key file {key_path}: {e}. LogShed will not start, so that the key "
+                "and the secrets encrypted with it are not lost. Check the file and its permissions, then start LogShed again."
+            ) from e
+        if content:
+            derived = _derive_fernet_key(content)
+            _cached_key = derived
+            _cached_fernet = Fernet(derived)
+            return derived
+        # An empty file holds no key, so nothing can depend on it
+        key_path.unlink()
 
-    # 3. Generate new key and persist with 0600 permissions
+    # 3. Generate new key and persist with 0600 permissions, never through a symlink or over another file
     new_key = Fernet.generate_key()
     try:
         key_path.parent.mkdir(parents=True, exist_ok=True)
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         mode = 0o600
         fd = os.open(str(key_path), flags, mode)
         with os.fdopen(fd, "wb") as f:
