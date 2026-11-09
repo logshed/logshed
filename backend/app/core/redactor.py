@@ -47,9 +47,11 @@ _CUT_DELIMITERS = " \t,;&\"'="
 _Q = r"""(?:\\?["'])?"""
 # Separator between a key name and its value, allowing the key's closing quote.
 _SEP = _Q + r"\s*[:=]\s*"
-# A password-like value: a whole quoted string (spaces allowed), or a bare value.
+# A password-like value: a whole quoted string (spaces and backslash-escaped quotes allowed), or a
+# bare value. A quoted scan stops at the first unescaped quote. Each value's opening quote follows the
+# separator, never a backslash, so no scan runs past the next value's opening quote: linear time.
 _SECRET_VALUE = (
-    r"""(?:"[^"\r\n]+"|'[^'\r\n]+'|\\"[^"\r\n]+?\\"|"""
+    r"""(?:"(?:\\[^\r\n]|[^"\\\r\n])+"|'(?:\\[^\r\n]|[^'\\\r\n])+'|\\"[^"\r\n]+?\\"|"""
     + _Q
     + r"""[^\s,;"'}{)(\]]+"""
     + _Q
@@ -81,11 +83,11 @@ _PATTERNS: list[tuple[str, re.Pattern, str]] = [
     ),
 
     # --- Authentication Headers ---
-    # Bearer tokens in Authentication headers (matching RFC 7235 Authorization header syntax)
+    # Bearer, Token and ApiKey credentials in Authorization headers (RFC 7235 syntax)
     (
         "bearer_token",
         re.compile(
-            r"(authorization" + _SEP + _Q + r"Bearer\s+)\S+",
+            r"(authorization" + _SEP + _Q + r"(?:Bearer|Token|Api-?Key)\s+)\S+",
             re.IGNORECASE,
         ),
         rf"\1{REDACTED}",
@@ -258,10 +260,18 @@ _PATTERNS: list[tuple[str, re.Pattern, str]] = [
         re.compile(r"AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])"),
         REDACTED,
     ),
-    # Telegram bot tokens: <bot id>:<35 chars>, often as /bot<token>/ in API URLs
+    # Telegram bot tokens: <bot id>:<usually 35 chars, 34 in Telegram's own example>, often as
+    # /bot<token>/ in API URLs
     (
         "telegram_bot_token",
-        re.compile(r"\b(bot)?\d{6,12}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])"),
+        re.compile(r"\b(bot)?\d{6,12}:[A-Za-z0-9_-]{30,50}(?![A-Za-z0-9_-])"),
+        rf"\1{REDACTED}",
+    ),
+    # Anything in the bot part of a Telegram Bot API URL is the token. The scan stops at `/`,
+    # which every new start contains.
+    (
+        "telegram_bot_api_url",
+        re.compile(r"""(api\.telegram\.org/bot)[^/\s?#"'<>]+""", re.IGNORECASE),
         rf"\1{REDACTED}",
     ),
 

@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Code fences in alert AI prompts**: A log line holding three backticks can no longer close the code block that holds the logs in an alert's AI enrichment prompt. They are replaced as in manual analysis, so the model reads the whole line as log text.
 - **Delete Logs custom range uses the server time zone**: In Storage, the Custom Range From and To times of Targeted Log Deletion are now read in the server's time zone, like the Console's date pickers, and the fields name that zone. Before, they were read in the browser's zone, so when the two differed the deletion covered a range shifted by the difference.
 - **Encryption key kept when it cannot be read**: If `/data/.secret_key` exists but cannot be read (a disk error or wrong permissions, for example), LogShed now stops at start-up with an error naming the file. Before, it wrote a new key over it, and every stored secret (AI keys, notification URLs, Docker TLS keys) and every session was lost for good.
+- **More secrets redacted**: Redaction (before AI analysis, in notifications and in external API and MCP responses) now covers quoted passwords holding an escaped quote (`"secret\"pass"`, where part of the secret used to show), `Authorization: Token ...` and `Authorization: ApiKey ...` headers, and Telegram bot tokens of any usual length, including every token in an `api.telegram.org/bot...` URL.
 
 ## [1.3.0] - 2026-11-09
 

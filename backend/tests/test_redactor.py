@@ -294,6 +294,15 @@ class TestRedactorQuotedKeys:
         assert "staple" not in result
         assert '"user": "bob"' in result
 
+    def test_json_password_with_escaped_quotes_redacted_whole(self):
+        result = redact(r'{"password": "secret\"pass", "user": "bob"}')
+        assert "pass\"" not in result
+        assert result == '{"password": ' + REDACTED + ', "user": "bob"}'
+
+        result = redact(r"{'password': 'it\'s secret', 'user': 'bob'}")
+        assert "secret" not in result
+        assert result == "{'password': " + REDACTED + ", 'user': 'bob'}"
+
     def test_nested_json_api_key_redacted(self):
         result = redact('{"auth":{"api_key":"abcd1234efgh5678"}}')
         assert "abcd1234efgh5678" not in result
@@ -404,6 +413,29 @@ class TestRedactorTokenFormats:
 
         result = redact(f"telegram token {token} rejected")
         assert "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw1" not in result
+
+    def test_telegram_bot_tokens_of_other_lengths_redacted(self):
+        # Telegram's own documented example has 34 characters after the colon
+        for secret in ("AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", "AAE" + "x9" * 20):
+            token = "110201543:" + secret
+            result = redact(f"GET https://api.telegram.org/bot{token}/getMe failed")
+            assert secret not in result
+            assert f"https://api.telegram.org/bot{REDACTED}/getMe" in result
+            result = redact(f"telegram token {token} rejected")
+            assert secret not in result
+
+    def test_telegram_api_url_redacted_whatever_the_token_looks_like(self):
+        result = redact("POST https://api.telegram.org/botABC:short-token/sendMessage?chat_id=1")
+        assert "short-token" not in result
+        assert f"https://api.telegram.org/bot{REDACTED}/sendMessage?chat_id=1" in result
+
+    def test_authorization_token_and_api_key_schemes_redacted(self):
+        for scheme in ("Token", "token", "ApiKey", "Api-Key"):
+            result = redact(f"Authorization: {scheme} abcdef0123456789abcdef")
+            assert "abcdef0123456789abcdef" not in result
+            assert result == f"Authorization: {scheme} {REDACTED}"
+        result = redact('{"Authorization": "Token abcdef0123456789abcdef"}')
+        assert "abcdef0123456789abcdef" not in result
 
     def test_google_api_key_redacted(self):
         key = "AIzaSyD-1234567890abcdefghijklmnopqrstu"
@@ -554,6 +586,11 @@ _ADVERSARIAL_INPUTS = {
     "curl_user_without_colon": _lines("-u -u ", 2400),
     "telegram_like_digits": _lines("bot123456789:", 1100),
     "cookie_headers": _lines("Cookie: a=b; ", 1100),
+    "escaped_quotes_after_password_keys": _lines('password:"\\"', 1300),
+    "escaped_quote_runs_without_close": _lines('password: "' + '\\"' * 7000, 1),
+    "authorization_token_repeated": _lines("authorization: Token ", 750),
+    "telegram_api_url_repeated": _lines("api.telegram.org/bot", 780),
+    "telegram_like_long_tokens": _lines("123456789:" + "A" * 60 + " ", 220),
 }
 
 
