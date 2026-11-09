@@ -776,6 +776,8 @@ class AlertEvaluator:
                     extracted_host = top_host
             if msg_counter:
                 top_msg, msg_count = msg_counter.most_common(1)[0]
+                # Notifications and the AI prompt show this message, so it is redacted like the sample log
+                top_msg = str(redact(top_msg))
                 msg_count = min(msg_count, total_logs)
                 msg_pct = round((msg_count / total_logs) * 100)
                 culprit_msg = f"{top_msg} (x{msg_count}, {msg_pct}%)"

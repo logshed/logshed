@@ -1580,6 +1580,77 @@ class TestQueueConsumerAlertIntegration:
         assert "repeated failure payload" in captured_prompt
         assert "logs/s" in captured_prompt
 
+    @pytest.mark.asyncio
+    async def test_rate_alert_top_pattern_is_redacted_in_notification_and_ai_prompt(self, test_db: Path, monkeypatch):
+        """The most frequent message of a log storm is redacted before it reaches a notification or the AI provider."""
+        _turn_ai_on(test_db)
+        conn = get_connection(test_db)
+        conn.execute(
+            """
+            INSERT INTO alert_rules
+            (name, rule_type, threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, 1, ?)
+            """,
+            ("Secret Storm", "rate", 5, 2, 300, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        conn.close()
+
+        captured_prompt = None
+        async def mock_ai(**kwargs):
+            nonlocal captured_prompt
+            captured_prompt = kwargs.get("prompt_override")
+            return AiAnalysisResult(
+                summary="Login storm",
+                root_cause="A client retries with a bad password",
+                remediation="Fix the client",
+                raw_response="raw",
+                prompt_sent="prompt",
+                tokens_in=1,
+                tokens_out=1,
+                tokens_thoughts=0,
+                tokens_used=2,
+                model_used="mock-model",
+            )
+
+        monkeypatch.setattr("app.services.ai_engine.execute_ai_analysis", mock_ai)
+
+        notifications = []
+        async def mock_send(self, title, body, channel_id=None, **kwargs):
+            notifications.append(body)
+            return True
+
+        from app.services.notifier import NotifierService
+        monkeypatch.setattr(NotifierService, "send_notification", mock_send)
+
+        evaluator = AlertEvaluator(test_db)
+        now = datetime.now(timezone.utc)
+        batch = [
+            {
+                "id": i,
+                "app_name": "auth-proxy",
+                "source_alias": "edge-01",
+                "message": "login failed for admin password=hunter2",
+                "timestamp": (now + timedelta(seconds=i * 0.1)).isoformat(),
+            }
+            for i in range(12)
+        ]
+        await evaluator.evaluate_batch(batch)
+        await asyncio.sleep(0.1)
+        await evaluator.stop()
+
+        assert len(notifications) == 1
+        body = notifications[0]
+        top_pattern = next(line for line in body.splitlines() if line.startswith("**Top Pattern:**"))
+        assert "[REDACTED]" in top_pattern
+        assert "hunter2" not in body
+
+        assert captured_prompt is not None
+        culprits = captured_prompt.split("### Primary Culprits", 1)[1].split("###", 1)[0]
+        assert "login failed for admin" in culprits
+        assert "[REDACTED]" in culprits
+        assert "hunter2" not in captured_prompt
+
 
 class TestGlobalMaintenanceWindow:
     """Tests for global maintenance window silencing notifications while recording alert history."""
