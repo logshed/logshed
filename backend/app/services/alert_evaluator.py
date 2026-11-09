@@ -796,7 +796,7 @@ class AlertEvaluator:
             try:
                 from app.api.deps import run_db_query
                 from app.services.ai_service import read_ai_settings, resolve_ai_provider_settings
-                from app.services.ai_engine import execute_ai_analysis, format_prompt_log_line
+                from app.services.ai_engine import escape_code_fences, execute_ai_analysis, format_prompt_log_line
 
                 ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
 
@@ -839,6 +839,8 @@ class AlertEvaluator:
                     ]
                     redacted_lines = await asyncio.to_thread(redact, raw_lines)
                     redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
+                    # A log line must not close the prompt's code fence
+                    redacted_text = escape_code_fences(redacted_text)
 
                     if rule.rule_type == "rate":
                         threshold_line = f"- Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s (Measured: {measured_rate} logs/s)"

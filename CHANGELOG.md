@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **First lines after a Docker reconnect**: A container that started while LogShed was reconnecting to its Docker host now keeps the lines it wrote before LogShed caught up.
 - **Log lines starting with a severity word**: Messages starting with words like Error, Warning or Notice (such as "Error on Supervisor API") without a colon or columnar spacing no longer have their first word trimmed in the Console or log detail payload.
 - **Log storm alerts redact the top message**: The most frequent message of a rate (Log Storm) alert, shown as Top Pattern, is now redacted like the rest of the alert before it goes to a notification channel or the AI provider. Before, a storm of lines holding a password sent it in that one field.
+- **Code fences in alert AI prompts**: A log line holding three backticks can no longer close the code block that holds the logs in an alert's AI enrichment prompt. They are replaced as in manual analysis, so the model reads the whole line as log text.
 
 ## [1.3.0] - 2026-11-09
 

@@ -597,6 +597,11 @@ def extract_rfc5424_structured_data(raw_text: Optional[str]) -> Optional[str]:
     return None
 
 
+def escape_code_fences(text: str) -> str:
+    """Replace triple backticks so log text cannot close the code fence it is placed in."""
+    return text.replace("```", "'''")
+
+
 def format_prompt_log_line(
     timestamp: Any,
     source: Optional[str],
@@ -724,7 +729,7 @@ def build_analysis_prompt(
             "",
         ])
 
-    safe_logs = redacted_logs.strip().replace("```", "'''")
+    safe_logs = escape_code_fences(redacted_logs.strip())
 
     parts.extend([
         "### Redacted Log Stream (Chronological)",
