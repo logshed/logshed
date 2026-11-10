@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import weakref
+from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -25,6 +26,10 @@ from app.core.pipeline import (
     detect_severity,
     SEVERITY_LEVEL_MAP,
     _RE_PYTHON_EXCEPTION,
+    get_queue,
+    increment_dropped_count,
+    ingest_room,
+    wait_for_ingest_room,
 )
 from app.core.utils import load_docker_source_aliases
 
@@ -708,40 +713,203 @@ def get_udp_receive_errors() -> Optional[int]:
     return max(0, current - baseline)
 
 
-# Parsing never waits, so a worker runs each message to the end before the next starts: more
-# workers per socket add no concurrency, only wake-ups.
-NUM_PARSER_WORKERS = 1
-# How long stop() waits for parser workers to finish the queued messages before cancelling them.
+# How long stop() waits for the parse worker to finish the queued messages before cancelling it.
 WORKER_DRAIN_TIMEOUT = 2.0
+# The parse queue shared by the UDP listener and every TCP connection: at most this many frames
+# or bytes. UDP datagrams beyond either limit are dropped and counted as lost.
+PARSE_QUEUE_MAX_ITEMS = 10000
+PARSE_QUEUE_MAX_BYTES = 16 * 1024 * 1024
+# A TCP connection that adds to a queue holding this much stops reading (the sender waits), so
+# TCP never takes the room UDP needs. Paused connections read again below the resume marks.
+TCP_PAUSE_ITEMS = 2000
+TCP_PAUSE_BYTES = 4 * 1024 * 1024
+TCP_RESUME_ITEMS = 500
+TCP_RESUME_BYTES = 1024 * 1024
+# Frames parsed before the worker lets other tasks run (the ingest consumer, the API, the listeners)
+PARSE_SLICE = 500
+# When the ingest queue is full, the worker waits this long for room (TCP senders are paused
+# meanwhile). If none comes, entries that do not fit are lost as before, and the worker waits
+# again only once the ingest queue is below half full, so a long stall blocks senders once.
+INGEST_ROOM_WAIT = 2.0
+# Free ingest places the worker waits for: one message can complete up to two entries
+INGEST_ROOM = 2
 
 
-async def _drain_workers(queue: asyncio.Queue, workers: list[asyncio.Task], label: str) -> None:
+class SyslogParseQueue:
     """
-    Let parser workers finish every message already queued, then end them: one None
-    sentinel per worker goes in behind the queued messages. Workers still running after
-    WORKER_DRAIN_TIMEOUT seconds are cancelled. Clears `workers`.
+    The frames received by the syslog listeners, waiting to be parsed, and the one worker that
+    parses them. Parsing never waits, so more workers would add no concurrency.
+
+    UDP cannot be paused, so a datagram that does not fit is dropped and counted as lost. A TCP
+    frame always goes in; once the queue passes the TCP pause marks, the connection that added it
+    stops reading until the worker has brought the queue down to the resume marks.
     """
-    tasks = list(workers)
-    if not tasks:
-        return
 
-    async def _finish() -> None:
-        for _ in tasks:
-            await queue.put(None)
-        await asyncio.gather(*tasks, return_exceptions=True)
+    def __init__(
+        self,
+        assembler: KeyedMultilineAssembler,
+        alias_cache: "AliasCache",
+        max_items: int = PARSE_QUEUE_MAX_ITEMS,
+        max_bytes: int = PARSE_QUEUE_MAX_BYTES,
+    ):
+        self.assembler = assembler
+        self.alias_cache = alias_cache
+        self.max_items = max_items
+        self.max_bytes = max_bytes
+        self._items: deque[tuple[bytes, str]] = deque()
+        self._bytes = 0
+        # Paused TCP connections in the order they paused (a dict keeps that order)
+        self._paused: dict["SyslogTCPProtocol", None] = {}
+        self._worker: Optional[asyncio.Task] = None
+        self._wakeup: Optional[asyncio.Future] = None
+        self._closing = False
+        self._close_task: Optional[asyncio.Task] = None
+        # Set when the ingest queue stayed full for INGEST_ROOM_WAIT: entries are lost until it has room again
+        self._ingest_overflowing = False
 
-    try:
-        await asyncio.wait_for(_finish(), timeout=WORKER_DRAIN_TIMEOUT)
-    except asyncio.TimeoutError:
-        logger.warning(
-            f"Syslog {label} parser workers did not finish within {WORKER_DRAIN_TIMEOUT}s; "
-            f"discarding {queue.qsize()} queued items."
-        )
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        workers.clear()
+    def qsize(self) -> int:
+        return len(self._items)
+
+    @property
+    def queued_bytes(self) -> int:
+        return self._bytes
+
+    @property
+    def paused_connections(self) -> int:
+        return len(self._paused)
+
+    def put_udp(self, data: bytes, source_ip: str) -> bool:
+        """Queue a datagram, or drop and count it when the queue is full. Returns True if queued."""
+        if len(self._items) >= self.max_items or self._bytes + len(data) > self.max_bytes:
+            increment_dropped_count(1)
+            logger.warning(
+                f"Syslog parse queue full ({len(self._items)} messages, {self._bytes} bytes). UDP packet dropped."
+            )
+            return False
+        self._put(data, source_ip)
+        return True
+
+    def put_tcp(self, frame: bytes, source_ip: str) -> bool:
+        """
+        Queue a TCP frame. It always fits; returns True once the queue has reached the TCP pause
+        marks, so the connection stops framing and pauses.
+        """
+        self._put(frame, source_ip)
+        return len(self._items) >= TCP_PAUSE_ITEMS or self._bytes >= TCP_PAUSE_BYTES
+
+    def _put(self, data: bytes, source_ip: str) -> None:
+        self._items.append((data, source_ip))
+        self._bytes += len(data)
+        wakeup = self._wakeup
+        if wakeup is not None:
+            self._wakeup = None
+            if not wakeup.done():
+                wakeup.set_result(None)
+        elif self._worker is None and not self._closing:
+            self._worker = asyncio.get_running_loop().create_task(self._run())
+
+    def pause(self, proto: "SyslogTCPProtocol") -> None:
+        """Pause a TCP connection until the queue is below the resume marks."""
+        if proto not in self._paused:
+            self._paused[proto] = None
+            proto.pause_reading()
+
+    def forget(self, proto: "SyslogTCPProtocol") -> None:
+        """A closed connection is never resumed."""
+        self._paused.pop(proto, None)
+
+    def _resume_paused(self) -> None:
+        """
+        Below the resume marks, resume paused connections in the order they paused. Each first
+        queues the rest of its last read, so once the queue is back at the pause marks the others
+        stay paused and go first next time: every busy sender gets its turn, whatever order the
+        sockets are read in.
+        """
+        if len(self._items) >= TCP_RESUME_ITEMS or self._bytes >= TCP_RESUME_BYTES:
+            return
+        paused = self._paused
+        while paused:
+            proto = next(iter(paused))
+            del paused[proto]
+            proto.resume_reading()
+            if len(self._items) >= TCP_PAUSE_ITEMS or self._bytes >= TCP_PAUSE_BYTES:
+                break
+
+    async def _wait_for_ingest_room(self) -> None:
+        if ingest_room(INGEST_ROOM):
+            if self._ingest_overflowing and ingest_room(get_queue().maxsize // 2):
+                self._ingest_overflowing = False
+            return
+        if self._ingest_overflowing or self._closing:
+            return
+        if not await wait_for_ingest_room(INGEST_ROOM, INGEST_ROOM_WAIT):
+            self._ingest_overflowing = True
+            logger.warning(
+                f"Ingest queue stayed full for {INGEST_ROOM_WAIT:g}s; syslog messages are lost until it has room again."
+            )
+
+    async def _run(self) -> None:
+        items = self._items
+        loop = asyncio.get_running_loop()
+        while True:
+            if not items:
+                if self._closing:
+                    break
+                self._wakeup = loop.create_future()
+                await self._wakeup
+                continue
+            for _ in range(PARSE_SLICE):
+                if not items:
+                    break
+                data, source_ip = items.popleft()
+                self._bytes -= len(data)
+                await self._wait_for_ingest_room()
+                try:
+                    await dispatch_syslog_message(data, source_ip, self.alias_cache, self.assembler)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Error in syslog parse worker: {e}")
+            if self._paused:
+                self._resume_paused()
+            # Let the ingest consumer, the API and the listeners run between slices
+            await asyncio.sleep(0)
+
+    async def close(self) -> None:
+        """
+        Let the worker parse every frame already queued, then end it; after WORKER_DRAIN_TIMEOUT
+        seconds it is cancelled and the rest discarded. The queue can be used again afterwards.
+        Calls made while a close is running wait for that one.
+        """
+        if self._close_task is None:
+            self._close_task = asyncio.get_running_loop().create_task(self._close())
+        await asyncio.shield(self._close_task)
+
+    async def _close(self) -> None:
+        self._closing = True
+        self._paused.clear()
+        worker, self._worker = self._worker, None
+        try:
+            if worker is not None:
+                wakeup, self._wakeup = self._wakeup, None
+                if wakeup is not None and not wakeup.done():
+                    wakeup.set_result(None)
+                try:
+                    await asyncio.wait_for(worker, timeout=WORKER_DRAIN_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Syslog parse worker did not finish within {WORKER_DRAIN_TIMEOUT}s; "
+                        f"discarding {len(self._items)} queued messages."
+                    )
+                except Exception as e:
+                    logger.error(f"Syslog parse worker failed while draining: {e}")
+        finally:
+            self._items.clear()
+            self._bytes = 0
+            self._wakeup = None
+            self._closing = False
+            self._ingest_overflowing = False
+            self._close_task = None
 
 
 async def dispatch_syslog_message(
@@ -799,50 +967,21 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         self,
         assembler: KeyedMultilineAssembler,
         alias_cache: AliasCache,
-        max_queue_size: int = 5000,
-        num_workers: int = NUM_PARSER_WORKERS,
+        max_queue_size: int = PARSE_QUEUE_MAX_ITEMS,
         on_lost: Optional[Callable[["SyslogUDPProtocol", Optional[Exception]], None]] = None,
+        parse_queue: Optional[SyslogParseQueue] = None,
     ):
         self.assembler = assembler
         self.alias_cache = alias_cache
         self.transport = None
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
-        self.num_workers = num_workers
-        self._workers: list[asyncio.Task] = []
+        # The server passes its shared queue; a protocol made on its own keeps one of its own
+        self._owns_queue = parse_queue is None
+        self.queue = parse_queue or SyslogParseQueue(assembler, alias_cache, max_items=max_queue_size)
         self.on_lost = on_lost
         self._stopping = False
 
-    def _ensure_workers(self) -> None:
-        if not self._workers and not self._stopping:
-            for _ in range(self.num_workers):
-                self._workers.append(asyncio.create_task(self._worker_loop()))
-
-    async def _worker_loop(self) -> None:
-        while True:
-            try:
-                item = await self.queue.get()
-            except asyncio.CancelledError:
-                break
-
-            if item is None:
-                self.queue.task_done()
-                break
-
-            try:
-                data, source_ip = item
-                await self.process_message(data, source_ip)
-            except asyncio.CancelledError:
-                self.queue.task_done()
-                break
-            except Exception as e:
-                logger.error(f"Error in Syslog UDP worker: {e}")
-                self.queue.task_done()
-            else:
-                self.queue.task_done()
-
     def connection_made(self, transport):
         self.transport = transport
-        self._ensure_workers()
         logger.info("Syslog UDP Server started")
 
     def connection_lost(self, exc):
@@ -852,24 +991,18 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple[str, int]):
         if self._stopping:
             return
-        source_ip = addr[0]
-        self._ensure_workers()
-        try:
-            self.queue.put_nowait((data, source_ip))
-        except asyncio.QueueFull:
-            from app.core.pipeline import increment_dropped_count
-            increment_dropped_count(1)
-            logger.warning("Syslog UDP queue full (5000 items). Packet dropped.")
-        
+        self.queue.put_udp(data, addr[0])
+
     async def process_message(self, data: bytes, source_ip: str):
         await dispatch_syslog_message(data, source_ip, self.alias_cache, self.assembler)
 
     async def stop(self) -> None:
-        """Stop receiving, then let the workers finish the datagrams already queued."""
+        """Stop receiving; a queue of its own is drained (the server drains the shared one)."""
         self._stopping = True
         if self.transport is not None:
             self.transport.close()
-        await _drain_workers(self.queue, self._workers, "UDP")
+        if self._owns_queue:
+            await self.queue.close()
 
 
 MAX_TCP_BUFFER = 65536  # 64 KB limit to prevent unbounded memory growth / OOM DoS
@@ -883,21 +1016,23 @@ class SyslogTCPProtocol(asyncio.Protocol):
         self,
         assembler: KeyedMultilineAssembler,
         alias_cache: AliasCache,
-        max_queue_size: int = 5000,
-        num_workers: int = NUM_PARSER_WORKERS,
         on_close=None,
         inactivity_timeout: float = TCP_INACTIVITY_TIMEOUT,
         reject_on_connect: bool = False,
         admit: Optional[Callable[["SyslogTCPProtocol"], bool]] = None,
+        parse_queue: Optional[SyslogParseQueue] = None,
     ):
         self.assembler = assembler
         self.alias_cache = alias_cache
         self.buffer = b""
         self.peername = None
+        self._source_ip = "unknown"
         self.transport = None
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
-        self.num_workers = num_workers
-        self._workers: list[asyncio.Task] = []
+        # The server passes its shared queue; a protocol made on its own keeps one of its own
+        self._owns_queue = parse_queue is None
+        self.queue = parse_queue or SyslogParseQueue(assembler, alias_cache)
+        # Set while the parse queue is too full for this connection to read more
+        self.paused = False
         self.on_close = on_close
         self.inactivity_timeout = inactivity_timeout
         self.reject_on_connect = reject_on_connect
@@ -905,17 +1040,12 @@ class SyslogTCPProtocol(asyncio.Protocol):
         self.admit = admit
         self._inactivity_handle: Optional[asyncio.TimerHandle] = None
         self._stopping = False
-        # Set by connection_lost on a normal disconnect: finishes the frames already queued.
+        # Set by connection_lost on a normal disconnect when the queue is its own: finishes the frames already queued.
         self.drain_task: Optional[asyncio.Task] = None
 
     @property
     def peer_ip(self) -> Optional[str]:
         return self.peername[0] if self.peername else None
-
-    def _ensure_workers(self) -> None:
-        if not self._workers and not self._stopping:
-            for _ in range(self.num_workers):
-                self._workers.append(asyncio.create_task(self._worker_loop()))
 
     def _reset_inactivity_timer(self) -> None:
         if self._inactivity_handle:
@@ -938,32 +1068,32 @@ class SyslogTCPProtocol(asyncio.Protocol):
         if self.transport and not self.transport.is_closing():
             self.transport.close()
 
-    async def _worker_loop(self) -> None:
-        while True:
-            try:
-                item = await self.queue.get()
-            except asyncio.CancelledError:
-                break
+    def pause_reading(self) -> None:
+        """Stop reading while the parse queue is full; the idle timeout waits too, as the silence is ours."""
+        self.paused = True
+        if self._inactivity_handle:
+            self._inactivity_handle.cancel()
+            self._inactivity_handle = None
+        if self.transport is not None and not self.transport.is_closing():
+            self.transport.pause_reading()
 
-            if item is None:
-                self.queue.task_done()
-                break
-
-            try:
-                data, source_ip = item
-                await self.process_message(data, source_ip)
-            except asyncio.CancelledError:
-                self.queue.task_done()
-                break
-            except Exception as e:
-                logger.error(f"Error in Syslog TCP worker: {e}")
-                self.queue.task_done()
-            else:
-                self.queue.task_done()
+    def resume_reading(self) -> None:
+        self.paused = False
+        if self.transport is None or self.transport.is_closing():
+            return
+        # Frame the rest of the last read first; that can fill the queue and pause again
+        if self.buffer:
+            self._frame(self.buffer)
+            if self.paused:
+                return
+        self.transport.resume_reading()
+        self._reset_inactivity_timer()
 
     def connection_made(self, transport):
         self.transport = transport
         self.peername = transport.get_extra_info('peername')
+        if self.peername:
+            self._source_ip = self.peername[0]
         sock = transport.get_extra_info('socket')
         if sock is not None:
             try:
@@ -979,15 +1109,25 @@ class SyslogTCPProtocol(asyncio.Protocol):
         if self.admit is not None and not self.admit(self):
             transport.close()
             return
-        self._ensure_workers()
         self._reset_inactivity_timer()
         logger.debug(f"Syslog TCP connection from {self.peername}")
 
     def data_received(self, data: bytes):
         if self._stopping:
             return
-        self._reset_inactivity_timer()
-        buffer = self.buffer + data if self.buffer else data
+        if not self.paused:
+            self._reset_inactivity_timer()
+        self._frame(self.buffer + data if self.buffer else data)
+
+    def _frame(self, buffer: bytes, until_full: bool = True) -> None:
+        """
+        Queue every complete frame in buffer and keep the rest in self.buffer. With until_full,
+        framing stops once the parse queue reaches the TCP pause marks: the connection pauses and
+        the rest of the read waits in self.buffer, as bytes, until it resumes.
+        """
+        put = self.queue.put_tcp
+        source_ip = self._source_ip
+        full = False
         # Frames are read by offset and the buffer is cut once at the end, so a chunk holding
         # many frames costs linear time instead of a copy of the rest per frame
         size = len(buffer)
@@ -1020,8 +1160,9 @@ class SyslogTCPProtocol(asyncio.Protocol):
 
                 frame = buffer[pos + header_len:frame_end]
                 pos = frame_end
-                if frame:
-                    self._enqueue_frame(frame)
+                if frame and put(frame, source_ip) and until_full:
+                    full = True
+                    break
             else:
                 # Non-transparent framing: trailer/newline delimitation (\n)
                 newline = buffer.find(b"\n", pos)
@@ -1030,10 +1171,15 @@ class SyslogTCPProtocol(asyncio.Protocol):
                     break
                 line = buffer[pos:newline].rstrip(b"\r")
                 pos = newline + 1
-                if line:
-                    self._enqueue_frame(line)
+                if line and put(line, source_ip) and until_full:
+                    full = True
+                    break
 
         self.buffer = buffer[pos:] if pos else buffer
+        if full:
+            # The rest may hold whole frames, so the unframed size limit does not apply yet
+            self.queue.pause(self)
+            return
         if len(self.buffer) > MAX_TCP_BUFFER:
             logger.warning(
                 f"Syslog TCP buffer exceeded {MAX_TCP_BUFFER} bytes without frame boundary from {self.peername}. Closing connection."
@@ -1041,16 +1187,11 @@ class SyslogTCPProtocol(asyncio.Protocol):
             self.buffer = b""
             if self.transport:
                 self.transport.close()
-                
-    def _enqueue_frame(self, frame: bytes) -> None:
-        source_ip = self.peername[0] if self.peername else "unknown"
-        self._ensure_workers()
-        try:
-            self.queue.put_nowait((frame, source_ip))
-        except asyncio.QueueFull:
-            from app.core.pipeline import increment_dropped_count
-            increment_dropped_count(1)
-            logger.warning("Syslog TCP queue full (5000 items). Message dropped.")
+
+    def _queue_rest(self) -> None:
+        """On close: queue the whole frames still waiting in the buffer of a paused connection."""
+        if self.paused and self.buffer:
+            self._frame(self.buffer, until_full=False)
 
     async def process_message(self, data: bytes, source_ip: str):
         await dispatch_syslog_message(data, source_ip, self.alias_cache, self.assembler)
@@ -1060,32 +1201,35 @@ class SyslogTCPProtocol(asyncio.Protocol):
             self._inactivity_handle.cancel()
             self._inactivity_handle = None
         logger.debug(f"Syslog TCP connection lost from {self.peername}")
+        self._queue_rest()
+        self.queue.forget(self)
         if not self._stopping:
-            # A normal disconnect (during stop() the workers are drained there instead): the
-            # workers finish the frames already read in a background task, bounded by
-            # WORKER_DRAIN_TIMEOUT, so this callback does not block.
+            # A normal disconnect (during stop() the queue is drained there instead). Frames
+            # already read stay queued and are parsed; a queue of its own is drained in a
+            # background task, bounded by WORKER_DRAIN_TIMEOUT, so this callback does not block.
             self._stopping = True
-            workers, self._workers = self._workers, []
-            if workers:
+            if self._owns_queue:
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
-                    for task in workers:
-                        task.cancel()
+                    pass
                 else:
-                    self.drain_task = loop.create_task(_drain_workers(self.queue, workers, "TCP"))
+                    self.drain_task = loop.create_task(self.queue.close())
         if self.on_close:
             self.on_close(self)
 
     async def stop(self) -> None:
-        """Close the connection, then let the workers finish the frames already queued."""
+        """Close the connection; a queue of its own is drained (the server drains the shared one)."""
         self._stopping = True
         if self._inactivity_handle:
             self._inactivity_handle.cancel()
             self._inactivity_handle = None
+        self._queue_rest()
         if self.transport is not None:
             self.transport.close()
-        await _drain_workers(self.queue, self._workers, "TCP")
+        self.queue.forget(self)
+        if self._owns_queue:
+            await self.queue.close()
 
 
 # Alias for backward compatibility / explicit naming
@@ -1116,9 +1260,9 @@ class SyslogServer:
         self.udp_protocol: SyslogUDPProtocol | None = None
         self.tcp_server = None
         self.tcp_protocols: set[SyslogTCPProtocol] = set()
-        # Parser drains of TCP connections that closed normally, still finishing queued frames
-        self._tcp_drain_tasks: set[asyncio.Task] = set()
         self.alias_cache = AliasCache(db_path, preload=False)
+        # One parse queue and worker for the UDP listener and every TCP connection
+        self.parse_queue = SyslogParseQueue(assembler, self.alias_cache)
         # Set once by stop(); a stopped server never binds again.
         self._stopped = False
         # Resolved by stop() (normal end) or failed by an unexpected listener loss.
@@ -1162,11 +1306,6 @@ class SyslogServer:
 
     def _remove_tcp_protocol(self, proto: SyslogTCPProtocol) -> None:
         self.tcp_protocols.discard(proto)
-        # Keep the disconnect drain referenced until it ends, so stop() can wait for it
-        task = proto.drain_task
-        if task is not None and not task.done():
-            self._tcp_drain_tasks.add(task)
-            task.add_done_callback(self._tcp_drain_tasks.discard)
 
     def _create_tcp_protocol(self) -> SyslogTCPProtocol:
         if len(self.tcp_protocols) >= self.max_tcp_connections:
@@ -1178,6 +1317,7 @@ class SyslogServer:
                 self.alias_cache,
                 on_close=self._remove_tcp_protocol,
                 reject_on_connect=True,
+                parse_queue=self.parse_queue,
             )
 
         proto = SyslogTCPProtocol(
@@ -1186,6 +1326,7 @@ class SyslogServer:
             on_close=self._remove_tcp_protocol,
             inactivity_timeout=self.tcp_inactivity_timeout,
             admit=self._admit_tcp_connection,
+            parse_queue=self.parse_queue,
         )
         self.tcp_protocols.add(proto)
         return proto
@@ -1217,7 +1358,7 @@ class SyslogServer:
             fut.set_exception(OSError(f"Syslog UDP listener closed unexpectedly: {exc}"))
 
     async def _close_listeners(self) -> None:
-        """Close both listeners and every TCP connection, draining their parse queues. Idempotent."""
+        """Close both listeners and every TCP connection, then drain the parse queue. Idempotent."""
         # Detach everything first, so a concurrent caller finds nothing left to close.
         tcp_server, self.tcp_server = self.tcp_server, None
         udp_protocol, self.udp_protocol = self.udp_protocol, None
@@ -1230,13 +1371,13 @@ class SyslogServer:
         if udp_transport is not None:
             udp_transport.close()
 
-        drains: list[Any] = [proto.stop() for proto in protocols]
+        closes: list[Any] = [proto.stop() for proto in protocols]
         if udp_protocol is not None:
-            drains.append(udp_protocol.stop())
-        # Each is bounded by WORKER_DRAIN_TIMEOUT
-        drains.extend(self._tcp_drain_tasks)
-        if drains:
-            await asyncio.gather(*drains, return_exceptions=True)
+            closes.append(udp_protocol.stop())
+        if closes:
+            await asyncio.gather(*closes, return_exceptions=True)
+        # Bounded by WORKER_DRAIN_TIMEOUT
+        await self.parse_queue.close()
 
         if tcp_server is not None:
             # Every client transport is closed above, so this returns once they detach.
@@ -1267,7 +1408,8 @@ class SyslogServer:
         try:
             try:
                 udp_protocol = SyslogUDPProtocol(
-                    self.assembler, self.alias_cache, on_lost=self._on_udp_lost
+                    self.assembler, self.alias_cache, on_lost=self._on_udp_lost,
+                    parse_queue=self.parse_queue,
                 )
                 self.udp_protocol = udp_protocol
                 self.udp_transport, _ = await loop.create_datagram_endpoint(

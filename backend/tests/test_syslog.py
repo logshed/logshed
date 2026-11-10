@@ -739,12 +739,16 @@ class TestSyslogNetworkAndProtocol:
         assert server.alias_cache._refresh_task is None
 
     @pytest.mark.asyncio
-    async def test_udp_syslog_bounded_queue_saturation_drops(self, db_path: Path):
+    async def test_udp_syslog_bounded_queue_saturation_drops(self, db_path: Path, monkeypatch):
         """When UDP protocol queue fills up, extra packets are dropped and counted."""
+        import app.core.pipeline as pipeline_mod
+
+        # stop() parses the two queued datagrams
+        monkeypatch.setattr(pipeline_mod, "_log_queue", asyncio.Queue())
         alias_cache = AliasCache(db_path)
         asm = KeyedMultilineAssembler()
-        # Initialize with max_queue_size=2 and num_workers=0 so queue fills
-        proto = SyslogUDPProtocol(asm, alias_cache, max_queue_size=2, num_workers=0)
+        # The worker cannot run before the test awaits, so the queue of 2 fills
+        proto = SyslogUDPProtocol(asm, alias_cache, max_queue_size=2)
         from app.core.pipeline import get_dropped_count
         initial_drops = get_dropped_count()
 
@@ -758,28 +762,140 @@ class TestSyslogNetworkAndProtocol:
         await proto.stop()
 
     @pytest.mark.asyncio
-    async def test_tcp_syslog_bounded_queue_saturation_drops(self, db_path: Path):
-        """When TCP protocol queue fills up, extra lines are dropped and counted."""
-        alias_cache = AliasCache(db_path)
-        asm = KeyedMultilineAssembler()
-        proto = SyslogTCPProtocol(asm, alias_cache, max_queue_size=2, num_workers=0)
-
-        class MockTransport:
-            def get_extra_info(self, name):
-                return ("10.0.0.2", 54321)
-            def close(self):
-                pass
-
-        proto.connection_made(MockTransport())
+    async def test_tcp_frames_past_the_pause_mark_pause_the_connection_instead_of_dropping(
+        self, db_path: Path, monkeypatch
+    ):
+        """A full parse queue stops the TCP connection reading; no line is lost, and reading resumes once it drains."""
+        from unittest.mock import MagicMock
+        import app.collectors.syslog as syslog_mod
         from app.core.pipeline import get_dropped_count
+
+        dispatched = []
+
+        async def record(data, source_ip, alias_cache, assembler):
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", record)
+        monkeypatch.setattr(syslog_mod, "TCP_PAUSE_ITEMS", 4)
+        monkeypatch.setattr(syslog_mod, "TCP_RESUME_ITEMS", 1)
+        proto = SyslogTCPProtocol(KeyedMultilineAssembler(), AliasCache(db_path), inactivity_timeout=5.0)
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("10.0.0.2", 54321)
+        transport.is_closing.return_value = False
+        proto.connection_made(transport)
         initial_drops = get_dropped_count()
 
-        proto.data_received(b"<14>Jan  1 10:00:00 host1 app1: msg 1\n<14>Jan  1 10:00:00 host1 app1: msg 2\n")
+        proto.data_received(b"<14>msg 1\n<14>msg 2\n")
         assert proto.queue.qsize() == 2
+        assert not transport.pause_reading.called
 
-        proto.data_received(b"<14>Jan  1 10:00:00 host1 app1: msg 3\n")
-        assert get_dropped_count() == initial_drops + 1
+        # Framing stops at the mark: the rest of the read waits as bytes, the connection stops
+        # reading and its idle timer stops
+        proto.data_received(b"".join(b"<14>msg %d\n" % i for i in range(3, 7)))
+        assert proto.queue.qsize() == 4
+        assert proto.buffer == b"<14>msg 5\n<14>msg 6\n"
+        assert transport.pause_reading.call_count == 1
+        assert proto.paused and proto._inactivity_handle is None
+
+        await _wait_until(lambda: len(dispatched) == 6)
+        assert dispatched == [b"<14>msg %d" % i for i in range(1, 7)]
+        assert transport.resume_reading.call_count == 1
+        assert not proto.paused and proto._inactivity_handle is not None
+        assert proto.buffer == b""
         await proto.stop()
+        assert get_dropped_count() == initial_drops
+
+    @pytest.mark.asyncio
+    async def test_paused_connections_resume_in_the_order_they_paused(self, db_path: Path, monkeypatch):
+        """The first to pause queues the rest of its read first, so a sender read late each time still gets its turn."""
+        from unittest.mock import MagicMock
+        import app.collectors.syslog as syslog_mod
+        from app.collectors.syslog import SyslogParseQueue
+
+        dispatched = []
+
+        async def record(data, source_ip, alias_cache, assembler):
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", record)
+        monkeypatch.setattr(syslog_mod, "TCP_PAUSE_ITEMS", 2)
+        monkeypatch.setattr(syslog_mod, "TCP_RESUME_ITEMS", 1)
+        shared = SyslogParseQueue(KeyedMultilineAssembler(), AliasCache(db_path, preload=False))
+        protos = {}
+        for name in ("c", "a", "b"):
+            proto = SyslogTCPProtocol(shared.assembler, shared.alias_cache, parse_queue=shared)
+            transport = MagicMock()
+            transport.get_extra_info.return_value = (f"10.0.0.{len(protos) + 1}", 5000)
+            transport.is_closing.return_value = False
+            proto.connection_made(transport)
+            protos[name] = proto
+        # One read each, in this order: every connection pauses with part of its read left
+        for name in ("c", "a", "b"):
+            protos[name].data_received(b"".join(b"<14>%s%d\n" % (name.encode(), i) for i in range(3)))
+        assert all(p.paused and p.buffer for p in protos.values())
+
+        await _wait_until(lambda: len(dispatched) == 9)
+        rest = [d.decode()[4:] for d in dispatched[4:]]
+        # a filled the queue again and went to the back, behind b
+        assert rest == ["c2", "a1", "b1", "b2", "a2"]
+        for proto in protos.values():
+            await proto.stop()
+        await shared.close()
+
+    @pytest.mark.asyncio
+    async def test_paused_connection_closing_still_queues_the_rest_of_its_read(self, db_path: Path, monkeypatch):
+        from unittest.mock import MagicMock
+        import app.collectors.syslog as syslog_mod
+
+        dispatched = []
+
+        async def record(data, source_ip, alias_cache, assembler):
+            dispatched.append(data)
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", record)
+        monkeypatch.setattr(syslog_mod, "TCP_PAUSE_ITEMS", 2)
+        proto = SyslogTCPProtocol(KeyedMultilineAssembler(), AliasCache(db_path))
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("10.0.0.2", 54321)
+        transport.is_closing.return_value = False
+        proto.connection_made(transport)
+        proto.data_received(b"".join(b"<14>msg %d\n" % i for i in range(1, 6)))
+        assert proto.paused and proto.queue.qsize() == 2
+
+        proto.connection_lost(None)
+        await proto.drain_task
+        assert dispatched == [b"<14>msg %d" % i for i in range(1, 6)]
+
+    @pytest.mark.asyncio
+    async def test_udp_keeps_its_room_while_tcp_is_paused(self, db_path: Path, monkeypatch):
+        """TCP pauses at its mark, so datagrams still fit up to the full queue size."""
+        from unittest.mock import MagicMock
+        import app.collectors.syslog as syslog_mod
+        from app.collectors.syslog import SyslogParseQueue
+        import app.core.pipeline as pipeline_mod
+        from app.core.pipeline import get_dropped_count
+
+        monkeypatch.setattr(pipeline_mod, "_log_queue", asyncio.Queue())
+        monkeypatch.setattr(syslog_mod, "TCP_PAUSE_ITEMS", 2)
+        shared = SyslogParseQueue(KeyedMultilineAssembler(), AliasCache(db_path), max_items=5)
+        tcp = SyslogTCPProtocol(shared.assembler, shared.alias_cache, parse_queue=shared)
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("10.0.0.3", 5000)
+        transport.is_closing.return_value = False
+        tcp.connection_made(transport)
+        udp = SyslogUDPProtocol(shared.assembler, shared.alias_cache, parse_queue=shared)
+        initial_drops = get_dropped_count()
+
+        tcp.data_received(b"<14>t1\n<14>t2\n")
+        assert transport.pause_reading.called
+        for i in range(4):
+            udp.datagram_received(b"<14>u%d" % i, ("10.0.0.4", 514))
+        assert shared.qsize() == 5
+        assert get_dropped_count() == initial_drops + 1
+
+        await tcp.stop()
+        await udp.stop()
+        await shared.close()
 
     @pytest.mark.asyncio
     async def test_tcp_syslog_octet_counted_single_message(self, db_path: Path):
@@ -1797,7 +1913,7 @@ class TestSyslogMessageCaps:
 
 
 class TestSyslogShutdownDrain:
-    """`stop()` hands every queued message to the assembler before the workers end."""
+    """`stop()` hands every queued message to the assembler before the worker ends."""
 
     @pytest.mark.asyncio
     async def test_udp_stop_drains_queued_datagrams(self, db_path: Path, monkeypatch):
@@ -1816,7 +1932,7 @@ class TestSyslogShutdownDrain:
 
         await proto.stop()
         assert len(dispatched) == 100
-        assert not proto._workers
+        assert proto.queue.qsize() == 0 and proto.queue._worker is None
 
     @pytest.mark.asyncio
     async def test_tcp_stop_drains_queued_frames(self, db_path: Path, monkeypatch):
@@ -1854,7 +1970,123 @@ class TestSyslogShutdownDrain:
         await asyncio.sleep(0)
 
         await asyncio.wait_for(proto.stop(), timeout=1.0)
-        assert not proto._workers
+        assert proto.queue.qsize() == 0 and proto.queue._worker is None
+
+
+class TestSyslogSharedParseQueue:
+    """One parse queue and worker serve every listener and connection, without losing what the ingest queue can take."""
+
+    @pytest.mark.asyncio
+    async def test_many_busy_tcp_connections_lose_nothing_while_the_consumer_keeps_up(
+        self, db_path: Path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+        import app.core.pipeline as pipeline_mod
+        from app.core.pipeline import get_dropped_count
+
+        ingest = asyncio.Queue(maxsize=200)
+        monkeypatch.setattr(pipeline_mod, "_log_queue", ingest)
+        server = SyslogServer(KeyedMultilineAssembler(), db_path)
+        stored = 0
+
+        async def consume():
+            nonlocal stored
+            while True:
+                await ingest.get()
+                stored += 1
+
+        consumer = asyncio.create_task(consume())
+        initial_drops = get_dropped_count()
+        protos = []
+        for i in range(8):
+            proto = server._create_tcp_protocol()
+            transport = MagicMock()
+            transport.get_extra_info.return_value = (f"10.0.1.{i}", 5000)
+            transport.is_closing.return_value = False
+            proto.connection_made(transport)
+            protos.append(proto)
+        try:
+            # One pass of the event loop can hand every busy connection a full read
+            for i, proto in enumerate(protos):
+                proto.data_received(b"".join(
+                    b"<14>Jan  1 10:00:00 host%d app%d: line %d\n" % (i, n % 3, n) for n in range(150)
+                ))
+            await _wait_until(lambda: all(p.queue.qsize() == 0 for p in protos))
+            await server.assembler.flush_all()
+            await _wait_until(lambda: ingest.qsize() == 0)
+            assert get_dropped_count() == initial_drops
+            assert stored == 8 * 150
+        finally:
+            consumer.cancel()
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_server_listeners_and_connections_share_one_queue(self, db_path: Path):
+        server = SyslogServer(KeyedMultilineAssembler(), db_path, host="127.0.0.1", port=0)
+        task = asyncio.create_task(server.start())
+        try:
+            await _wait_until(lambda: _listening(server))
+            first, second = server._create_tcp_protocol(), server._create_tcp_protocol()
+            assert first.queue is second.queue is server.udp_protocol.queue is server.parse_queue
+            # An idle connection starts no task of its own
+            assert server.parse_queue._worker is None
+        finally:
+            await server.stop()
+            await asyncio.wait_for(task, timeout=2.0)
+
+    @pytest.mark.asyncio
+    async def test_full_ingest_queue_waits_then_loses_until_half_empty(self, db_path: Path, monkeypatch):
+        import app.collectors.syslog as syslog_mod
+        import app.core.pipeline as pipeline_mod
+        from app.collectors.syslog import SyslogParseQueue
+        from app.core.pipeline import get_dropped_count
+
+        ingest = pipeline_mod._IngestQueue(maxsize=4)
+        monkeypatch.setattr(pipeline_mod, "_log_queue", ingest)
+        monkeypatch.setattr(syslog_mod, "INGEST_ROOM_WAIT", 0.05)
+
+        async def enqueue_only(data, source_ip, alias_cache, assembler):
+            pipeline_mod.enqueue_entry({"message": data})
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", enqueue_only)
+        shared = SyslogParseQueue(KeyedMultilineAssembler(), AliasCache(db_path, preload=False))
+        loop = asyncio.get_running_loop()
+        for i in range(4):
+            ingest.put_nowait({"message": i})
+        initial_drops = get_dropped_count()
+        try:
+            # Full: the worker waits for room, then gives up and the entry is lost
+            begin = loop.time()
+            shared.put_udp(b"a", "10.0.0.1")
+            await _wait_until(lambda: get_dropped_count() == initial_drops + 1)
+            assert loop.time() - begin >= 0.05
+
+            # Still full: no second wait
+            begin = loop.time()
+            shared.put_udp(b"b", "10.0.0.1")
+            await _wait_until(lambda: get_dropped_count() == initial_drops + 2)
+            assert loop.time() - begin < 0.05
+
+            # Below half full again: stored, and the next full queue is waited for again
+            for _ in range(3):
+                ingest.get_nowait()
+            shared.put_udp(b"c", "10.0.0.1")
+            await _wait_until(lambda: ingest.qsize() == 2)
+            ingest.put_nowait({"message": "x"})
+            ingest.put_nowait({"message": "y"})
+            monkeypatch.setattr(syslog_mod, "INGEST_ROOM_WAIT", 5.0)
+            shared.put_udp(b"d", "10.0.0.1")
+            await asyncio.sleep(0.02)
+            assert shared.qsize() == 0 and ingest.qsize() == 4
+            # Woken once the consumer has taken enough for one message
+            ingest.get_nowait()
+            await asyncio.sleep(0.01)
+            assert ingest.qsize() == 3
+            ingest.get_nowait()
+            await _wait_until(lambda: ingest.qsize() == 3)
+            assert get_dropped_count() == initial_drops + 2
+        finally:
+            await shared.close()
 
 
 class TestSyslogFutureTimestampWindow:
@@ -1958,7 +2190,7 @@ class TestSyslogTimestampHelpers:
 
 
 class TestSyslogTcpDisconnectDrain:
-    """Frames read before a sender disconnects are still parsed, and stop() waits for that."""
+    """Frames read before a sender disconnects are still parsed, and stop() waits for them."""
 
     @staticmethod
     async def _send_and_disconnect(server: SyslogServer, count: int) -> None:
@@ -1988,13 +2220,12 @@ class TestSyslogTcpDisconnectDrain:
         try:
             await _wait_until(lambda: _listening(server))
             await self._send_and_disconnect(server, 50)
-            # The parser is still blocked: the frames wait in the closed connection's queue
+            # The parser is still blocked: the frames wait in the shared queue
             assert dispatched == []
+            assert server.parse_queue.qsize() == 49
             release.set()
             await _wait_until(lambda: len(dispatched) == 50)
-            # Four parser workers run in parallel, so only the set of frames is fixed
-            assert sorted(dispatched) == sorted(f"<14>line {i}".encode() for i in range(50))
-            await _wait_until(lambda: not server._tcp_drain_tasks)
+            assert dispatched == [f"<14>line {i}".encode() for i in range(50)]
         finally:
             release.set()
             await server.stop()
@@ -2017,7 +2248,7 @@ class TestSyslogTcpDisconnectDrain:
         try:
             await _wait_until(lambda: _listening(server))
             await self._send_and_disconnect(server, 20)
-            assert len(server._tcp_drain_tasks) == 1
+            assert server.parse_queue.qsize() == 19
 
             stop_task = asyncio.create_task(server.stop())
             for _ in range(10):
@@ -2026,7 +2257,7 @@ class TestSyslogTcpDisconnectDrain:
             release.set()
             await asyncio.wait_for(stop_task, timeout=2.0)
             assert len(dispatched) == 20
-            assert not server._tcp_drain_tasks
+            assert server.parse_queue.qsize() == 0
         finally:
             release.set()
             await server.stop()

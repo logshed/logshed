@@ -268,12 +268,64 @@ def _takes_ingest_turn(fn):
     return wrapper
 
 
+class _IngestQueue(asyncio.Queue):
+    """The shared ingest queue. A producer that can wait waits on it for free room (see wait_for_ingest_room)."""
+
+    def _init(self, maxsize: int) -> None:
+        super()._init(maxsize)
+        # (future, free places it waits for), resolved when the consumer takes enough entries
+        self._room_waiters: list[tuple[asyncio.Future, int]] = []
+
+    def _get(self):
+        item = super()._get()
+        if self._room_waiters:
+            free = self.maxsize - self.qsize()
+            for fut, room in self._room_waiters:
+                if free >= room and not fut.done():
+                    fut.set_result(None)
+        return item
+
+
 def get_queue() -> asyncio.Queue:
     """Returns the singleton log queue, creating it if needed."""
     global _log_queue
     if _log_queue is None:
-        _log_queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
+        _log_queue = _IngestQueue(maxsize=_QUEUE_MAXSIZE)
     return _log_queue
+
+
+def ingest_room(room: int) -> bool:
+    """True when the ingest queue has at least `room` free places (always, for an unbounded queue)."""
+    queue = get_queue()
+    return queue.maxsize <= 0 or queue.maxsize - queue.qsize() >= room
+
+
+async def wait_for_ingest_room(room: int, timeout: float) -> bool:
+    """
+    Wait up to `timeout` seconds until the ingest queue has `room` free places. Wakes as soon as
+    the consumer takes enough entries. Returns False if the time ran out first.
+    """
+    if ingest_room(room):
+        return True
+    queue = get_queue()
+    loop = asyncio.get_running_loop()
+    if not isinstance(queue, _IngestQueue):
+        # A plain queue put in place by a test: check again every few milliseconds
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            await asyncio.sleep(0.005)
+            if ingest_room(room):
+                return True
+        return False
+    waiter = (loop.create_future(), room)
+    queue._room_waiters.append(waiter)
+    try:
+        await asyncio.wait_for(waiter[0], timeout)
+        return True
+    except asyncio.TimeoutError:
+        return ingest_room(room)
+    finally:
+        queue._room_waiters.remove(waiter)
 
 def increment_dropped_count(amount: int = 1) -> None:
     """Thread-safe increment of the dropped logs counter."""

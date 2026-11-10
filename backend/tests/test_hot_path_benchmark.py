@@ -57,13 +57,14 @@ def _syslog_stream(count: int, octet_counted: bool) -> bytes:
 
 
 class _Sink:
-    """Stands in for the protocol's queue: counts frames without parsing them."""
+    """Stands in for the protocol's parse queue: counts frames without parsing them."""
 
     def __init__(self) -> None:
         self.count = 0
 
-    def put_nowait(self, item) -> None:
+    def put_tcp(self, frame, source_ip) -> bool:
         self.count += 1
+        return False
 
 
 def test_tcp_framing_throughput():
@@ -76,7 +77,6 @@ def test_tcp_framing_throughput():
         for chunk_size in (4096, 65536):
             proto = SyslogTCPProtocol(assembler=None, alias_cache=None, inactivity_timeout=0)
             proto.queue = _Sink()
-            proto._ensure_workers = lambda: None
             chunks = [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
             start = time.perf_counter()
             for chunk in chunks:
