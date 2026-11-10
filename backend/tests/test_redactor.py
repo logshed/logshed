@@ -78,7 +78,7 @@ class TestRedactor:
 MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfnNkGFOQCPO...
 -----END RSA PRIVATE KEY-----"""
         result = redact(text)
-        assert "MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfnNkGFOQCPO" not in result
+        assert "MIIEpAIBAAKCAQEA0Z3VS5JJ" not in result
         assert REDACTED in result
 
     def test_connection_string_password_redacted(self):
@@ -503,7 +503,7 @@ class TestRedactorTokenFormats:
             "-----END RSA PRIVATE KEY-----"
         )
         result = redact(text)
-        assert "MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfnNkGFOQCPO" not in result
+        assert "MIIEpAIBAAKCAQEA0Z3VS5JJ" not in result
         assert result == REDACTED
 
     def test_private_key_without_end_marker_redacted(self):
