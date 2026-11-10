@@ -726,28 +726,28 @@ class TestAppLoggerLevelPreservation:
     def test_configure_internal_log_handler_preserves_app_logger_level_for_console(self):
         app_logger = logging.getLogger("app")
 
-        # 1. Setting WARNING should keep app logger at NOTSET so root console handler gets INFO logs
+        # 1. Storing WARNING keeps logger 'app' at INFO, so the console still gets INFO
         configure_internal_log_handler("WARNING")
-        assert app_logger.level == logging.NOTSET
+        assert app_logger.level == logging.INFO
         handler = get_internal_log_handler()
         assert handler is not None
         assert handler.level == logging.WARNING
 
-        # 2. Setting ERROR should keep app logger at NOTSET
+        # 2. Storing ERROR keeps logger 'app' at INFO
         configure_internal_log_handler("ERROR")
-        assert app_logger.level == logging.NOTSET
+        assert app_logger.level == logging.INFO
         assert handler.level == logging.ERROR
 
-        # 3. Setting DEBUG should lower app logger to DEBUG so debug logs reach handlers
+        # 3. Storing DEBUG lowers logger 'app' to DEBUG so debug records reach the handler
         configure_internal_log_handler("DEBUG")
         assert app_logger.level == logging.DEBUG
         assert handler.level == logging.DEBUG
 
-        # 4. Switching back to WARNING should restore app logger to NOTSET
+        # 4. Switching back to WARNING returns logger 'app' to INFO
         configure_internal_log_handler("WARNING")
-        assert app_logger.level == logging.NOTSET
+        assert app_logger.level == logging.INFO
 
-        # 5. Switching to DISABLED should restore app logger to NOTSET
+        # 5. Switching to DISABLED keeps logger 'app' at INFO for the console
         configure_internal_log_handler("DISABLED")
-        assert app_logger.level == logging.NOTSET
+        assert app_logger.level == logging.INFO
         assert get_internal_log_handler() is None

@@ -14,7 +14,7 @@ import httpx
 from app.core.config import parse_bool
 from app.version import APP_VERSION, SemVer, is_newer_stable_version, parse_semver
 
-logger = logging.getLogger("logshed.version")
+logger = logging.getLogger(__name__)
 
 # In-memory cache configuration (1 hour TTL)
 _CACHE_TTL_SECONDS = 3600

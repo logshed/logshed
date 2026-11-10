@@ -96,6 +96,8 @@ services:
 | `APP_URL` | *(empty)* | Web UI or Compose | Public base URL of the LogShed instance (for example, `https://logs.example.com`), used for links in push alerts that open the alert's incident record. | 1.1.0 |
 | `LOGSHED_INTERNAL_LOG_LEVEL` | `WARNING` | Web UI or Compose | Log level for LogShed internal diagnostic logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `DISABLED`). Logs from alerting, notifications and AI analysis are stored but never evaluated by alert rules, so a rule cannot trigger itself. | 1.1.0 |
 
+**What `docker logs` shows, and what is stored.** LogShed prints its own messages at `INFO` and above (database migrations, listeners and workers starting and stopping, warnings and errors) to the container's console, beside uvicorn's lines. Each line has the time in the server's time zone (`TZ`), the level and the part of LogShed that wrote it, for example `2026-11-09 15:04:05 INFO     app.core.migrations: Migrating from 2 to 3`. `LOGSHED_INTERNAL_LOG_LEVEL` does not change what is printed: it sets which of these messages are also stored as logs (host `logshed`). The Docker collector never reads LogShed's own container (one named `logshed`, `log-shed` or `log_shed` in any letter case, or whose ID matches the container's host name, which Docker sets by default), so console lines are not stored a second time.
+
 ---
 
 ## Syslog Listener

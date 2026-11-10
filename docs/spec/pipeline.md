@@ -117,6 +117,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 ## 6. Internal Application Logs (`InternalLogHandler`)
 
 - **Implementation Reference:** `InternalLogHandler` in [backend/app/core/pipeline.py](../../backend/app/core/pipeline.py), attached to the `app` logger at startup.
+- **Console copy:** The console handler on the same logger (see `architecture.md`, Console Logging) prints `INFO` and above whatever this level is; the internal log level decides only what is stored.
 - **Threshold:** Records at or above the internal log level (`internal_log_level` setting or `LOGSHED_INTERNAL_LOG_LEVEL`, default `WARNING`, `DISABLED` turns ingestion off) are queued as logs from source `127.0.0.1` / `logshed` (or its host alias), with the last segment of the logger name as `app_name`. Drop rules and maintenance windows apply as for any other log.
 - **Never Stored (loop and noise guards):**
   - `app.core.pipeline` and `app.core.sse`: the handler feeds the pipeline and every stored log is broadcast over SSE, so their logs would feed back into themselves.

@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
 
 ### Fixed
+- **LogShed's own messages in `docker logs`**: LogShed's own start-up and status messages, such as database migrations and listeners starting, now appear in `docker logs` with a time and level, and its warnings and errors show their level too. Which of them are also stored as logs is still set by `LOGSHED_INTERNAL_LOG_LEVEL`.
 - **Screen readers and AI**: With AI on, each Console log row is a plain list item for screen readers, with no button inside it. "Explain with AI" on a row is now for mouse and touch; from the keyboard, open the log with Enter and use "Explain with AI" in its drawer, or tick rows with Space and use "Run Analysis".
 - **Focus look**: A focused text field, dropdown or the Console log list shows only its accent border or ring, without the browser's default outline around it as well.
 - **Sky blue accents**: Highlighted text, active tabs, chips and tinted panels now show the sky blue accent they were meant to have instead of the default text and border shades.

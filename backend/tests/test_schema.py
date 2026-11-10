@@ -1525,6 +1525,7 @@ class TestDatabaseNewerThanApp:
         p = tmp_path / "logs.db"
         latest = MIGRATIONS[-1][0]
         before = _make_newer_database(p, latest + 1)
+        caplog.clear()  # building the newer database ran the migrations
 
         with caplog.at_level(logging.INFO, logger="app.core.migrations"):
             with pytest.raises(migrations_mod.DatabaseNewerThanAppError) as exc:

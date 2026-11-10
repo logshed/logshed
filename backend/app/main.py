@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import re
+import sys
 from contextlib import asynccontextmanager
 from time import monotonic as _monotonic
 from typing import Any, Optional, Union
@@ -56,6 +57,57 @@ logger = logging.getLogger(__name__)
 
 # Silence uvicorn HTTP request access logger to prevent self-logging feedback loops
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+
+class _ServerTimeFormatter(logging.Formatter):
+    """Console lines with the time in the server's time zone (TZ), as the web UI shows times."""
+
+    def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
+        from app.core.utils import get_server_tzinfo
+        when = datetime.datetime.fromtimestamp(record.created, get_server_tzinfo())
+        return when.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
+
+class _ConsoleHandler(logging.StreamHandler):
+    """
+    LogShed's own messages on stderr beside uvicorn's, which is what `docker logs` shows. Writes to
+    sys.stderr as it is when each record arrives, as logging's last-resort handler does.
+    """
+
+    _logshed_console = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setLevel(logging.INFO)
+        self.setFormatter(_ServerTimeFormatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s"))
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, value) -> None:
+        pass
+
+
+def install_console_log_handler() -> logging.Handler:
+    """
+    Print INFO and above from logger 'app' to stderr. Added once however often this module is
+    imported or the app is built. The root logger keeps no handler and 'app' keeps propagating,
+    so nothing prints twice and pytest's caplog still sees every record.
+    """
+    app_logger = logging.getLogger("app")
+    for handler in app_logger.handlers:
+        if getattr(handler, "_logshed_console", False):
+            return handler
+    handler = _ConsoleHandler()
+    app_logger.addHandler(handler)
+    if app_logger.level == logging.NOTSET or app_logger.level > logging.INFO:
+        app_logger.setLevel(logging.INFO)
+    return handler
+
+
+install_console_log_handler()
 
 # Module-level worker references for lifespan management
 _queue_consumer: Optional[QueueConsumer] = None
@@ -126,7 +178,7 @@ def configure_internal_log_handler(
             except Exception:
                 pass
             _internal_log_handler = None
-        app_logger.setLevel(logging.NOTSET)
+        app_logger.setLevel(logging.INFO)
         return None
 
     if _internal_log_handler is None:
@@ -141,13 +193,9 @@ def configure_internal_log_handler(
         if _internal_log_handler not in app_logger.handlers:
             app_logger.addHandler(_internal_log_handler)
 
-    # Permit DEBUG or INFO records to propagate through logger 'app' to handlers
-    # if a lower threshold is explicitly requested. Never raise app_logger's level to
-    # WARNING or ERROR as that would suppress normal informational console logs from LogShed.
-    if parsed < logging.WARNING:
-        app_logger.setLevel(parsed)
-    else:
-        app_logger.setLevel(logging.NOTSET)
+    # Logger 'app' passes INFO to the console whatever is stored, and DEBUG as well when DEBUG is
+    # stored. Never raise it to WARNING or ERROR: that would hide LogShed's console messages.
+    app_logger.setLevel(min(parsed, logging.INFO))
 
     return _internal_log_handler
 
