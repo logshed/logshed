@@ -120,9 +120,6 @@ const categoryWildcard = (category: ScopeCategory): string => `${category.id}:*`
 const categoryOf = (scope: string): ScopeCategory | undefined =>
   SCOPE_CATALOG.find((c) => scope === categoryWildcard(c) || c.actions.some((a) => a.scope === scope));
 
-/** Every action scope in catalog order. */
-export const CATALOG_ACTION_SCOPES: string[] = SCOPE_CATALOG.flatMap((c) => c.actions.map((a) => a.scope));
-
 /** Same scopes regardless of order and duplicates. */
 export function sameScopeSet(a: readonly string[], b: readonly string[]): boolean {
   const setA = new Set(a);

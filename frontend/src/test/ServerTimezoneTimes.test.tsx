@@ -131,6 +131,12 @@ describe('times shown in the server time zone', () => {
     render(
       <NotificationsCard
         settings={{ server_timezone: SERVER_TZ, daily_digest_last_run: '2026-10-13T10:00:00Z' } as any}
+        digestEnabled={false}
+        onDigestEnabledChange={vi.fn()}
+        digestChannelId={null}
+        onDigestChannelIdChange={vi.fn()}
+        digestScheduleTime="09:00"
+        onDigestScheduleTimeChange={vi.fn()}
       />
     );
     expect(await screen.findByText('2026-10-14 00:00:00')).toBeInTheDocument();

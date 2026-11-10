@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Trash2, Clock, Check, RefreshCw, AlertCircle, Info, Lock, Database } from 'lucide-react';
 import { fetchPrunePreview, triggerManualPrune, triggerVacuum } from '../../api/system.ts';
-import { formatBytes } from './StorageCard.tsx';
+import { formatBytes } from '../../utils/formatters.ts';
 import { PrunePreview, PruneResponse, VacuumResponse } from '../../types.ts';
 import { Modal } from '../common/Modal.tsx';
 import { PrunePreviewModal, PrunePreviewMode } from './PrunePreviewModal.tsx';

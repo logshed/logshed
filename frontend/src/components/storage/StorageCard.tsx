@@ -8,7 +8,6 @@ interface StorageCardProps {
 }
 import { formatBytes } from '../../utils/formatters.ts';
 
-export { formatBytes };
 
 export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
   if (!metrics) {

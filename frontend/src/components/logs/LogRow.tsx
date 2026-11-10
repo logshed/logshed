@@ -2,15 +2,13 @@ import React from 'react';
 import { Sparkles, CheckSquare, Square } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
-import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp } from '../../utils/formatters.ts';
-import { getCachedServerTimezone } from '../../api/settings.ts';
 
 export interface ProcessedLogEntry extends LogEntry {
   /** source_alias as stored, before prepareLogEntry shows a syslog host alias in its place. */
   storedSourceAlias?: string;
-  formattedTimestamp?: string;
-  cleanedMessage?: string;
-  strippedMessage?: string;
+  formattedTimestamp: string;
+  cleanedMessage: string;
+  strippedMessage: string;
 }
 
 // Desktop column layout, shared by the table header and every row so they stay aligned.
@@ -47,7 +45,6 @@ export interface LogRowProps {
   log: ProcessedLogEntry;
   index: number;
   isSelected: boolean;
-  isHovered?: boolean;
   isMobile: boolean;
   /** Shows the "Explain with AI" row action (a pointer target); off until settings say AI is on. */
   aiEnabled?: boolean;
@@ -65,7 +62,6 @@ export interface LogRowProps {
 export function areLogRowPropsEqual(prevProps: LogRowProps, nextProps: LogRowProps): boolean {
   if (prevProps.log.id !== nextProps.log.id) return false;
   if (prevProps.isSelected !== nextProps.isSelected) return false;
-  if (prevProps.isHovered !== nextProps.isHovered) return false;
   if (prevProps.index !== nextProps.index) return false;
   if (prevProps.isMobile !== nextProps.isMobile) return false;
   if (Boolean(prevProps.aiEnabled) !== Boolean(nextProps.aiEnabled)) return false;
@@ -105,7 +101,6 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   log,
   index,
   isSelected,
-  isHovered,
   isMobile,
   aiEnabled = false,
   isFocused = false,
@@ -115,10 +110,9 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
   onClick,
   onDiagnoseAi,
 }) => {
-  const displayTimestamp = log.formattedTimestamp ??
-    formatStreamTimestamp(log.timestamp, log.received_at, getCachedServerTimezone());
-  const displayMessage = log.cleanedMessage ?? cleanLogMessageForDisplay(log.message);
-  const displayTitle = log.strippedMessage ?? stripAnsi(log.message);
+  const displayTimestamp = log.formattedTimestamp;
+  const displayMessage = log.cleanedMessage;
+  const displayTitle = log.strippedMessage;
 
   if (isMobile) {
     return (
@@ -189,7 +183,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       style={style}
       className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
         rowStateClass(isSelected, isFocused)
-      }${isHovered ? ' bg-dark-900/60' : ''}${isCursor ? CURSOR_CLASS : ''}`}
+      }${isCursor ? CURSOR_CLASS : ''}`}
     >
       {/* Checkbox: a mouse target; keyboard users tick the cursor row with Space, and the row's
           aria-selected tells screen readers */}

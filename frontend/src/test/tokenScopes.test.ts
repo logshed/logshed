@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CATALOG_ACTION_SCOPES,
+  SCOPE_CATALOG,
   SCOPE_PRESETS,
   addedAccess,
   collapseScopes,
@@ -24,8 +24,9 @@ const KNOWN_SCOPES = [
 
 describe('tokenScopes', () => {
   it('lists exactly the backend KNOWN_SCOPES in the catalog', () => {
-    expect([...CATALOG_ACTION_SCOPES].sort()).toEqual([...KNOWN_SCOPES].sort());
-    expect(new Set(CATALOG_ACTION_SCOPES).size).toBe(CATALOG_ACTION_SCOPES.length);
+    const catalogActionScopes = SCOPE_CATALOG.flatMap((c) => c.actions.map((a) => a.scope));
+    expect([...catalogActionScopes].sort()).toEqual([...KNOWN_SCOPES].sort());
+    expect(new Set(catalogActionScopes).size).toBe(catalogActionScopes.length);
   });
 
   it('scopeGrants follows has_scope_permission', () => {

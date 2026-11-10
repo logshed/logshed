@@ -35,7 +35,6 @@ import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import {
   LogRow,
   ProcessedLogEntry,
-  areLogRowPropsEqual,
   logGridCols,
   logRowId,
   DESKTOP_LOG_ROW_HEIGHT,
@@ -229,7 +228,7 @@ export function prepareLogEntry(
   dockerAliases?: Set<string>,
   todayKey?: string,
 ): ProcessedLogEntry {
-  const existing = entry as ProcessedLogEntry;
+  const existing = entry as Partial<ProcessedLogEntry>;
   const storedSourceAlias = existing.storedSourceAlias ?? entry.source_alias;
   const isDocker =
     entry.source_ip === 'docker' ||
@@ -268,8 +267,6 @@ function reformatTimestamps(
   }));
 }
 
-export { LogRow, areLogRowPropsEqual };
-export type { ProcessedLogEntry };
 
 /** A search query as an expression: terms joined by AND, OR and NOT (`a NOT b` is a and not b). */
 export type SearchNode =

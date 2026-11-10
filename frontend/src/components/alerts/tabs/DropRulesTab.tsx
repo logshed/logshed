@@ -38,7 +38,6 @@ export interface DropRulesTabProps {
   onRulesChange?: (rules: DropRule[]) => void;
 }
 
-export type DropRulesCardProps = DropRulesTabProps;
 
 export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => {
   const [rules, setRules] = useState<DropRule[]>([]);
@@ -514,5 +513,4 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
   );
 };
 
-export const DropRulesCard = DropRulesTab;
 export default DropRulesTab;

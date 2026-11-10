@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { StorageCard, formatBytes } from '../components/storage/StorageCard.tsx';
+import { StorageCard } from '../components/storage/StorageCard.tsx';
+import { formatBytes } from '../utils/formatters.ts';
 import { StorageMetricsResponse } from '../types.ts';
 
 describe('StorageCard Component', () => {

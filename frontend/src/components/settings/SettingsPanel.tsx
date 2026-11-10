@@ -38,7 +38,6 @@ import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
 
-export type { SettingsSubTab };
 
 export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();

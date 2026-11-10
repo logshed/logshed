@@ -13,7 +13,7 @@ export interface AlertTestModalProps {
   onClose: () => void;
 }
 
-export const generateInitialSample = (rule: AlertRule): string => {
+const generateInitialSample = (rule: AlertRule): string => {
   const pattern = rule.match_pattern || '';
   if (!pattern) {
     return 'Sample test log line from 192.168.1.100';

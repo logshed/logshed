@@ -21,31 +21,34 @@ import {
   testNotificationTarget,
   sendDailyDigest,
 } from '../../api/notifications.ts';
-import { fetchSettings, updateSettings } from '../../api/settings.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 
+/**
+ * Notification targets, and the daily digest fields of the settings form: the digest values are
+ * held by the settings page and saved with its other changes.
+ */
 export interface NotificationsCardProps {
-  settings?: SystemSettings | null;
+  settings: SystemSettings | null;
   onSettingsSaved?: () => Promise<void> | void;
-  digestEnabled?: boolean;
-  onDigestEnabledChange?: (enabled: boolean) => void;
-  digestChannelId?: number | null;
-  onDigestChannelIdChange?: (channelId: number | null) => void;
-  digestScheduleTime?: string;
-  onDigestScheduleTimeChange?: (time: string) => void;
+  digestEnabled: boolean;
+  onDigestEnabledChange: (enabled: boolean) => void;
+  digestChannelId: number | null;
+  onDigestChannelIdChange: (channelId: number | null) => void;
+  digestScheduleTime: string;
+  onDigestScheduleTimeChange: (time: string) => void;
   isSavingSettings?: boolean;
 }
 
 export const NotificationsCard: React.FC<NotificationsCardProps> = ({
-  settings: externalSettings,
+  settings,
   onSettingsSaved,
-  digestEnabled: propsDigestEnabled,
+  digestEnabled,
   onDigestEnabledChange,
-  digestChannelId: propsDigestChannelId,
+  digestChannelId,
   onDigestChannelIdChange,
-  digestScheduleTime: propsDigestScheduleTime,
+  digestScheduleTime,
   onDigestScheduleTimeChange,
   isSavingSettings = false,
 }) => {
@@ -70,78 +73,19 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   const [testingChannelId, setTestingChannelId] = useState<number | null>(null);
 
   // Daily Digest states
-  const [internalSettings, setInternalSettings] = useState<SystemSettings | null>(null);
-  const effectiveSettings = externalSettings !== undefined ? externalSettings : internalSettings;
-  const serverTimezone = effectiveSettings?.server_timezone || undefined;
-
-  const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
-  const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
-  const [digestScheduleTime, setDigestScheduleTime] = useState<string>('09:00');
+  const serverTimezone = settings?.server_timezone || undefined;
   const [scheduleTimeError, setScheduleTimeError] = useState<string | null>(null);
   const [digestLastRun, setDigestLastRun] = useState<string | null>(null);
-  const [isSavingDigest, setIsSavingDigest] = useState<boolean>(false);
   const [isSendingDigest, setIsSendingDigest] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  const isDigestControlled = onDigestEnabledChange !== undefined;
-  const currentDigestEnabled = isDigestControlled ? Boolean(propsDigestEnabled) : digestEnabled;
-  const currentDigestChannelId = isDigestControlled ? (propsDigestChannelId ?? null) : digestChannelId;
-  const currentDigestScheduleTime = isDigestControlled ? (propsDigestScheduleTime ?? '09:00') : digestScheduleTime;
-
-  const loadInternalSettings = useCallback(async () => {
-    try {
-      const res = await fetchSettings();
-      setInternalSettings(res);
-    } catch {
-      // Graceful fallback for test/offline environments
-    }
-  }, []);
-
   useEffect(() => {
-    if (externalSettings === undefined) {
-      loadInternalSettings();
+    if (settings) {
+      setDigestLastRun(settings.daily_digest_last_run ?? null);
     }
-  }, [externalSettings, loadInternalSettings]);
-
-  useEffect(() => {
-    if (effectiveSettings) {
-      setDigestEnabled(Boolean(effectiveSettings.daily_digest_enabled));
-      setDigestChannelId(effectiveSettings.daily_digest_channel_id ?? null);
-      setDigestScheduleTime(effectiveSettings.daily_digest_schedule_time || '09:00');
-      setDigestLastRun(effectiveSettings.daily_digest_last_run ?? null);
-    }
-  }, [effectiveSettings]);
+  }, [settings]);
 
   const hasActiveChannel = channels.some((c) => c.is_enabled);
-
-  const handleSaveDigest = async (updates: {
-    daily_digest_enabled?: boolean;
-    daily_digest_channel_id?: number | null;
-    daily_digest_schedule_time?: string;
-  }) => {
-    try {
-      setIsSavingDigest(true);
-      await updateSettings(updates);
-      if (updates.daily_digest_enabled !== undefined) {
-        setDigestEnabled(updates.daily_digest_enabled);
-      }
-      if (updates.daily_digest_channel_id !== undefined) {
-        setDigestChannelId(updates.daily_digest_channel_id);
-      }
-      if (updates.daily_digest_schedule_time !== undefined) {
-        setDigestScheduleTime(updates.daily_digest_schedule_time);
-      }
-      setInternalSettings((prev) => (prev ? { ...prev, ...updates } : null));
-      if (onSettingsSaved) {
-        await onSettingsSaved();
-      }
-      setFeedbackMsg({ text: 'Daily digest settings saved successfully.', isError: false });
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to save daily digest settings.', isError: true });
-    } finally {
-      setIsSavingDigest(false);
-    }
-  };
 
   const handleSendDigestNow = async () => {
     try {
@@ -323,9 +267,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
       setFeedbackMsg({ text: `Notification target "${channelToDelete.name}" deleted.`, isError: false });
       setChannelToDelete(null);
       // The server clears the digest channel when its target is deleted: mirror that here
-      if (currentDigestChannelId === channelToDelete.id) {
-        setDigestChannelId(null);
-        setInternalSettings((prev) => (prev ? { ...prev, daily_digest_channel_id: null } : prev));
+      if (digestChannelId === channelToDelete.id) {
         if (onSettingsSaved) {
           await onSettingsSaved();
         }
@@ -498,7 +440,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           <button
             type="button"
             onClick={handleSendDigestNow}
-            disabled={isSendingDigest || isSavingDigest || isSavingSettings}
+            disabled={isSendingDigest || isSavingSettings}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
             title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
           >
@@ -513,15 +455,9 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             <label className="flex items-start gap-2 text-xs select-none cursor-pointer text-slate-200">
               <input
                 type="checkbox"
-                checked={currentDigestEnabled}
-                disabled={isSavingDigest || isSavingSettings}
-                onChange={(e) => {
-                  if (isDigestControlled) {
-                    onDigestEnabledChange?.(e.target.checked);
-                  } else {
-                    handleSaveDigest({ daily_digest_enabled: e.target.checked });
-                  }
-                }}
+                checked={digestEnabled}
+                disabled={isSavingSettings}
+                onChange={(e) => onDigestEnabledChange(e.target.checked)}
                 className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer mt-0.5 disabled:opacity-50"
               />
               <div>
@@ -554,16 +490,9 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                     label: `Channel: ${ch.name}${ch.is_enabled ? '' : ' (Disabled)'}`,
                   })),
                 ]}
-                value={String(currentDigestChannelId ?? '')}
-                disabled={!currentDigestEnabled || !hasActiveChannel || isSavingDigest || isSavingSettings}
-                onChange={(v) => {
-                  const val = v ? Number(v) : null;
-                  if (isDigestControlled) {
-                    onDigestChannelIdChange?.(val);
-                  } else {
-                    handleSaveDigest({ daily_digest_channel_id: val });
-                  }
-                }}
+                value={String(digestChannelId ?? '')}
+                disabled={!digestEnabled || !hasActiveChannel || isSavingSettings}
+                onChange={(v) => onDigestChannelIdChange(v ? Number(v) : null)}
               />
             </div>
 
@@ -576,20 +505,16 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               <input
                 type="text"
                 id="digest-schedule-time"
-                value={currentDigestScheduleTime}
+                value={digestScheduleTime}
                 placeholder="HH:MM"
                 maxLength={5}
-                disabled={!currentDigestEnabled || isSavingDigest || isSavingSettings}
+                disabled={!digestEnabled || isSavingSettings}
                 onChange={(e) => {
-                  if (isDigestControlled) {
-                    onDigestScheduleTimeChange?.(e.target.value);
-                  } else {
-                    setDigestScheduleTime(e.target.value);
-                  }
+                  onDigestScheduleTimeChange(e.target.value);
                   setScheduleTimeError(null);
                 }}
                 onBlur={() => {
-                  const val = currentDigestScheduleTime;
+                  const val = digestScheduleTime;
                   if (!val || val.trim() === '') {
                     setScheduleTimeError(null);
                     return;
@@ -599,12 +524,6 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                     return;
                   }
                   setScheduleTimeError(null);
-                  if (!isDigestControlled) {
-                    const serverTime = effectiveSettings?.daily_digest_schedule_time || '09:00';
-                    if (val !== serverTime) {
-                      handleSaveDigest({ daily_digest_schedule_time: val });
-                    }
-                  }
                 }}
                 className={`w-full bg-dark-900 border rounded px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none disabled:opacity-50 font-mono ${
                   scheduleTimeError
@@ -615,11 +534,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               {scheduleTimeError ? (
                 <p className="text-[11px] text-red-400">{scheduleTimeError}</p>
               ) : (
-                <p className="text-[11px] text-slate-400">
-                  {isDigestControlled
-                    ? '24-hour format (e.g. 09:00).'
-                    : '24-hour format (e.g. 09:00). Saved when you leave this field.'}
-                </p>
+                <p className="text-[11px] text-slate-400">24-hour format (e.g. 09:00).</p>
               )}
             </div>
           </div>

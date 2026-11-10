@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RetentionSlider } from '../components/storage/RetentionSlider.tsx';
 import { describeNextCleanup } from '../components/storage/PrunePreviewModal.tsx';
-import { formatBytes } from '../components/storage/StorageCard.tsx';
+import { formatBytes } from '../utils/formatters.ts';
 import * as systemApi from '../api/system.ts';
 import { ApiError } from '../api/client.ts';
 

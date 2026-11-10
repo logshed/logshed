@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DropRulesCard } from '../components/alerts/tabs/DropRulesTab.tsx';
+import { DropRulesTab } from '../components/alerts/tabs/DropRulesTab.tsx';
 import * as dropRulesApi from '../api/dropRules.ts';
 import { DropRule } from '../types.ts';
 import { stubDownloads } from './downloadStubs.ts';
@@ -18,7 +18,7 @@ function addPattern(field: RegExp, searchPlaceholder: string, value: string) {
 const addHost = (value: string) => addPattern(/Hosts or IPs/, 'Search or add host...', value);
 const addApp = (value: string) => addPattern(/Apps or Containers/, 'Search or add app...', value);
 
-describe('DropRulesCard Component', () => {
+describe('DropRulesTab Component', () => {
   const mockRules: DropRule[] = [
     {
       id: 1,
@@ -52,7 +52,7 @@ describe('DropRulesCard Component', () => {
   });
 
   it('renders drop rules list with statuses and counts', async () => {
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Ingestion Drop Rules')).toBeInTheDocument();
@@ -73,7 +73,7 @@ describe('DropRulesCard Component', () => {
       is_enabled: false,
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe('DropRulesCard Component', () => {
       dropped_count: 0,
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe('DropRulesCard Component', () => {
   it('requires confirmation before deleting a drop rule and allows cancel', async () => {
     const deleteSpy = vi.spyOn(dropRulesApi, 'deleteDropRule').mockResolvedValue({ status: 'ok' });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -192,7 +192,7 @@ describe('DropRulesCard Component', () => {
       created_at: '2026-09-18T10:10:00Z',
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -252,7 +252,7 @@ describe('DropRulesCard Component', () => {
       created_at: '2026-09-18T10:15:00Z',
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -304,7 +304,7 @@ describe('DropRulesCard Component', () => {
       created_at: '2026-09-18T10:20:00Z',
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -373,7 +373,7 @@ describe('DropRulesCard Component', () => {
       created_at: '2026-09-18T10:25:00Z',
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Drop DHCPACK')).toBeInTheDocument();
@@ -467,7 +467,7 @@ describe('DropRulesCard Component', () => {
       created_at: '2026-09-18T11:00:00Z',
     });
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Presets/i })).toBeInTheDocument();
@@ -502,7 +502,7 @@ describe('DropRulesCard Component', () => {
     );
 
     const restoreDownloads = stubDownloads();
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Export All/i })).toBeInTheDocument();
@@ -521,7 +521,7 @@ describe('DropRulesCard Component', () => {
     );
 
     const restoreDownloads = stubDownloads();
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Export rule 1')).toBeInTheDocument();
@@ -540,7 +540,7 @@ describe('DropRulesCard Component', () => {
       errors: [],
     });
 
-    const { container } = render(<DropRulesCard />);
+    const { container } = render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument();
@@ -570,7 +570,7 @@ describe('DropRulesCard Component', () => {
       dispatchEvent: vi.fn(),
     }));
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
 
     await waitFor(() => {
       expect(screen.getByText('Ingestion Drop Rules')).toBeInTheDocument();
@@ -595,7 +595,7 @@ describe('DropRulesCard Component', () => {
     const order = () =>
       screen.getAllByLabelText(/Move rule \d+ up/).map((el) => Number(el.getAttribute('aria-label')!.match(/\d+/)![0]));
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
     await waitFor(() => expect(screen.getByText('Rule 1')).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText('Move rule 1 down'));
@@ -612,7 +612,7 @@ describe('DropRulesCard Component', () => {
   });
 
   it('clears the dragged row when a drag ends outside a row', async () => {
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
     await waitFor(() => expect(screen.getByTestId('drop-rule-row-1')).toBeInTheDocument());
     const row = screen.getByTestId('drop-rule-row-1');
     fireEvent.dragStart(row, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
@@ -629,7 +629,7 @@ describe('DropRulesCard Component', () => {
       .mockImplementation(async (ids: number[]) => ids.map((id) => rules.find((r) => r.id === id)!));
     const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
 
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
     await waitFor(() => expect(screen.getByTestId('drop-rule-row-3')).toBeInTheDocument());
 
     fireEvent.dragStart(screen.getByTestId('drop-rule-row-1'), { dataTransfer });
@@ -648,7 +648,7 @@ describe('DropRulesCard Component', () => {
     const importSpy = vi
       .spyOn(dropRulesApi, 'importDropRules')
       .mockResolvedValue({ imported: 0, skipped: 1, errors: ['Item #2: bad pattern'] });
-    const { container } = render(<DropRulesCard />);
+    const { container } = render(<DropRulesTab />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Import/i })).toBeInTheDocument());
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
 
@@ -664,7 +664,7 @@ describe('DropRulesCard Component', () => {
 });
 
 
-describe('DropRulesCard pattern display', () => {
+describe('DropRulesTab pattern display', () => {
   const base = {
     source_pattern: null,
     app_pattern: null,
@@ -681,7 +681,7 @@ describe('DropRulesCard pattern display', () => {
       { ...base, id: 2, name: 'Star pattern', message_pattern: '*' },
       { ...base, id: 3, name: 'Empty pattern', message_pattern: '' },
     ] as DropRule[]);
-    render(<DropRulesCard />);
+    render(<DropRulesTab />);
     await waitFor(() => expect(screen.getByText('Has pattern')).toBeInTheDocument());
 
     const pattern = screen.getByText('DHCPACK from 10.0.0.5');

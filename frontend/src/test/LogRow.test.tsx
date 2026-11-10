@@ -90,12 +90,11 @@ describe('LogRow Component and Optimization', () => {
     expect(onDiagnoseAi).toHaveBeenCalledWith([baseLog]);
   });
 
-  it('custom comparison function areLogRowPropsEqual handles id, selection, hover, and style', () => {
+  it('custom comparison function areLogRowPropsEqual handles id, selection and style', () => {
     const defaultProps = {
       log: baseLog,
       index: 0,
       isSelected: false,
-      isHovered: false,
       isMobile: false,
       style: { height: '28px', transform: 'translateY(0px)' },
       onSelect: vi.fn(),
@@ -108,9 +107,6 @@ describe('LogRow Component and Optimization', () => {
 
     // Changed selection status should return false
     expect(areLogRowPropsEqual(defaultProps, { ...defaultProps, isSelected: true })).toBe(false);
-
-    // Changed hover status should return false
-    expect(areLogRowPropsEqual(defaultProps, { ...defaultProps, isHovered: true })).toBe(false);
 
     // Changed id should return false
     expect(

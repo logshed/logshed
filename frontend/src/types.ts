@@ -338,10 +338,6 @@ export interface VersionInfo {
   repo_deprecated?: boolean;
 }
 
-export interface RuleReorderRequest {
-  rule_ids: number[];
-}
-
 export interface DropRule {
   id: number;
   name?: string | null;
