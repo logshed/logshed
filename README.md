@@ -169,7 +169,7 @@ docker exec -it logshed python -m app.cli reset-admin
 
 ## Home Assistant Integration
 
-The [LogShed integration for Home Assistant](https://github.com/logshed/homeassistant-logshed) connects your LogShed server to Home Assistant. Install it through the [Home Assistant Marketplace](https://www.home-assistant.io/integrations/marketplace/) (**Settings > Marketplace > Add from link** with `logshed/homeassistant-logshed` on Home Assistant 2026.11 and later) or as a custom repository in HACS on older versions:
+The [LogShed integration for Home Assistant](https://github.com/logshed/homeassistant-logshed) connects your LogShed server to Home Assistant. Install it through the [Home Assistant Marketplace](https://www.home-assistant.io/integrations/marketplace/) (**Settings > Marketplace**, search for **LogShed**, on Home Assistant 2026.11 and later) or through HACS on older versions:
 
 - **Sensors** for ingestion rate, error counts (1h, 24h, and by severity), database size, disk usage, alert state, and active maintenance.
 - **Maintenance switch and actions** (`logshed.enable_maintenance` and `logshed.disable_maintenance`) so backup or update automations can silence alerts automatically.
