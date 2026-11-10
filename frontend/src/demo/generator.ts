@@ -61,7 +61,7 @@ const INCIDENTS: Template[] = [
 const totalWeight = TEMPLATES.reduce((s, t) => s + t[3], 0);
 
 function chooseTemplate(): Template {
-  if (Math.random() < 0.004) return pick(INCIDENTS);
+  if (Math.random() < 0.0015) return pick(INCIDENTS);
   let r = Math.random() * totalWeight;
   for (const t of TEMPLATES) {
     r -= t[3];

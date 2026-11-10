@@ -1,10 +1,11 @@
 // The fake backend: answers the app's /api requests from in-memory data, in the browser.
 import type {
   LogEntry, LogFacetsResponse, AiDiagnosisRequest, AiDiagnosisResponse, AiConversationMessage,
-  AiDiagnosisStreamEvent, AiFollowUpStreamEvent,
+  AiDiagnosisStreamEvent, AiFollowUpStreamEvent, AlertRule, MaintenanceSchedule,
 } from '../types.ts';
 import { matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
 import { makeHistory, makeLog } from './generator.ts';
+import * as store from './store.ts';
 import { FOLLOW_UPS, pickDiagnosis } from './aiAnswers.ts';
 
 export const DEMO_VERSION = '1.3.1';
@@ -45,6 +46,7 @@ function trickle() {
   logs.push(log);
   if (logs.length > MAX_LOGS) logs.splice(0, logs.length - MAX_LOGS);
   listeners.forEach((fn) => fn(log));
+  checkAlerts(log);
   setTimeout(trickle, 300 + Math.random() * 900);
 }
 setTimeout(trickle, 1000);
@@ -133,6 +135,69 @@ function diagnose(body: Body): AiDiagnosisResponse {
   return startConversation({ ...pickDiagnosis(chosen), model_used: String(settings.ai_model) }, req);
 }
 
+const nowIso = () => new Date().toISOString();
+function found<T>(item: T | undefined): T {
+  if (item === undefined) throw new DemoHttpError(404, 'Not found');
+  return item;
+}
+
+/** List, create, update and delete routes for one collection. */
+function crud<T extends { id: number }>(base: string, coll: store.Collection<T>, make: (body: Record<string, any>) => Omit<T, 'id'>): Array<[string, RegExp, Handler]> {
+  const esc = base.replace(/\//g, '\\/');
+  const one = new RegExp(`^${esc}\\/(\\d+)$`);
+  return [
+    ['GET', new RegExp(`^${esc}$`), () => coll.items],
+    ['POST', new RegExp(`^${esc}$`), (_m, _q, b) => coll.add(make(b || {}))],
+    ['GET', one, (m) => found(coll.get(Number(m[1])))],
+    ['PUT', one, (m, _q, b) => found(coll.update(Number(m[1]), { ...(b || {}), updated_at: nowIso() } as unknown as Partial<T>))],
+    ['DELETE', one, (m) => { coll.remove(Number(m[1])); return { status: 'ok' }; }],
+  ];
+}
+
+function importRules(body: Body, add: (rule: any) => unknown) {
+  const rules = (Array.isArray(body) ? body : (body?.rules as unknown[])) || [];
+  rules.forEach((r) => { const { id: _id, ...rest } = r as Record<string, unknown>; add(rest); });
+  return { imported: rules.length, skipped: 0, errors: [] };
+}
+
+function maintenanceState() {
+  const now = Date.now();
+  const live = store.sessions.filter((x) => Date.parse(x.expires_at) > now);
+  store.sessions.splice(0, store.sessions.length, ...live);
+  const until = live.length ? live.map((x) => x.expires_at).sort().slice(-1)[0] : null;
+  return {
+    active: live.length > 0, until, on_demand_until: until, reason: live[0]?.reason ?? null, schedule_name: null,
+    schedules: store.schedules, server_time: new Date().toISOString(),
+    server_timezone: String(settings.server_timezone), remaining_seconds: until ? Math.round((Date.parse(until) - now) / 1000) : 0,
+    active_sessions_count: live.length, sessions: live, log_handling: 'silence_alerts',
+  };
+}
+
+/** Fire the alert rules a new line matches, as the real alert engine would, with each rule's cooldown. */
+function checkAlerts(log: LogEntry) {
+  if (maintenanceState().active) return;
+  for (const rule of store.alertRules.items) {
+    if (!rule.is_enabled || !store.matchesRule(rule, log)) continue;
+    if (rule.last_triggered_at && Date.parse(log.timestamp) - Date.parse(rule.last_triggered_at) < rule.cooldown_seconds * 1000) continue;
+    rule.trigger_count += 1;
+    rule.last_triggered_at = log.timestamp;
+    const item = store.history.add({
+      rule_id: rule.id, rule_name: rule.name, channel_id: rule.channel_id, trigger_count: 1, sample_log: log.message,
+      sample_log_id: log.id, ai_enrichment: false, triggered_at: log.timestamp, source_alias: log.source_alias, app_name: log.app_name,
+    });
+    // Newest first
+    store.history.items.pop();
+    store.history.items.unshift(item);
+  }
+}
+
+store.seedHistory(logs, (summary) => {
+  const auditId = nextAuditId++;
+  conversations.set(auditId, [{ id: nextMessageId++, role: 'assistant', content: summary, tokens_used: 1808, model: 'gemini-flash-latest', created_at: nowIso() }]);
+  return auditId;
+});
+const storage = store.storageHistory(logs.length * 40);
+
 const ROUTES: Array<[string, RegExp, Handler]> = [
   ['GET', /^\/api\/auth\/status$/, () => ({ setup_required: false, authenticated: true })],
   ['POST', /^\/api\/auth\/(login|logout|setup)$/, () => ({ status: 'ok' })],
@@ -179,13 +244,125 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     const messages = conversations.get(Number(m[1])) || [];
     return { audit_id: Number(m[1]), messages, turn_count: Math.floor(messages.length / 2), max_turns: 10 };
   }],
+  ['POST', /^\/api\/ai\/audit\/(\d+)\/follow-up$/, () => { throw notInDemo('A follow-up without streaming'); }],
   ['DELETE', /^\/api\/ai\/audit\/(\d+)\/messages$/, (m) => { conversations.set(Number(m[1]), (conversations.get(Number(m[1])) || []).slice(0, 1)); return { status: 'ok' }; }],
-  // Sections the spike does not fill yet: empty lists, so the pages still open
-  ['GET', /^\/api\/(alerts\/rules|alerts\/presets|aliases|drop-rules|drop-rules\/presets|saved-views|notifications\/channels|tokens|docker\/hosts)$/, () => []],
-  ['GET', /^\/api\/alerts\/history$/, (_m, q) => ({ items: [], total: 0, limit: Number(q.get('limit') || 50), offset: 0 })],
-  ['GET', /^\/api\/alerts\/maintenance$/, () => ({ active: false, until: null, schedules: [], sessions: [], active_sessions_count: 0 })],
-  ['GET', /^\/api\/system\/storage$/, () => ({ db_size_bytes: logs.length * 650, disk_free_bytes: 412e9, disk_total_bytes: 1e12, total_logs_count: logs.length, history: [] })],
+  ...crud('/api/alerts/rules', store.alertRules, (b) => ({
+    name: 'New rule', rule_type: 'pattern' as AlertRule['rule_type'], channel_id: null, filter_app: null, filter_severity: null, match_pattern: null, threshold_count: 1,
+    window_seconds: 60, cooldown_seconds: 300, ai_enrichment: false, is_enabled: true, ...b,
+    trigger_count: 0, last_triggered_at: null, suppress_until: null, created_at: nowIso(), display_order: store.alertRules.items.length,
+  })),
+  ['PUT', /^\/api\/alerts\/rules\/reorder$/, (_m, _q, b) => store.alertRules.reorder((b?.rule_ids as number[]) || [])],
+  ['GET', /^\/api\/alerts\/rules\/export$/, () => ({ rules: store.alertRules.items })],
+  ['GET', /^\/api\/alerts\/rules\/(\d+)\/export$/, (m) => ({ rules: [found(store.alertRules.get(Number(m[1])))] })],
+  ['POST', /^\/api\/alerts\/rules\/import$/, (_m, _q, b) => importRules(b, (r) => store.alertRules.add({ ...r, trigger_count: 0, last_triggered_at: null, created_at: nowIso() }))],
+  ['GET', /^\/api\/alerts\/presets$/, () => store.ALERT_PRESETS],
+  ['POST', /^\/api\/alerts\/presets\/([^/]+)\/install$/, (m, _q, b) => {
+    const { id: _id, category: _c, description: _d, is_custom: _x, ...p } = found(store.ALERT_PRESETS.find((x) => x.id === decodeURIComponent(m[1])));
+    return store.alertRules.add({
+      ...p, rule_type: p.rule_type as AlertRule['rule_type'], channel_id: (b?.channel_id as number | null) ?? null, is_enabled: true,
+      trigger_count: 0, last_triggered_at: null, suppress_until: null, created_at: nowIso(), display_order: store.alertRules.items.length,
+    });
+  }],
+  ['POST', /^\/api\/alerts\/test$/, (_m, _q, b) => {
+    try {
+      return { matched: new RegExp(String(b?.match_pattern || ''), 'i').test(String(b?.sample_log || b?.test_message || '')), extracted_ip: null, error: null };
+    } catch (e) {
+      return { matched: false, error: String((e as Error).message) };
+    }
+  }],
+  ['GET', /^\/api\/alerts\/history$/, (_m, q) => {
+    const ruleId = q.get('rule_id');
+    const items = store.history.items.filter((h) => !ruleId || h.rule_id === Number(ruleId));
+    const limit = Number(q.get('limit') || 50);
+    const offset = Number(q.get('offset') || 0);
+    return { items: items.slice(offset, offset + limit), total: items.length, limit, offset };
+  }],
+  ['GET', /^\/api\/alerts\/history\/(\d+)$/, (m) => found(store.history.get(Number(m[1])))],
+  ['DELETE', /^\/api\/alerts\/history\/(\d+)$/, (m) => { store.history.remove(Number(m[1])); return { status: 'ok' }; }],
+  ['DELETE', /^\/api\/alerts\/history$/, () => { store.history.items = []; return { status: 'ok' }; }],
+  ['GET', /^\/api\/alerts\/maintenance$/, () => maintenanceState()],
+  ['POST', /^\/api\/alerts\/maintenance$/, (_m, _q, b) => {
+    if (b?.until) store.sessions.push({ session_id: `demo-${Date.now()}`, reason: 'Started from the web UI', log_handling: 'silence_alerts', initiated_by: 'web', expires_at: String(b.until) });
+    else store.sessions.splice(0);
+    return maintenanceState();
+  }],
+  ['POST', /^\/api\/alerts\/maintenance\/schedules$/, (_m, _q, b) => {
+    store.schedules.splice(0, store.schedules.length, ...((b?.schedules as MaintenanceSchedule[]) || []));
+    return maintenanceState();
+  }],
+  ['DELETE', /^\/api\/alerts\/maintenance\/sessions\/([^/]+)$/, (m) => {
+    const i = store.sessions.findIndex((x) => x.session_id === decodeURIComponent(m[1]));
+    if (i >= 0) store.sessions.splice(i, 1);
+    return maintenanceState();
+  }],
+  ['POST', /^\/api\/alerts\/maintenance\/sessions\/([^/]+)\/extend$/, (m, _q, b) => {
+    const sess = found(store.sessions.find((x) => x.session_id === decodeURIComponent(m[1])));
+    sess.expires_at = new Date(Date.parse(sess.expires_at) + Number(b?.minutes || 60) * 60_000).toISOString();
+    return maintenanceState();
+  }],
+  ...crud('/api/drop-rules', store.dropRules, (b) => ({
+    name: null, source_pattern: null, app_pattern: null, message_pattern: '', is_regex: false, is_enabled: true, severity_threshold: null,
+    ...b, dropped_count: 0, created_at: nowIso(), display_order: store.dropRules.items.length,
+  })),
+  ['PUT', /^\/api\/drop-rules\/reorder$/, (_m, _q, b) => store.dropRules.reorder((b?.rule_ids as number[]) || [])],
+  ['POST', /^\/api\/drop-rules\/(\d+)\/reset$/, (m) => found(store.dropRules.update(Number(m[1]), { dropped_count: 0 }))],
+  ['GET', /^\/api\/drop-rules\/export$/, () => ({ rules: store.dropRules.items })],
+  ['GET', /^\/api\/drop-rules\/(\d+)\/export$/, (m) => ({ rules: [found(store.dropRules.get(Number(m[1])))] })],
+  ['POST', /^\/api\/drop-rules\/import$/, (_m, _q, b) => importRules(b, (r) => store.dropRules.add({ ...r, dropped_count: 0, created_at: nowIso() }))],
+  ['GET', /^\/api\/drop-rules\/presets$/, () => store.DROP_PRESETS],
+  ['POST', /^\/api\/drop-rules\/presets\/([^/]+)\/install$/, (m) => {
+    const { id: _id, category: _c, description: _d, is_custom: _x, ...p } = found(store.DROP_PRESETS.find((x) => x.id === decodeURIComponent(m[1])));
+    return store.dropRules.add({ ...p, is_enabled: true, dropped_count: 0, created_at: nowIso(), display_order: store.dropRules.items.length });
+  }],
+  ['POST', /^\/api\/drop-rules\/test$/, (_m, _q, b) => {
+    const pattern = String(b?.message_pattern || '');
+    const sample = String(b?.sample_message || b?.test_message || b?.message || '');
+    try {
+      return { matched: b?.is_regex ? new RegExp(pattern).test(sample) : sample.toLowerCase().includes(pattern.toLowerCase()), error: null };
+    } catch (e) {
+      return { matched: false, error: String((e as Error).message) };
+    }
+  }],
+  ...crud('/api/saved-views', store.savedViews, (b) => ({ name: '', query_params: {}, is_pinned: false, ...b, created_at: nowIso() })),
+  ...crud('/api/notifications/channels', store.channels, (b) => ({ name: '', url: '', is_enabled: true, ...b, created_at: nowIso(), updated_at: nowIso() })),
+  ['POST', /^\/api\/notifications\/(test|digest\/send)$/, () => { throw notInDemo('Sending notifications'); }],
+  ['GET', /^\/api\/tokens$/, () => store.tokens.items],
+  ['POST', /^\/api\/tokens$/, (_m, _q, b) => {
+    const prefix = `lsk_${Math.random().toString(16).slice(2, 6)}`;
+    const token = store.tokens.add({ name: String(b?.name || 'New token'), scopes: (b?.scopes as string[]) || [], token_prefix: prefix, created_at: nowIso(), expires_at: (b?.expires_at as string) ?? null, last_used_at: null, created_by: 'admin' });
+    return { token, raw_token: `${prefix}_demo-token-not-valid-anywhere` };
+  }],
+  ['PATCH', /^\/api\/tokens\/(\d+)$/, (m, _q, b) => found(store.tokens.update(Number(m[1]), b || {}))],
+  ['DELETE', /^\/api\/tokens\/(\d+)$/, (m) => { store.tokens.remove(Number(m[1])); return { status: 'ok' }; }],
+  ...crud('/api/docker/hosts', store.dockerHosts, (b) => ({
+    name: '', url: '', source_alias: '', enabled: true, tls_enabled: false, exclude_containers: '', ...b,
+    created_at: nowIso(), updated_at: nowIso(), is_connected: false, active_containers: 0, last_error: 'The demo cannot connect to Docker hosts.', last_activity: null, latency_ms: null,
+  })),
+  ['POST', /^\/api\/docker\/hosts\/test$/, () => { throw notInDemo('Testing a Docker connection'); }],
+  ['GET', /^\/api\/aliases$/, () => store.aliases],
+  ['POST', /^\/api\/aliases$/, (_m, _q, b) => {
+    const entry = { ip: String(b?.ip || ''), alias: String(b?.alias || ''), notes: (b?.notes as string) ?? null, created_at: nowIso() };
+    store.setAliases([...store.aliases.filter((a) => a.ip !== entry.ip), entry]);
+    return entry;
+  }],
+  ['DELETE', /^\/api\/aliases\/(.+)$/, (m) => { store.setAliases(store.aliases.filter((a) => a.ip !== decodeURIComponent(m[1]))); return { status: 'ok' }; }],
+  ['GET', /^\/api\/system\/storage$/, () => {
+    const count = logs.length * 40;
+    return { db_size_bytes: count * 640, disk_free_bytes: 394e9, disk_total_bytes: 1e12, total_logs_count: count, history: storage };
+  }],
+  ['GET', /^\/api\/maintenance\/prune\/preview$/, (_m, q) => ({
+    retention_days: Number(q.get('retention_days') || settings.retention_days), cutoff: new Date(Date.now() - 30 * 86400_000).toISOString(),
+    logs: 0, history_alerts: 0, history_on_demand: 0, history_digests: 0, history_maintenance: 0, history_total: 0, metrics: 0, ai_audit: 0, total: 0,
+    last_cleanup_at: new Date(Date.now() - 5 * 3600_000).toISOString(), next_cleanup_at: new Date(Date.now() + 19 * 3600_000).toISOString(),
+  })],
+  ['POST', /^\/api\/(maintenance\/prune|system\/vacuum)$/, () => { throw notInDemo('Database maintenance'); }],
 ];
+
+/** Whether the demo answers this method and path (used by the drift test). */
+export function hasRoute(method: string, path: string): boolean {
+  if (method === 'POST' && (path === '/api/ai/diagnose/stream' || /^\/api\/ai\/audit\/\d+\/follow-up\/stream$/.test(path))) return true;
+  return ROUTES.some(([m, re]) => m === method && re.test(path));
+}
 
 export function handle(method: string, url: URL, body: Body): unknown {
   for (const [m, re, fn] of ROUTES) {
