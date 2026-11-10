@@ -308,20 +308,25 @@ export const App: React.FC = () => {
               saveTriggerRef={saveSettingsTriggerRef}
             />
           )}
-
-          {/* Global AI Root-Cause Analysis Modal */}
-          <AiAnalysisModal
-            isOpen={aiSelectedLogs.length > 0}
-            onClose={() => {
-              setAiSelectedLogs([]);
-              if (isMobile) {
-                setClearSelectionSignal((prev) => prev + 1);
-              }
-            }}
-            selectedLogs={aiSelectedLogs}
-            onNavigateToSettings={() => handleTabChange('settings')}
-          />
         </React.Suspense>
+
+        {/* Global AI Root-Cause Analysis Modal, mounted only while open so its chunk loads on first use.
+            It resets all its state on close, so unmounting it loses nothing. */}
+        {aiSelectedLogs.length > 0 && (
+          <React.Suspense fallback={null}>
+            <AiAnalysisModal
+              isOpen
+              onClose={() => {
+                setAiSelectedLogs([]);
+                if (isMobile) {
+                  setClearSelectionSignal((prev) => prev + 1);
+                }
+              }}
+              selectedLogs={aiSelectedLogs}
+              onNavigateToSettings={() => handleTabChange('settings')}
+            />
+          </React.Suspense>
+        )}
       </main>
 
       {/* Unsaved Changes Confirmation Modal */}

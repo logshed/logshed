@@ -41,10 +41,14 @@ import {
   DESKTOP_LOG_ROW_HEIGHT,
   MOBILE_LOG_ROW_HEIGHT,
 } from './LogRow.tsx';
-import { CreateDropRuleModal } from '../alerts/CreateDropRuleModal.tsx';
 import { setAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { Modal } from '../common/Modal.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
+
+// Loaded on first use, not with the Console
+const CreateDropRuleModal = React.lazy(() =>
+  import('../alerts/CreateDropRuleModal.tsx').then((m) => ({ default: m.CreateDropRuleModal }))
+);
 
 export function parseFiltersFromUrl(): LogFilterParams {
   if (typeof window === 'undefined') return {};
@@ -2614,15 +2618,17 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
       {/* Create Drop Rule Modal */}
       {dropRuleTargetLog && (
-        <CreateDropRuleModal
-          isOpen={Boolean(dropRuleTargetLog)}
-          onClose={() => setDropRuleTargetLog(null)}
-          initialSource={dropRuleTargetLog.source_alias || dropRuleTargetLog.source_ip}
-          initialApp={dropRuleTargetLog.app_name}
-          initialMessage={cleanLogMessageForDisplay(dropRuleTargetLog.message)}
-          availableSources={availableSourcesForSelectedApps}
-          availableApps={availableAppsForSelectedHosts}
-        />
+        <React.Suspense fallback={null}>
+          <CreateDropRuleModal
+            isOpen={Boolean(dropRuleTargetLog)}
+            onClose={() => setDropRuleTargetLog(null)}
+            initialSource={dropRuleTargetLog.source_alias || dropRuleTargetLog.source_ip}
+            initialApp={dropRuleTargetLog.app_name}
+            initialMessage={cleanLogMessageForDisplay(dropRuleTargetLog.message)}
+            availableSources={availableSourcesForSelectedApps}
+            availableApps={availableAppsForSelectedHosts}
+          />
+        </React.Suspense>
       )}
 
       {/* Delete Selected Confirmation Modal */}

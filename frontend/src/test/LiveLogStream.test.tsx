@@ -19,7 +19,6 @@ import * as authApi from '../api/auth.ts';
 import { LogEntry } from '../types.ts';
 import { AliasContext, AliasContextValue } from '../context/AliasContext.tsx';
 import * as clipboardModule from '../utils/clipboard.ts';
-import * as dropRuleModalModule from '../components/alerts/CreateDropRuleModal.tsx';
 import { takeAlertRuleHandoff } from '../utils/alertRuleHandoff.ts';
 import { chooseOption, shownValue, toolbarSelect } from './selectDropdownHelpers.ts';
 
@@ -2571,14 +2570,15 @@ describe('LiveLogStream console controls', () => {
 
   it('prefills Create Drop Rule with the host alias rather than the IP', async () => {
     mockSettings({});
-    const modalSpy = vi.spyOn(dropRuleModalModule, 'CreateDropRuleModal');
     renderStream();
     await waitForRows();
     fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
     fireEvent.click(await screen.findByRole('button', { name: /Create Drop Rule/i }));
-    await waitFor(() => expect(modalSpy).toHaveBeenCalled());
-    const props = modalSpy.mock.calls[modalSpy.mock.calls.length - 1][0] as any;
-    expect(props.initialSource).toBe('homelab-host');
+    // The dialog is loaded on first use
+    const dialog = await screen.findByRole('dialog', { name: /Drop Rule/i });
+    // The Host field shows the chosen host
+    expect(await within(dialog).findByText('homelab-host')).toBeInTheDocument();
+    expect(within(dialog).queryByText('192.168.1.50')).toBeNull();
   });
 
   describe('empty states', () => {
