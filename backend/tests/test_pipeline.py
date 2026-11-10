@@ -1204,6 +1204,22 @@ class TestKeyedMultilineAssemblerLimits:
             q.get_nowait()
 
     @pytest.mark.asyncio
+    async def test_single_lines_on_one_stream_keep_one_flush_timer(self):
+        """Each single line flushes the one before it; the stream keeps its running timer instead of setting one per line."""
+        asm = KeyedMultilineAssembler(flush_timeout=0.05)
+        q = get_queue()
+        await asm.feed("s1:app", _make_entry(message="first"))
+        timer = asm._timers["s1:app"]
+        for n in range(20):
+            await asm.feed("s1:app", _make_entry(message=f"line {n}"))
+            assert asm._timers["s1:app"] is timer
+        assert [q.get_nowait()["message"] for _ in range(20)] == ["first"] + [f"line {n}" for n in range(19)]
+        # The last line still flushes on time, and the timer ends with it
+        await asyncio.sleep(0.12)
+        assert q.get_nowait()["message"] == "line 19"
+        assert asm._timers == {} and asm._flush_deadlines == {}
+
+    @pytest.mark.asyncio
     async def test_each_line_moves_the_flush_deadline(self):
         """A stream flushes flush_timeout after its last line, however many lines came before."""
         asm = KeyedMultilineAssembler(flush_timeout=0.06)

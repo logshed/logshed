@@ -851,12 +851,16 @@ class KeyedMultilineAssembler:
     def _on_flush_timer(self, stream_key: str) -> None:
         """Flush a stream once its latest deadline has passed, or wait again until it does."""
         deadline = self._flush_deadlines.get(stream_key)
-        if deadline is not None:
-            loop = asyncio.get_running_loop()
-            # A deadline less than a millisecond away counts as reached, so the timer is not set again for it
-            if deadline - loop.time() > 0.001:
-                self._timers[stream_key] = loop.call_at(deadline, self._on_flush_timer, stream_key)
-                return
+        if deadline is None:
+            # Flushed since the timer was set, and nothing buffered after
+            self._timers.pop(stream_key, None)
+            return
+        loop = asyncio.get_running_loop()
+        # A deadline less than a millisecond away counts as reached, so the timer is not set again for it
+        if deadline - loop.time() > 0.001:
+            self._timers[stream_key] = loop.call_at(deadline, self._on_flush_timer, stream_key)
+            return
+        self._timers.pop(stream_key, None)
         self._flush_stream_internal(stream_key)
 
     def flush_stream(self, stream_key: str) -> None:
@@ -867,11 +871,10 @@ class KeyedMultilineAssembler:
         """
         Internal flush logic.
         Takes buffered lines, merges them, and puts to the shared queue.
+        The stream's flush timer keeps running: a stream that starts a new entry before it fires
+        reuses it (one timer per flush timeout rather than one per single-line message), and
+        otherwise it finds nothing buffered and ends.
         """
-        if stream_key in self._timers:
-            self._timers[stream_key].cancel()
-            del self._timers[stream_key]
-
         self._stream_start_times.pop(stream_key, None)
         self._stream_bytes.pop(stream_key, None)
         self._stream_chars.pop(stream_key, None)
@@ -913,6 +916,9 @@ class KeyedMultilineAssembler:
         keys = list(self._buffers.keys())
         for k in keys:
             self._flush_stream_internal(k)
+        for timer in self._timers.values():
+            timer.cancel()
+        self._timers.clear()
 
 _QUEUE_SENTINEL = object()
 

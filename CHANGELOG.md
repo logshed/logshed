@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Quicker API answers**: Every request to the web interface, the REST API, HTTP ingest and MCP spends less time in LogShed's own request handling: a health check took 1.0 ms instead of 1.9 ms in a test. Database reads no longer look up the database file's full path each time.
 - **Faster redaction**: Redaction (REST API and MCP log responses, AI analysis, notifications) skips the patterns a line cannot match, such as the private key pattern on a line without `-----BEGIN`. A full page of 1,000 logs from `/api/v1/logs` is redacted in 40 ms instead of 150 ms; what is redacted is unchanged.
 - **Lighter Docker log intake**: Reading and storing a Docker log line takes over a quarter less CPU (15.5 us instead of 21.7 us in a test): its patterns are prepared once, the message is cleaned once when the stored raw line is the same text, lines without escape or control characters skip the cleaning, and Docker's timestamps are put in the stored form once instead of being parsed again before storing. Stored timestamps are unchanged.
+- **Lighter syslog intake**: A busy syslog source no longer sets and cancels a timer for every single-line message; each source keeps one running timer for joining multi-line messages. Receiving a syslog message takes about 6% less time (20,100 instead of 18,900 messages a second over UDP in a test).
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
 
 ### Fixed
