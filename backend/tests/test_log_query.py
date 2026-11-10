@@ -226,6 +226,29 @@ class TestRunNewestFirst:
         assert total == 21
         assert [row[0] for row in page][:3] == [1, 500, 499]
 
+    def test_back_dated_rare_match_inside_the_time_range_widens_the_search(self, tmp_path, monkeypatch):
+        # Row 1 is older than every window but its timestamp falls inside the searched range
+        db = tmp_path / "logs.db"
+        rows = [(_ts(470), "stale early")] + [(_ts(i), "stale handle" if i == 480 else f"noise {i}") for i in range(2, 501)]
+        _seed_numbered_logs(db, rows)
+        monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
+        with get_connection(db) as conn:
+            attempts: list[int] = []
+            total, page = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts, from_ts=_ts(460))
+        assert attempts == [451, 0]
+        assert total == 2
+        assert [row[0] for row in page] == [480, 1]
+
+    def test_time_range_after_every_row_is_answered_from_the_newest_window(self, tmp_path, monkeypatch):
+        db = tmp_path / "logs.db"
+        _seed_numbered_logs(db, [(_ts(i), f"stale {i}") for i in range(1, 501)])
+        monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
+        with get_connection(db) as conn:
+            attempts: list[int] = []
+            result = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts, from_ts=_ts(1000))
+        assert attempts == [451]
+        assert result == (0, [])
+
     def test_query_without_full_text_term_runs_once(self):
         calls = []
         result = run_newest_first(MagicMock(), {"limit": 5}, lambda p: calls.append(p) or "done", lambda r: None, len, 1)

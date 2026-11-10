@@ -136,12 +136,16 @@ def run_newest_first(
             result = run({**params, "fts_min_rowid": min_rowid})
             cutoff = oldest_needed(result)
             if cutoff is not None:
-                # MIN(+id) keeps SQLite on the timestamp index: rows are mostly in id order, but
-                # a late or back-dated row outside the window could still belong on the page.
-                oldest_id = conn.execute(
-                    "SELECT MIN(+id) FROM logs WHERE timestamp >= ?", (cutoff,)
+                # Rows are mostly in id order, but a late or back-dated row outside the window
+                # could still belong on the page. +id keeps SQLite on the timestamp index, read
+                # from the cutoff up: the first row older than the window ends the scan, so a
+                # window that does not cover the time range fails at once. With no row at or
+                # after the cutoff, the window is accepted, which is still exact: no row outside
+                # it can belong on the page.
+                outside = conn.execute(
+                    "SELECT EXISTS(SELECT 1 FROM logs WHERE timestamp >= ? AND +id < ?)", (cutoff, min_rowid)
                 ).fetchone()[0]
-                if oldest_id is not None and oldest_id >= min_rowid:
+                if not outside:
                     return result
             found = matches(result)
             smallest_useful_span = span * needed / found if found else float("inf")
