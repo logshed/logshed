@@ -186,7 +186,7 @@ class TestOperationContention:
         async def _boom(*args, **kwargs):
             raise RuntimeError("disk exploded")
 
-        monkeypatch.setattr(ext_v1_mod, "execute_prune_async", _boom)
+        monkeypatch.setattr(system_mod, "execute_prune_async", _boom)
         res = await client.post("/api/v1/system/prune", headers=write_token_headers)
         assert res.status_code == 500
         with operation_guard("prune"):
@@ -312,7 +312,7 @@ class TestCancellationKeepsLock:
                 },
             }
 
-        monkeypatch.setattr(ext_v1_mod, "execute_prune_async", _slow_prune)
+        monkeypatch.setattr(system_mod, "execute_prune_async", _slow_prune)
 
         request = asyncio.create_task(ext_v1_mod.trigger_prune_v1(token={"scopes": ["system:write"]}))
         await started.wait()
@@ -372,15 +372,15 @@ class TestCooldownAfterSuccess:
     async def test_failed_prune_does_not_start_cooldown(
         self, client: AsyncClient, write_token_headers: dict, monkeypatch
     ):
-        real_prune = ext_v1_mod.execute_prune_async
+        real_prune = system_mod.execute_prune_async
 
         async def _boom(*args, **kwargs):
             raise RuntimeError("fail")
 
-        monkeypatch.setattr(ext_v1_mod, "execute_prune_async", _boom)
+        monkeypatch.setattr(system_mod, "execute_prune_async", _boom)
         assert (await client.post("/api/v1/system/prune", headers=write_token_headers)).status_code == 500
 
-        monkeypatch.setattr(ext_v1_mod, "execute_prune_async", real_prune)
+        monkeypatch.setattr(system_mod, "execute_prune_async", real_prune)
         assert (await client.post("/api/v1/system/prune", headers=write_token_headers)).status_code == 200
 
         res = await client.post("/api/v1/system/prune", headers=write_token_headers)
@@ -391,15 +391,15 @@ class TestCooldownAfterSuccess:
     async def test_failed_vacuum_does_not_start_cooldown(
         self, client: AsyncClient, write_token_headers: dict, monkeypatch
     ):
-        real_vacuum = ext_v1_mod.execute_vacuum
+        real_vacuum = system_mod.execute_vacuum
 
         async def _boom(*args, **kwargs):
             raise RuntimeError("fail")
 
-        monkeypatch.setattr(ext_v1_mod, "execute_vacuum", _boom)
+        monkeypatch.setattr(system_mod, "execute_vacuum", _boom)
         assert (await client.post("/api/v1/system/vacuum", headers=write_token_headers)).status_code == 500
 
-        monkeypatch.setattr(ext_v1_mod, "execute_vacuum", real_vacuum)
+        monkeypatch.setattr(system_mod, "execute_vacuum", real_vacuum)
         assert (await client.post("/api/v1/system/vacuum", headers=write_token_headers)).status_code == 200
         assert (await client.post("/api/v1/system/vacuum", headers=write_token_headers)).status_code == 429
 
@@ -412,7 +412,7 @@ class TestGenericVacuumErrors:
         async def _boom(*args, **kwargs):
             raise RuntimeError("unable to open /secret/internal/path.db")
 
-        monkeypatch.setattr(ext_v1_mod, "execute_vacuum", _boom)
+        monkeypatch.setattr(system_mod, "execute_vacuum", _boom)
         with caplog.at_level(logging.ERROR):
             res = await client.post("/api/v1/system/vacuum", headers=write_token_headers)
         assert res.status_code == 500
@@ -441,7 +441,7 @@ class TestGenericVacuumErrors:
         async def _low_disk(*args, **kwargs):
             raise InsufficientDiskSpaceError("Insufficient temporary disk headroom available.")
 
-        monkeypatch.setattr(ext_v1_mod, "execute_vacuum", _low_disk)
+        monkeypatch.setattr(system_mod, "execute_vacuum", _low_disk)
         res = await client.post("/api/v1/system/vacuum", headers=write_token_headers)
         assert res.status_code == 400
         assert "headroom" in res.json()["detail"]
