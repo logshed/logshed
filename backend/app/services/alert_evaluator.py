@@ -341,7 +341,7 @@ class AlertEvaluator:
                 trigger_count=r[12] or 0,
                 last_triggered_at=r[13],
                 suppress_until=r[14],
-                display_order=r[15] if len(r) > 15 else 0,
+                display_order=r[15],
             )
             if rule.compiled_regex is not None:
                 rule.on_pattern_timeout = self._make_timeout_callback(rule)
@@ -389,13 +389,8 @@ class AlertEvaluator:
             if isinstance(window, RateWindow):
                 window.prune(window_cutoff)
                 continue
-            while window:
-                first = window[0]
-                entry_epoch = first[0] if isinstance(first, (tuple, list)) else first
-                if entry_epoch < window_cutoff:
-                    window.popleft()
-                else:
-                    break
+            while window and window[0][0] < window_cutoff:
+                window.popleft()
 
     async def evaluate_batch(self, batch: list[dict[str, Any]]) -> None:
         """
@@ -498,25 +493,20 @@ class AlertEvaluator:
                         entry_epoch = entry.get("_epoch_ts", now_epoch)
 
                         # Evict expired entries outside the sliding window
-                        while window:
-                            first = window[0]
-                            first_epoch = first[0] if isinstance(first, (tuple, list)) else first
-                            if first_epoch < window_cutoff:
-                                window.popleft()
-                            else:
-                                break
+                        while window and window[0][0] < window_cutoff:
+                            window.popleft()
 
                         # Skip entries that fall outside the active sliding window
                         if entry_epoch < window_cutoff:
                             continue
 
                         # Append entry preserving chronological order under timestamp jitter
-                        if not window or entry_epoch >= (window[-1][0] if isinstance(window[-1], (tuple, list)) else window[-1]):
+                        if not window or entry_epoch >= window[-1][0]:
                             window.append((entry_epoch, entry))
                         else:
                             # Backwards linear search for insertion index to avoid full deque sorting
                             idx = len(window)
-                            while idx > 0 and (window[idx - 1][0] if isinstance(window[idx - 1], (tuple, list)) else window[idx - 1]) > entry_epoch:
+                            while idx > 0 and window[idx - 1][0] > entry_epoch:
                                 idx -= 1
                             if len(window) - idx >= FULL_ENTRIES_KEPT:
                                 window.insert(idx, (entry_epoch, _rate_payload(entry)))
