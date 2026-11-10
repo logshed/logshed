@@ -13,7 +13,7 @@ from app.core.migrations import run_migrations, get_connection
 from app.core.pipeline import SKIP_ALERT_RULES_KEY
 from app.services.ai_engine import AiAnalysisResult
 from app.services.alert_evaluator import AlertEvaluator, CompiledAlertRule
-from app.services.alert_presets import extract_ip_from_message, get_security_presets
+from app.services.alert_presets import extract_ip_from_message, get_alert_presets
 
 
 def _turn_ai_on(db_file: Path) -> None:
@@ -604,7 +604,7 @@ class TestSecurityPresets:
     """Unit tests for predefined security presets and IP extraction."""
 
     def test_presets_count_and_keys(self):
-        presets = get_security_presets()
+        presets = get_alert_presets()
         preset_ids = {p["id"] for p in presets}
         assert len(preset_ids) == len(presets)
         expected_ids = {"ssh_bruteforce", "proxy_auth_flood", "sudo_escalation", "oom_killer", "log_storm_detection"}
@@ -796,10 +796,10 @@ class TestQueueConsumerAlertIntegration:
     def test_proxy_and_oom_presets_filter_false_positives(self):
         """Verify proxy 401/403 and OOM presets don't trigger on benign text containing 401/403 or generic kill."""
         from app.core.regex_validator import compile_user_pattern
-        from app.services.alert_presets import get_security_preset_by_id
+        from app.services.alert_presets import get_alert_preset_by_id
         import re
 
-        proxy_preset = get_security_preset_by_id("proxy_auth_flood")
+        proxy_preset = get_alert_preset_by_id("proxy_auth_flood")
         proxy_re = compile_user_pattern(proxy_preset["match_pattern"], re.IGNORECASE)
 
         # Genuine proxy logs match
@@ -814,7 +814,7 @@ class TestQueueConsumerAlertIntegration:
         assert not proxy_re.search("Order #403 updated")
         assert not proxy_re.search("Listening on port 4010")
 
-        oom_preset = get_security_preset_by_id("oom_killer")
+        oom_preset = get_alert_preset_by_id("oom_killer")
         oom_re = compile_user_pattern(oom_preset["match_pattern"], re.IGNORECASE)
 
         # Genuine OOM matches
@@ -2387,7 +2387,7 @@ class TestAlertRuleTimeoutAutoDisable:
         import app.api.deps as deps
 
         attempts: list[int] = []
-        real_get = deps.get_thread_read_connection
+        real_get = deps.get_thread_connection
 
         class _Conn:
             def __init__(self, conn):
@@ -2410,7 +2410,7 @@ class TestAlertRuleTimeoutAutoDisable:
             def __getattr__(self, name):
                 return getattr(self._conn, name)
 
-        monkeypatch.setattr(deps, "get_thread_read_connection", lambda db: _Conn(real_get(db)))
+        monkeypatch.setattr(deps, "get_thread_connection", lambda db: _Conn(real_get(db)))
         return attempts
 
     @pytest.mark.asyncio

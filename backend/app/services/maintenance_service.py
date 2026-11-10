@@ -20,8 +20,6 @@ from app.models import MaintenanceSchedule, MaintenanceSessionDetail, Maintenanc
 
 logger = logging.getLogger(__name__)
 
-DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-
 
 def _get_server_time_info() -> tuple[datetime.datetime, str]:
     """Get current local server datetime (in the server zone, with its DST rules) and zone abbreviation."""
@@ -725,11 +723,6 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
         log_handling=log_handling,
     )
 
-
-
-def sweep_maintenance_sessions(conn: sqlite3.Connection) -> None:
-    """Periodic maintenance upkeep: close expired sessions, flush drop counts, refresh the cache."""
-    refresh_maintenance_cache(conn)
 
 
 def sweep_maintenance_sessions_if_needed(conn: sqlite3.Connection) -> bool:

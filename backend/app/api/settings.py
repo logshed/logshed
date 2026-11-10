@@ -505,8 +505,8 @@ async def update_settings(
         try:
             from app.main import configure_internal_log_handler
             configure_internal_log_handler(req.internal_log_level)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Internal log level saved but not applied until restart: {e}")
 
     if req.check_for_updates is not None:
         try:

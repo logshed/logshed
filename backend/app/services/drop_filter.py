@@ -24,7 +24,6 @@ from app.core.regex_validator import (
     RuleTimeoutTracker,
     compile_user_pattern,
     describe_rule_timeout_limit,
-    safe_regex_search,
     user_pattern_search,
 )
 from app.core.rule_index import RuleIndex, exact_match_key
@@ -167,36 +166,6 @@ def _drop_rule_exact_keys(rule: CompiledDropRule) -> Optional[tuple[str, tuple[s
     if sources:
         return ("source", sources)
     return None
-
-
-def match_message(
-    candidate: Union[CompiledDropRule, str],
-    message: Optional[str] = None,
-    pattern: Optional[str] = None,
-    is_regex: bool = False,
-    compiled_regex: Optional[regex.Pattern] = None,
-) -> bool:
-    """
-    Safely evaluate a message against a CompiledDropRule or pattern string.
-    Ensures regex matching cannot hang caller threads.
-    """
-    if isinstance(candidate, CompiledDropRule):
-        return candidate.match_message(message or "")
-    if compiled_regex is not None:
-        return safe_regex_search(compiled_regex, candidate)
-    if is_regex and pattern:
-        return safe_regex_search(pattern, candidate)
-    if pattern:
-        rule = CompiledDropRule(
-            id=0,
-            source_pattern=None,
-            app_pattern=None,
-            message_pattern=pattern,
-            is_regex=is_regex,
-            is_enabled=True,
-        )
-        return rule.match_message(candidate)
-    return True
 
 
 class DropFilter:
@@ -363,13 +332,6 @@ class DropFilter:
         except Exception as exc:
             logger.warning(f"Failed to reload drop rules after automatic disables: {exc}")
 
-    def _flush_pending_counts(self, conn: Optional[sqlite3.Connection] = None) -> int:
-        """
-        Flush accumulated in-memory drop counts to SQLite.
-        Falls back to get_db_path() if self.db_path is not explicitly configured.
-        """
-        return self.flush_counts(conn=conn)
-
     def reload_rules(self, conn: Optional[sqlite3.Connection] = None) -> None:
         """
         Reload active drop rules from SQLite and compile regex patterns.
@@ -405,8 +367,8 @@ class DropFilter:
             msg_pat = r[3]
             is_regex = bool(r[4])
             is_enabled = bool(r[5])
-            sev_thresh = r[6] if len(r) > 6 else None
-            disp_ord = r[7] if len(r) > 7 else 0
+            sev_thresh = r[6]
+            disp_ord = r[7]
 
             compiled_re = None
             if is_regex:

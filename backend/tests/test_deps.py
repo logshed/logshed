@@ -1,5 +1,5 @@
 """
-Tests for thread-local SQLite read connection reuse, multi-threaded isolation,
+Tests for thread-local SQLite connection reuse, multi-threaded isolation,
 WAL concurrency, and connection lifecycle management in app.api.deps.
 """
 
@@ -14,7 +14,7 @@ import pytest
 from app.api.deps import (
     _thread_local,
     close_thread_local_connections,
-    get_thread_read_connection,
+    get_thread_connection,
     reset_all_db_connections,
     run_db_query,
 )
@@ -37,13 +37,13 @@ def cleanup_thread_local_connections():
     close_thread_local_connections()
 
 
-def test_get_thread_read_connection_pragmas_and_reuse(db_path: Path):
+def test_get_thread_connection_pragmas_and_reuse(db_path: Path):
     """
-    get_thread_read_connection returns a configured connection and reuses it on the same thread.
+    get_thread_connection returns a configured connection and reuses it on the same thread.
     Pragmas (WAL, NORMAL synchronous, 5000 busy_timeout, foreign_keys ON) and Row factory are set.
     """
-    conn1 = get_thread_read_connection(db_path)
-    conn2 = get_thread_read_connection(db_path)
+    conn1 = get_thread_connection(db_path)
+    conn2 = get_thread_connection(db_path)
 
     # Identical instance must be returned on the same thread
     assert conn1 is conn2
@@ -70,7 +70,7 @@ def test_close_thread_local_connections(db_path: Path):
     close_thread_local_connections closes all cached connections on the calling thread
     and clears the cache dictionary.
     """
-    conn = get_thread_read_connection(db_path)
+    conn = get_thread_connection(db_path)
     resolved_key = str(db_path.resolve())
 
     assert hasattr(_thread_local, "connections")
@@ -91,7 +91,7 @@ def test_close_thread_local_connections(db_path: Path):
         conn.execute("SELECT 1;")
 
     # Next call opens a fresh, open connection
-    new_conn = get_thread_read_connection(db_path)
+    new_conn = get_thread_connection(db_path)
     assert new_conn is not conn
     assert new_conn.execute("SELECT 1;").fetchone()[0] == 1
 
@@ -107,8 +107,8 @@ def test_multithreaded_connection_isolation(db_path: Path):
 
     def _worker(thread_idx: int):
         try:
-            c1 = get_thread_read_connection(db_path)
-            c2 = get_thread_read_connection(db_path)
+            c1 = get_thread_connection(db_path)
+            c2 = get_thread_connection(db_path)
             # Reused within the thread
             assert c1 is c2
             ident = threading.get_ident()
@@ -144,8 +144,8 @@ def test_distinct_db_paths_have_separate_connections(tmp_path: Path):
     run_migrations(p1)
     run_migrations(p2)
 
-    conn1 = get_thread_read_connection(p1)
-    conn2 = get_thread_read_connection(p2)
+    conn1 = get_thread_connection(p1)
+    conn2 = get_thread_connection(p2)
 
     assert conn1 is not conn2
 
@@ -156,12 +156,12 @@ def test_distinct_db_paths_have_separate_connections(tmp_path: Path):
 
 
 def test_connection_reopened_if_closed_externally(db_path: Path):
-    """If a cached connection was closed externally, get_thread_read_connection safely reopens it."""
-    conn = get_thread_read_connection(db_path)
+    """If a cached connection was closed externally, get_thread_connection safely reopens it."""
+    conn = get_thread_connection(db_path)
     conn.close()
 
     # Next call should detect the closed connection and open a fresh one
-    new_conn = get_thread_read_connection(db_path)
+    new_conn = get_thread_connection(db_path)
     assert new_conn is not conn
     assert new_conn.execute("SELECT 1;").fetchone()[0] == 1
 
@@ -171,14 +171,14 @@ def test_reset_from_another_thread_replaces_and_closes_a_worker_threads_connecti
     the worker closes it and opens a fresh one on its next use (SQLite connections cannot be closed
     from another thread)."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as worker:
-        old_conn = worker.submit(get_thread_read_connection, db_path).result()
+        old_conn = worker.submit(get_thread_connection, db_path).result()
 
         reset_thread = threading.Thread(target=reset_all_db_connections)
         reset_thread.start()
         reset_thread.join()
 
         def _next_use():
-            conn = get_thread_read_connection(db_path)
+            conn = get_thread_connection(db_path)
             try:
                 old_conn.execute("SELECT 1;")
                 old_closed = False
@@ -195,11 +195,11 @@ def test_reset_from_another_thread_replaces_and_closes_a_worker_threads_connecti
 
 
 def test_reset_closes_the_calling_threads_connections_at_once(db_path: Path):
-    conn = get_thread_read_connection(db_path)
+    conn = get_thread_connection(db_path)
     reset_all_db_connections()
     with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("SELECT 1;")
-    assert get_thread_read_connection(db_path) is not conn
+    assert get_thread_connection(db_path) is not conn
 
 
 @pytest.mark.asyncio
@@ -212,12 +212,12 @@ async def test_run_db_query_reuses_connection_sequential(db_path: Path):
         # First query
         conn1_id = await loop.run_in_executor(
             executor,
-            lambda: id(get_thread_read_connection(db_path)),
+            lambda: id(get_thread_connection(db_path)),
         )
         # Second query on same worker thread
         conn2_id = await loop.run_in_executor(
             executor,
-            lambda: id(get_thread_read_connection(db_path)),
+            lambda: id(get_thread_connection(db_path)),
         )
         assert conn1_id == conn2_id
     finally:

@@ -218,17 +218,17 @@ def test_settings_cache_cost(tmp_path: Path, monkeypatch):
 
 
 def test_small_per_call_costs(tmp_path: Path):
-    from app.api.deps import close_thread_local_connections, get_thread_read_connection
+    from app.api.deps import close_thread_local_connections, get_thread_connection
     from app.core.migrations import run_migrations
     from app.core.utils import format_fts_query
 
     db_file = tmp_path / "logs.db"
     run_migrations(db_file)
     count = 50_000
-    get_thread_read_connection(db_file)
+    get_thread_connection(db_file)
     start = time.perf_counter()
     for _ in range(count):
-        get_thread_read_connection(db_file)
+        get_thread_connection(db_file)
     conn_seconds = time.perf_counter() - start
     close_thread_local_connections()
 
@@ -239,7 +239,7 @@ def test_small_per_call_costs(tmp_path: Path):
     fts_seconds = time.perf_counter() - start
     print(
         "\nPer-call costs:\n"
-        f"  thread read connection lookup : {_rate(count, conn_seconds)}\n"
+        f"  thread connection lookup      : {_rate(count, conn_seconds)}\n"
         f"  format_fts_query              : {_rate(count, fts_seconds)}"
     )
 

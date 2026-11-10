@@ -16,6 +16,8 @@ from typing import Any, Optional, Union
 from pathlib import Path
 from collections import deque
 
+from app.core.utils import SEVERITY_NAME_MAP
+
 
 logger = logging.getLogger(__name__)
 
@@ -496,27 +498,6 @@ def _insert_params(entry: dict) -> list:
     ]
 
 
-SEVERITY_LEVEL_MAP = {
-    "emerg": 0,
-    "emergency": 0,
-    "alert": 1,
-    "crit": 2,
-    "critical": 2,
-    "fatal": 2,
-    "panic": 2,
-    "err": 3,
-    "error": 3,
-    "warn": 4,
-    "warning": 4,
-    "notice": 5,
-    "log": 6,
-    "info": 6,
-    "informational": 6,
-    "debug": 7,
-    "trace": 7,
-    "verbose": 7,
-}
-
 _RE_KV = re.compile(r"""\b(?:level|lvl|severity)\s*=\s*["']?([a-zA-Z]+)["']?""")
 _RE_JSON = re.compile(r"""["'](?:level|severity)["']\s*:\s*["']([a-zA-Z]+)["']""")
 _RE_BRACKET = re.compile(r"""\[\s*([a-zA-Z]+)\s*\]""")
@@ -570,8 +551,8 @@ def detect_severity(raw_line: str) -> int:
             continue
         for m in regex.finditer(header):
             lvl = m.group(1).lower()
-            if lvl in SEVERITY_LEVEL_MAP:
-                return SEVERITY_LEVEL_MAP[lvl]
+            if lvl in SEVERITY_NAME_MAP:
+                return SEVERITY_NAME_MAP[lvl]
 
     return 6
 
@@ -636,7 +617,7 @@ def _continues_entry(line: str, saw_traceback: bool, saw_python_traceback: bool)
 
     if saw_python_traceback:
         m = _RE_TRACEBACK_EXCEPTION_LINE.match(stripped)
-        if m and m.group(1).lower() not in SEVERITY_LEVEL_MAP:
+        if m and m.group(1).lower() not in SEVERITY_NAME_MAP:
             return True
 
     return False
@@ -958,7 +939,6 @@ class QueueConsumer:
         self._started = False
         self._running = False
         self._stopping = False
-        self._stop_event = asyncio.Event()
         self._drain_done = asyncio.Event()
         self._drain_lock = asyncio.Lock()
         self._conn: Optional[sqlite3.Connection] = None
@@ -993,14 +973,6 @@ class QueueConsumer:
         self._paused = False
         self._resume_event.set()
 
-    def set_fts_indexer(self, fts_indexer: Any) -> None:
-        """Register FTSIndexWorker instance for immediate post-commit notification."""
-        self._fts_indexer = fts_indexer
-
-    def set_alert_evaluator(self, alert_evaluator: Any) -> None:
-        """Register AlertEvaluator instance for post-commit batch evaluation."""
-        self._alert_evaluator = alert_evaluator
-
     def _get_connection(self) -> sqlite3.Connection:
         """Returns or opens a persistent connection configured with WAL and performance PRAGMAs."""
         with self._conn_lock:
@@ -1027,7 +999,6 @@ class QueueConsumer:
         """Main loop: drain queue with debounce-based batching (up to 5000 records or debounce window)."""
         self._started = True
         self._running = True
-        self._stop_event.clear()
         self._drain_done.clear()
         queue = get_queue()
 
@@ -1130,12 +1101,9 @@ class QueueConsumer:
                 break
             except asyncio.CancelledError:
                 # If cancelled during flush, attempt a shielded insert so in-flight logs are preserved
-                try:
-                    await asyncio.shield(asyncio.to_thread(self._insert_batch, batch))
-                    inserted = True
-                    break
-                except Exception:
-                    raise
+                await asyncio.shield(asyncio.to_thread(self._insert_batch, batch))
+                inserted = True
+                break
             except Exception as e:
                 if not self._running or self._stopping:
                     if shutdown_retries == 0:
@@ -1159,12 +1127,9 @@ class QueueConsumer:
                     try:
                         await asyncio.sleep(backoff)
                     except asyncio.CancelledError:
-                        try:
-                            await asyncio.shield(asyncio.to_thread(self._insert_batch, batch))
-                            inserted = True
-                            break
-                        except Exception:
-                            raise
+                        await asyncio.shield(asyncio.to_thread(self._insert_batch, batch))
+                        inserted = True
+                        break
                     backoff = min(backoff * 2.0, self.RETRY_BACKOFF_MAX)
 
         if inserted:
@@ -1222,7 +1187,6 @@ class QueueConsumer:
         """
         logger.info("QueueConsumer stopping: draining pending logs...")
         self._stopping = True
-        self._stop_event.set()
         self._resume_event.set()
         if _active_queue_consumer is self:
             set_queue_consumer(None)

@@ -312,8 +312,8 @@ class AlertEvaluator:
         if conn is not None:
             rows = _load(conn)
         elif effective_db:
-            from app.api.deps import get_thread_read_connection
-            c = get_thread_read_connection(effective_db)
+            from app.api.deps import get_thread_connection
+            c = get_thread_connection(effective_db)
             rows = _load(c)
         else:
             rows = []
@@ -612,13 +612,13 @@ class AlertEvaluator:
     def _store_auto_disabled_rules(self) -> None:
         """Store is_enabled = 0 for automatically disabled rules, then reload the rule cache (worker thread)."""
         from app.core.config import get_db_path
-        from app.api.deps import get_thread_read_connection
+        from app.api.deps import get_thread_connection
         effective_db = self.db_path or get_db_path()
         if not effective_db:
             return
         # A failed write is queued again for the next batch. The rule stays off in memory meanwhile;
         # if every attempt fails, the next start runs it again.
-        if not self._auto_disables.store(lambda: nullcontext(get_thread_read_connection(effective_db))):
+        if not self._auto_disables.store(lambda: nullcontext(get_thread_connection(effective_db))):
             return
         try:
             self.reload_rules()
@@ -628,13 +628,13 @@ class AlertEvaluator:
     def _update_rule_trigger_state(self, rule: CompiledAlertRule) -> None:
         """Persist last_triggered_at, suppress_until, and trigger_count to SQLite."""
         from app.core.config import get_db_path
-        from app.api.deps import get_thread_read_connection
+        from app.api.deps import get_thread_connection
         effective_db = self.db_path or get_db_path()
         if not effective_db:
             return
 
         try:
-            conn = get_thread_read_connection(effective_db)
+            conn = get_thread_connection(effective_db)
             with conn:
                 conn.execute(
                     """
@@ -655,9 +655,9 @@ class AlertEvaluator:
             return False
 
         try:
-            from app.api.deps import get_thread_read_connection
+            from app.api.deps import get_thread_connection
             from app.services.maintenance_service import get_maintenance_status
-            conn = get_thread_read_connection(effective_db)
+            conn = get_thread_connection(effective_db)
             status = get_maintenance_status(conn)
             return status.active
         except Exception as exc:

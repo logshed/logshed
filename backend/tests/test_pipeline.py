@@ -642,9 +642,9 @@ class TestQueueConsumer:
 
         # Verify sequential calls on the same thread reuse the exact same sqlite3.Connection
         def _run_sequential_queries():
-            conn1 = deps_mod.get_thread_read_connection(db_path)
+            conn1 = deps_mod.get_thread_connection(db_path)
             res1 = conn1.execute("SELECT 1").fetchone()[0]
-            conn2 = deps_mod.get_thread_read_connection(db_path)
+            conn2 = deps_mod.get_thread_connection(db_path)
             res2 = conn2.execute("SELECT 2").fetchone()[0]
             assert conn1 is conn2
             return res1, res2

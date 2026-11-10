@@ -36,13 +36,6 @@ def get_secret_key_override() -> Optional[str]:
     """Returns the secret key override from environment if provided."""
     return os.environ.get("LOGSHED_SECRET_KEY")
 
-def get_port() -> int:
-    """Returns the web server listening port."""
-    try:
-        return int(os.environ.get("PORT", "8080"))
-    except ValueError:
-        return 8080
-
 def get_syslog_port() -> int:
     """
     Returns the configured Syslog UDP and TCP listening port.

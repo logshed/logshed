@@ -15,7 +15,6 @@ from app.collectors.syslog import (
     AliasCache,
     SyslogServer,
     SyslogTCPProtocol,
-    SyslogTCPServerProtocol,
     SyslogUDPProtocol,
     MAX_TCP_CONNECTIONS,
     TCP_INACTIVITY_TIMEOUT,
@@ -1233,20 +1232,6 @@ class TestAliasCache:
         await cache.stop()
         assert cache._refresh_task is None
 
-    def test_alias_cache_get_alias_interface(self, db_path: Path):
-        """get_alias returns resolved alias identically to resolve()."""
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
-            conn.execute(
-                "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.75', 'switch-core', ?)",
-                (now,),
-            )
-            conn.commit()
-
-        cache = AliasCache(db_path)
-        assert cache.get_alias("192.168.1.75") == "switch-core"
-        assert cache.get_alias("192.168.1.99") == "192.168.1.99"
-
     def test_alias_cache_weakset_no_leak(self, db_path: Path):
         """AliasCache is registered in _active_caches via WeakSet and garbage collected without leaking."""
         import gc
@@ -1432,7 +1417,6 @@ class TestSyslogTCPConnectionLimitsAndTimeout:
     def test_constants_and_aliases(self):
         assert MAX_TCP_CONNECTIONS == 250
         assert TCP_INACTIVITY_TIMEOUT == 0.0
-        assert SyslogTCPServerProtocol is SyslogTCPProtocol
 
     @pytest.mark.asyncio
     async def test_tcp_connection_limit_rejection(self, db_path: Path):

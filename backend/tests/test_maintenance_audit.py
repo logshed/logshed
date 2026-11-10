@@ -170,7 +170,7 @@ class TestSessionLifecycle:
                 (past, data["session_id"]),
             )
             conn.commit()
-            ms.sweep_maintenance_sessions(conn)
+            ms.refresh_maintenance_cache(conn)
         row = _session_row(db_path, data["session_id"])
         assert row["is_active"] == 0
         assert row["end_reason"] == "expired"

@@ -66,9 +66,10 @@ def _resolved_db_path(db_path: Path) -> str:
     return resolved
 
 
-def get_thread_read_connection(db_path: Path) -> sqlite3.Connection:
+def get_thread_connection(db_path: Path) -> sqlite3.Connection:
     """
-    Get or open a cached thread-local read connection for the given database path.
+    Get or open the calling thread's cached connection for the given database path (used for
+    reads and writes).
     Configures WAL mode and performance pragmas once upon connection creation.
     """
     if not hasattr(_thread_local, "connections"):
@@ -145,7 +146,7 @@ async def run_db_query(
 ) -> T:
     """
     Executes a synchronous database function in a worker thread using asyncio.to_thread().
-    Reuses thread-local read connections across invocations on the same thread.
+    Reuses the thread's cached connection across invocations on the same thread.
 
     ``should_interrupt`` is polled from the worker thread while statements run; when it returns
     True, the running statement stops with ``sqlite3.OperationalError("interrupted")``.
@@ -153,7 +154,7 @@ async def run_db_query(
     db_path = custom_db_path or get_db_path()
 
     def _execute() -> T:
-        conn = get_thread_read_connection(db_path)
+        conn = get_thread_connection(db_path)
         if should_interrupt is not None:
             conn.set_progress_handler(should_interrupt, INTERRUPT_CHECK_INSTRUCTIONS)
         try:

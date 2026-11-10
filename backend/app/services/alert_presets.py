@@ -119,7 +119,3 @@ def get_alert_preset_by_id(preset_id: str) -> Optional[dict[str, Any]]:
             return dict(preset)
     return None
 
-
-# Backward compatibility aliases
-get_security_presets = get_alert_presets
-get_security_preset_by_id = get_alert_preset_by_id

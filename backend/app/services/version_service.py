@@ -130,8 +130,8 @@ async def check_for_updates(
     try:
         from app.api.deps import run_db_query
         is_enabled = await run_db_query(_is_update_check_enabled_in_db)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not read the update check setting, checking anyway: {e}")
 
     if not is_enabled:
         return {

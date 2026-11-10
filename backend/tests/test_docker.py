@@ -29,7 +29,6 @@ from app.collectors.docker_collector import (
     _extract_docker_timestamp,
     _make_log_entry,
     _parse_docker_host,
-    _parse_docker_log_line,
     _parse_docker_message_content,
     _should_ignore_container,
     _started_at_since,
@@ -115,28 +114,6 @@ class TestDockerHostParsing:
 
 class TestDockerLogParsing:
 
-    def test_multiplexed_stdout_frame(self):
-        """Parse a Docker multiplexed stdout frame (stream_type=1)."""
-        payload = b"Hello World!"
-        header = bytes([1, 0, 0, 0]) + len(payload).to_bytes(4, "big")
-        frame = header + payload
-        result = _parse_docker_log_line(frame)
-        assert result == "Hello World!"
-
-    def test_multiplexed_stderr_frame(self):
-        """Parse a Docker multiplexed stderr frame (stream_type=2)."""
-        payload = b"Error occurred"
-        header = bytes([2, 0, 0, 0]) + len(payload).to_bytes(4, "big")
-        frame = header + payload
-        result = _parse_docker_log_line(frame)
-        assert result == "Error occurred"
-
-    def test_raw_tty_mode_fallback(self):
-        """Non-framed text should be returned as-is (TTY mode)."""
-        raw = b"Just a plain log line\n"
-        result = _parse_docker_log_line(raw)
-        assert result == "Just a plain log line"
-
     def test_make_log_entry_fields(self):
         """_make_log_entry should produce correct dict shape defaulting to 'docker'."""
         entry = _make_log_entry("my-app", "abc123def", "Server started")
@@ -149,10 +126,9 @@ class TestDockerLogParsing:
         datetime.datetime.fromisoformat(entry["timestamp"])
         datetime.datetime.fromisoformat(entry["received_at"])
 
-    def test_make_log_entry_source_alias_override(self, monkeypatch):
-        """_make_log_entry should respect DOCKER_SOURCE_ALIAS environment variable."""
-        monkeypatch.setenv("DOCKER_SOURCE_ALIAS", "pve-node1-docker")
-        entry = _make_log_entry("redis-cache", "xyz789", "Ready to accept connections")
+    def test_make_log_entry_source_alias_override(self):
+        """_make_log_entry uses the configured Docker source alias."""
+        entry = _make_log_entry("redis-cache", "xyz789", "Ready to accept connections", source_alias="pve-node1-docker")
         assert entry["source_alias"] == "pve-node1-docker"
         assert entry["app_name"] == "redis-cache"
 
@@ -224,17 +200,17 @@ class TestDockerLogParsing:
         monkeypatch.setenv("HOSTNAME", "abc123456789")
         assert _should_ignore_container("abc123456789def012345678", "custom-app-name") is True
 
-        # Match custom DOCKER_EXCLUDE_CONTAINERS
-        monkeypatch.setenv("DOCKER_EXCLUDE_CONTAINERS", "my-db,custom_redis")
-        assert _should_ignore_container("111222333444", "my-db") is True
-        assert _should_ignore_container("111222333444", "/custom_redis") is True
-        assert _should_ignore_container("111222333444", "plex") is False
+        # Match the configured exclusion list
+        excluded = "my-db,custom_redis"
+        assert _should_ignore_container("111222333444", "my-db", exclude_containers=excluded) is True
+        assert _should_ignore_container("111222333444", "/custom_redis", exclude_containers=excluded) is True
+        assert _should_ignore_container("111222333444", "plex", exclude_containers=excluded) is False
 
         # Match resolved display_name against exclusion list
-        assert _should_ignore_container("111222333444", "raw_service_1", display_name="my-db") is True
+        assert _should_ignore_container("111222333444", "raw_service_1", display_name="my-db", exclude_containers=excluded) is True
         assert _should_ignore_container("111222333444", "logshed", display_name="some_service") is True
         assert _should_ignore_container("111222333444", "raw_service_2", display_name="logshed") is True
-        assert _should_ignore_container("111222333444", "plex_raw", display_name="plex_alias") is False
+        assert _should_ignore_container("111222333444", "plex_raw", display_name="plex_alias", exclude_containers=excluded) is False
 
 
 # ===================================================================
@@ -2416,14 +2392,13 @@ class TestDockerHostAliases:
         assert entry["source_ip"] == "docker"
         assert entry["source_alias"] == "docker"
 
-    def test_make_log_entry_env_override_with_cache_resolution(self, db_path: Path, monkeypatch):
-        """_make_log_entry resolves DOCKER_SOURCE_ALIAS with alias cache fallback."""
-        monkeypatch.setenv("DOCKER_SOURCE_ALIAS", "unraid-tower")
+    def test_make_log_entry_env_override_with_cache_resolution(self, db_path: Path):
+        """_make_log_entry resolves the configured Docker source alias with alias cache fallback."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         cache = AliasCache(db_path)
         # Without alias in DB, uses env override
-        entry = _make_log_entry("nginx", "c1", "test 1", alias_cache=cache)
+        entry = _make_log_entry("nginx", "c1", "test 1", alias_cache=cache, source_alias="unraid-tower")
         assert entry["source_alias"] == "unraid-tower"
 
         # When 'docker' has an alias, it overrides the env default
@@ -2434,12 +2409,11 @@ class TestDockerHostAliases:
             )
             conn.commit()
         cache.load_aliases()
-        entry2 = _make_log_entry("nginx", "c1", "test 2", alias_cache=cache)
+        entry2 = _make_log_entry("nginx", "c1", "test 2", alias_cache=cache, source_alias="unraid-tower")
         assert entry2["source_alias"] == "docker-primary"
 
-    def test_make_log_entry_custom_env_alias_precedence(self, db_path: Path, monkeypatch):
-        """When both customized DOCKER_SOURCE_ALIAS and 'docker' have aliases, the specific custom alias takes precedence."""
-        monkeypatch.setenv("DOCKER_SOURCE_ALIAS", "unraid-tower")
+    def test_make_log_entry_custom_env_alias_precedence(self, db_path: Path):
+        """When both the configured Docker source alias and 'docker' have aliases, the specific custom alias takes precedence."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with get_connection(db_path) as conn:
             conn.execute(
@@ -2453,7 +2427,7 @@ class TestDockerHostAliases:
             conn.commit()
 
         cache = AliasCache(db_path)
-        entry = _make_log_entry("nginx", "c1", "test precedence", alias_cache=cache)
+        entry = _make_log_entry("nginx", "c1", "test precedence", alias_cache=cache, source_alias="unraid-tower")
         assert entry["source_alias"] == "specific-unraid"
 
     def test_docker_tailer_initializes_with_alias_cache(self, db_path: Path):

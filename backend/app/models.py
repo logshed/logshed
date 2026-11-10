@@ -1051,10 +1051,6 @@ class AlertPresetResponse(BaseModel):
     is_custom: bool = False
 
 
-# Backward compatibility alias
-SecurityPresetResponse = AlertPresetResponse
-
-
 class AlertRuleExportItem(BaseModel):
     """Exportable alert rule definition."""
     model_config = ConfigDict(extra="ignore")

@@ -24,14 +24,13 @@ from app.core.pipeline import (
     MAX_MESSAGE_BYTES,
     KeyedMultilineAssembler,
     detect_severity,
-    SEVERITY_LEVEL_MAP,
     _RE_PYTHON_EXCEPTION,
     get_queue,
     increment_dropped_count,
     ingest_room,
     wait_for_ingest_room,
 )
-from app.core.utils import load_docker_source_aliases
+from app.core.utils import SEVERITY_NAME_MAP, load_docker_source_aliases
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +57,12 @@ _RE_ISO_TIMESTAMP = re.compile(r"^" + _ISO_TIMESTAMP + r"\s+")
 _RE_HOST_APP_ENVELOPE = re.compile(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)", re.DOTALL)
 _RE_BRACKETED_HOST = re.compile(r"^\[([^\]]+)\]\s*(.*)", re.DOTALL)
 _RE_VALKEY = re.compile(r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)", re.DOTALL)
-_VALKEY_SEVERITY = {"#": 4, "*": 5, ".": 7, "-": 7}
+VALKEY_SEVERITY = {"#": 4, "*": 5, ".": 7, "-": 7}
 _RE_APP_PIPE = re.compile(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)", re.DOTALL)
 _RE_BRACKETED_LEVEL = re.compile(r"^\[([a-zA-Z]+)\]\s*(.*)", re.DOTALL)
 _RE_LOGFMT = re.compile(r"""^(?:time|ts)=["']?([^"'\s]+)["']?\s+(.*)""", re.DOTALL)
-_RE_LOGFMT_LEVEL = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""")
-_RE_LOGFMT_MSG = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
+RE_LOGFMT_LEVEL = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""")
+RE_LOGFMT_MSG = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
 _RE_UTC_SUFFIX = re.compile(r"\s+(?:UTC|GMT)\b", flags=re.IGNORECASE)
 _RE_ZONE_ABBREVIATION = re.compile(r"\s+[A-Z]{2,5}(?=$|[+-])")
 # Matched at an offset with .match(buffer, pos), so no "^" anchor
@@ -164,7 +163,7 @@ def _is_valid_hostname(token: str) -> bool:
         and token != "-"
         and "[" not in token
         and "]" not in token
-        and token.lower() not in SEVERITY_LEVEL_MAP
+        and token.lower() not in SEVERITY_NAME_MAP
         and not (token.endswith(":") and not token.endswith("::"))
     )
 
@@ -198,14 +197,14 @@ def _parse_msg_into_app_and_content(result: dict[str, Any], msg_part: str) -> No
     # 3. [TAG]: CONTENT or [TAG] CONTENT (bracketed process tag, e.g. [kernel])
     m = _RE_BRACKETED_TAG.match(msg_part)
     if m:
-        if m.group(1).lower() not in SEVERITY_LEVEL_MAP:
+        if m.group(1).lower() not in SEVERITY_NAME_MAP:
             result["app_name"] = m.group(1)
             result["message"] = m.group(2)
             return
     # 4. TAG CONTENT (space-separated, no colon)
     m = _RE_TAG_SPACE.match(msg_part)
     if m:
-        if m.group(1).lower() not in SEVERITY_LEVEL_MAP:
+        if m.group(1).lower() not in SEVERITY_NAME_MAP:
             result["app_name"] = m.group(1)
             result["message"] = m.group(2)
             return
@@ -399,7 +398,7 @@ def parse_syslog_message(
             result["message"] = m_env.group(3)
         else:
             m_host = _RE_BRACKETED_HOST.match(rem)
-            if m_host and m_host.group(1).lower() not in SEVERITY_LEVEL_MAP:
+            if m_host and m_host.group(1).lower() not in SEVERITY_NAME_MAP:
                 result["hostname"] = m_host.group(1)
                 _parse_msg_into_app_and_content(result, m_host.group(2))
             else:
@@ -414,7 +413,7 @@ def parse_syslog_message(
             m_valkey.group(2), m_valkey.group(3), m_valkey.group(4), m_valkey.group(5), now, local_tz
         )
         level_char = m_valkey.group(6)
-        result["severity"] = _VALKEY_SEVERITY.get(level_char, 6)
+        result["severity"] = VALKEY_SEVERITY.get(level_char, 6)
         explicit_severity = True
         result["message"] = m_valkey.group(7)
     elif (m_app_pipe := _RE_APP_PIPE.match(content)):
@@ -425,8 +424,8 @@ def parse_syslog_message(
         )
         rem = m_app_pipe.group(4)
         m_level = _RE_BRACKETED_LEVEL.match(rem)
-        if m_level and m_level.group(1).lower() in SEVERITY_LEVEL_MAP:
-            result["severity"] = SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+        if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
+            result["severity"] = SEVERITY_NAME_MAP[m_level.group(1).lower()]
             explicit_severity = True
             result["message"] = m_level.group(2)
         else:
@@ -435,11 +434,11 @@ def parse_syslog_message(
         # Logfmt format: time="2026-10-03T14:56:31Z" level=info msg="..."
         result["timestamp"] = _parse_iso_or_datetime(m_logfmt.group(1), now, local_tz)
         rem = m_logfmt.group(2)
-        m_level = _RE_LOGFMT_LEVEL.search(rem)
-        if m_level and m_level.group(1).lower() in SEVERITY_LEVEL_MAP:
-            result["severity"] = SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+        m_level = RE_LOGFMT_LEVEL.search(rem)
+        if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
+            result["severity"] = SEVERITY_NAME_MAP[m_level.group(1).lower()]
             explicit_severity = True
-        m_msg = _RE_LOGFMT_MSG.search(rem)
+        m_msg = RE_LOGFMT_MSG.search(rem)
         if m_msg:
             result["message"] = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
         else:
@@ -497,10 +496,6 @@ class AliasCache:
         """True when name matches a Docker host alias, ignoring letter case."""
         with self._lock:
             return name.lower() in self._docker_aliases
-
-    def get_alias(self, source_ip: str) -> str:
-        """Alias for resolve() to support get_alias interface."""
-        return self.resolve(source_ip)
 
     def load_aliases(self) -> None:
         """Synchronous: bulk-load all aliases from host_aliases, and the Docker host aliases."""
@@ -1180,9 +1175,6 @@ class SyslogTCPProtocol(asyncio.Protocol):
         if self._owns_queue:
             await self.queue.close()
 
-
-# Alias for backward compatibility / explicit naming
-SyslogTCPServerProtocol = SyslogTCPProtocol
 
 
 class SyslogServer:

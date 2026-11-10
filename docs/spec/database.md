@@ -377,7 +377,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
 - **Graceful Shutdown Sequencing:** Lifespan shutdown stops log collectors (`SyslogServer`, `DockerTailer`), flushes the multiline assembler, stops `QueueConsumer` (drains queue to DB), then stops `FTSIndexWorker` (flushes pending unindexed logs to `logs_fts`), followed by `PruneWorker`, `StorageMetricsWorker`, `AlertEvaluator`, `DailyDigestWorker`, notification executor, and flushes drop filter counts.
 
 ### 2.5 Thread-Local Connection Model & Concurrency
-- **Thread-Local Read Connection Reuse:** In [`backend/app/api/deps.py`](../../backend/app/api/deps.py), synchronous database queries are dispatched to worker threads via `run_db_query(fn, custom_db_path)` using `asyncio.to_thread()`. `get_thread_read_connection(db_path: Path) -> sqlite3.Connection` maintains a thread-local dictionary `_thread_local.connections` keyed by resolved database path, reusing connections across sequential queries on worker threads.
+- **Thread-Local Connection Reuse:** In [`backend/app/api/deps.py`](../../backend/app/api/deps.py), synchronous database reads and writes are dispatched to worker threads via `run_db_query(fn, custom_db_path)` using `asyncio.to_thread()`. `get_thread_connection(db_path: Path) -> sqlite3.Connection` maintains a thread-local dictionary `_thread_local.connections` keyed by resolved database path, reusing connections across sequential queries on worker threads.
 - **One-Time Pragma Execution:** Pragmas and row factory are configured only once per newly opened thread connection:
   `PRAGMA journal_mode=WAL;`
   `PRAGMA synchronous=NORMAL;`
@@ -394,7 +394,7 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
           conn.rollback()
   ```
   This rollback guard prevents shared read locks on the WAL index (`-shm`) from blocking write checkpoints, allowing `PRAGMA wal_checkpoint(TRUNCATE)` to complete without contention.
-- **Retiring Connections (`reset_all_db_connections`):** Connections are opened with `check_same_thread=True`, so only their own thread can close them. Each cached entry records the connection generation it was opened in; `reset_all_db_connections()` (called before Compact Database runs `VACUUM`) increments the generation and closes the calling thread's connections at once. Every other thread closes its stale connection and opens a fresh one the next time it calls `get_thread_read_connection`, so no query after a compact runs on a connection from before it. An idle thread keeps its old connection open until its next use.
+- **Retiring Connections (`reset_all_db_connections`):** Connections are opened with `check_same_thread=True`, so only their own thread can close them. Each cached entry records the connection generation it was opened in; `reset_all_db_connections()` (called before Compact Database runs `VACUUM`) increments the generation and closes the calling thread's connections at once. Every other thread closes its stale connection and opens a fresh one the next time it calls `get_thread_connection`, so no query after a compact runs on a connection from before it. An idle thread keeps its old connection open until its next use.
 - **Connection Teardown Hook:** `close_thread_local_connections()` closes all cached connections on the calling thread and clears the dictionary, ensuring clean test fixture teardown and process exit.
 
 ### 2.6 Retention Pruning

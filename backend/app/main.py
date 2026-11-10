@@ -257,13 +257,13 @@ async def _maintenance_sweep_worker(db_path) -> None:
     import sqlite3
 
     from app.core.migrations import get_connection
-    from app.services.maintenance_service import sweep_maintenance_sessions
+    from app.services.maintenance_service import refresh_maintenance_cache
 
     def _sweep() -> None:
         conn = get_connection(db_path)
         conn.row_factory = sqlite3.Row
         try:
-            sweep_maintenance_sessions(conn)
+            refresh_maintenance_cache(conn)
         finally:
             conn.close()
 
@@ -435,8 +435,8 @@ async def lifespan(app: FastAPI):
             return None
 
         persisted_level = await run_db_query(_read_persisted_level, custom_db_path=Path(db_path))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not read the stored internal log level, using the default: {e}")
 
     shared_cache = _syslog_server.alias_cache if _syslog_server else None
     if shared_cache is None and _docker_tailer and hasattr(_docker_tailer, "alias_cache"):
@@ -540,9 +540,9 @@ async def lifespan(app: FastAPI):
     # Persist maintenance drop counts recorded since the last 30s sweep (the consumer is stopped,
     # so no new drops arrive). Bounded so a locked database cannot hang shutdown.
     try:
-        from app.services.maintenance_service import sweep_maintenance_sessions
+        from app.services.maintenance_service import refresh_maintenance_cache
         await asyncio.wait_for(
-            run_db_query(sweep_maintenance_sessions, custom_db_path=Path(db_path)),
+            run_db_query(refresh_maintenance_cache, custom_db_path=Path(db_path)),
             timeout=10.0,
         )
     except Exception as e:

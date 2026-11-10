@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.collectors.syslog import AliasCache
+from app.collectors.syslog import RE_LOGFMT_LEVEL, RE_LOGFMT_MSG, VALKEY_SEVERITY, AliasCache
 from app.core.config import env_bool, env_docker_disabled, get_db_path
 from app.core.migrations import get_connection
 from app.core.net_guard import GuardedAsyncHTTPTransport
@@ -34,9 +34,8 @@ from app.core.pipeline import (
     KeyedMultilineAssembler,
     detect_severity,
     clean_log_text,
-    SEVERITY_LEVEL_MAP,
 )
-from app.core.utils import DOCKER_ALIASES_SQL
+from app.core.utils import DOCKER_ALIASES_SQL, SEVERITY_NAME_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -311,31 +310,7 @@ def _demux_stream(buffer: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
     return frames, buffer[pos:]
 
 
-def _parse_docker_log_line(raw_bytes: bytes) -> str:
-    """
-    Parse a Docker log stream frame.
-
-    Docker multiplexed stream format (when tty=false):
-    [8-byte header][payload]
-    Header: stream_type(1) + padding(3) + size(4 big-endian)
-
-    When tty=true, the stream is raw text with no framing.
-    """
-    if len(raw_bytes) >= 8:
-        stream_type = raw_bytes[0]
-        # stream_type: 0=stdin, 1=stdout, 2=stderr
-        if stream_type in (0, 1, 2):
-            payload_size = int.from_bytes(raw_bytes[4:8], "big")
-            payload = raw_bytes[8:8 + payload_size]
-            return payload.decode("utf-8", errors="replace").rstrip("\n\r")
-
-    # Fallback: treat entire bytes as text (tty mode)
-    return raw_bytes.decode("utf-8", errors="replace").rstrip("\n\r")
-
-
-
 _clean_text = clean_log_text
-_SEVERITY_LEVEL_MAP = SEVERITY_LEVEL_MAP
 _detect_severity = detect_severity
 
 
@@ -434,13 +409,9 @@ def _started_at_since(started_at: Any) -> Optional[str]:
 _VALKEY_LINE_RE = re.compile(
     r"^(\d+:[a-zA-Z])\s+(\d{1,2})\s+([A-Z][a-z]{2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+([#*.-])\s+(.*)"
 )
-_VALKEY_SEVERITY = {"#": 4, "*": 5, ".": 7, "-": 7}
 # Maintainerr pipe format: [app] | DD/MM/YYYY HH:MM:SS [LEVEL] ...
 _APP_PIPE_LINE_RE = re.compile(r"^\[([^\]]+)\]\s*\|\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\s+(.*)")
 _BRACKET_LEVEL_RE = re.compile(r"^\[([a-zA-Z]+)\]\s*(.*)")
-# Logfmt format: time="2026-..." level=info msg="..."
-_LOGFMT_MSG_RE = re.compile(r"""\bmsg=(?:"([^"]*)"|'([^']*)'|(\S+))""")
-_LOGFMT_LEVEL_RE = re.compile(r"""\b(?:level|lvl|severity)=["']?([a-zA-Z]+)["']?""")
 
 
 def _parse_docker_message_content(message: str, default_severity: int) -> tuple[str, int]:
@@ -452,25 +423,25 @@ def _parse_docker_message_content(message: str, default_severity: int) -> tuple[
     # 1. Valkey / Redis server line (starts with a digit)
     m_valkey = _VALKEY_LINE_RE.match(message)
     if m_valkey:
-        return m_valkey.group(7), _VALKEY_SEVERITY.get(m_valkey.group(6), default_severity)
+        return m_valkey.group(7), VALKEY_SEVERITY.get(m_valkey.group(6), default_severity)
 
     # 2. Maintainerr pipe format
     m_app_pipe = _APP_PIPE_LINE_RE.match(message)
     if m_app_pipe:
         rem = m_app_pipe.group(4)
         m_level = _BRACKET_LEVEL_RE.match(rem)
-        if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
-            return m_level.group(2), _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+        if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
+            return m_level.group(2), SEVERITY_NAME_MAP[m_level.group(1).lower()]
         return rem, default_severity
 
     # 3. Logfmt format (searched once: the match that decides is the one captured)
-    m_msg = _LOGFMT_MSG_RE.search(message)
+    m_msg = RE_LOGFMT_MSG.search(message)
     if m_msg:
         extracted_msg = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
-        m_level = _LOGFMT_LEVEL_RE.search(message)
+        m_level = RE_LOGFMT_LEVEL.search(message)
         sev = default_severity
-        if m_level and m_level.group(1).lower() in _SEVERITY_LEVEL_MAP:
-            sev = _SEVERITY_LEVEL_MAP[m_level.group(1).lower()]
+        if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
+            sev = SEVERITY_NAME_MAP[m_level.group(1).lower()]
         return extracted_msg, sev
 
     return message, default_severity
@@ -484,18 +455,11 @@ def _make_log_entry(
     timestamp: Optional[str] = None,
     alias_cache: Optional[AliasCache] = None,
     source_ip: str = "docker",
-    source_alias: Optional[str] = None,
+    source_alias: str = "docker",
     raw: Optional[str] = None,
 ) -> dict:
     """Build a log entry dict compatible with the shared pipeline."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    if source_alias is None:
-        try:
-            from app.core.config import get_cached_setting
-            source_alias = get_cached_setting("docker_source_alias", "docker")
-        except Exception:
-            source_alias = os.environ.get("DOCKER_SOURCE_ALIAS", source_ip)
-
     default_alias = source_alias or source_ip
     resolved_alias = default_alias
     if alias_cache is not None:
@@ -632,20 +596,13 @@ def _should_ignore_container(
     container_id: str,
     container_name: str,
     display_name: Optional[str] = None,
-    exclude_containers: Optional[str] = None,
+    exclude_containers: str = "",
 ) -> bool:
     """
     Determine if a container should be excluded from log tailing.
     Prevents self-tailing loops for LogShed itself.
     """
     # 1. Explicitly configured excluded container names/IDs
-    if exclude_containers is None:
-        try:
-            from app.core.config import get_cached_setting
-            exclude_containers = get_cached_setting("docker_exclude_containers", "")
-        except Exception:
-            exclude_containers = os.environ.get("DOCKER_EXCLUDE_CONTAINERS", "")
-
     excluded_names = {n.strip().lower() for n in exclude_containers.split(",") if n.strip()}
     # Always exclude default container names for this app
     excluded_names.update({
@@ -672,17 +629,76 @@ def _should_ignore_container(
     return False
 
 
-async def _get_container_name(client: httpx.AsyncClient, container_id: str) -> str:
-    """Inspect a container to get its name."""
+def _heartbeat_interval() -> float:
+    """DOCKER_HEARTBEAT_INTERVAL in seconds, read on each connect; 0 or less turns the keepalive off."""
     try:
-        resp = await client.get(f"/containers/{container_id}/json")
-        resp.raise_for_status()
-        info = resp.json()
-        name = info.get("Name", container_id)
-        # Docker names start with '/'
-        return name.lstrip("/")
-    except Exception:
-        return container_id[:12]
+        return float(os.environ.get("DOCKER_HEARTBEAT_INTERVAL", DEFAULT_DOCKER_HEARTBEAT_INTERVAL))
+    except ValueError:
+        return DEFAULT_DOCKER_HEARTBEAT_INTERVAL
+
+
+class _StreamKeepalive:
+    """
+    Keepalive for one Docker stream. Its reader calls touch() for each chunk, and run() pings the
+    daemon when the stream has been quiet for the interval. A failed ping marks the stream failed
+    and cancels the reader, so the caller reconnects instead of waiting on a half-open connection.
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        interval: float,
+        cancel_event: asyncio.Event,
+        failed_text: str,
+        reconnect_text: str,
+    ):
+        self._client = client
+        self._interval = interval
+        self._cancel_event = cancel_event
+        self._failed_text = failed_text
+        self._reconnect_text = reconnect_text
+        self.failed = False
+        self.last_activity = asyncio.get_running_loop().time()
+
+    def touch(self) -> None:
+        self.last_activity = asyncio.get_running_loop().time()
+
+    def timeout_error(self) -> httpx.ReadTimeout:
+        return httpx.ReadTimeout(f"{self._failed_text}; half-open connection detected")
+
+    async def run(self, reader: asyncio.Task) -> None:
+        if self._interval <= 0:
+            return
+        while not self._cancel_event.is_set():
+            try:
+                await asyncio.sleep(min(self._interval / 2.0, 5.0))
+            except asyncio.CancelledError:
+                return
+            if asyncio.get_running_loop().time() - self.last_activity < self._interval:
+                continue
+            try:
+                ping_resp = await self._client.get("/_ping", timeout=5.0)
+                if ping_resp.status_code != 200:
+                    raise httpx.ConnectError(f"Ping returned status {ping_resp.status_code}")
+                self.touch()
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning(f"{self._failed_text}: {e}. {self._reconnect_text}")
+                self.failed = True
+                reader.cancel()
+                return
+
+
+async def _cancel_and_wait(*tasks: asyncio.Task) -> None:
+    """Cancel the tasks still running and wait for each to end, however it ends."""
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def _tail_container_logs(
@@ -697,7 +713,7 @@ async def _tail_container_logs(
     alias_cache: Optional[AliasCache] = None,
     endpoint_id: int = 1,
     source_ip: str = "docker",
-    source_alias: Optional[str] = None,
+    source_alias: str = "docker",
     initial_since: Optional[str] = None,
 ) -> None:
     """
@@ -715,14 +731,7 @@ async def _tail_container_logs(
     url = f"/containers/{container_id}/logs"
 
     if heartbeat_interval is None:
-        env_hb = os.environ.get("DOCKER_HEARTBEAT_INTERVAL")
-        if env_hb is not None:
-            try:
-                heartbeat_interval = float(env_hb)
-            except ValueError:
-                heartbeat_interval = 30.0
-        else:
-            heartbeat_interval = 30.0
+        heartbeat_interval = _heartbeat_interval()
 
     last_seen_timestamp: Optional[str] = (
         container_last_seen.get(container_id) if container_last_seen is not None else None
@@ -816,15 +825,20 @@ async def _tail_container_logs(
                 buffer = b""
                 line_buffer = ""
 
-                last_activity = asyncio.get_running_loop().time()
-                heartbeat_failed = False
+                keepalive = _StreamKeepalive(
+                    client,
+                    heartbeat_interval,
+                    cancel_event,
+                    f"Docker keepalive heartbeat failed for {container_name} ({container_id[:12]})",
+                    "Triggering reconnect.",
+                )
 
                 async def _consume_stream() -> None:
-                    nonlocal buffer, line_buffer, last_activity
+                    nonlocal buffer, line_buffer
                     async for chunk in resp.aiter_bytes():
                         if cancel_event.is_set():
                             return
-                        last_activity = asyncio.get_running_loop().time()
+                        keepalive.touch()
                         buffer += chunk
 
                         if is_tty:
@@ -905,34 +919,7 @@ async def _tail_container_logs(
 
                 stream_task = asyncio.create_task(_consume_stream())
 
-                async def _heartbeat_monitor() -> None:
-                    nonlocal heartbeat_failed, last_activity
-                    if heartbeat_interval is None or heartbeat_interval <= 0:
-                        return
-                    while not cancel_event.is_set():
-                        try:
-                            await asyncio.sleep(min(heartbeat_interval / 2.0, 5.0))
-                        except asyncio.CancelledError:
-                            return
-                        now = asyncio.get_running_loop().time()
-                        if now - last_activity >= heartbeat_interval:
-                            try:
-                                ping_resp = await client.get("/_ping", timeout=5.0)
-                                if ping_resp.status_code != 200:
-                                    raise httpx.ConnectError(f"Ping returned status {ping_resp.status_code}")
-                                last_activity = asyncio.get_running_loop().time()
-                            except asyncio.CancelledError:
-                                return
-                            except Exception as ping_err:
-                                logger.warning(
-                                    f"Docker keepalive heartbeat failed for {container_name} "
-                                    f"({container_id[:12]}): {ping_err}. Triggering reconnect."
-                                )
-                                heartbeat_failed = True
-                                stream_task.cancel()
-                                return
-
-                monitor_task = asyncio.create_task(_heartbeat_monitor())
+                monitor_task = asyncio.create_task(keepalive.run(stream_task))
                 cancel_task = asyncio.create_task(cancel_event.wait())
                 try:
                     done, pending = await asyncio.wait(
@@ -941,35 +928,15 @@ async def _tail_container_logs(
                     )
                     if cancel_task in done:
                         return
-                    if heartbeat_failed:
-                        raise httpx.ReadTimeout(
-                            f"Docker keepalive heartbeat failed for {container_name}; half-open connection detected"
-                        )
+                    if keepalive.failed:
+                        raise keepalive.timeout_error()
                     await stream_task
                 except asyncio.CancelledError:
-                    if heartbeat_failed:
-                        raise httpx.ReadTimeout(
-                            f"Docker keepalive heartbeat failed for {container_name}; half-open connection detected"
-                        )
+                    if keepalive.failed:
+                        raise keepalive.timeout_error()
                     raise
                 finally:
-                    if not cancel_task.done():
-                        cancel_task.cancel()
-                        try:
-                            await cancel_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
-                    if not stream_task.done():
-                        stream_task.cancel()
-                        try:
-                            await stream_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
-                    monitor_task.cancel()
-                    try:
-                        await monitor_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                    await _cancel_and_wait(cancel_task, stream_task, monitor_task)
 
             # Stream ended normally (EOF)
             if cancel_event.is_set():
@@ -1580,22 +1547,21 @@ class DockerTailer:
             "filters": json.dumps({"event": ["start", "die", "restart"], "type": ["container"]}),
         }
 
-        try:
-            heartbeat_interval = float(os.environ.get("DOCKER_HEARTBEAT_INTERVAL", str(DEFAULT_DOCKER_HEARTBEAT_INTERVAL)))
-        except ValueError:
-            heartbeat_interval = DEFAULT_DOCKER_HEARTBEAT_INTERVAL
-
         async with client.stream("GET", "/events", params=params) as resp:
             resp.raise_for_status()
-            last_activity = asyncio.get_running_loop().time()
-            heartbeat_failed = False
+            keepalive = _StreamKeepalive(
+                client,
+                _heartbeat_interval(),
+                self._cancel_event,
+                "Docker events keepalive heartbeat failed",
+                "Reconnecting supervisor.",
+            )
 
             async def _consume_events() -> None:
-                nonlocal last_activity
                 async for line in resp.aiter_lines():
                     if self._cancel_event.is_set():
                         return
-                    last_activity = asyncio.get_running_loop().time()
+                    keepalive.touch()
                     if not line.strip():
                         continue
 
@@ -1634,32 +1600,6 @@ class DockerTailer:
 
             events_task = asyncio.create_task(_consume_events())
 
-            async def _events_heartbeat() -> None:
-                nonlocal heartbeat_failed, last_activity
-                if heartbeat_interval <= 0:
-                    return
-                while not self._cancel_event.is_set():
-                    try:
-                        await asyncio.sleep(min(heartbeat_interval / 2.0, 5.0))
-                    except asyncio.CancelledError:
-                        return
-                    now = asyncio.get_running_loop().time()
-                    if now - last_activity >= heartbeat_interval:
-                        try:
-                            ping_resp = await client.get("/_ping", timeout=5.0)
-                            if ping_resp.status_code != 200:
-                                raise httpx.ConnectError(f"Ping returned status {ping_resp.status_code}")
-                            last_activity = asyncio.get_running_loop().time()
-                        except asyncio.CancelledError:
-                            return
-                        except Exception as e:
-                            logger.warning(
-                                f"Docker events keepalive heartbeat failed: {e}. Reconnecting supervisor."
-                            )
-                            heartbeat_failed = True
-                            events_task.cancel()
-                            return
-
             async def _periodic_discovery() -> None:
                 if self._discovery_interval <= 0:
                     return
@@ -1676,7 +1616,7 @@ class DockerTailer:
                         logger.debug(f"Periodic container discovery error: {e}")
 
             discovery_task = asyncio.create_task(_periodic_discovery())
-            monitor_task = asyncio.create_task(_events_heartbeat())
+            monitor_task = asyncio.create_task(keepalive.run(events_task))
             cancel_task = asyncio.create_task(self._cancel_event.wait())
             try:
                 done, pending = await asyncio.wait(
@@ -1685,42 +1625,16 @@ class DockerTailer:
                 )
                 if cancel_task in done:
                     return
-                if heartbeat_failed:
-                    raise httpx.ReadTimeout(
-                        "Docker events keepalive heartbeat failed; half-open connection detected"
-                    )
+                if keepalive.failed:
+                    raise keepalive.timeout_error()
                 await events_task
                 if not self._cancel_event.is_set():
                     # The daemon closed the stream cleanly (for example while restarting). Reconnect like
                     # after an error: the tailers hold this client, which closes when the caller returns.
                     raise httpx.RemoteProtocolError("Docker events stream ended")
             except asyncio.CancelledError:
-                if heartbeat_failed:
-                    raise httpx.ReadTimeout(
-                        "Docker events keepalive heartbeat failed; half-open connection detected"
-                    )
+                if keepalive.failed:
+                    raise keepalive.timeout_error()
                 raise
             finally:
-                if not cancel_task.done():
-                    cancel_task.cancel()
-                    try:
-                        await cancel_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                if not events_task.done():
-                    events_task.cancel()
-                    try:
-                        await events_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                if not discovery_task.done():
-                    discovery_task.cancel()
-                    try:
-                        await discovery_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                monitor_task.cancel()
-                try:
-                    await monitor_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+                await _cancel_and_wait(cancel_task, events_task, discovery_task, monitor_task)
