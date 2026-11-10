@@ -15,6 +15,15 @@ import {
   getTodayKey,
   formatUtcOffset,
 } from '../utils/formatters.ts';
+// Shared with the backend's collector tests (backend/tests/test_message_formats.py)
+import messageFormats from '../../../backend/tests/fixtures/message_formats.json';
+
+describe('log formats shared with the collectors', () => {
+  it.each(messageFormats.cases)('$name: shows the stored message and the raw line alike', ({ line, stored, display }) => {
+    expect(cleanLogMessageForDisplay(stored)).toBe(display);
+    expect(cleanLogMessageForDisplay(line)).toBe(display);
+  });
+});
 
 describe('stripAnsi', () => {
   it('handles null, undefined, and empty string gracefully', () => {

@@ -1,0 +1,59 @@
+{
+  "about": "Log line formats that LogShed's collectors know, shared by backend/tests/test_message_formats.py and frontend/src/test/Formatters.test.ts. line: a container line as Docker sends it. stored: the message the Docker collector stores for it. display: what the Console shows for both line and stored (cleanLogMessageForDisplay in frontend/src/utils/formatters.ts). When a collector learns a new format, add a case here, so the Console's tidying must handle it too.",
+  "cases": [
+    {
+      "name": "ANSI colour codes (Overseerr, Jellyseerr)",
+      "line": "2026-09-11T19:40:00.041Z [\u001b[32minfo\u001b[39m][Plex Scan]: Beginning to process",
+      "stored": "2026-09-11T19:40:00.041Z [info][Plex Scan]: Beginning to process",
+      "display": "[Plex Scan]: Beginning to process"
+    },
+    {
+      "name": "ANSI around a level word",
+      "line": "\u001b[1;31mERROR:\u001b[0m Database connection lost",
+      "stored": "ERROR: Database connection lost",
+      "display": "Database connection lost"
+    },
+    {
+      "name": "Stray control characters",
+      "line": "Log with stray escape \u001b and bell \u0007 and null \u0000 character",
+      "stored": "Log with stray escape  and bell  and null  character",
+      "display": "Log with stray escape  and bell  and null  character"
+    },
+    {
+      "name": "logfmt msg=",
+      "line": "time=\"2026-10-03T14:56:31Z\" level=info msg=\"Successfully refreshed custom fields cache with 0 fields.\"",
+      "stored": "Successfully refreshed custom fields cache with 0 fields.",
+      "display": "Successfully refreshed custom fields cache with 0 fields."
+    },
+    {
+      "name": "Maintainerr app pipe",
+      "line": "[maintainerr] | 03/10/2026 16:00:33  [INFO] [RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done.",
+      "stored": "[RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done.",
+      "display": "[RuleExecutorService] Execution of rules for 'Never Watched by Anyone' done."
+    },
+    {
+      "name": "Valkey / Redis",
+      "line": "1:M 02 Oct 2026 11:47:57.745 # Warning: No config file specified, using the default config.",
+      "stored": "Warning: No config file specified, using the default config.",
+      "display": "No config file specified, using the default config."
+    },
+    {
+      "name": "ISO timestamp and columnar level",
+      "line": "2026-09-12 06:35:02  INFO      All scopes processed",
+      "stored": "2026-09-12 06:35:02  INFO      All scopes processed",
+      "display": "All scopes processed"
+    },
+    {
+      "name": "PostgreSQL named zone and LOG:",
+      "line": "2026-09-12 08:50:39.344 BST [27] LOG:  checkpoint starting: time",
+      "stored": "2026-09-12 08:50:39.344 BST [27] LOG:  checkpoint starting: time",
+      "display": "[27] checkpoint starting: time"
+    },
+    {
+      "name": "Plain sentence starting with Error",
+      "line": "Error on Supervisor API: Timeout connecting to Supervisor",
+      "stored": "Error on Supervisor API: Timeout connecting to Supervisor",
+      "display": "Error on Supervisor API: Timeout connecting to Supervisor"
+    }
+  ]
+}
