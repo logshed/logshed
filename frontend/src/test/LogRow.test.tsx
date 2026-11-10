@@ -91,6 +91,23 @@ describe('LogRow Component and Optimization', () => {
     expect(onDiagnoseAi).toHaveBeenCalledWith([baseLog]);
   });
 
+  it('brightens a selected or alert row on hover instead of dropping its highlight', () => {
+    const props = { log: baseLog, index: 0, isMobile: false, style: {}, onSelect: vi.fn(), onClick: vi.fn(), onDiagnoseAi: vi.fn() };
+    const { rerender } = render(<LogRow {...props} isSelected={false} />);
+    const row = () => screen.getByRole('option');
+    expect(row().className).toContain('hover:bg-dark-900/60');
+
+    rerender(<LogRow {...props} isSelected={true} />);
+    expect(row().className).toContain('bg-accent-950/40');
+    expect(row().className).toContain('hover:bg-accent-900/50');
+    expect(row().className).not.toContain('hover:bg-dark-900');
+
+    rerender(<LogRow {...props} isSelected={true} isFocused={true} />);
+    expect(row().className).toContain('bg-amber-950/50');
+    expect(row().className).toContain('hover:bg-amber-900/50');
+    expect(row().className).not.toContain('hover:bg-dark-900');
+  });
+
   it('custom comparison function areLogRowPropsEqual handles id, selection and style', () => {
     const defaultProps = {
       log: baseLog,

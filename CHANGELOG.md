@@ -23,7 +23,7 @@ No database change, so going back to 1.3.0 only needs the older image.
 ### Changed
 - **Faster searches on large databases**: A search looks through the newest logs first. At 50 million logs, `nginx 499` takes about 1 s instead of 18 s, with the same results. A search you abandon while typing stops on the server too, and any search stops after 2 minutes with a hint to narrow it.
 - **Faster everywhere else**: The web interface loads quicker (compressed files, and less to download on the first visit), and the Host and App filter lists, Delete All, the metrics behind the Home Assistant integration, redaction, and Docker and syslog intake all do less work.
-- **Keyboard use**: In the Console, the arrow keys move through log rows, Enter opens one and Space ticks it. Dialogs keep focus inside, and Esc closes only the one on top.
+- **Keyboard use**: In the Console, the arrow keys move through log rows, Enter opens one and Space ticks it; the outline on that row shows only while you use the keyboard. Dialogs keep focus inside, and Esc closes only the one on top.
 - **LogShed's own dropdowns**: Every dropdown now looks and works the same in every browser.
 - **Notification links**: With `APP_URL` set, the link in an alert notification opens that incident instead of the Incident History list.
 - **Clearer `docker logs`**: LogShed's own start-up and status messages show with a time and level.
@@ -37,7 +37,7 @@ No database change, so going back to 1.3.0 only needs the older image.
 - **Claude refusals**: When a Claude model declines an analysis, a fallback model answers instead.
 - **Targeted Log Deletion** reads its custom range in the server time zone, like the rest of LogShed.
 - **Maintenance schedules** with an invalid start time are refused instead of breaking the maintenance status everywhere.
-- **Console**: Host aliases show on the first page, the arrow keys pause auto-scroll, a custom time range no longer pushes the list down, swiping on a phone no longer reloads the page, the paused list no longer jumps on a phone while you scroll as new logs arrive, the Paused button and the new logs banner reach the top while logs keep arriving, and focus outlines and the sky blue accents look as intended.
+- **Console**: Host aliases show on the first page, the arrow keys pause auto-scroll, a custom time range no longer pushes the list down, swiping on a phone no longer reloads the page, the paused list no longer jumps on a phone while you scroll as new logs arrive, the Paused button and the new logs banner reach the top while logs keep arriving, focus outlines and the sky blue accents look as intended, and a ticked row stays highlighted (brighter) under the mouse.
 - **Screen readers**: With AI on, each Console row reads as one item, and the filter buttons say how many filters are active.
 - **AI answers** with very deeply nested lists display instead of failing.
 

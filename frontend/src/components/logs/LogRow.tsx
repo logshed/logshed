@@ -41,6 +41,13 @@ function rowStateClass(isSelected: boolean, isFocused: boolean): string {
   return 'border-l-transparent';
 }
 
+/** Desktop hover: brightens a highlighted row rather than replacing its colour, so it still looks selected. */
+function rowHoverClass(isSelected: boolean, isFocused: boolean): string {
+  if (isFocused) return 'hover:bg-amber-900/50';
+  if (isSelected) return 'hover:bg-accent-900/50';
+  return 'hover:bg-dark-900/60';
+}
+
 export interface LogRowProps {
   log: ProcessedLogEntry;
   index: number;
@@ -50,7 +57,7 @@ export interface LogRowProps {
   aiEnabled?: boolean;
   /** Highlights the row as the log an alert link pointed at (the log that triggered the alert). */
   isFocused?: boolean;
-  /** The list's keyboard cursor is on this row (outlined while the list has focus). */
+  /** Outlines the row as the list's keyboard cursor (only while the list has focus). */
   isCursor?: boolean;
   style: React.CSSProperties;
   /** Ticks or unticks the row; shiftKey ticks the range from the last ticked row. */
@@ -181,9 +188,9 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       data-focused={isFocused || undefined}
       onClick={() => onClick(log)}
       style={style}
-      className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 hover:bg-dark-900/60 transition-colors cursor-pointer text-[11px] leading-tight ${
+      className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 transition-colors cursor-pointer text-[11px] leading-tight ${
         rowStateClass(isSelected, isFocused)
-      }${isCursor ? CURSOR_CLASS : ''}`}
+      } ${rowHoverClass(isSelected, isFocused)}${isCursor ? CURSOR_CLASS : ''}`}
     >
       {/* Checkbox: a mouse target; keyboard users tick the cursor row with Space, and the row's
           aria-selected tells screen readers */}

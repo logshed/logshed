@@ -1884,6 +1884,31 @@ describe('LiveLogStream Component', () => {
       expect(list).toHaveAttribute('aria-activedescendant', 'log-row-102');
     });
 
+    it('outlines the cursor row only after a key moves the cursor, not after a mouse click', async () => {
+      const list = await loadList();
+      const ring = 'group-focus/loglist:ring-1';
+      // Opening a row with the mouse puts the cursor on it, but draws no outline
+      fireEvent.mouseDown(list);
+      fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
+      const drawer = await screen.findByRole('dialog', { name: /Log Record #101/ });
+      fireEvent.keyDown(drawer, { key: 'Escape' });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /Log Record #101/ })).toBeNull();
+      });
+      expect(list).toHaveAttribute('aria-activedescendant', 'log-row-101');
+      expect(document.getElementById('log-row-101')!.className).not.toContain(ring);
+      // Ticking rows with the mouse draws none either
+      fireEvent.mouseDown(list);
+      fireEvent.click(within(document.getElementById('log-row-102')!).getByTestId('log-row-checkbox'));
+      expect(document.getElementById('log-row-101')!.className).not.toContain(ring);
+      expect(document.getElementById('log-row-102')!.className).not.toContain(ring);
+
+      key(list, 'ArrowDown');
+      expect(document.getElementById('log-row-102')!.className).toContain(ring);
+      fireEvent.mouseDown(list);
+      expect(document.getElementById('log-row-102')!.className).not.toContain(ring);
+    });
+
     it('leaves keys pressed with Ctrl, Meta or Alt alone', async () => {
       const list = await loadList();
       key(list, 'ArrowDown', { ctrlKey: true });

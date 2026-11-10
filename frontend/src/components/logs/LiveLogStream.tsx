@@ -1651,6 +1651,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // names the cursor row with aria-activedescendant. Tracked by log id, so it stays on its log
   // when live rows are added above it; -1 when unset or the log has left the buffer.
   const [cursorLogId, setCursorLogId] = useState<number | null>(null);
+  // The cursor is outlined only while the keyboard is in use: a key on the list shows it, a mouse
+  // press on the list hides it. A mouse user who opens or ticks rows never sees it.
+  const [cursorOutlined, setCursorOutlined] = useState<boolean>(false);
   // When the cursor last scrolled the list: reaching the top that way (Home) keeps auto-scroll paused
   const cursorScrollAtRef = useRef<number>(0);
   const cursorIndex = useMemo(
@@ -1676,6 +1679,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const firstInView = rowVirtualizer.getVirtualItems().find((item) => item.start + item.size > scrollTop)?.index ?? 0;
     const current = cursorIndex >= 0 ? cursorIndex : null;
     let next: number | null = null;
+    if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', 'Enter', ' '].includes(e.key)) {
+      setCursorOutlined(true);
+    }
     switch (e.key) {
       case 'ArrowDown':
         next = current === null ? firstInView : current + 1;
@@ -2395,7 +2401,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             noteScrollActivity();
           }}
           onWheel={endResumingToTop}
-          onMouseDown={endResumingToTop}
+          onMouseDown={() => {
+            endResumingToTop();
+            setCursorOutlined(false);
+          }}
           // One Tab stop: the arrow, page, Home and End keys move the row cursor (handleListKeyDown)
           tabIndex={0}
           onKeyDown={handleListKeyDown}
@@ -2485,7 +2494,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                     isMobile={isMobile}
                     aiEnabled={aiEnabled}
                     isFocused={log.id === focusLogId}
-                    isCursor={virtualRow.index === cursorIndex}
+                    isCursor={cursorOutlined && virtualRow.index === cursorIndex}
                     style={{
                       position: 'absolute',
                       top: 0,
