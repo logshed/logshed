@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext.tsx';
 import { fetchHealth, fetchVersion } from '../../api/system.ts';
 import { fetchMaintenanceWindow } from '../../api/alerts.ts';
 import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '../../types.ts';
-import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
+import { useMediaQuery, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { formatMaintenanceTime } from '../../utils/formatters.ts';
 
@@ -131,10 +131,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   useEffect(() => {
     loadHealth();
     loadMaintenance();
-    const interval = setInterval(() => {
-      loadHealth();
-      loadMaintenance();
-    }, 10000);
 
     const onMaintenanceUpdated = (e: Event) => {
       const customEvent = e as CustomEvent<{ active: boolean; until: string | null }>;
@@ -157,10 +153,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     loadVersion();
 
     return () => {
-      clearInterval(interval);
       window.removeEventListener('maintenance-updated', onMaintenanceUpdated);
     };
   }, []);
+
+  // The health dot and the maintenance banner (which AlertsPanel also follows through the event)
+  usePolling(() => {
+    loadHealth();
+    loadMaintenance();
+  }, 10000);
 
   const handleLogoClick = () => {
     onTabChange('stream');

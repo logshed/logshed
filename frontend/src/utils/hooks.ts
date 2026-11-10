@@ -89,3 +89,46 @@ export function useServerTimezone(): string | undefined {
   }, []);
   return serverTimezone;
 }
+
+/**
+ * Calls poll every intervalMs while mounted. With pauseWhenHidden (the default), polling stops while
+ * the browser tab is hidden and runs at once when it is shown again, so a background tab sends no
+ * requests and a returning user sees fresh data. Always calls the latest poll function.
+ */
+export function usePolling(
+  poll: () => void,
+  intervalMs: number,
+  { pauseWhenHidden = true }: { pauseWhenHidden?: boolean } = {}
+): void {
+  const pollRef = useRef(poll);
+  pollRef.current = poll;
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (timer === null) timer = setInterval(() => pollRef.current(), intervalMs);
+    };
+    const stop = () => {
+      if (timer !== null) clearInterval(timer);
+      timer = null;
+    };
+    const isHidden = () => pauseWhenHidden && document.visibilityState === 'hidden';
+
+    if (!isHidden()) start();
+    if (!pauseWhenHidden) return stop;
+
+    const onVisibilityChange = () => {
+      if (isHidden()) {
+        stop();
+      } else if (timer === null) {
+        pollRef.current();
+        start();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [intervalMs, pauseWhenHidden]);
+}

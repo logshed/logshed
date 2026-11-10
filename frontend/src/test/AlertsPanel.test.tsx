@@ -817,6 +817,36 @@ describe('AlertsPanel Component', () => {
     expect(importSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes the incident list every 10 seconds on History and leaves the maintenance poll to the Navbar', async () => {
+    window.history.pushState(null, '', '/rules/history');
+    const historySpy = vi.mocked(alertsApi.fetchAlertHistory);
+    const maintenanceSpy = vi.mocked(alertsApi.fetchMaintenanceWindow);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<AlertsPanel />);
+      await screen.findAllByText('SSH Brute-Force Detection');
+      const historyCalls = historySpy.mock.calls.length;
+      const maintenanceCalls = maintenanceSpy.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+      expect(historySpy.mock.calls.length).toBe(historyCalls + 1);
+      expect(maintenanceSpy.mock.calls.length).toBe(maintenanceCalls);
+
+      // The Navbar's poll result reaches the panel through its event
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent('maintenance-updated', {
+            detail: { active: true, until: '2099-01-01T00:00:00Z', schedules: [] },
+          })
+        );
+      });
+      expect(screen.getByText('Active')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('auto-dismisses success feedback after 5 seconds', async () => {
     vi.spyOn(alertsApi, 'importAlertRules').mockResolvedValue({ imported: 1, skipped: 0, errors: [] });
 

@@ -54,7 +54,7 @@ import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
 import { AlertRuleHandoff, takeAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
-import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
+import { useMediaQuery, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { isMaintenanceItem } from '../../utils/maintenanceHistory.ts';
 import { useSerialReorder } from '../../utils/useSerialReorder.ts';
 import { downloadRuleExport, importRuleFile } from '../../utils/ruleTransfer.ts';
@@ -333,16 +333,11 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     }
   }, [historyLimit, historyOffset]);
 
-  // Periodic poll every 10 seconds to keep maintenance status synchronized
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
-      if (activeSubTab === 'history') {
-        refreshHistory();
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [activeSubTab, refreshHistory]);
+  // The incident list refreshes every 10 seconds while shown. Maintenance status needs no poll here:
+  // the Navbar polls it and announces each result with a 'maintenance-updated' event (below).
+  usePolling(() => {
+    if (activeSubTab === 'history') refreshHistory();
+  }, 10000);
 
   // Real-time timer to refresh state the exact second a window expires
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { renderHook, act, render, screen, fireEvent } from '@testing-library/react';
 import { SlideOver } from '../components/common/SlideOver.tsx';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useClipboard } from '../utils/hooks.ts';
+import { useClipboard, usePolling } from '../utils/hooks.ts';
 import { usePullToRefresh } from '../utils/usePullToRefresh.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 
@@ -287,5 +287,96 @@ describe('usePullToRefresh leaves dialogs and open lists alone', () => {
     render(<Header onRefresh={onRefresh} drawerOpen={false} />);
     await pull(screen.getByRole('option', { name: 'nas' }));
     expect(onRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('usePolling', () => {
+  let visibility: DocumentVisibilityState = 'visible';
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    visibility = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  const setVisibility = (state: DocumentVisibilityState) => {
+    visibility = state;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  };
+
+  it('polls every interval, not at mount', () => {
+    const poll = vi.fn();
+    renderHook(() => usePolling(poll, 10000));
+    expect(poll).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(poll).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops while the tab is hidden and polls at once when it is shown again', () => {
+    const poll = vi.fn();
+    renderHook(() => usePolling(poll, 10000));
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(60000);
+    });
+    expect(poll).not.toHaveBeenCalled();
+
+    setVisibility('visible');
+    expect(poll).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(poll).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not start while mounted in a hidden tab', () => {
+    visibility = 'hidden';
+    const poll = vi.fn();
+    renderHook(() => usePolling(poll, 10000));
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('keeps polling while hidden when pauseWhenHidden is off', () => {
+    const poll = vi.fn();
+    renderHook(() => usePolling(poll, 10000, { pauseWhenHidden: false }));
+    setVisibility('hidden');
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    expect(poll).toHaveBeenCalledTimes(2);
+  });
+
+  it('calls the latest poll function and stops at unmount', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender, unmount } = renderHook(({ fn }) => usePolling(fn, 10000), {
+      initialProps: { fn: first },
+    });
+    rerender({ fn: second });
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+
+    unmount();
+    setVisibility('hidden');
+    setVisibility('visible');
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(second).toHaveBeenCalledTimes(1);
   });
 });
