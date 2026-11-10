@@ -847,6 +847,46 @@ describe('AlertsPanel Component', () => {
     }
   });
 
+  it('does not refetch maintenance at once for a window that ends more than 24.8 days ahead', async () => {
+    // setTimeout runs a delay above 2^31-1 ms (about 24.8 days) after 1 ms
+    const until = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+    const maintenanceSpy = vi
+      .mocked(alertsApi.fetchMaintenanceWindow)
+      .mockResolvedValue({ active: true, until, schedules: [] });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<AlertsPanel />);
+      await screen.findAllByText('Active');
+      const calls = maintenanceSpy.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(maintenanceSpy.mock.calls.length).toBe(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refetches maintenance just after a window ends', async () => {
+    const until = new Date(Date.now() + 60 * 1000).toISOString();
+    const maintenanceSpy = vi
+      .mocked(alertsApi.fetchMaintenanceWindow)
+      .mockResolvedValue({ active: true, until, schedules: [] });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<AlertsPanel />);
+      await screen.findAllByText('Active');
+      const calls = maintenanceSpy.mock.calls.length;
+      maintenanceSpy.mockResolvedValue({ active: false, until: null, schedules: [] });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(61000);
+      });
+      expect(maintenanceSpy.mock.calls.length).toBe(calls + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('auto-dismisses success feedback after 5 seconds', async () => {
     vi.spyOn(alertsApi, 'importAlertRules').mockResolvedValue({ imported: 1, skipped: 0, errors: [] });
 

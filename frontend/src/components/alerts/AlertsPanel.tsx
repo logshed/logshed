@@ -65,6 +65,9 @@ import { MaintenanceWindowTab, DAYS_OF_WEEK } from './tabs/MaintenanceWindowTab.
 
 export type AlertViewTab = 'rules' | 'drop-rules' | 'history' | 'maintenance';
 
+// The longest delay setTimeout honours (2^31-1 ms, about 24.8 days)
+const MAX_TIMEOUT_MS = 2147483647;
+
 export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
   const clean = pathname.replace(/\/+$/, '').toLowerCase();
   if (clean === '/rules/history') {
@@ -350,6 +353,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
       return;
     }
+    // setTimeout runs a longer delay at once; the 10 second maintenance poll covers such a window
+    if (delay + 250 > MAX_TIMEOUT_MS) return;
     const timer = setTimeout(() => {
       fetchMaintenanceWindow()
         .then((res) => {
