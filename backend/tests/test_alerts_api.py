@@ -105,10 +105,9 @@ class TestAlertsApi:
         assert created["threshold_count"] == 10
         assert created["ai_enrichment"] is True
 
-        # 3. Get single rule
-        get_res = await client.get(f"/api/alerts/rules/{rule_id}", headers=auth_headers)
-        assert get_res.status_code == 200
-        assert get_res.json()["id"] == rule_id
+        # 3. The rule is listed
+        list_res = await client.get("/api/alerts/rules", headers=auth_headers)
+        assert [r["id"] for r in list_res.json()] == [rule_id]
 
         # 4. Update rule
         update_payload = {
@@ -142,9 +141,27 @@ class TestAlertsApi:
         assert del_res.status_code == 200
         assert del_res.json()["status"] == "ok"
 
-        # 6. Verify 404 on deleted rule
-        get_deleted = await client.get(f"/api/alerts/rules/{rule_id}", headers=auth_headers)
-        assert get_deleted.status_code == 404
+        # 6. The deleted rule is gone
+        assert (await client.get("/api/alerts/rules", headers=auth_headers)).json() == []
+        update_deleted = await client.put(f"/api/alerts/rules/{rule_id}", json={"name": "x"}, headers=auth_headers)
+        assert update_deleted.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_unused_routes_are_removed(self, client: AsyncClient, auth_headers: dict):
+        """Reading one rule and the old maintenance aliases were never used by the UI and are gone."""
+        create_res = await client.post(
+            "/api/alerts/rules",
+            json={"name": "Probe", "match_pattern": "x", "threshold_count": 1, "window_seconds": 60},
+            headers=auth_headers,
+        )
+        rule_id = create_res.json()["id"]
+        # 405 from the routes left on these paths, or 404 from the web interface's fallback once it is built
+        res = await client.get(f"/api/alerts/rules/{rule_id}", headers=auth_headers)
+        assert res.status_code in (404, 405)
+        res = await client.post("/api/alerts/maintenance/sessions/abc/disable", headers=auth_headers)
+        assert res.status_code in (404, 405)
+        res = await client.put("/api/alerts/maintenance/schedules", json={"schedules": []}, headers=auth_headers)
+        assert res.status_code in (404, 405)
 
     @pytest.mark.asyncio
     async def test_create_rule_invalid_channel_returns_400(self, client: AsyncClient, auth_headers: dict):

@@ -404,14 +404,10 @@ class TestExposure:
         res = await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
         assert res.status_code == 200
 
-        # Already ended, unknown, and the hidden POST alias all report 404
+        # Already ended and unknown sessions both report 404
         res = await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
         assert res.status_code == 404
         res = await client.delete("/api/alerts/maintenance/sessions/does-not-exist", headers=auth_headers)
-        assert res.status_code == 404
-        res = await client.post(
-            "/api/alerts/maintenance/sessions/does-not-exist/disable", headers=auth_headers
-        )
         assert res.status_code == 404
 
     @pytest.mark.asyncio

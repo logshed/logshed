@@ -185,7 +185,6 @@ async def set_maintenance_window(
 
 
 @router.delete("/maintenance/sessions/{session_id}", response_model=MaintenanceWindowResponse)
-@router.post("/maintenance/sessions/{session_id}/disable", response_model=MaintenanceWindowResponse, include_in_schema=False)
 async def disable_single_maintenance_session(
     session_id: str,
     user: dict = Depends(get_current_user),
@@ -226,7 +225,6 @@ async def extend_single_maintenance_session(
 
 
 @router.post("/maintenance/schedules", response_model=MaintenanceWindowResponse)
-@router.put("/maintenance/schedules", response_model=MaintenanceWindowResponse, include_in_schema=False)
 async def update_maintenance_schedules(
     payload: MaintenanceSchedulesUpdateRequest,
     user: dict = Depends(get_current_user),
@@ -541,17 +539,6 @@ async def create_alert_rule(
     rule_id, display_order = await run_db_query(_insert)
     await asyncio.to_thread(get_alert_evaluator().reload_rules)
     return _new_alert_rule_response(rule, rule_id, display_order, now_iso)
-
-
-@router.get("/rules/{rule_id}", response_model=AlertRuleResponse)
-async def get_alert_rule(
-    rule_id: int,
-    user: dict = Depends(get_current_user),
-) -> AlertRuleResponse:
-    """Retrieve details for a single alert rule."""
-    row = await _fetch_alert_rule_row(rule_id)
-
-    return _row_to_alert_rule_response(row)
 
 
 @router.put("/rules/reorder", response_model=list[AlertRuleResponse])
