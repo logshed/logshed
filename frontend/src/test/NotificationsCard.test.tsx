@@ -22,7 +22,8 @@ vi.mock('../api/settings.ts', () => ({
 
 describe('NotificationsCard Component', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Also drops one-time replies a test set but never used, so one failure cannot spill into the next test
+    vi.resetAllMocks();
   });
 
   it('labels the digest schedule time with the server time zone it runs in', async () => {
@@ -209,7 +210,9 @@ describe('NotificationsCard Component', () => {
       daily_digest_channel_id: null,
     };
     vi.mocked(settingsApi.fetchSettings).mockImplementation(async () => ({ ...currentSettings }));
+    // Each save takes a moment, as on a slow runner: the digest controls stay disabled until it ends
     vi.mocked(settingsApi.updateSettings).mockImplementation(async (updates) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
       currentSettings = { ...currentSettings, ...updates };
       return { ...currentSettings };
     });
@@ -249,9 +252,11 @@ describe('NotificationsCard Component', () => {
       expect(settingsApi.updateSettings).toHaveBeenCalledWith({ daily_digest_enabled: true });
     });
 
-    // Select channel
+    // Select channel once the save has finished
     const channelSelect = screen.getByLabelText(/Target Channel/i);
-    expect(channelSelect).not.toBeDisabled();
+    await waitFor(() => {
+      expect(channelSelect).not.toBeDisabled();
+    });
     chooseOption(channelSelect, 'Channel: Homelab Discord');
 
     await waitFor(() => {
@@ -276,8 +281,11 @@ describe('NotificationsCard Component', () => {
       expect(settingsApi.updateSettings).toHaveBeenCalledWith({ daily_digest_schedule_time: '14:30' });
     });
 
-    // Click Send Digest Now
-    const sendBtn = screen.getByText('Send Digest Now');
+    // Click Send Digest Now once the schedule save has finished
+    const sendBtn = screen.getByRole('button', { name: 'Send Digest Now' });
+    await waitFor(() => {
+      expect(sendBtn).not.toBeDisabled();
+    });
     fireEvent.click(sendBtn);
 
     await waitFor(() => {
