@@ -599,6 +599,10 @@ const LIVE_BUFFER_SIZE = 3000;
 const MAX_FOCUS_PAGES = 10;
 const SCROLLBACK_BUFFER_SIZE = 20000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
+// How long after the last scroll event (or a finger lifting) scrolling counts as stopped
+const SCROLL_IDLE_MS = 150;
+// Longest the Paused and jump-to-top buttons' smooth scroll to the top may take
+const RESUME_SCROLL_MAX_MS = 1500;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
@@ -1030,6 +1034,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const isAutoScrollRef = useRef<boolean>(true);
   const pendingScrollAdjustmentRef = useRef<number>(0);
   const isTouchingRef = useRef<boolean>(false);
+  // True from a scroll event (or a finger lifting) until SCROLL_IDLE_MS pass without another one, so a
+  // momentum glide counts as scrolling. Mobile browsers show a scrollTop write during a drag or glide as a jump.
+  const isScrollingRef = useRef<boolean>(false);
+  const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The scrollTop our own anchoring wrote, so its scroll event is not taken for the user's
+  const anchoredScrollTopRef = useRef<number | null>(null);
+  // Set when held rows were dropped (the scrollback buffer was full): they then wait for auto-scroll to
+  // resume, because joining them to the list would leave a gap
+  const heldRowsDroppedRef = useRef<boolean>(false);
+  // Set by the Paused and jump-to-top buttons while the smooth scroll to the top runs, so its scroll
+  // events do not pause auto-scroll again on the way up
+  const resumingToTopRef = useRef<boolean>(false);
+  const resumingToTopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep ref updated
   useEffect(() => {
@@ -1054,6 +1071,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     if (!autoScroll || heldLiveRowsRef.current.length === 0) return;
     const held = heldLiveRowsRef.current;
     heldLiveRowsRef.current = [];
+    heldRowsDroppedRef.current = false;
     setLogs((prev) => {
       const existingIds = new Set(prev.map((l) => l.id));
       return [...held.filter((l) => !existingIds.has(l.id)), ...prev];
@@ -1068,6 +1086,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       pendingScrollAdjustmentRef.current = 0;
       if (parentRef.current && !isAutoScrollRef.current) {
         parentRef.current.scrollTop += adjustment;
+        anchoredScrollTopRef.current = parentRef.current.scrollTop;
       }
     }
   }, [logs]);
@@ -1160,38 +1179,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     });
   }, []);
 
-  // Flush incoming buffered SSE logs to React state in a single batch
-  const flushIncomingLogs = useCallback(() => {
-    if (incomingBufferRef.current.length === 0) return;
-
-    const toFlush = incomingBufferRef.current;
-    incomingBufferRef.current = [];
-
-    // Incrementally update facets with new incoming logs
-    updateFacetsWithNewLogs(toFlush);
-
-    // "Today" is computed once per batch; after midnight the rows already shown get their date back
+  // Put prepared live rows (newest first) at the top of the list
+  const prependLiveRows = useCallback((prepared: ProcessedLogEntry[]) => {
+    // "Today" is checked once per batch; after midnight the rows already shown get their date back
     const fmt = getFormatContext();
     const dayChanged = fmt.todayKey !== formatDayRef.current;
     formatDayRef.current = fmt.todayKey;
-    // toFlush is in arrival order (oldest first, newest last): reverse it so the newest log is at the top
-    const prepared = toFlush
-      .map((entry) =>
-        prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-      )
-      .reverse();
-
-    // Scrolled back with a full scrollback buffer: hold new rows (counted in the "N new" banner)
-    // until auto-scroll resumes, instead of trimming the history the user is reading.
-    if (
-      !isAutoScrollRef.current &&
-      (heldLiveRowsRef.current.length > 0 ||
-        logsRef.current.length + prepared.length > SCROLLBACK_BUFFER_SIZE)
-    ) {
-      heldLiveRowsRef.current = [...prepared, ...heldLiveRowsRef.current].slice(0, LIVE_BUFFER_SIZE);
-      setMissedLogsCount((prev) => prev + toFlush.length);
-      return;
-    }
 
     // Trim to the buffer cap here rather than leaving it to the cap effect, which would render every
     // batch twice once the buffer is full: once grown, then again trimmed
@@ -1207,12 +1200,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       return next.length > cap ? next.slice(0, cap) : next;
     });
 
-    setLastSelectedLogIndex((prev) => (prev !== null ? prev + toFlush.length : null));
+    setLastSelectedLogIndex((prev) => (prev !== null ? prev + prepared.length : null));
 
     if (!isAutoScrollRef.current) {
-      setMissedLogsCount((prev) => prev + toFlush.length);
       // Anchor scroll position by compensating for prepended items' height
-      pendingScrollAdjustmentRef.current += toFlush.length * (isMobileRef.current ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT);
+      pendingScrollAdjustmentRef.current += prepared.length * (isMobileRef.current ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT);
     } else if (parentRef.current && !isTouchingRef.current) {
       requestAnimationFrame(() => {
         if (parentRef.current && isAutoScrollRef.current && !isTouchingRef.current) {
@@ -1220,7 +1212,82 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }
       });
     }
-  }, [updateFacetsWithNewLogs, getFormatContext]);
+  }, [getFormatContext]);
+
+  // Rows held while the user was scrolling join the list in one batch, with one scroll correction,
+  // once scrolling has stopped. Rows held because the scrollback buffer is full wait for auto-scroll.
+  const releaseHeldLiveRows = useCallback(() => {
+    const held = heldLiveRowsRef.current;
+    if (
+      held.length === 0 ||
+      isAutoScrollRef.current ||
+      isTouchingRef.current ||
+      isScrollingRef.current ||
+      heldRowsDroppedRef.current ||
+      logsRef.current.length + held.length > SCROLLBACK_BUFFER_SIZE
+    ) {
+      return;
+    }
+    heldLiveRowsRef.current = [];
+    const existingIds = new Set(logsRef.current.map((l) => l.id));
+    const fresh = held.filter((l) => !existingIds.has(l.id));
+    if (fresh.length > 0) prependLiveRows(fresh);
+  }, [prependLiveRows]);
+
+  // A scroll event or a lifted finger: scrolling counts as stopped SCROLL_IDLE_MS after the last one
+  const noteScrollActivity = useCallback(() => {
+    isScrollingRef.current = true;
+    if (scrollIdleTimerRef.current !== null) clearTimeout(scrollIdleTimerRef.current);
+    scrollIdleTimerRef.current = setTimeout(() => {
+      scrollIdleTimerRef.current = null;
+      isScrollingRef.current = false;
+      releaseHeldLiveRows();
+    }, SCROLL_IDLE_MS);
+  }, [releaseHeldLiveRows]);
+
+  useEffect(() => () => {
+    if (scrollIdleTimerRef.current !== null) clearTimeout(scrollIdleTimerRef.current);
+    if (resumingToTopTimerRef.current !== null) clearTimeout(resumingToTopTimerRef.current);
+  }, []);
+
+  // Flush incoming buffered SSE logs to React state in a single batch
+  const flushIncomingLogs = useCallback(() => {
+    if (incomingBufferRef.current.length === 0) return;
+
+    const toFlush = incomingBufferRef.current;
+    incomingBufferRef.current = [];
+
+    // Incrementally update facets with new incoming logs
+    updateFacetsWithNewLogs(toFlush);
+
+    const fmt = getFormatContext();
+    // toFlush is in arrival order (oldest first, newest last): reverse it so the newest log is at the top
+    const prepared = toFlush
+      .map((entry) =>
+        prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
+      )
+      .reverse();
+
+    if (!isAutoScrollRef.current) {
+      setMissedLogsCount((prev) => prev + toFlush.length);
+      // Scrolled back and either still scrolling, or with a full scrollback buffer: hold new rows
+      // (counted in the "N new" banner). Moving the list under a finger or a glide shows as a jump on
+      // phones, and trimming the full buffer would cut the history the user is reading.
+      const bufferFull = logsRef.current.length + heldLiveRowsRef.current.length + prepared.length > SCROLLBACK_BUFFER_SIZE;
+      if (heldLiveRowsRef.current.length > 0 || bufferFull || isTouchingRef.current || isScrollingRef.current) {
+        const held = [...prepared, ...heldLiveRowsRef.current];
+        if (bufferFull && held.length > LIVE_BUFFER_SIZE) {
+          heldRowsDroppedRef.current = true;
+          heldLiveRowsRef.current = held.slice(0, LIVE_BUFFER_SIZE);
+        } else {
+          heldLiveRowsRef.current = held;
+        }
+        return;
+      }
+    }
+
+    prependLiveRows(prepared);
+  }, [updateFacetsWithNewLogs, getFormatContext, prependLiveRows]);
 
   // In-flight query cancellation / stale response guard
   const fetchRequestIdRef = useRef<number>(0);
@@ -1252,6 +1319,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       incomingBufferRef.current = [];
       heldLiveRowsRef.current = [];
+      heldRowsDroppedRef.current = false;
       pendingScrollAdjustmentRef.current = 0;
 
       const activeFilters = overrideFilters !== undefined ? overrideFilters : filters;
@@ -1498,6 +1566,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       incomingBufferRef.current = [];
       heldLiveRowsRef.current = [];
+      heldRowsDroppedRef.current = false;
     };
   }, [filters.severity_max, filters.to, sourcesKey, appsKey, flushIncomingLogs, streamReconnectNonce]);
 
@@ -1507,13 +1576,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const { scrollTop, scrollHeight, clientHeight } = parentRef.current;
     const isAtTop = scrollTop <= 5;
 
+    // Our own scroll anchoring is not the user scrolling
+    const anchored = anchoredScrollTopRef.current;
+    anchoredScrollTopRef.current = null;
+    if (anchored === null || Math.abs(scrollTop - anchored) > 1) noteScrollActivity();
+
     if (isAtTop) {
+      endResumingToTop();
       const scrolledByCursor = performance.now() - cursorScrollAtRef.current < 500;
       if (!autoScroll && !isTouchingRef.current && !scrolledByCursor) {
         setAutoScroll(true);
         setMissedLogsCount(0);
       }
-    } else {
+    } else if (!resumingToTopRef.current) {
       if (autoScroll) {
         isAutoScrollRef.current = false;
         setAutoScroll(false);
@@ -1528,7 +1603,22 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   };
 
+  const endResumingToTop = () => {
+    resumingToTopRef.current = false;
+    if (resumingToTopTimerRef.current !== null) {
+      clearTimeout(resumingToTopTimerRef.current);
+      resumingToTopTimerRef.current = null;
+    }
+  };
+
   const resumeAutoScroll = () => {
+    // The smooth scroll up passes through positions that would otherwise pause auto-scroll again, and
+    // a paused batch would then write scrollTop, which stops the scroll short of the top
+    endResumingToTop();
+    resumingToTopRef.current = true;
+    // In case the scroll never reaches the top (the user takes over, or the browser cuts it short)
+    resumingToTopTimerRef.current = setTimeout(endResumingToTop, RESUME_SCROLL_MAX_MS);
+    isAutoScrollRef.current = true;
     setAutoScroll(true);
     setMissedLogsCount(0);
     pendingScrollAdjustmentRef.current = 0;
@@ -1622,6 +1712,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const index = Math.min(count - 1, Math.max(0, next));
     // Moving the cursor pauses auto-scroll, as scrolling down does, so live rows arriving above it
     // keep the view (and the cursor row) in place instead of carrying it down the list
+    endResumingToTop();
     if (isAutoScrollRef.current) {
       isAutoScrollRef.current = false;
       setAutoScroll(false);
@@ -2014,6 +2105,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
     incomingBufferRef.current = [];
     heldLiveRowsRef.current = [];
+    heldRowsDroppedRef.current = false;
     pendingScrollAdjustmentRef.current = 0;
     setLogs([]);
     chipRankDirtyRef.current = true;
@@ -2292,13 +2384,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onScroll={handleScroll}
           onTouchStart={() => {
             isTouchingRef.current = true;
+            endResumingToTop();
           }}
           onTouchEnd={() => {
             isTouchingRef.current = false;
+            noteScrollActivity();
           }}
           onTouchCancel={() => {
             isTouchingRef.current = false;
+            noteScrollActivity();
           }}
+          onWheel={endResumingToTop}
+          onMouseDown={endResumingToTop}
           // One Tab stop: the arrow, page, Home and End keys move the row cursor (handleListKeyDown)
           tabIndex={0}
           onKeyDown={handleListKeyDown}
