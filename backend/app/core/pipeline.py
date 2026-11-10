@@ -14,9 +14,8 @@ import time
 import traceback
 from typing import Any, Optional, Union
 from pathlib import Path
-from collections import defaultdict, deque
+from collections import deque
 
-from app.core.migrations import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -1210,7 +1209,7 @@ class QueueConsumer:
                     # If flush failed after all retries, clean up remaining queue items
                     while not queue.empty():
                         try:
-                            rem = queue.get_nowait()
+                            queue.get_nowait()
                             queue.task_done()
                         except asyncio.QueueEmpty:
                             break

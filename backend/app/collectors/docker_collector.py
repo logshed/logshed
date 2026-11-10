@@ -16,7 +16,6 @@ import os
 import re
 import shutil
 import socket
-import sqlite3
 import ssl
 import tempfile
 import time

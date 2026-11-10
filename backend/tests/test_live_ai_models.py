@@ -1,10 +1,8 @@
 import os
 from pathlib import Path
-import httpx
 import pytest
-from app.services.ai_engine import fetch_available_models, is_text_generation_model, NON_TEXT_MODEL_KEYWORDS
+from app.services.ai_engine import fetch_available_models
 from google import genai
-from openai import AsyncOpenAI
 
 pytestmark = pytest.mark.e2e
 

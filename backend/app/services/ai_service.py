@@ -26,7 +26,6 @@ from app.core.config import (
     parse_bool,
 )
 from app.core.redactor import redact
-from app.core.security import decrypt_value
 from app.core.utils import (
     format_utc_offset,
     get_server_timezone_name,

@@ -1140,7 +1140,7 @@ class TestQueueConsumerAlertIntegration:
         async def mock_dispatch_gemini(api_key, model, prompt, system_prompt=None, timeout=45.0, **kwargs):
             attempted_models.append(model)
             raise ai_engine.AiServiceUnavailableError(
-                f"503 UNAVAILABLE: This model is currently experiencing high demand.",
+                "503 UNAVAILABLE: This model is currently experiencing high demand.",
                 code=503,
             )
 
@@ -1297,7 +1297,6 @@ class TestQueueConsumerAlertIntegration:
             """,
             ("Bounds Rule", "threshold", "probe", 1, 86400, 300, now_iso),
         )
-        rule_id = cur.lastrowid
         conn.commit()
         conn.close()
 
@@ -1388,12 +1387,10 @@ class TestQueueConsumerAlertIntegration:
             """,
             ("Decoupled Rule", "threshold", "trigger", 1, 60, 300, now_iso),
         )
-        rule_id = cur.lastrowid
         conn.commit()
         conn.close()
 
         db_write_started = asyncio.Event()
-        db_write_finish = asyncio.Event()
 
         evaluator = AlertEvaluator(test_db)
         orig_update = evaluator._update_rule_trigger_state
@@ -1547,7 +1544,6 @@ class TestQueueConsumerAlertIntegration:
             """,
             ("AI Rate Storm", "rate", 5, 2, 300, now_iso),
         )
-        rule_id = cur.lastrowid
         conn.commit()
         conn.close()
 

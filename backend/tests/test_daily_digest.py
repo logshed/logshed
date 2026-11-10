@@ -8,11 +8,9 @@ import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
-from app.core.config import get_db_path
 from app.core.migrations import get_connection, run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (

@@ -36,7 +36,6 @@ from app.models import (
     AlertRuleUpdate,
     AlertTestRequest,
     AlertTestResponse,
-    MaintenanceSchedule,
     MaintenanceSchedulesUpdateRequest,
     MaintenanceSessionExtendRequest,
     MaintenanceWindowRequest,

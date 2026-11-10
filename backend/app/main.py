@@ -9,7 +9,6 @@ import datetime
 import hashlib
 import json
 import logging
-import os
 import re
 from contextlib import asynccontextmanager
 from time import monotonic as _monotonic
@@ -17,7 +16,7 @@ from typing import Any, Optional, Union
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -756,7 +755,7 @@ def create_app() -> FastAPI:
         messages = []
         for err in exc.errors():
             msg = err.get("msg", "Validation error")
-            loc = " -> ".join(str(l) for l in err.get("loc", []) if l != "body")
+            loc = " -> ".join(str(part) for part in err.get("loc", []) if part != "body")
             messages.append(f"{loc}: {msg}" if loc else msg)
         clean_detail = "; ".join(messages) if messages else "Request validation failed."
         return JSONResponse(

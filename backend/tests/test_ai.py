@@ -459,7 +459,7 @@ Multiple transaction queries deadlock on shared index.
                     prompt_override="Operator explicitly edited prompt payload",
                 )
             )
-            summary, prompt_sent = result.summary, result.prompt_sent
+            prompt_sent = result.prompt_sent
             assert prompt_sent == "Operator explicitly edited prompt payload"
             mock_dispatch.assert_called_once_with(
                 api_key="key",
@@ -564,7 +564,7 @@ Multiple transaction queries deadlock on shared index.
                     log_count=700,
                 )
             )
-            summary, prompt_sent = result.summary, result.prompt_sent
+            prompt_sent = result.prompt_sent
             assert "[... Truncated older logs to fit token budget ...]" in prompt_sent
             call_prompt = mock_dispatch.call_args[1]["prompt"]
             assert "[... Truncated older logs to fit token budget ...]" in call_prompt
@@ -1300,7 +1300,6 @@ class TestAiDiagnoseWorkflow:
                 },
             )
             assert override_res.status_code == 200
-            override_audit_id = override_res.json()["audit_id"]
 
             override_kwargs = mock_exec.call_args[1]
             assert "sk-proj-123456789012345678901234" not in override_kwargs["prompt_override"]

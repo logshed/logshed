@@ -10,14 +10,11 @@ import asyncio
 from collections import Counter, deque
 from contextlib import nullcontext
 import datetime
-import fnmatch
 import logging
-import os
 from pathlib import Path
 import re
 import sqlite3
 import threading
-import time
 from typing import Any, Callable, Optional, Union
 
 import regex
@@ -821,14 +818,14 @@ class AlertEvaluator:
                     # Format and redact log window
                     raw_lines = [
                         format_prompt_log_line(
-                            timestamp=l.get("timestamp"),
-                            source=l.get("source_alias") or l.get("source_ip"),
-                            app_name=l.get("app_name"),
-                            message=l.get("message", ""),
-                            severity=l.get("severity"),
-                            raw=l.get("raw"),
+                            timestamp=entry.get("timestamp"),
+                            source=entry.get("source_alias") or entry.get("source_ip"),
+                            app_name=entry.get("app_name"),
+                            message=entry.get("message", ""),
+                            severity=entry.get("severity"),
+                            raw=entry.get("raw"),
                         )
-                        for l in triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
+                        for entry in triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
                     ]
                     redacted_lines = await asyncio.to_thread(redact, raw_lines)
                     redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)

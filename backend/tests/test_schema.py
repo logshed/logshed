@@ -407,7 +407,7 @@ class TestMigrationRunner:
         """Upgrading an existing v1 database to v2 drops logs_ai, initializes fts_index_state to MAX(id), and applies v2 schema."""
         p = tmp_path / "v1_to_v2.db"
         conn = get_connection(p)
-        from app.core.migrations import migrate_v1, set_user_version
+        from app.core.migrations import migrate_v1
         migrate_v1(conn)
         set_user_version(conn, 1)
 
@@ -472,7 +472,7 @@ class TestMigrationRunner:
         """Upgrading an existing v2 database to v3 adds display_order, creates indexes, api_tokens, maintenance_sessions, and instance_id."""
         p = tmp_path / "v2_to_v3.db"
         conn = get_connection(p)
-        from app.core.migrations import migrate_v1, migrate_v2, set_user_version
+        from app.core.migrations import migrate_v1, migrate_v2
         migrate_v1(conn)
         migrate_v2(conn)
         set_user_version(conn, 2)
@@ -547,7 +547,7 @@ class TestMigrationRunner:
         """Upgrading v2 to v3 preserves existing custom server_name and instance_id if already present."""
         p = tmp_path / "v2_preserve_identity.db"
         conn = get_connection(p)
-        from app.core.migrations import migrate_v1, migrate_v2, set_user_version
+        from app.core.migrations import migrate_v1, migrate_v2
         migrate_v1(conn)
         migrate_v2(conn)
         set_user_version(conn, 2)
@@ -577,7 +577,7 @@ class TestMigrationRunner:
         """
         p = tmp_path / "v3_prerelease.db"
         conn = get_connection(p)
-        from app.core.migrations import migrate_v1, migrate_v2, set_user_version
+        from app.core.migrations import migrate_v1, migrate_v2
         migrate_v1(conn)
         migrate_v2(conn)
         # Create standard v3 tables without docker_endpoints and mark as user_version = 3
@@ -1223,7 +1223,7 @@ class TestFTS5Sync:
     def test_startup_sanitization_clamps_future_timestamps(self, tmp_path: Path):
         """migrate_v2 should sanitize any future-dated timestamps without touching past logs."""
         db_file = tmp_path / "sanitize_test.db"
-        from app.core.migrations import migrate_v1, set_user_version
+        from app.core.migrations import migrate_v1
         with get_connection(db_file) as conn:
             migrate_v1(conn)
             set_user_version(conn, 1)

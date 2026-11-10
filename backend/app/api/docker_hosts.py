@@ -11,7 +11,7 @@ import socket
 import sqlite3
 import ssl
 import time
-from typing import Any, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 import httpx

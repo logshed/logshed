@@ -3,8 +3,6 @@ Integration tests for LogShed External Maintenance API and multi-session trackin
 Session overlapping, cancellation by session_id, clear all, drop_errors mode, and alert suppression.
 """
 
-import asyncio
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
 import pytest_asyncio
@@ -12,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -24,7 +22,7 @@ from app.core.sse import sse_manager
 from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
-from app.services.maintenance_service import should_drop_maintenance_error, get_maintenance_status
+from app.services.maintenance_service import should_drop_maintenance_error
 
 
 @pytest.fixture(autouse=True)

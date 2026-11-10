@@ -347,12 +347,15 @@ class DropFilter:
         if not self._auto_disables.has_queued():
             return
         if conn is not None:
-            connect = lambda: nullcontext(conn)
+            def connect():
+                return nullcontext(conn)
         else:
             effective_db = self.db_path or get_db_path()
             if not (effective_db and Path(effective_db).exists()):
                 return
-            connect = lambda: closing(get_connection(effective_db))
+
+            def connect():
+                return closing(get_connection(effective_db))
         if not self._auto_disables.store(connect):
             return
         try:

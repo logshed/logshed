@@ -260,7 +260,6 @@ class TestDropFilterUnit:
             VALUES ('Second Evaluated', NULL, NULL, 'order_test', 0, 1, 20, 0, datetime('now'))
             """
         )
-        rule1_id = cur.lastrowid
         # Rule 2 has lower display_order (10)
         cur.execute(
             """

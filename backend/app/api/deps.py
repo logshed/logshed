@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 
-from fastapi import Depends, HTTPException, Request, Response, Security, status
+from fastapi import HTTPException, Request, Response, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.api_tokens import (
@@ -25,7 +25,6 @@ from app.core.api_tokens import (
     should_update_last_used,
 )
 from app.core.config import get_db_path
-from app.core.migrations import get_connection
 from app.core.security import SESSION_COOKIE_NAME, verify_session_token
 from app.core.utils import parse_iso_to_utc_datetime
 

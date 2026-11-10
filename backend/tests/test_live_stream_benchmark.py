@@ -26,7 +26,7 @@ BROADCAST_SIZE = 400
 
 
 @pytest.mark.asyncio
-async def test_live_stream_throughput(client, auth_cookie):
+async def test_live_stream_throughput(client, auth_cookie):  # noqa: F811 (pytest fixtures imported above)
     client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     entries = [

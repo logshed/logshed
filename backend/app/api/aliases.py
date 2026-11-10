@@ -10,13 +10,13 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-logger = logging.getLogger(__name__)
-
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
 from app.core.utils import load_docker_source_aliases, load_former_docker_aliases
 from app.models import HostAliasCreate, HostAliasResponse, MessageResponse
 from app.services.alias_rename import alias_in_use, follow_alias_rename, reload_after_alias_rename
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/aliases", tags=["Host Aliases"])
 

@@ -5,7 +5,6 @@ the same winning drop rule and counts, the same alert matches in the same order,
 for other apps are never evaluated.
 """
 
-import asyncio
 import datetime
 import itertools
 from collections import Counter

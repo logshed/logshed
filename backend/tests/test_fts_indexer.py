@@ -10,7 +10,6 @@ import sqlite3
 import threading
 import time
 import pytest
-import pytest_asyncio
 
 from app.core import pipeline as pipeline_mod
 from app.core.migrations import get_connection, run_migrations
@@ -157,7 +156,6 @@ class TestFTSIndexWorkerDurableRecovery:
     async def test_durable_last_indexed_id_recovery_across_worker_restarts(self, db_path: Path):
         """Worker recovers progress cleanly from fts_index_state across restarts without duplicate or omitted index rows."""
         # 1. Insert 40 logs and index them with Worker 1
-        worker1 = FTSIndexWorker(db_path, batch_size=100)
         conn = get_connection(db_path)
         with conn:
             for i in range(1, 41):
@@ -200,7 +198,6 @@ class TestFTSIndexWorkerDurableRecovery:
         conn.close()
 
         # 3. Start Worker 2 (new instance). It should pick up from last_indexed_id=40 and index only 41..70.
-        worker2 = FTSIndexWorker(db_path, batch_size=100)
         indexed2 = index_pending_logs(db_path)
         assert indexed2 == 30
 

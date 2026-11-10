@@ -56,5 +56,8 @@ jobs:
         run: |
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
+      - name: Lint backend
+        run: ruff check backend
+
       - name: Run backend test suite
         run: pytest backend/tests/ -v

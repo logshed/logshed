@@ -2,7 +2,6 @@
 Pydantic v2 schemas and models for LogShed API.
 """
 
-from datetime import datetime
 import ipaddress
 import re
 from typing import Any, Literal, Optional

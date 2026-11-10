@@ -2,9 +2,8 @@
 Tests for NotifierService, Apprise URL encryption, token masking, and Notifications API.
 """
 
-import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -25,7 +24,6 @@ from app.services.notifier import (
     NotifierService,
     decrypt_channel_url,
     encrypt_channel_url,
-    get_notifier,
     mask_notification_url,
     validate_notification_url,
 )
@@ -349,7 +347,7 @@ class TestNotifierService:
 class TestNotificationsApi:
 
     @pytest.mark.asyncio
-    async def test_crud_notification_channel(self, client: AsyncClient, auth_headers: dict):
+    async def test_crud_notification_channel(self, client: AsyncClient, auth_headers: dict, tmp_path: Path):
         # 1. Create channel
         create_payload = {
             "name": "Ops Discord",
@@ -365,8 +363,10 @@ class TestNotificationsApi:
         channel_id = data["id"]
 
         # Verify ciphertext in database
-        with get_connection(Path(client._transport.app.state._db_path if hasattr(client._transport.app, 'state') and hasattr(client._transport.app.state, '_db_path') else 'logs.db')) as conn:
-            pass
+        with get_connection(tmp_path / "logs.db") as conn:
+            stored = conn.execute("SELECT url FROM notification_channels WHERE id = ?", (channel_id,)).fetchone()[0]
+        assert "my_real_secret_token" not in stored
+        assert self._stored_url(tmp_path, channel_id) == "discord://123456789/my_real_secret_token"
 
         # 2. List channels
         list_res = await client.get("/api/notifications/channels", headers=auth_headers)

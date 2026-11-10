@@ -359,8 +359,6 @@ def expand_source_aliases(
     return sorted(expanded)
 
 
-import re
-
 # Reserved FTS5 syntax operators
 _FTS_OPERATORS = {"AND", "OR", "NOT", "NEAR"}
 # Strict allowlist of searchable columns in logs_fts virtual table

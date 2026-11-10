@@ -7,7 +7,6 @@ and apps in single-digit milliseconds across large log databases.
 import datetime
 from pathlib import Path
 import random
-import sqlite3
 import time
 import pytest
 import pytest_asyncio

@@ -29,7 +29,8 @@ npm test
 npm run build
 cd ..
 
-# 4. Run the backend test suite
+# 4. Lint the backend and run its test suite
+.venv/bin/ruff check backend
 .venv/bin/pytest backend/tests/ -v
 
 # 5. Start the local development server (DATA_DIR keeps the database in ./data instead of /data)
@@ -49,5 +50,5 @@ DATA_DIR=./data .venv/bin/python -m uvicorn app.main:app --app-dir backend --hos
 
 1. Create a new branch from `main`.
 2. Make your changes and add tests that cover what you added or changed.
-3. Run both test suites (`.venv/bin/pytest backend/tests/ -v` and `cd frontend && npm test`) and build the frontend (`cd frontend && npm run build`).
+3. Lint the backend (`.venv/bin/ruff check backend`), run both test suites (`.venv/bin/pytest backend/tests/ -v` and `cd frontend && npm test`) and build the frontend (`cd frontend && npm run build`).
 4. Open a Pull Request against `main` and fill out the PR template.

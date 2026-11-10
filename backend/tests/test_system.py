@@ -5,7 +5,6 @@ Tests for storage metrics, retention prune worker, healthcheck, settings encrypt
 import asyncio
 import datetime
 import os
-import shutil
 import sqlite3
 import stat
 from pathlib import Path

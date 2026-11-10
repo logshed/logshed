@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import ipaddress
 import logging
-import os
 import re
 import socket
 import threading

@@ -8,7 +8,6 @@ Tests for Advanced System Settings:
 - Dynamic worker and subsystem dispatch (SyslogServer, DockerTailer, Notifier, AlertEvaluator, Auth)
 """
 
-import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
@@ -21,7 +20,6 @@ from app.core.pipeline import KeyedMultilineAssembler
 from app.core.config import (
     invalidate_settings_cache,
     get_cached_setting,
-    get_cached_system_settings,
     resolve_setting,
     resolve_all_system_settings,
 )

@@ -7,7 +7,6 @@ and FTS5 synchronization.
 
 import datetime
 from pathlib import Path
-import sqlite3
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -184,7 +183,7 @@ async def test_delete_single_log_success(client: AsyncClient, auth_cookie: dict)
     check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 4
-    assert not any(l["id"] == target_id for l in remaining)
+    assert not any(log["id"] == target_id for log in remaining)
 
     # Verify deleted from FTS5
     conn = get_connection(db_path)
@@ -227,7 +226,7 @@ async def test_delete_multiple_logs_by_id(client: AsyncClient, auth_cookie: dict
     remaining = check_res.json()["logs"]
     assert len(remaining) == 3
     for deleted_id in ids_to_delete:
-        assert not any(l["id"] == deleted_id for l in remaining)
+        assert not any(log["id"] == deleted_id for log in remaining)
 
 
 # ===================================================================
@@ -252,7 +251,7 @@ async def test_delete_all_logs_for_host(client: AsyncClient, auth_cookie: dict):
     check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 2
-    assert all(l["source_alias"] == "pve2" for l in remaining)
+    assert all(log["source_alias"] == "pve2" for log in remaining)
 
 
 @pytest.mark.asyncio
@@ -371,7 +370,7 @@ async def test_delete_all_logs_for_app(client: AsyncClient, auth_cookie: dict):
     check_res = await client.get("/api/logs")
     remaining = check_res.json()["logs"]
     assert len(remaining) == 3
-    assert not any(l["app_name"] == "nginx" for l in remaining)
+    assert not any(log["app_name"] == "nginx" for log in remaining)
 
 
 @pytest.mark.asyncio
@@ -396,7 +395,7 @@ async def test_delete_logs_by_time_range(client: AsyncClient, auth_cookie: dict)
     remaining = check_res.json()["logs"]
     assert len(remaining) == 2
     # Sep 2 (nginx) and Sep 6 (kernel) remain
-    apps = [l["app_name"] for l in remaining]
+    apps = [log["app_name"] for log in remaining]
     assert "kernel" in apps
     assert "nginx" in apps
 

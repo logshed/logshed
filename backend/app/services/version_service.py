@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.config import parse_bool
-from app.version import APP_VERSION, SemVer, compare_semver, is_newer_stable_version, parse_semver
+from app.version import APP_VERSION, SemVer, is_newer_stable_version, parse_semver
 
 logger = logging.getLogger("logshed.version")
 

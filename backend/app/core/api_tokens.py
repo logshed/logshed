@@ -4,11 +4,9 @@ API token generation, hashing, verification, and rate limiting for LogShed Exter
 
 from dataclasses import dataclass
 import hashlib
-import json
 import secrets
 import threading
 import time
-from typing import Any, Optional
 
 from app.core.rate_limiter import SlidingWindowLimiter
 

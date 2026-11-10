@@ -4,11 +4,11 @@ Unit and integration tests for DockerCollectorPool and multi-instance Docker col
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.collectors.docker_collector import DockerTailer
-from app.collectors.docker_pool import DockerCollectorPool, _supervise_tailer
+from app.collectors.docker_pool import DockerCollectorPool
 from app.core.migrations import get_connection, run_migrations
 from app.core.pipeline import KeyedMultilineAssembler
 

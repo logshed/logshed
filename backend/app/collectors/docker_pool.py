@@ -14,7 +14,6 @@ from typing import Any, Optional, Union
 from app.collectors.docker_collector import DockerTailer, create_docker_ssl_context
 from app.collectors.syslog import AliasCache
 from app.core.config import env_docker_disabled, get_cached_setting, get_db_path
-from app.core.migrations import get_connection
 from app.core.pipeline import KeyedMultilineAssembler
 from app.core.security import decrypt_value
 from app.services.docker_endpoints import load_docker_endpoints, public_endpoint

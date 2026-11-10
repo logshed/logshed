@@ -13,7 +13,6 @@ from pathlib import Path
 import sqlite3
 import time
 import pytest
-import pytest_asyncio
 
 from app.core import pipeline as pipeline_mod
 from app.core.migrations import get_connection, run_migrations

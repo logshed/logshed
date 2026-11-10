@@ -29,8 +29,6 @@ from app.models import (
     MessageResponse,
 )
 from app.services.ai_engine import (
-    DEFAULT_SYSTEM_PROMPT,
-    build_analysis_prompt,
     execute_ai_analysis,
     execute_ai_follow_up,
     fetch_available_models,
@@ -45,7 +43,6 @@ from app.services.ai_service import (
     count_conversation_turns,
     delete_conversation_thread,
     get_conversation_messages,
-    is_cache_fresh,
     read_ai_settings,
     save_diagnosis_audit,
     save_follow_up_exchange,

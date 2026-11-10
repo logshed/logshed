@@ -189,13 +189,13 @@ class TestLogQuerying:
         res_multi_app_comma = await client.get("/api/logs", params={"app_name": "nginx,kernel"})
         assert res_multi_app_comma.status_code == 200
         assert res_multi_app_comma.json()["total"] == 2
-        app_names = {l["app_name"] for l in res_multi_app_comma.json()["logs"]}
+        app_names = {log["app_name"] for log in res_multi_app_comma.json()["logs"]}
         assert app_names == {"nginx", "kernel"}
 
         res_multi_app_repeat = await client.get("/api/logs?app_name=nginx&app_name=nextcloud")
         assert res_multi_app_repeat.status_code == 200
         assert res_multi_app_repeat.json()["total"] == 2
-        app_names_repeat = {l["app_name"] for l in res_multi_app_repeat.json()["logs"]}
+        app_names_repeat = {log["app_name"] for log in res_multi_app_repeat.json()["logs"]}
         assert app_names_repeat == {"nginx", "nextcloud"}
 
         # 9. Multi-host and multi-app combined
@@ -529,7 +529,7 @@ class TestLogContext:
         assert res_first.json()["logs"][0]["id"] == 1
 
         # Latest log boundary
-        latest_id = max(context_logs, key=lambda l: (l["timestamp"], l["id"]))["id"]
+        latest_id = max(context_logs, key=lambda log: (log["timestamp"], log["id"]))["id"]
         res_last = await client.get(f"/api/logs/{latest_id}/context", params={"lines": 10})
         assert res_last.status_code == 200
         assert res_last.json()["logs"][-1]["id"] == latest_id
@@ -581,8 +581,8 @@ class TestLogStreamAndFacets:
                 if line.strip():
                     lines.append(line.strip())
 
-            assert any("event: log" in l for l in lines)
-            assert any("SSE test log message" in l for l in lines)
+            assert any("event: log" in line for line in lines)
+            assert any("SSE test log message" in line for line in lines)
 
         await broadcast_task
 
@@ -645,9 +645,9 @@ class TestLogStreamAndFacets:
                 if line.strip():
                     lines.append(line.strip())
 
-            assert not any("Ignored log 3" in l for l in lines)
-            assert any("Filtered log 1" in l for l in lines)
-            assert any("Filtered log 2" in l for l in lines)
+            assert not any("Ignored log 3" in line for line in lines)
+            assert any("Filtered log 1" in line for line in lines)
+            assert any("Filtered log 2" in line for line in lines)
 
         await broadcast_task
 
@@ -1421,7 +1421,7 @@ class TestSseLimitsAndPayload:
 
         task = asyncio.create_task(_broadcast_then_mutate())
         async with client.stream("GET", "/api/logs/stream", params={"max_events": 1}) as response:
-            data_lines = [l[len("data: "):] async for l in response.aiter_lines() if l.startswith("data: ")]
+            data_lines = [line[len("data: "):] async for line in response.aiter_lines() if line.startswith("data: ")]
         await task
 
         assert len(data_lines) == 1

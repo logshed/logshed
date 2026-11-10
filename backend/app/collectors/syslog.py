@@ -308,7 +308,6 @@ def parse_syslog_message(
             # SD is either "-" (NILVALUE) or one or more [sdid ...] blocks
             if remainder.startswith("-"):
                 # NILVALUE structured data
-                sd = "-"
                 msg = remainder[1:].lstrip(" ")
             elif remainder.startswith("["):
                 # Bracket-aware extraction: consume all [...] blocks
@@ -333,14 +332,11 @@ def parse_syslog_message(
                     if i < len(remainder) and remainder[i] == " " and i + 1 < len(remainder) and remainder[i + 1] == "[":
                         i += 1
                 if sd_end == 0:
-                    sd = ""
                     msg = remainder
                 else:
-                    sd = remainder[:sd_end]
                     msg = remainder[sd_end:].lstrip(" ")
             else:
                 # Malformed SD - treat entire remainder as message
-                sd = ""
                 msg = remainder
 
             if timestamp != "-":

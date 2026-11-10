@@ -342,8 +342,8 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
         )
         data = res.model_dump()
         projected_logs = [
-            _project_log_entry(l, include_raw=include_raw, fields=fields)
-            for l in data.get("logs", [])
+            _project_log_entry(entry, include_raw=include_raw, fields=fields)
+            for entry in data.get("logs", [])
         ]
         data["logs"] = projected_logs
         return data
@@ -380,12 +380,12 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
                 data["target_log"], include_raw=include_raw, fields=fields
             )
         data["before_logs"] = [
-            _project_log_entry(l, include_raw=include_raw, fields=fields)
-            for l in data.get("before_logs", [])
+            _project_log_entry(entry, include_raw=include_raw, fields=fields)
+            for entry in data.get("before_logs", [])
         ]
         data["after_logs"] = [
-            _project_log_entry(l, include_raw=include_raw, fields=fields)
-            for l in data.get("after_logs", [])
+            _project_log_entry(entry, include_raw=include_raw, fields=fields)
+            for entry in data.get("after_logs", [])
         ]
         return data
 

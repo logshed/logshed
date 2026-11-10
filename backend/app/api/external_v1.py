@@ -29,7 +29,6 @@ from app.core.pipeline import (
 from app.core.utils import (
     expand_source_aliases,
     format_severity_label,
-    parse_iso_to_utc_datetime,
     parse_multi_values,
     resolve_severity,
     source_filter_sql,

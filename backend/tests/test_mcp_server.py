@@ -17,7 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from mcp.server.fastmcp import FastMCP
 
 from app.core import pipeline as pipeline_mod
-from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps, hash_token
+from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
 from app.core.config import invalidate_settings_cache
 from app.core.migrations import get_connection, run_migrations
 from app.core.rate_limiter import login_rate_limiter

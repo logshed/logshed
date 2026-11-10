@@ -6,7 +6,7 @@ Provides secure storage with encryption at rest for API keys.
 import asyncio
 import datetime
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
@@ -25,7 +25,7 @@ from app.core.config import (
     get_cached_setting,
     parse_bool,
 )
-from app.core.security import decrypt_value, encrypt_value, keeps_stored_secret, mask_secret
+from app.core.security import encrypt_value, keeps_stored_secret, mask_secret
 from app.core.utils import get_server_timezone_name, note_docker_alias_change, parse_iso_to_utc_datetime
 
 from app.models import MessageResponse, SettingsResponse, SettingsUpdateRequest, AiProviderConfig
