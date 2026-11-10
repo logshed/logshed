@@ -1021,7 +1021,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   // Buffer cap, one rule for live rows and history pages: keep the newest LIVE_BUFFER_SIZE rows
   // while auto-scroll is on, and up to SCROLLBACK_BUFFER_SIZE while scrolled back. Trimming drops the
-  // oldest rows, so the next history page must start that many rows earlier.
+  // oldest rows, so the next history page must start that many rows earlier. Live batches trim
+  // themselves in flushIncomingLogs; this catches history pages and auto-scroll turning back on.
   useLayoutEffect(() => {
     const cap = autoScroll ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE;
     if (logs.length <= cap) return;
@@ -1175,9 +1176,18 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       return;
     }
 
+    // Trim to the buffer cap here rather than leaving it to the cap effect, which would render every
+    // batch twice once the buffer is full: once grown, then again trimmed
+    const cap = isAutoScrollRef.current ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE;
+    const removed = logsRef.current.length + prepared.length - cap;
+    if (removed > 0) {
+      historicalOffsetRef.current = Math.max(0, historicalOffsetRef.current - removed);
+      setHasMoreLogs(true);
+    }
     setLogs((prev) => {
       const base = dayChanged ? reformatTimestamps(prev, fmt.timeZone, fmt.todayKey) : prev;
-      return [...prepared, ...base];
+      const next = [...prepared, ...base];
+      return next.length > cap ? next.slice(0, cap) : next;
     });
 
     setLastSelectedLogIndex((prev) => (prev !== null ? prev + toFlush.length : null));
