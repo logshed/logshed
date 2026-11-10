@@ -303,6 +303,11 @@ class TestRedactorQuotedKeys:
         assert "secret" not in result
         assert result == "{'password': " + REDACTED + ", 'user': 'bob'}"
 
+    def test_quoted_password_ending_in_backslash_redacted_whole(self):
+        assert redact('login password="my pass\\" failed') == "login password=" + REDACTED + " failed"
+        assert redact("login password='my pass\\' failed") == "login password=" + REDACTED + " failed"
+        assert redact('vault secret="two words\\" rejected') == "vault secret=" + REDACTED + " rejected"
+
     def test_nested_json_api_key_redacted(self):
         result = redact('{"auth":{"api_key":"abcd1234efgh5678"}}')
         assert "abcd1234efgh5678" not in result

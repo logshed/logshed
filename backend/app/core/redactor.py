@@ -48,10 +48,12 @@ _Q = r"""(?:\\?["'])?"""
 # Separator between a key name and its value, allowing the key's closing quote.
 _SEP = _Q + r"\s*[:=]\s*"
 # A password-like value: a whole quoted string (spaces and backslash-escaped quotes allowed), or a
-# bare value. A quoted scan stops at the first unescaped quote. Each value's opening quote follows the
-# separator, never a backslash, so no scan runs past the next value's opening quote: linear time.
+# bare value. A quoted scan stops at the first unescaped quote. A quoted value with no unescaped
+# closing quote on its line (`"my pass\"`, a value that ends in a backslash) falls back to the text up
+# to the next quote, so it is still redacted whole. Each value's opening quote follows the separator,
+# never a backslash, and each scan stops at the next quote or line end: linear time.
 _SECRET_VALUE = (
-    r"""(?:"(?:\\[^\r\n]|[^"\\\r\n])+"|'(?:\\[^\r\n]|[^'\\\r\n])+'|\\"[^"\r\n]+?\\"|"""
+    r"""(?:"(?:\\[^\r\n]|[^"\\\r\n])+"|'(?:\\[^\r\n]|[^'\\\r\n])+'|"[^"\r\n]+"|'[^'\r\n]+'|\\"[^"\r\n]+?\\"|"""
     + _Q
     + r"""[^\s,;"'}{)(\]]+"""
     + _Q
