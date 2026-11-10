@@ -93,9 +93,10 @@ def get_or_create_master_key(custom_key_path: Optional[Path] = None) -> bytes:
     key_path = Path(key_path)
 
     # 2. Key file exists. A key that exists but cannot be read is never replaced: every stored
-    # secret is encrypted with it, so a new key would lose them all for good.
+    # secret is encrypted with it, so a new key would lose them all for good. A symlink to a key
+    # file (a mounted secret, for example) is read; a dangling link or a link to a directory is not.
     if os.path.lexists(key_path):
-        if key_path.is_symlink() or not key_path.is_file():
+        if not key_path.is_file():
             raise RuntimeError(
                 f"The encryption key path {key_path} is not a regular file. LogShed will not replace it; "
                 "fix or remove it, then start LogShed again."
@@ -112,7 +113,13 @@ def get_or_create_master_key(custom_key_path: Optional[Path] = None) -> bytes:
             _cached_key = derived
             _cached_fernet = Fernet(derived)
             return derived
-        # An empty file holds no key, so nothing can depend on it
+        # An empty file holds no key, so nothing can depend on it. An empty file reached through a
+        # link is refused instead: removing the link would leave the mounted secret silently unused.
+        if key_path.is_symlink():
+            raise RuntimeError(
+                f"The encryption key file {key_path} is empty, and it is a symbolic link. LogShed will not "
+                "replace it; put a key in the file it links to, or remove the link, then start LogShed again."
+            )
         key_path.unlink()
 
     # 3. Generate new key and persist with 0600 permissions, never through a symlink or over another file

@@ -802,6 +802,33 @@ class TestSettingsEncryptionAndKeyManagement:
             get_or_create_master_key(directory)
         reset_crypto_cache()
 
+    def test_secret_key_path_that_links_to_a_key_file_reads_that_key(self, tmp_path: Path, monkeypatch):
+        reset_crypto_cache()
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        target = tmp_path / "mounted" / "key"
+        target.parent.mkdir()
+        expected = get_or_create_master_key(target)
+        reset_crypto_cache()
+        link = tmp_path / "linked_secret_key"
+        link.symlink_to(target)
+        assert get_or_create_master_key(link) == expected
+        assert link.is_symlink()
+        reset_crypto_cache()
+
+    def test_secret_key_path_that_links_to_an_empty_file_is_refused_and_kept(self, tmp_path: Path, monkeypatch):
+        reset_crypto_cache()
+        monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+        target = tmp_path / "mounted" / "key"
+        target.parent.mkdir()
+        target.write_bytes(b"")
+        link = tmp_path / "linked_secret_key"
+        link.symlink_to(target)
+        with pytest.raises(RuntimeError, match="empty"):
+            get_or_create_master_key(link)
+        assert link.is_symlink()
+        assert target.read_bytes() == b""
+        reset_crypto_cache()
+
     def test_existing_secret_key_is_reused_and_an_empty_one_replaced(self, tmp_path: Path, monkeypatch):
         reset_crypto_cache()
         monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
