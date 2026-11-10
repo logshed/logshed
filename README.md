@@ -41,6 +41,7 @@
 - [System Requirements](#system-requirements)
 - [Built With](#built-with)
 - [Local Development](#local-development)
+- [Support the Project](#support-the-project)
 - [Licensing](#licensing)
 
 ---
@@ -261,6 +262,12 @@ cd ..
 .venv/bin/pytest backend/tests/ -v
 DATA_DIR=./data python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
 ```
+
+---
+
+## Support the Project
+
+LogShed is free and maintained in spare time. If it is useful to you, you can support it through [GitHub Sponsors](https://github.com/sponsors/BenHornerTech) or [Buy Me a Coffee](https://buymeacoffee.com/benhornertech).
 
 ---
 

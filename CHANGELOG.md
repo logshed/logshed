@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [1.3.1] - Unreleased
 
 ### Added
+- **Sponsor links**: Settings > About has a Sponsor LogShed link next to GitHub Repository and Changelog, and the README has a Support the Project section with GitHub Sponsors and Buy Me a Coffee. The link is a plain external link: LogShed loads nothing from either site.
 - **More alert and drop presets**: The preset libraries grow from 5 to 20 alert presets and from 3 to 12 drop presets for common homelab trouble and noise: failing disks (SMART, ZFS, mdadm, filesystem errors), failed backups, UPS on battery, certificate renewal failures, Proxmox cluster trouble, gateway alarms, crashes, failed systemd units, fail2ban bans, hardware errors and overheating; and DNS query lines, firewall passes, health check requests, Proxmox and systemd chatter, SMART attribute changes, Radarr and Sonarr refreshes and Home Assistant's custom integration warnings. Both libraries have a Category filter. The list, with what each preset catches and what to adjust, is in `docs/RULES_GUIDE.md`.
 - **Drop rules for several hosts or apps**: One drop rule can now name several hosts and several apps, picked from lists or typed as patterns, like an alert rule's app filter. A log is dropped when it matches any of them. The host list shows each alias's IP, so a rule written for an IP before the host got an alias is easy to spot. Going back to 1.3.0 leaves such rules matching nothing until edited.
 

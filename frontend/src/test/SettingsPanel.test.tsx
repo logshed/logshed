@@ -609,6 +609,11 @@ describe('SettingsPanel Component', () => {
     const changelogLink = screen.getByRole('link', { name: /Changelog/i });
     expect(changelogLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/blob/main/CHANGELOG.md');
     expect(changelogLink).toHaveAttribute('target', '_blank');
+
+    const sponsorLink = screen.getByRole('link', { name: /Sponsor LogShed/i });
+    expect(sponsorLink).toHaveAttribute('href', 'https://github.com/sponsors/BenHornerTech');
+    expect(sponsorLink).toHaveAttribute('target', '_blank');
+    expect(sponsorLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('does not render About LogShed section on advanced tab', async () => {

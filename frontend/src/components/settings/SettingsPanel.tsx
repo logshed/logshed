@@ -1576,6 +1576,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <span>Changelog</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
+              <a
+                href="https://github.com/sponsors/BenHornerTech"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
+              >
+                <span>Sponsor LogShed</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
             </div>
           </section>
         </div>
