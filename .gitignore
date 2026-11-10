@@ -52,6 +52,7 @@ htmlcov/
 # ==============================================================================
 node_modules/
 frontend/dist/
+frontend/dist-demo/
 backend/app/static/
 npm-debug.log*
 yarn-debug.log*

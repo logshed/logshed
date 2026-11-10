@@ -8,7 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:demo": "tsc && vite build --config vite.demo.config.ts",
+    "dev:demo": "vite --config vite.demo.config.ts --open /demo.html"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.2",
