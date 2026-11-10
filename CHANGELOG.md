@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Building from source** needs Node.js 24 (Node.js 20 has reached end of life). The Docker image is built with it too.
 
 ### Fixed
+- **Focus look**: A focused text field, dropdown or the Console log list shows only its accent border or ring, without the browser's default outline around it as well.
 - **Sky blue accents**: Highlighted text, active tabs, chips and tinted panels now show the sky blue accent they were meant to have instead of the default text and border shades.
 - **Claude refusals fall back to another model**: When a Claude model declines an analysis, Anthropic's own fallback model answers where one exists, and otherwise LogShed tries your configured fallback models instead of failing.
 - **Console filters with a screen reader**: The Filters and Reset buttons now say how many filters are active, and the Host and App filters' clear buttons are separate buttons rather than part of the dropdown.

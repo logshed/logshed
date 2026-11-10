@@ -258,7 +258,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
 
   // The open and active states mark the border with !important, over the field's own border colour
   const triggerClass = isPanel
-    ? `w-full flex items-center justify-between gap-2 border text-xs select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${fieldClassName} ${
+    ? `w-full flex items-center justify-between gap-2 border text-xs select-none transition focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${fieldClassName} ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
       } ${
         isOpen

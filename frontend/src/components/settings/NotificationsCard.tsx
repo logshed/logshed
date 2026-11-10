@@ -606,7 +606,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                     }
                   }
                 }}
-                className={`w-full bg-dark-900 border rounded px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-hidden disabled:opacity-50 font-mono ${
+                className={`w-full bg-dark-900 border rounded px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none disabled:opacity-50 font-mono ${
                   scheduleTimeError
                     ? 'border-red-500 focus:border-red-400'
                     : 'border-dark-700 focus:border-accent-500'
@@ -658,7 +658,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="e.g. Homelab Discord, Admin Telegram, Gotify Push"
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
             />
           </div>
 
@@ -699,7 +699,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 setTestResult(null);
               }}
               placeholder="discord://webhook_id/webhook_token or gotify://hostname/token"
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
             />
             <p className="text-[11px] text-slate-400 mt-1">
               Supports Discord (<code>discord://...</code>), Gotify (<code>gotify://...</code>), Telegram (<code>tgram://...</code>), Ntfy (<code>ntfy://...</code>), Pushover (<code>pover://...</code>), Slack (<code>slack://...</code>), and generic webhooks (<code>https://...</code>).

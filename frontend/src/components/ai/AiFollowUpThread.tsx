@@ -349,7 +349,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
               rows={2}
               placeholder="Ask a follow-up question about this diagnosis..."
               aria-label="Follow-up question"
-              className="flex-1 min-h-[44px] px-3 py-2 bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-sans resize-y disabled:opacity-60"
+              className="flex-1 min-h-[44px] px-3 py-2 bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-sans resize-y disabled:opacity-60"
             />
             <button
               type="button"

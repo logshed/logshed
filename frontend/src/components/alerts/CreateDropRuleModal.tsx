@@ -339,7 +339,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             maxLength={NAME_MAX_LENGTH}
             required
             autoFocus
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 focus:outline-none focus:border-accent-500"
           />
         </div>
 
@@ -353,7 +353,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             onChange={(e) => setMessagePattern(e.target.value)}
             placeholder="e.g. DHCPACK, query\s+from\b, probe, or * to match all messages"
             maxLength={MESSAGE_PATTERN_MAX_LENGTH}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 font-mono focus:outline-none focus:border-accent-500"
           />
           <span className="text-[11px] text-slate-400 mt-1 block">
             Case-insensitive match string. Use * or leave empty to drop all messages matching the selected host or app.
@@ -499,7 +499,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               value={sampleMessage}
               onChange={(e) => setSampleMessage(e.target.value)}
               placeholder="Paste a representative log line here..."
-              className="w-full bg-dark-900 border border-dark-800 rounded px-2.5 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+              className="w-full bg-dark-900 border border-dark-800 rounded px-2.5 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-accent-500"
             />
           </div>
 
@@ -511,7 +511,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                 value={sampleSource}
                 onChange={(e) => setSampleSource(e.target.value)}
                 placeholder="e.g. 192.168.1.50"
-                className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden"
+                className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-none focus:border-accent-500"
               />
             </div>
             <div>
@@ -521,7 +521,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                 value={sampleApp}
                 onChange={(e) => setSampleApp(e.target.value)}
                 placeholder="e.g. dnsmasq"
-                className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden"
+                className="w-full bg-dark-900 border border-dark-800 rounded px-2 py-1 text-slate-200 font-mono text-xs focus:outline-none focus:border-accent-500"
               />
             </div>
             <div>

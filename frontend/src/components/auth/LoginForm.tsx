@@ -80,7 +80,7 @@ export const LoginForm: React.FC = () => {
                 placeholder="Enter password..."
                 required
                 autoFocus
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
             </div>

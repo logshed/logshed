@@ -9,7 +9,7 @@ export function filterTriggerClass(isOpen: boolean, active: boolean): string {
     : active
     ? 'border-accent-600/60 bg-dark-900/90 text-slate-100'
     : 'border-dark-700 hover:border-slate-600 text-slate-300';
-  return `flex items-center gap-1.5 bg-dark-900 border rounded px-2.5 py-1 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${state}`;
+  return `flex items-center gap-1.5 bg-dark-900 border rounded px-2.5 py-1 text-xs cursor-pointer select-none transition focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${state}`;
 }
 
 /** The clear button over a filter trigger: its right edge is the trigger's padding plus the chevron and gap. */

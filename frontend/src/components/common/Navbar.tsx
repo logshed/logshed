@@ -186,7 +186,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }}
             role="button"
             tabIndex={0}
-            className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity focus:outline-hidden focus:ring-1 focus:ring-accent-500 rounded"
+            className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity focus:outline-none focus:ring-1 focus:ring-accent-500 rounded"
             title="Go to Console View"
           >
             <LogShedLogo className="w-5 h-5 text-accent-500" />

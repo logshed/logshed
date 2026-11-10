@@ -429,7 +429,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
             maxLength={NAME_MAX_LENGTH}
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'rename-view-taken' : undefined}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-none focus:border-accent-500"
           />
           {isTaken && (
             <p id="rename-view-taken" className="mt-1 text-red-400 text-[11px]">
@@ -550,7 +550,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             autoFocus
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'save-view-taken' : undefined}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-none focus:border-accent-500"
           />
           {isTaken && (
             <p id="save-view-taken" className="mt-1 text-red-400 text-[11px]">

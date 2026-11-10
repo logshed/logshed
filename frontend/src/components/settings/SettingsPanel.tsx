@@ -1040,7 +1040,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   }
                 }}
                 placeholder={hasApiKeyForProvider ? `Enter new API key or leave ${MASKED_SECRET} to preserve` : 'Enter API key'}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
               />
             </div>
 
@@ -1069,7 +1069,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     value={aiBaseUrl}
                     onChange={(e) => setAiBaseUrl(e.target.value)}
                     placeholder="http://host.docker.internal:11434/v1"
-                    className="w-full min-w-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                    className="w-full min-w-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
@@ -1195,7 +1195,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   value={aiModel}
                   onChange={(e) => handlePrimaryModelChange(e.target.value)}
                   placeholder={DEFAULT_PROVIDER_MODELS[aiProvider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
                 />
               )}
 
@@ -1316,7 +1316,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       value={customFallbackInput}
                       onChange={(e) => setCustomFallbackInput(e.target.value)}
                       placeholder="Enter custom model ID"
-                      className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
+                      className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono"
                     />
                     <button
                       type="button"
@@ -1375,7 +1375,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 onChange={(e) => setAiSystemPrompt(e.target.value)}
                 rows={7}
                 placeholder="Enter system instructions..."
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono leading-relaxed resize-y"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono leading-relaxed resize-y"
               />
             </div>
           </div>
@@ -1659,7 +1659,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   value={currentPwd}
                   onChange={(e) => setCurrentPwd(e.target.value)}
                   required
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
                 />
               </div>
 
@@ -1674,7 +1674,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   onChange={(e) => setNewPwd(e.target.value)}
                   minLength={PASSWORD_MIN_LENGTH}
                   required
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
                 />
               </div>
 
@@ -1689,7 +1689,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   onChange={(e) => setConfirmPwd(e.target.value)}
                   minLength={PASSWORD_MIN_LENGTH}
                   required
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
                 />
               </div>
 

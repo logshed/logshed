@@ -633,7 +633,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   type="text"
                   readOnly
                   value={sseUrl}
-                  className="flex-1 bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 select-all focus:outline-hidden focus:border-accent-500"
+                  className="flex-1 bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 select-all focus:outline-none focus:border-accent-500"
                 />
                 <button
                   type="button"
@@ -917,7 +917,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   placeholder="e.g. Home Assistant or Claude Desktop"
                   value={newTokenName}
                   onChange={(e) => setNewTokenName(e.target.value)}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500"
                 />
               </div>
 
@@ -1013,7 +1013,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   aria-describedby={editScopesChanged && !editNameChanged ? 'edit-token-name-hint' : undefined}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500"
                 />
                 {editScopesChanged && !editNameChanged && (
                   <p id="edit-token-name-hint" className="mt-1 text-[11px] text-slate-400">

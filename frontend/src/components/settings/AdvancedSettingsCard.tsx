@@ -236,7 +236,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 value={aiTimeout}
                 onChange={(e) => setAiTimeout(parseFloat(e.target.value) || 5)}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
               />
             </div>
 
@@ -278,7 +278,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 placeholder="https://logs.example.com"
                 value={appUrl}
                 onChange={(e) => setAppUrl(e.target.value)}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
               />
               <p className="text-[11px] text-slate-400 mt-1">
                 Used in alert notifications for a link that opens the incident.
@@ -320,7 +320,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 placeholder="10.0.0.0/8, 192.168.1.1"
                 value={trustedProxies}
                 onChange={(e) => setTrustedProxies(e.target.value)}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
               />
               <p className="text-[11px] text-slate-400 mt-1">
                 Comma-separated IP addresses or CIDR ranges. Enables X-Forwarded-For parsing.
@@ -381,7 +381,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 value={syslogMaxTcpConnections}
                 onChange={(e) => setSyslogMaxTcpConnections(parseInt(e.target.value, 10) || 1)}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
               />
             </div>
 
@@ -397,7 +397,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 value={syslogTcpInactivityTimeout}
                 onChange={(e) => setSyslogTcpInactivityTimeout(parseFloat(e.target.value) || 0.0)}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
               />
             </div>
           </div>

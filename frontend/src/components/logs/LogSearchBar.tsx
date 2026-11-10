@@ -289,7 +289,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               aria-label="Search logs"
               enterKeyHint="search"
               data-active={active.query}
-              className={`w-full bg-dark-900 border ${active.query ? ACTIVE_BORDER : IDLE_BORDER} rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
+              className={`w-full bg-dark-900 border ${active.query ? ACTIVE_BORDER : IDLE_BORDER} rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono`}
             />
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
             {/* Search syntax help, left of the clear button. The wrapper is not positioned, so the
@@ -313,7 +313,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                   role="dialog"
                   aria-label="Search syntax"
                   tabIndex={-1}
-                  className="absolute inset-x-0 md:left-auto md:w-80 top-full mt-2 bg-dark-900 border border-dark-700 rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-hidden"
+                  className="absolute inset-x-0 md:left-auto md:w-80 top-full mt-2 bg-dark-900 border border-dark-700 rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-none"
                 >
                   <p className="font-semibold text-slate-200 mb-2">Search syntax</p>
                   <ul className="space-y-1.5">
@@ -489,7 +489,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                     from: fromLocalDatetimeInputString(e.target.value, timeZone),
                   })
                 }
-                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-none"
               />
             </div>
             <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-dark-900 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded px-2.5 focus-within:border-accent-500`}>
@@ -504,7 +504,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                     to: fromLocalDatetimeInputString(e.target.value, timeZone),
                   })
                 }
-                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-none"
               />
             </div>
             <span className="text-slate-400 text-[11px] font-mono shrink min-w-0 truncate" title="From and To are times in this zone">
@@ -660,7 +660,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                         from: fromLocalDatetimeInputString(e.target.value, timeZone),
                       })
                     }
-                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-none"
                   />
                 </div>
               </div>
@@ -677,7 +677,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                         to: fromLocalDatetimeInputString(e.target.value, timeZone),
                       })
                     }
-                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-none"
                   />
                 </div>
               </div>

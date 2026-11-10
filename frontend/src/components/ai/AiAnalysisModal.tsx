@@ -822,7 +822,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 value={promptViewMode === 'full' ? fullPromptText : promptText}
                 onChange={handlePromptChange}
                 placeholder={promptViewMode === 'full' ? 'Full LLM prompt envelope...' : 'Redacted prompt...'}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs focus:outline-none focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
               />
 
               {/* Log Redaction Notice */}
@@ -980,7 +980,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
                         placeholder={DEFAULT_PROVIDER_MODELS[provider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-                        className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
+                        className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono"
                       />
                     )}
                   </div>
@@ -1104,7 +1104,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                           value={customFallbackInput}
                           onChange={(e) => setCustomFallbackInput(e.target.value)}
                           placeholder="Enter custom model ID"
-                          className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
+                          className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono"
                         />
                         <button
                           type="button"
@@ -1148,7 +1148,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 maxLength={MAX_USER_CONTEXT_LENGTH}
                 placeholder="e.g. Occurred immediately following network switch firmware upgrade, or after container image pull..."
                 rows={2}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-sans"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-sans"
               />
             </div>
 

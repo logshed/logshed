@@ -223,7 +223,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               }
             }}
             placeholder={`Search or add ${label.toLowerCase()}...`}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-2 py-1 pl-6 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded px-2 py-1 pl-6 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
           />
           <Search className="w-3 h-3 text-slate-500 absolute left-2 top-2" />
           {searchTerm && (
@@ -287,7 +287,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             }}
             role="button"
             tabIndex={0}
-            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer bg-dark-800/60 hover:bg-accent-950/60 text-accent-300 text-[11px] border-b border-dark-800 focus:outline-hidden focus:bg-accent-950/60"
+            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer bg-dark-800/60 hover:bg-accent-950/60 text-accent-300 text-[11px] border-b border-dark-800 focus:outline-none focus:bg-accent-950/60"
           >
             <Plus className="w-3 h-3 text-accent-400 shrink-0" />
             <span className="truncate">Add "{searchTerm.trim()}"</span>
@@ -315,7 +315,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                 role="button"
                 tabIndex={0}
                 aria-pressed={isChecked}
-                className={`flex items-center justify-between px-2.5 py-1 cursor-pointer select-none text-[11px] transition focus:outline-hidden focus:bg-dark-800 ${
+                className={`flex items-center justify-between px-2.5 py-1 cursor-pointer select-none text-[11px] transition focus:outline-none focus:bg-dark-800 ${
                   isChecked
                     ? 'bg-accent-950/50 text-accent-200'
                     : 'text-slate-300 hover:bg-dark-800 hover:text-slate-100'
@@ -358,7 +358,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         }}
         className={
           isForm
-            ? `w-full h-[38px] flex items-center justify-between bg-dark-800 border rounded-lg px-3 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
+            ? `w-full h-[38px] flex items-center justify-between bg-dark-800 border rounded-lg px-3 text-xs cursor-pointer select-none transition focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
                 isOpen
                   ? 'border-accent-500 ring-1 ring-accent-500/20'
                   : 'border-dark-700 hover:border-slate-600 text-slate-200'

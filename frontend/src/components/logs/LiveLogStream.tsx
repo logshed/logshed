@@ -2279,7 +2279,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           aria-label="Log list"
           aria-multiselectable={processedLogs.length > 0 ? true : undefined}
           aria-activedescendant={cursorRowRendered ? logRowId(processedLogs[cursorIndex].id) : undefined}
-          className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
+          className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
         >
           {isLoadingHistory && logs.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400 font-mono">

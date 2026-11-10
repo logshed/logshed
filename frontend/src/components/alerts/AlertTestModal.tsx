@@ -163,7 +163,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             rows={3}
             value={testSampleMessage}
             onChange={(e) => setTestSampleMessage(e.target.value)}
-            className="w-full bg-dark-800 border border-dark-700 rounded p-2 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-dark-800 border border-dark-700 rounded p-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-accent-500"
           />
           <p className="text-[11px] text-slate-400">
             Enter a sample log line payload to evaluate pattern matching and IP extraction.

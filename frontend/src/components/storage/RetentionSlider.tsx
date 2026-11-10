@@ -292,7 +292,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
                 }}
                 role="button"
                 tabIndex={retentionOverridden ? -1 : 0}
-                className={`absolute -translate-x-1/2 flex flex-col items-center group transition focus:outline-hidden ${
+                className={`absolute -translate-x-1/2 flex flex-col items-center group transition ${
                   retentionOverridden
                     ? 'cursor-not-allowed opacity-40'
                     : 'cursor-pointer hover:text-accent-400 focus:text-accent-400'
