@@ -20,7 +20,6 @@ import httpx
 from anthropic import (
     AsyncAnthropic,
     APITimeoutError as AnthropicTimeoutError,
-    APIStatusError as AnthropicAPIStatusError,
 )
 from google import genai
 from google.genai import errors as genai_errors
@@ -83,15 +82,8 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
     if isinstance(exc, (AiServiceUnavailableError, AiRefusalError)):
         return True
 
-    # Check status code attribute (int or string convertible)
-    raw_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    if raw_code is not None:
-        try:
-            int_code = int(raw_code)
-            if int_code in (404, 408, 429, 500, 502, 503, 504, 529):
-                return True
-        except (ValueError, TypeError):
-            pass
+    if _is_retryable_code(getattr(exc, "code", None) or getattr(exc, "status_code", None)):
+        return True
 
     # Check status string attribute (e.g. google.genai.errors.APIError status)
     status_attr = getattr(exc, "status", None)
@@ -100,34 +92,56 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
         if norm_status in ("UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "INTERNAL"):
             return True
 
-    # Check exception text representation
-    err_str = str(exc).lower()
+    return _is_retryable_text(str(exc))
+
+
+_RETRYABLE_CODES = (404, 408, 429, 500, 502, 503, 504, 529)
+_RETRYABLE_KEYWORDS = (
+    "503",
+    "504",
+    "502",
+    "500",
+    "529",
+    "429",
+    "408",
+    "timeout",
+    "timed out",
+    "deadline",
+    "expired",
+    "overload",
+    "unavailable",
+    "resource_exhausted",
+    "quota",
+    "rate limit",
+)
+
+
+def _is_retryable_code(raw_code: Any) -> bool:
+    """True for an HTTP status (int or numeric string) that a fallback model may not hit."""
+    if raw_code is None:
+        return False
+    try:
+        return int(raw_code) in _RETRYABLE_CODES
+    except (ValueError, TypeError):
+        return False
+
+
+def _is_retryable_text(text: str) -> bool:
+    """True when an error's text names a status or condition that a fallback model may not hit."""
+    err_str = text.lower()
     if "404" in err_str and ("not found" in err_str or "not_found" in err_str):
         return True
-    retryable_keywords = (
-        "503",
-        "504",
-        "502",
-        "500",
-        "529",
-        "429",
-        "408",
-        "timeout",
-        "timed out",
-        "deadline",
-        "expired",
-        "overload",
-        "unavailable",
-        "service unavailable",
-        "resource_exhausted",
-        "quota",
-        "rate limit",
-        "temporarily unavailable",
-    )
-    if any(kw in err_str for kw in retryable_keywords):
-        return True
+    return any(kw in err_str for kw in _RETRYABLE_KEYWORDS)
 
-    return False
+
+def _provider_error(err_msg: str, err_code: Any, clean_err: str) -> Exception:
+    """
+    A provider SDK failure as LogShed raises it: AiServiceUnavailableError when a fallback model
+    may succeed (the same rule for every provider), otherwise RuntimeError.
+    """
+    if _is_retryable_code(err_code) or _is_retryable_text(clean_err):
+        return AiServiceUnavailableError(err_msg, code=err_code or 503)
+    return RuntimeError(err_msg)
 
 
 def supports_gemini_thinking(model_name: str) -> bool:
@@ -927,19 +941,7 @@ def _gemini_error(e: Exception) -> Exception:
     clean_err = str(redact(clean_err))
     err_msg = f"Gemini API error: {clean_err}"
     _log_provider_failure(clean_err)
-    err_lower = clean_err.lower()
-    if (
-        err_code in (404, 503, 504)
-        or "503" in clean_err
-        or "504" in clean_err
-        or ("404" in err_lower and ("not found" in err_lower or "not_found" in err_lower))
-        or "overload" in err_lower
-        or "unavailable" in err_lower
-        or "deadline" in err_lower
-        or "expired" in err_lower
-    ):
-        return AiServiceUnavailableError(err_msg, code=err_code or 503)
-    return RuntimeError(err_msg)
+    return _provider_error(err_msg, err_code, clean_err)
 
 
 @asynccontextmanager
@@ -1009,18 +1011,7 @@ def _openai_error(e: Exception) -> Exception:
     err_msg = f"OpenAI endpoint error: {clean_err}"
     _log_provider_failure(clean_err)
     err_code = getattr(e, "code", None) or getattr(e, "status_code", None)
-    err_lower = clean_err.lower()
-    if (
-        err_code in (404, 503, 504)
-        or "503" in clean_err
-        or "504" in clean_err
-        or ("404" in err_lower and ("not found" in err_lower or "not_found" in err_lower))
-        or "overload" in err_lower
-        or "unavailable" in err_lower
-        or "deadline" in err_lower
-    ):
-        return AiServiceUnavailableError(err_msg, code=err_code or 503)
-    return RuntimeError(err_msg)
+    return _provider_error(err_msg, err_code, clean_err)
 
 
 @asynccontextmanager
@@ -1181,18 +1172,8 @@ def _anthropic_error(e: Exception) -> Exception:
     clean_err = str(redact(str(e)[:500]))
     err_msg = f"Anthropic endpoint error: {clean_err}"
     _log_provider_failure(clean_err)
-    if isinstance(e, AnthropicAPIStatusError):
-        if e.status_code in (404, 408, 429, 500, 502, 503, 504, 529):
-            return AiServiceUnavailableError(err_msg, code=e.status_code)
-        return RuntimeError(err_msg)
     err_code = getattr(e, "code", None) or getattr(e, "status_code", None)
-    err_lower = clean_err.lower()
-    if (
-        err_code in (404, 408, 429, 500, 502, 503, 504, 529)
-        or any(kw in err_lower for kw in ("503", "504", "529", "overload", "unavailable", "deadline", "rate limit"))
-    ):
-        return AiServiceUnavailableError(err_msg, code=err_code or 503)
-    return RuntimeError(err_msg)
+    return _provider_error(err_msg, err_code, clean_err)
 
 
 @asynccontextmanager

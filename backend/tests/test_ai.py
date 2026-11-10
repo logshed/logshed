@@ -4510,3 +4510,38 @@ class TestClaudeRefusalFallback:
             "claude-sonnet-5-5 failed: Anthropic model declined the request (stop_reason: refusal).",
             "claude-opus-5-5 declined the request; Anthropic answered with claude-sonnet-5",
         ]
+
+
+class _CodedProviderError(Exception):
+    """An SDK failure carrying an HTTP status in .code, as the provider SDKs do."""
+
+    def __init__(self, text: str, code: Optional[int]):
+        super().__init__(text)
+        self.code = code
+
+
+class TestProviderErrorRule:
+    """Every provider's SDK failure is sorted by one rule: may a fallback model succeed?"""
+
+    @pytest.mark.parametrize(
+        "translate",
+        [ai_engine._gemini_error, ai_engine._openai_error, ai_engine._anthropic_error],
+        ids=["gemini", "openai", "anthropic"],
+    )
+    @pytest.mark.parametrize(
+        "code, text, unavailable",
+        [
+            (429, "Too many requests", True),
+            (500, "Internal error", True),
+            (529, "Busy", True),
+            (400, "Bad request", False),
+            (401, "Invalid key", False),
+            (None, "The model is overloaded", True),
+            (None, "Rate limit reached for requests", True),
+            (None, "Unsupported parameter", False),
+        ],
+    )
+    def test_same_rule_for_every_provider(self, translate, code, text, unavailable):
+        result = translate(_CodedProviderError(text, code))
+        assert isinstance(result, ai_engine.AiServiceUnavailableError) is unavailable
+        assert ai_engine.is_retryable_for_fallback(result) is unavailable
