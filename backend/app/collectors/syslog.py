@@ -84,6 +84,28 @@ def _correct_future_timestamp(dt_utc: datetime.datetime, now: datetime.datetime)
     return dt_utc
 
 
+def _resolve_naive(dt: datetime.datetime, now: datetime.datetime, local_tz: datetime.tzinfo) -> datetime.datetime:
+    """
+    A timestamp without an offset, in UTC. Senders write either their local time or UTC, so
+    the reading nearer the received time wins (local time on a tie).
+    """
+    as_local = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
+    as_utc = dt.replace(tzinfo=datetime.timezone.utc)
+    if abs((as_utc - now).total_seconds()) < abs((as_local - now).total_seconds()):
+        return as_utc
+    return as_local
+
+
+def _naive_datetime(year: int, month: int, day: int, time_str: str) -> datetime.datetime:
+    """A datetime from a date and HH:MM:SS with an optional fraction after "." or ","."""
+    time_parts = time_str.replace(",", ".").split(":")
+    sec_parts = time_parts[2].split(".")
+    microsecond = int(float("0." + sec_parts[1]) * 1_000_000) if len(sec_parts) > 1 else 0
+    return datetime.datetime(
+        year, month, day, int(time_parts[0]), int(time_parts[1]), int(sec_parts[0]), microsecond
+    )
+
+
 def _parse_valkey_datetime(
     day_str: str,
     mon_str: str,
@@ -94,24 +116,8 @@ def _parse_valkey_datetime(
 ) -> str:
     """Parse Valkey/Redis style datetime (e.g. 02 Oct 2026 11:47:57.745) to UTC ISO format."""
     try:
-        day = int(day_str)
-        month = _MONTH_MAP.get(mon_str.lower(), 1)
-        year = int(year_str)
-        time_clean = time_str.replace(",", ".")
-        time_parts = time_clean.split(":")
-        hour = int(time_parts[0])
-        minute = int(time_parts[1])
-        sec_parts = time_parts[2].split(".")
-        second = int(sec_parts[0])
-        microsecond = int(float("0." + sec_parts[1]) * 1_000_000) if len(sec_parts) > 1 else 0
-        dt = datetime.datetime(year, month, day, hour, minute, second, microsecond)
-        candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
-        candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
-        if abs((candidate_b - now).total_seconds()) < abs((candidate_a - now).total_seconds()):
-            dt_utc = candidate_b
-        else:
-            dt_utc = candidate_a
-        return dt_utc.isoformat()
+        dt = _naive_datetime(int(year_str), _MONTH_MAP.get(mon_str.lower(), 1), int(day_str), time_str)
+        return _resolve_naive(dt, now, local_tz).isoformat()
     except Exception:
         return f"{year_str}-{mon_str}-{day_str}T{time_str}"
 
@@ -124,24 +130,8 @@ def _parse_dmy_or_datetime(
     """Parse day-first slash date (DD/MM/YYYY HH:MM:SS) to UTC ISO format."""
     try:
         parts = dmy_str.split("/")
-        day = int(parts[0])
-        month = int(parts[1])
-        year = int(parts[2])
-        time_clean = time_str.replace(",", ".")
-        time_parts = time_clean.split(":")
-        hour = int(time_parts[0])
-        minute = int(time_parts[1])
-        sec_parts = time_parts[2].split(".")
-        second = int(sec_parts[0])
-        microsecond = int(float("0." + sec_parts[1]) * 1_000_000) if len(sec_parts) > 1 else 0
-        dt = datetime.datetime(year, month, day, hour, minute, second, microsecond)
-        candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
-        candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
-        if abs((candidate_b - now).total_seconds()) < abs((candidate_a - now).total_seconds()):
-            dt_utc = candidate_b
-        else:
-            dt_utc = candidate_a
-        return dt_utc.isoformat()
+        dt = _naive_datetime(int(parts[2]), int(parts[1]), int(parts[0]), time_str)
+        return _resolve_naive(dt, now, local_tz).isoformat()
     except Exception:
         return f"{dmy_str}T{time_str}"
 
@@ -161,18 +151,34 @@ def _parse_iso_or_datetime(
         ts_clean = ts_clean.replace(" ", "T", 1)
     try:
         dt = datetime.datetime.fromisoformat(ts_clean)
-        if dt.tzinfo is None:
-            candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
-            candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
-            if abs((candidate_b - now).total_seconds()) < abs((candidate_a - now).total_seconds()):
-                dt_utc = candidate_b
-            else:
-                dt_utc = candidate_a
-        else:
-            dt_utc = dt.astimezone(datetime.timezone.utc)
+        dt_utc = _resolve_naive(dt, now, local_tz) if dt.tzinfo is None else dt.astimezone(datetime.timezone.utc)
         return _correct_future_timestamp(dt_utc, now).isoformat()
     except Exception:
         return ts_str
+
+
+def _is_valid_hostname(token: str) -> bool:
+    """Whether the token after a timestamp is a hostname rather than the app tag or the message."""
+    return (
+        bool(token)
+        and token != "-"
+        and "[" not in token
+        and "]" not in token
+        and token.lower() not in SEVERITY_LEVEL_MAP
+        and not (token.endswith(":") and not token.endswith("::"))
+    )
+
+
+def _parse_hostname_and_msg(result: dict[str, Any], content: str) -> None:
+    """Read an optional HOSTNAME (or "-") before the syslog MSG part, then the app and the message."""
+    parts = content.split(" ", 1)
+    if len(parts) == 2 and _is_valid_hostname(parts[0]):
+        result["hostname"] = parts[0]
+        _parse_msg_into_app_and_content(result, parts[1])
+    elif len(parts) == 2 and parts[0] == "-":
+        _parse_msg_into_app_and_content(result, parts[1])
+    else:
+        _parse_msg_into_app_and_content(result, content)
 
 
 def _parse_msg_into_app_and_content(result: dict[str, Any], msg_part: str) -> None:
@@ -342,12 +348,7 @@ def parse_syslog_message(
                     ts_clean = timestamp.replace("Z", "+00:00")
                     dt = datetime.datetime.fromisoformat(ts_clean)
                     if dt.tzinfo is None:
-                        candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
-                        candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
-                        if abs((candidate_b - now).total_seconds()) < abs((candidate_a - now).total_seconds()):
-                            dt_utc = candidate_b
-                        else:
-                            dt_utc = candidate_a
+                        dt_utc = _resolve_naive(dt, now, local_tz)
                     else:
                         dt_utc = dt.astimezone(datetime.timezone.utc)
                     result["timestamp"] = _correct_future_timestamp(dt_utc, now).isoformat()
@@ -381,18 +382,7 @@ def parse_syslog_message(
 
             # RFC 3164 timestamps lack timezone information and are emitted either in
             # the sender's local time or in UTC.
-            candidate_a = dt.replace(tzinfo=local_tz).astimezone(datetime.timezone.utc)
-            candidate_b = dt.replace(tzinfo=datetime.timezone.utc)
-
-            diff_a = abs((candidate_a - now).total_seconds())
-            diff_b = abs((candidate_b - now).total_seconds())
-
-            if diff_b < diff_a:
-                dt_utc = candidate_b
-            else:
-                dt_utc = candidate_a
-
-            dt_utc = _correct_future_timestamp(dt_utc, now)
+            dt_utc = _correct_future_timestamp(_resolve_naive(dt, now, local_tz), now)
 
             # Preserve microsecond arrival precision for proper sub-second ordering
             dt_utc = dt_utc.replace(microsecond=now.microsecond)
@@ -401,26 +391,7 @@ def parse_syslog_message(
             pass
 
         # RFC 3164 Section 4.1.2 / 4.1.3: The HOSTNAME field is optional.
-        parts = content.split(" ", 1)
-        first_token = parts[0]
-        is_nil_hostname = (len(parts) == 2 and first_token == "-")
-        is_valid_hostname = (
-            len(parts) == 2
-            and bool(first_token)
-            and first_token != "-"
-            and "[" not in first_token
-            and "]" not in first_token
-            and first_token.lower() not in SEVERITY_LEVEL_MAP
-            and not (first_token.endswith(":") and not first_token.endswith("::"))
-        )
-
-        if is_valid_hostname:
-            result["hostname"] = first_token
-            _parse_msg_into_app_and_content(result, parts[1])
-        elif is_nil_hostname:
-            _parse_msg_into_app_and_content(result, parts[1])
-        else:
-            _parse_msg_into_app_and_content(result, content)
+        _parse_hostname_and_msg(result, content)
     elif (m_bracket := _RE_BRACKETED_ISO_TIMESTAMP.match(content)):
         # Bracketed timestamp envelope: [TIMESTAMP] [HOST] [APP] MSG or [TIMESTAMP] MSG
         result["timestamp"] = _parse_iso_or_datetime(m_bracket.group(1), now, local_tz)
@@ -440,25 +411,7 @@ def parse_syslog_message(
     elif (m_iso := _RE_ISO_TIMESTAMP.match(content)):
         # Unbracketed ISO 8601 / RFC 3339 / standard datetime: TIMESTAMP HOSTNAME TAG: MSG
         result["timestamp"] = _parse_iso_or_datetime(m_iso.group(1), now, local_tz)
-        rem = content[m_iso.end():]
-        parts = rem.split(" ", 1)
-        first_token = parts[0]
-        is_valid_hostname = (
-            len(parts) == 2
-            and bool(first_token)
-            and first_token != "-"
-            and "[" not in first_token
-            and "]" not in first_token
-            and first_token.lower() not in SEVERITY_LEVEL_MAP
-            and not (first_token.endswith(":") and not first_token.endswith("::"))
-        )
-        if is_valid_hostname:
-            result["hostname"] = first_token
-            _parse_msg_into_app_and_content(result, parts[1])
-        elif len(parts) == 2 and first_token == "-":
-            _parse_msg_into_app_and_content(result, parts[1])
-        else:
-            _parse_msg_into_app_and_content(result, rem)
+        _parse_hostname_and_msg(result, content[m_iso.end():])
     elif (m_valkey := _RE_VALKEY.match(content)):
         # Valkey / Redis server format: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
         result["timestamp"] = _parse_valkey_datetime(

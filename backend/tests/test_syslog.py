@@ -2122,6 +2122,35 @@ class TestSyslogFutureTimestampWindow:
         assert parsed["timestamp"] == (self.NOW + datetime.timedelta(minutes=2)).isoformat()
 
 
+class TestSyslogTimestampWithoutZone:
+    """A timestamp without an offset is read as local time or UTC, whichever is nearer the received time."""
+
+    NOW = datetime.datetime(2026, 10, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    LOCAL_TZ = datetime.timezone(datetime.timedelta(hours=5))
+
+    @staticmethod
+    def _messages(day: str, month: int, clock: str) -> list[bytes]:
+        mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1]
+        return [
+            f"<14>1 2026-{month:02d}-{day}T{clock} host app - - - rfc5424".encode(),
+            f"<14>{mon} {day} {clock} host app: rfc3164".encode(),
+            f"<14>2026-{month:02d}-{day} {clock} host app: iso".encode(),
+            f"[2026-{month:02d}-{day} {clock}] bracketed iso".encode(),
+            f"[app] | {day}/{month:02d}/2026 {clock}  [INFO] day first".encode(),
+            f"1:M {day} {mon} 2026 {clock}.000 # valkey".encode(),
+        ]
+
+    def test_local_time_is_chosen_when_it_is_nearer(self):
+        for data in self._messages("19", 10, "17:00:00"):
+            parsed = parse_syslog_message(data, "10.0.0.1", now=self.NOW, local_tz=self.LOCAL_TZ)
+            assert parsed["timestamp"] == "2026-10-19T12:00:00+00:00", data
+
+    def test_utc_is_chosen_when_it_is_nearer(self):
+        for data in self._messages("19", 10, "11:59:00"):
+            parsed = parse_syslog_message(data, "10.0.0.1", now=self.NOW, local_tz=self.LOCAL_TZ)
+            assert parsed["timestamp"] == "2026-10-19T11:59:00+00:00", data
+
+
 class TestSyslogTimestampHelpers:
     """The parser's own date reading and its cached local time zone."""
 
