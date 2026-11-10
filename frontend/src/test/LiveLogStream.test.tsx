@@ -1654,6 +1654,43 @@ describe('LiveLogStream Component', () => {
     expect(within(row).queryByText('logshed')).toBeNull();
   });
 
+  it('shows host aliases on the first history page when it arrives before the alias list', async () => {
+    const syslogLog: LogEntry = {
+      id: 556,
+      timestamp: '2026-09-03T12:00:00.000Z',
+      received_at: '2026-09-03T12:00:00.010Z',
+      source_ip: '192.168.1.20',
+      source_alias: 'nas-raw-hostname',
+      app_name: 'smartd',
+      facility: 3,
+      severity: 6,
+      message: 'Disk check passed',
+      raw: 'Disk check passed',
+    };
+    let releaseAliases: (list: Awaited<ReturnType<typeof aliasesApi.fetchAliases>>) => void = () => {};
+    vi.spyOn(aliasesApi, 'fetchAliases').mockImplementationOnce(
+      () => new Promise((resolve) => { releaseAliases = resolve; })
+    );
+    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValueOnce({ logs: [syslogLog], total: 1, limit: 500, offset: 0 });
+
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Disk check passed')).toBeInTheDocument();
+    });
+    const row = () => document.querySelector('.log-row') as HTMLElement;
+    expect(within(row()).getByText('nas-raw-hostname')).toBeInTheDocument();
+
+    await act(async () => {
+      releaseAliases([{ ip: '192.168.1.20', alias: 'NAS', notes: null, created_at: '2026-09-01T00:00:00Z' }]);
+    });
+
+    await waitFor(() => {
+      expect(within(row()).getByText('NAS')).toBeInTheDocument();
+    });
+    expect(within(row()).queryByText('nas-raw-hostname')).toBeNull();
+  });
+
   it('preserves user modifications in Create Drop Rule modal when a new log arrives', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 

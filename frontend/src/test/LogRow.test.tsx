@@ -5,6 +5,7 @@ import {
   buildDockerAliasSet,
   matchesSearchQuery,
   prepareLogEntry,
+  reapplyAliases,
   restoreDockerAliases,
 } from '../components/logs/LiveLogStream.tsx';
 
@@ -189,6 +190,34 @@ describe('LogRow Component and Optimization', () => {
     expect(restoreDockerAliases(restored, buildDockerAliasSet([], ['nas-docker']))).toBe(restored);
     // Preparing a prepared row again reads its stored alias, not the shown one
     expect(prepareLogEntry(rows[0], aliases, undefined, buildDockerAliasSet([], ['nas-docker'])).source_alias).toBe('nas-docker');
+  });
+
+  it('reapplyAliases gives rows prepared before the alias list loaded their host alias', () => {
+    const base = {
+      timestamp: '2026-11-03T10:00:00.000Z',
+      received_at: '2026-11-03T10:00:00.000Z',
+      source_ip: '192.168.1.60',
+      facility: 1,
+      severity: 6,
+      raw: 'line',
+    };
+    // Prepared with no alias list and no Docker hosts yet: both rows show what was stored
+    const rows = [
+      prepareLogEntry({ ...base, id: 1, source_alias: 'nas-docker', app_name: 'plex', message: 'container' }, {}, undefined, new Set()),
+      prepareLogEntry({ ...base, id: 2, source_alias: 'nas-hostname', app_name: 'sshd', message: 'syslog' }, {}, undefined, new Set()),
+    ];
+    expect(rows.map((r) => r.source_alias)).toEqual(['nas-docker', 'nas-hostname']);
+
+    const aliases = { '192.168.1.60': 'nas' };
+    const dockerAliases = buildDockerAliasSet([], ['nas-docker']);
+    const realiased = reapplyAliases(rows, aliases, dockerAliases);
+    // The syslog row takes its address's alias; the Docker row keeps its own
+    expect(realiased.map((r) => r.source_alias)).toEqual(['nas-docker', 'nas']);
+    expect(realiased[0]).toBe(rows[0]);
+    expect(realiased[1].storedSourceAlias).toBe('nas-hostname');
+    expect(realiased[1].formattedTimestamp).toBe(rows[1].formattedTimestamp);
+    // Nothing to change: the same array comes back, so React skips the update
+    expect(reapplyAliases(realiased, aliases, dockerAliases)).toBe(realiased);
   });
 
   it('prepareLogEntry canonicalizes host alias upon ingestion when aliases are supplied', () => {

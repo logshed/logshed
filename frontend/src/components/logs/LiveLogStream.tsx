@@ -221,6 +221,25 @@ export function restoreDockerAliases(
   return changed ? next : logs;
 }
 
+/**
+ * Prepare the rows already shown again with a newly loaded alias map and Docker aliases, for rows
+ * that arrived before the alias list did. Returns the same array when no row's host changes.
+ */
+export function reapplyAliases(
+  logs: ProcessedLogEntry[],
+  aliases: Record<string, string>,
+  dockerAliases: Set<string>
+): ProcessedLogEntry[] {
+  let changed = false;
+  const next = logs.map((log) => {
+    const prepared = prepareLogEntry(log, aliases, undefined, dockerAliases);
+    if (prepared.source_alias === log.source_alias) return log;
+    changed = true;
+    return prepared;
+  });
+  return changed ? next : logs;
+}
+
 export function prepareLogEntry(
   entry: LogEntry | ProcessedLogEntry,
   aliases?: Record<string, string>,
@@ -743,7 +762,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       dockerEndpointsRef.current = endpointsList;
       dockerAliasesRef.current = buildDockerAliasSet(endpointsList, formerDockerAliasesRef.current);
       const dockerAliases = dockerAliasesRef.current;
-      setLogs((prev) => restoreDockerAliases(prev, dockerAliases));
+      // The first history page may have been prepared before this list arrived
+      setLogs((prev) => reapplyAliases(prev, map, dockerAliases));
     });
   }, []);
 
