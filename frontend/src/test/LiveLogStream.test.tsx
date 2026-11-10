@@ -735,16 +735,12 @@ describe('LiveLogStream Component', () => {
   });
 
   it('deduplicates aliased hosts and never shows the raw IP when an alias is set', async () => {
-    // Provide knownAliases with 172.22.2.4 -> NPM and 192.168.1.50 -> homelab-host
-    renderWithContext(
-      <LiveLogStream
-        onDiagnoseAi={vi.fn()}
-        knownAliases={{
-          '172.22.2.4': 'NPM',
-          '192.168.1.50': 'homelab-host',
-        }}
-      />
-    );
+    // 172.22.2.4 -> NPM and 192.168.1.50 -> homelab-host
+    vi.spyOn(aliasesApi, 'fetchAliases').mockResolvedValue([
+      { ip: '172.22.2.4', alias: 'NPM', notes: null, created_at: '2026-09-01T00:00:00Z' },
+      { ip: '192.168.1.50', alias: 'homelab-host', notes: null, created_at: '2026-09-01T00:00:00Z' },
+    ]);
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
@@ -1641,16 +1637,13 @@ describe('LiveLogStream Component', () => {
       { ip: '127.0.0.1', alias: 'Local', notes: null, created_at: '2026-09-01T00:00:00Z' },
     ]);
 
-    vi.spyOn(logsApi, 'fetchLogs').mockResolvedValueOnce({
-      logs: [internalLog],
-      total: 1,
-      limit: 500,
-      offset: 0,
+    // The history page arrives after the alias list, as it usually does
+    vi.spyOn(logsApi, 'fetchLogs').mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return { logs: [internalLog], total: 1, limit: 500, offset: 0 };
     });
 
-    renderWithContext(
-      <LiveLogStream onDiagnoseAi={vi.fn()} knownAliases={{ '127.0.0.1': 'Local' }} />
-    );
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('LogShed internal status check')).toBeInTheDocument();

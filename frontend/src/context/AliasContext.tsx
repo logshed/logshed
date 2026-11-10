@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
 export interface AliasContextValue {
   aliasVersion: number;
@@ -17,17 +17,15 @@ export const AliasProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAliasVersion((prev) => prev + 1);
   }, []);
 
+  const value = useMemo(() => ({ aliasVersion, bumpAliasVersion }), [aliasVersion, bumpAliasVersion]);
+
   return (
-    <AliasContext.Provider value={{ aliasVersion, bumpAliasVersion }}>
+    <AliasContext.Provider value={value}>
       {children}
     </AliasContext.Provider>
   );
 };
 
 export const useAlias = (): AliasContextValue => {
-  return useContext(AliasContext);
-};
-
-export const useAliasContext = (): AliasContextValue => {
   return useContext(AliasContext);
 };

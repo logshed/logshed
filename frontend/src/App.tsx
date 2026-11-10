@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AlertCircle, RefreshCw, Save } from 'lucide-react';
 import { useAuth } from './context/AuthContext.tsx';
-import { AliasContext } from './context/AliasContext.tsx';
+import { AliasProvider } from './context/AliasContext.tsx';
 import { Navbar } from './components/common/Navbar.tsx';
 import { Modal } from './components/common/Modal.tsx';
 import { LoginForm } from './components/auth/LoginForm.tsx';
@@ -60,14 +60,6 @@ export const App: React.FC = () => {
   const [deletedDockerHostInfo, setDeletedDockerHostInfo] = useState<{ name: string; ip: string } | null>(null);
   const [pendingSettingsSubTab, setPendingSettingsSubTab] = useState<SettingsSubTab | null>(null);
   const [clearSelectionSignal, setClearSelectionSignal] = useState<number>(0);
-  const [aliasVersion, setAliasVersion] = useState<number>(0);
-  const bumpAliasVersion = useCallback(() => {
-    setAliasVersion((prev) => prev + 1);
-  }, []);
-  const aliasContextValue = useMemo(
-    () => ({ aliasVersion, bumpAliasVersion }),
-    [aliasVersion, bumpAliasVersion]
-  );
   // Hand-offs from the log view (add alias, edit/manage a Docker host) only apply to the next
   // visit that started them; leaving Settings drops them so they cannot reopen a modal later.
   const clearSettingsHandOffs = useCallback(() => {
@@ -238,7 +230,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <AliasContext.Provider value={aliasContextValue}>
+    <AliasProvider>
       <div className="h-dvh max-h-dvh w-full max-w-full bg-dark-950 text-slate-200 flex flex-col overflow-hidden select-text">
       {/* Mobile Pull-to-Refresh Indicator */}
       {isMobile && (isPulling || isRefreshing) && (
@@ -393,6 +385,6 @@ export const App: React.FC = () => {
         </div>
       </Modal>
       </div>
-    </AliasContext.Provider>
+    </AliasProvider>
   );
 };

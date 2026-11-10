@@ -569,7 +569,6 @@ interface LiveLogStreamProps {
   onAddAlias?: (ip: string) => void;
   onEditDockerHost?: (endpointId: number) => void;
   onManageDeletedDockerHost?: (info: { name: string; ip: string }) => void;
-  knownAliases?: Record<string, string>;
   clearSelectionSignal?: number;
   pullTouchHandlers?: PullTouchHandlers;
 }
@@ -582,7 +581,6 @@ const SCROLLBACK_BUFFER_SIZE = 20000;
 const BATCH_FLUSH_INTERVAL_MS = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
-const EMPTY_KNOWN_ALIASES: Record<string, string> = {};
 const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
 
 export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
@@ -591,7 +589,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   onAddAlias,
   onEditDockerHost,
   onManageDeletedDockerHost,
-  knownAliases = EMPTY_KNOWN_ALIASES,
   clearSelectionSignal,
   pullTouchHandlers,
 }) => {
@@ -739,7 +736,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         }
       });
       setActiveAliasesMap(map);
-      mergedAliasesRef.current = { ...map, ...knownAliases };
+      mergedAliasesRef.current = map;
 
       setDockerEndpoints(endpointsList);
       dockerEndpointsRef.current = endpointsList;
@@ -747,7 +744,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       const dockerAliases = dockerAliasesRef.current;
       setLogs((prev) => restoreDockerAliases(prev, dockerAliases));
     });
-  }, [knownAliases]);
+  }, []);
 
   useEffect(() => {
     loadSourcesConfig();
@@ -797,7 +794,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             map[a.ip] = a.alias;
           }
         });
-        const newMerged = { ...map, ...knownAliases };
+        const newMerged = map;
         mergedAliasesRef.current = newMerged;
         setActiveAliasesMap(map);
 
@@ -990,11 +987,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       .catch((err) => {
         console.error('Failed to reload host aliases in stream', err);
       });
-  }, [aliasVersion, knownAliases]);
+  }, [aliasVersion]);
 
-  const mergedAliases = useMemo(() => {
-    return { ...activeAliasesMap, ...knownAliases };
-  }, [activeAliasesMap, knownAliases]);
+  const mergedAliases = activeAliasesMap;
 
   const mergedAliasesRef = useRef(mergedAliases);
   useEffect(() => {
