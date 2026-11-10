@@ -312,6 +312,37 @@ describe('LogRow AI controls follow the AI setting', () => {
     expect(row.children.length).toBe(7);
   });
 
+  it.each([
+    ['desktop row', false],
+    ['mobile card', true],
+  ])('with AI on, the %s holds no control inside its list option, and its AI target works by pointer', (_label, isMobile) => {
+    const onClick = vi.fn();
+    const onDiagnoseAi = vi.fn();
+    const { container } = render(
+      <LogRow
+        log={log}
+        index={0}
+        isSelected={false}
+        isMobile={isMobile}
+        aiEnabled={true}
+        style={{ height: isMobile ? '74px' : '28px' }}
+        onSelect={vi.fn()}
+        onClick={onClick}
+        onDiagnoseAi={onDiagnoseAi}
+      />
+    );
+    const option = screen.getByRole('option');
+    expect(option.querySelectorAll('button, a, input, [tabindex], [role="button"]')).toHaveLength(0);
+    expect(screen.queryByRole('button', { hidden: false })).toBeNull();
+
+    const target = screen.getByTitle('Explain with AI');
+    expect(target.closest('[aria-hidden="true"]')).not.toBeNull();
+    fireEvent.click(target);
+    expect(onDiagnoseAi).toHaveBeenCalledWith([log]);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(container.querySelector('.log-row')).toBe(option);
+  });
+
   it('hides the mobile card AI button when AI is off', () => {
     renderRow(true, false);
     expect(screen.queryByTitle('Explain with AI')).toBeNull();

@@ -49,7 +49,7 @@ export interface LogRowProps {
   isSelected: boolean;
   isHovered?: boolean;
   isMobile: boolean;
-  /** Shows the "Explain with AI" row action; off until settings say AI is on. */
+  /** Shows the "Explain with AI" row action (a pointer target); off until settings say AI is on. */
   aiEnabled?: boolean;
   /** Highlights the row as the log an alert link pointed at (the log that triggered the alert). */
   isFocused?: boolean;
@@ -158,20 +158,20 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
             {displayTimestamp}
           </span>
           {aiEnabled && (
-            // 32px tall touch target; the negative margin keeps the 16px footer height unchanged
-            <button
+            // A touch target, 32px tall; the negative margin keeps the 16px footer height unchanged.
+            // Not a control: see the desktop row's action below.
+            <div
+              aria-hidden="true"
               onClick={(e) => {
                 e.stopPropagation();
                 onDiagnoseAi([log]);
               }}
-              // Inside a list option, so not a Tab stop: keyboard users open the log (Enter) or tick it (Space)
-              tabIndex={-1}
-              className="text-accent-400 hover:text-accent-300 min-h-8 px-2 -my-2 flex items-center gap-1 shrink-0"
+              className="text-accent-400 hover:text-accent-300 min-h-8 px-2 -my-2 flex items-center gap-1 shrink-0 cursor-pointer select-none"
               title="Explain with AI"
             >
               <Sparkles className="w-3 h-3" />
               <span className="text-[10px] font-sans font-medium">AI</span>
-            </button>
+            </div>
           )}
         </div>
       </div>
@@ -241,20 +241,22 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         )}
       </div>
 
-      {/* Quick Row Actions (AI only, so the column is dropped when AI is off) */}
+      {/* Quick Row Actions (AI only, so the column is dropped when AI is off). Like the checkbox, a
+          mouse target and not a control: a list option may not contain one. Keyboard and screen reader
+          users open the log (Enter) and use "Explain with AI" in its drawer, or tick rows (Space) and
+          use the toolbar's AI action. */}
       {aiEnabled && (
         <div className="flex items-center justify-end gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
-          <button
+          <div
+            aria-hidden="true"
             onClick={() => {
               onDiagnoseAi([log]);
             }}
-            // Inside a list option, so not a Tab stop: keyboard users open the log (Enter) or tick it (Space)
-            tabIndex={-1}
             title="Explain with AI"
-            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition"
+            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition cursor-pointer"
           >
             <Sparkles className="w-3 h-3" />
-          </button>
+          </div>
         </div>
       )}
     </div>
