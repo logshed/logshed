@@ -107,17 +107,22 @@ describe('LogRow Component and Optimization', () => {
     const props = { log: baseLog, index: 0, isMobile: false, style: {}, onSelect: vi.fn(), onClick: vi.fn(), onDiagnoseAi: vi.fn() };
     const { rerender } = render(<LogRow {...props} isSelected={false} />);
     const row = () => screen.getByRole('option');
-    expect(row().className).toContain('hover:bg-dark-900/60');
+    // dark-900 at 60% on the dark-950 list could hardly be seen; dark-800 and a grey left edge can,
+    // and grey stays apart from the blue of a selected row
+    expect(row().className).toContain('hover:bg-dark-800');
+    expect(row().className).toContain('hover:border-l-slate-500');
 
     rerender(<LogRow {...props} isSelected={true} />);
     expect(row().className).toContain('bg-accent-950/40');
     expect(row().className).toContain('hover:bg-accent-900/50');
-    expect(row().className).not.toContain('hover:bg-dark-900');
+    expect(row().className).not.toContain('hover:bg-dark-800');
+    expect(row().className).not.toContain('hover:border-l-slate-500');
 
     rerender(<LogRow {...props} isSelected={true} isFocused={true} />);
     expect(row().className).toContain('bg-amber-950/50');
     expect(row().className).toContain('hover:bg-amber-900/50');
-    expect(row().className).not.toContain('hover:bg-dark-900');
+    expect(row().className).not.toContain('hover:bg-dark-800');
+    expect(row().className).not.toContain('hover:border-l-slate-500');
   });
 
   it('custom comparison function areLogRowPropsEqual handles id, selection and style', () => {

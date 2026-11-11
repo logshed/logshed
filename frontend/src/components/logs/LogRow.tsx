@@ -45,7 +45,8 @@ function rowStateClass(isSelected: boolean, isFocused: boolean): string {
 function rowHoverClass(isSelected: boolean, isFocused: boolean): string {
   if (isFocused) return 'hover:bg-amber-900/50';
   if (isSelected) return 'hover:bg-accent-900/50';
-  return 'hover:bg-dark-900/60';
+  // A grey edge, not blue: blue marks a selected row
+  return 'hover:bg-dark-800 hover:border-l-slate-500';
 }
 
 export interface LogRowProps {
