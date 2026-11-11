@@ -291,7 +291,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               data-active={active.query}
               className={`w-full bg-dark-900 border ${active.query ? ACTIVE_BORDER : IDLE_BORDER} rounded px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono`}
             />
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
+            {/* The icon and the two buttons are centred on the input, so they stay in line at any input height */}
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
             {/* Search syntax help, left of the clear button. The wrapper is not positioned, so the
                 popover is placed against the input (full input width on phones), not the icon. */}
             <div ref={helpRef} onBlur={handleHelpBlur}>
@@ -299,7 +300,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 ref={helpButtonRef}
                 type="button"
                 onClick={() => setIsHelpOpen((prev) => !prev)}
-                className={`absolute top-1.5 ${filters.query ? 'right-7' : 'right-2'} block transition cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`absolute top-1/2 -translate-y-1/2 leading-none ${filters.query ? 'right-7' : 'right-2'} block transition-colors cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-slate-500 hover:text-slate-300'}`}
                 title="Search syntax"
                 aria-label="Search syntax help"
                 aria-expanded={isHelpOpen}
@@ -330,7 +331,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             {filters.query && (
               <button
                 onClick={() => onFilterChange({ ...filters, query: '' })}
-                className="absolute right-2 top-1.5 text-slate-500 hover:text-slate-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 leading-none text-slate-500 hover:text-slate-300"
                 title="Clear search query"
                 aria-label="Clear search query"
               >

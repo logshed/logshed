@@ -424,6 +424,17 @@ describe('LogSearchBar search button, drawer and syntax help', () => {
     expect(screen.getByPlaceholderText('Search logs, e.g. "disk full", error OR timeout, app:nginx')).toBeInTheDocument();
   });
 
+  it('centres the search icon, the help button and the clear button on the input', async () => {
+    await renderBar({ query: 'error' });
+    const centred = ['top-1/2', '-translate-y-1/2'];
+    expect(screen.getByRole('textbox', { name: 'Search logs' }).parentElement!.querySelector(':scope > svg')).toHaveClass(...centred);
+    for (const name of ['Search syntax help', 'Clear search query']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveClass(...centred, 'leading-none');
+      expect(button).not.toHaveClass('top-1.5');
+    }
+  });
+
   it('the help button opens a popover listing the search syntax', async () => {
     await renderBar();
     const help = screen.getByRole('button', { name: 'Search syntax help' });
