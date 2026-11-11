@@ -46,9 +46,9 @@ export const LoginForm: React.FC = () => {
         {/* Brand Header */}
         <div className="flex flex-col items-center mb-6">
           <div className="w-12 h-12 rounded-xl bg-dark-800 border border-dark-700 flex items-center justify-center mb-3">
-            <LogShedLogo className="w-7 h-7 text-accent-500" />
+            <LogShedLogo className="w-7 h-7 text-accent-600" />
           </div>
-          <h1 className="text-xl font-bold text-slate-100 tracking-wide">LOGSHED</h1>
+          <h1 className="text-xl font-bold text-slate-50 tracking-[-0.02em]">LogShed</h1>
           <p className="text-xs text-slate-400 mt-1">Single-Process Log Aggregator & Ops Console</p>
         </div>
 

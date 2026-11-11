@@ -23,7 +23,7 @@ describe('LoginForm Component', () => {
     render(<LoginForm />);
     expect(screen.getByRole('main')).toContainElement(screen.getByRole('heading', { level: 1 }));
 
-    expect(screen.getByText('LOGSHED')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'LogShed' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Enter password...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Sign In to Console/i })).toBeInTheDocument();
   });

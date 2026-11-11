@@ -186,13 +186,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             }}
             role="button"
             tabIndex={0}
-            className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity focus:outline-none focus:ring-1 focus:ring-accent-500 rounded"
+            className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity focus:outline-none focus:ring-1 focus:ring-accent-500 rounded"
             title="Go to Console View"
           >
-            <LogShedLogo className="w-5 h-5 text-accent-500" />
-            <span className="font-semibold tracking-wide text-slate-100 text-sm">
-              LOG<span className="text-accent-500 font-mono">SHED</span>
-            </span>
+            <LogShedLogo className="w-6 h-6 text-accent-600" />
+            {/* The logshed.dev wordmark; 1px lower than centre looks centred next to the icon */}
+            <span className="relative top-px font-bold tracking-[-0.02em] text-[1.05rem] leading-6 text-slate-50">LogShed</span>
           </div>
 
           {/* Ingestion & Queue Health */}

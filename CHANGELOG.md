@@ -27,6 +27,7 @@ No database change, so going back to 1.3.0 only needs the older image.
 - **LogShed's own dropdowns**: Every dropdown now looks and works the same in every browser.
 - **Notification links**: With `APP_URL` set, the link in an alert notification opens that incident instead of the Incident History list.
 - **Clearer `docker logs`**: LogShed's own start-up and status messages show with a time and level.
+- **The LogShed name**: The navbar and the sign-in page write it as logshed.dev does, in one bold word next to the logo.
 
 ### Fixed
 - **No lost logs under load**: Busy TCP syslog senders are slowed down instead of losing lines (in a test, 50 connections lost 425,632 of 705,138 lines before, and none now), and logs arriving during a large delete or prune are no longer lost.
