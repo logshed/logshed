@@ -833,6 +833,20 @@ class TestQueueConsumerAlertIntegration:
         # If only loopback exists, return loopback
         assert extract_ip_from_message("Local probe from 127.0.0.1") == "127.0.0.1"
 
+    def test_extract_ip_from_a_crafted_message_is_quick(self):
+        """'host' and a long run of spaces took seconds (quadratic); it runs on the event loop."""
+        import time
+
+        for msg in ("host" + " " * 20000 + "x", "Failed password host" + " " * 60000):
+            started = time.perf_counter()
+            assert extract_ip_from_message(msg) is None
+            assert time.perf_counter() - started < 0.5
+
+    def test_extract_ip_after_host_and_within_the_first_8k(self):
+        assert extract_ip_from_message("Rejected host   198.51.100.7 port 22") == "198.51.100.7"
+        assert extract_ip_from_message("hostname 198.51.100.8") == "198.51.100.8"
+        assert extract_ip_from_message("x" * 9000 + " from 198.51.100.9") is None
+
     def test_multi_select_comma_separated_app_filter(self):
         """Verify comma-separated app filter matches any specified app."""
         rule = CompiledAlertRule(

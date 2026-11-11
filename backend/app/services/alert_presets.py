@@ -23,11 +23,15 @@ logger = logging.getLogger(__name__)
 
 _BUILTIN_DIR = Path(__file__).resolve().parent.parent / "presets" / "alerts"
 
-# Regex patterns for extracting client and offending IP addresses from log messages
+# Regex patterns for extracting client and offending IP addresses from log messages.
+# `host(?=\s)` rather than `host\s+`: followed by `\s*`, that split a run of spaces in every
+# possible way, so "host" and 60,000 spaces took minutes on the event loop.
 _CONTEXTUAL_IP_REGEX = re.compile(
-    r"(?:from|rhost=|client[:=]|source[_-]?ip[:=]|host\s+)\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-fA-F0-9:]{3,})",
+    r"(?:from|rhost=|client[:=]|source[_-]?ip[:=]|host(?=\s))\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-fA-F0-9:]{3,})",
     re.IGNORECASE,
 )
+# Only the start of a message is searched, which bounds the work for a 64 KB message
+_IP_SEARCH_MAX_CHARS = 8192
 _STANDALONE_IPV4_REGEX = re.compile(r"\b([0-9]{1,3}(?:\.[0-9]{1,3}){3})\b")
 
 
@@ -40,6 +44,7 @@ def extract_ip_from_message(message: str) -> Optional[str]:
     """
     if not message:
         return None
+    message = message[:_IP_SEARCH_MAX_CHARS]
 
     loopback_fallback = None
 

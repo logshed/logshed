@@ -47,6 +47,7 @@ No database change, so going back to 1.3.0 only needs the older image.
 - **More secrets redacted**: Quoted passwords holding an escaped quote, `Authorization: Token` and `ApiKey` headers, Telegram bot tokens, and the top message of Log Storm alerts.
 - **AI prompts**: A log line holding three backticks can no longer break out of the logs in an alert's AI prompt.
 - **MCP**: Streams close as soon as their token is revoked, and request bodies over 1 MiB are refused.
+- **Alerts**: A crafted log line can no longer stall LogShed for minutes when it fires an alert (finding the IP address in it was slow).
 - **Limits**: Rule imports apply the same limits as the editor (at most 500 rules per file), and a delete by log IDs takes at most 20,000.
 
 ## [1.3.0] - 2026-11-09
