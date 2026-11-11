@@ -119,6 +119,14 @@ describe('Navbar Component', () => {
     expect(onTabChange).toHaveBeenCalledWith('stream');
   });
 
+  it('outlines the brand logo only for keyboard focus, not after a click', () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({ status: 'ok' });
+    render(<Navbar activeTab="settings" onTabChange={vi.fn()} />);
+    const brandLogo = screen.getByTitle('Go to Console View');
+    expect(brandLogo.className).toContain('focus-visible:ring-1');
+    expect(brandLogo.className).not.toMatch(/(^|\s)focus:ring/);
+  });
+
   it('renders all four navigation tabs and switches tabs on click', async () => {
     vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
       status: 'ok',
