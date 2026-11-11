@@ -2643,8 +2643,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onClose={() => setActiveLogDetail(null)}
           timeZone={serverTimezone}
           aiEnabled={aiEnabled}
+          // The AI dialog opens on top of the drawer, so closing it shows the same log again
           onExplainWithAi={(log, ctxLogs) => {
-            setActiveLogDetail(null);
             const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
             setLogs((prevLogs) => {
               const existingIds = new Set(prevLogs.map((l) => l.id));
@@ -2664,7 +2664,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             onDiagnoseAi(logsToInspect);
           }}
           onInspectWithContext={(targetAndCtxLogs) => {
-            setActiveLogDetail(null);
             setLogs((prevLogs) => {
               const existingIds = new Set(prevLogs.map((l) => l.id));
               const fmt = getFormatContext();

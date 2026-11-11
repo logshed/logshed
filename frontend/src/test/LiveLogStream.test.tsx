@@ -350,6 +350,22 @@ describe('LiveLogStream Component', () => {
     });
   });
 
+  it('keeps the log drawer open under the AI dialog it opens', async () => {
+    const onDiagnoseAi = vi.fn();
+    renderWithContext(<LiveLogStream onDiagnoseAi={onDiagnoseAi} />);
+    await waitFor(() => expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Nginx upstream connection timeout'));
+    fireEvent.click(await screen.findByRole('button', { name: /Older log/i }));
+    await waitFor(() => expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Explain with AI/i }));
+    expect(onDiagnoseAi).toHaveBeenCalledTimes(1);
+    expect(onDiagnoseAi.mock.calls[0][0].map((l: { id: number }) => l.id)).toEqual([102]);
+    // Still open on log 102, so closing the AI dialog shows it again without a reopen
+    expect(screen.getByText(/Log Record #102/i)).toBeInTheDocument();
+  });
+
   it('performs Shift-Click range selection across multiple hosts without error', async () => {
     renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
 
