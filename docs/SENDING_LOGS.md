@@ -23,6 +23,7 @@ This guide provides step-by-step instructions for forwarding syslog traffic and 
 ## Table of Contents
 
 - [UDP or TCP Syslog](#udp-or-tcp-syslog)
+- [Reading the Navbar Health Figures](#reading-the-navbar-health-figures)
 - [OPNsense](#opnsense)
 - [Proxmox VE](#proxmox-ve)
 - [Synology DSM](#synology-dsm)
@@ -50,8 +51,49 @@ Most devices let you choose UDP or TCP when you add LogShed as a syslog target. 
   ```
 
   Then restart the LogShed container. Do not try to set this with a `sysctls:` entry in `docker-compose.yml`: Docker refuses `net.core.rmem_max` there because it is a host-wide setting. If you cannot change the host, set `SYSLOG_UDP_RECEIVE_BUFFER_BYTES` to the size the startup log reports to silence the warning (the buffer then stays small).
-- **Watch the processing load.** LogShed reads syslog, applies drop and alert rules, streams to open Console tabs and answers web requests on one event loop. When it falls behind, every wake-up of that loop runs late, sockets are read late, and UDP messages start to be lost. The navbar's rate tooltip shows this lag over the last 60 seconds (now, 95th percentile and maximum), and the amber dot next to the rate turns on, with the tooltip "LogShed is near its processing limit", when the 95th percentile stays at 50 ms or more for 30 seconds. The same dot turns on when logs arrive faster than LogShed can store them: the ingestion queue stays at least half full (5,000 logs) or the Lost count keeps growing for 30 seconds. The tooltip says which. A healthy LogShed shows a 95th percentile of a few milliseconds, and a short spike in the maximum is normal (a large search, a prune). If the dot stays on, send fewer logs (drop noisy sources at the sender), simplify or remove regex rules, or move busy senders to TCP. The figures are `loop_lag_ms`, `loop_lag_p95_ms` and `loop_lag_max_ms` in `GET /api/health` and `GET /api/v1/system/metrics`.
+- **Watch the processing load.** When LogShed gets close to the most it can handle, UDP messages start to be lost before anything else goes wrong. The navbar shows how close it is: see [Reading the Navbar Health Figures](#reading-the-navbar-health-figures).
 - **What "UDP lost" counts.** It is the kernel's receive-buffer error counter for UDP since the syslog listener started. The counter belongs to the network namespace: in a normal container it counts only LogShed's own sockets, but with `network_mode: host` it counts every UDP socket on the host, including ones that have nothing to do with syslog. It is blank (and the navbar hides it) when LogShed cannot read it, for example on a host that is not Linux.
+
+---
+
+## Reading the Navbar Health Figures
+
+The figures next to the LogShed logo show how LogShed is keeping up with the logs it receives. Rest the mouse on a figure to see what it means. They refresh every 10 seconds while the tab is open.
+
+| Figure | What it means | What is normal |
+|---|---|---|
+| **Rate** | Logs received per second, averaged over the last 5 seconds. | Whatever your senders produce. A sudden jump usually means a device is in trouble or has become noisy. |
+| **Queue** | Logs received but not yet stored. The queue holds up to 10,000. | Close to 0. It may climb briefly in a burst and then drain. |
+| **Lost** (only when above 0) | Logs LogShed had to turn away because the queue was full, since it last started. Logs removed by drop rules are not counted here. | Not shown. |
+| **UDP lost** (only when above 0) | Syslog UDP messages the operating system threw away before LogShed could read them, since it last started. They are not part of Lost. See [UDP or TCP Syslog](#udp-or-tcp-syslog). | Not shown. |
+| **Amber dot** | LogShed is near its processing limit, or the health check failed. Rest the mouse on it for the reason. | Not shown. |
+
+### Event loop lag (in the Rate tooltip)
+
+LogShed does nearly all its work in one place, called the event loop: reading syslog, applying drop and alert rules, streaming to open Console tabs and answering the web interface. The loop works through one small job at a time. When there is more to do than it can keep up with, every job waits a little longer for its turn.
+
+To measure this, LogShed asks to be woken every 100 ms and records how late each wake-up actually is. That delay is the **loop lag**. The Rate tooltip shows three figures for the last 60 seconds:
+
+- **now:** the lag of the latest wake-up.
+- **95th percentile:** 95 out of 100 wake-ups were at least this punctual. This is the figure to watch: it shows how LogShed is coping in general and ignores rare spikes.
+- **max:** the single worst wake-up. A spike of a few hundred milliseconds is normal during a large search, a delete or the nightly prune.
+
+A healthy LogShed shows a 95th percentile of a few milliseconds. While the lag is high, LogShed reads its syslog sockets late, and UDP messages that arrive in the meantime can overflow the receive buffer and show up as **UDP lost**.
+
+### When the amber dot turns on
+
+The amber dot appears when one of these has held for 30 seconds (three health checks in a row):
+
+- the 95th percentile loop lag is 50 ms or more, or
+- the queue holds at least 5,000 logs (half full), or the Lost count keeps growing.
+
+Its tooltip says which. The dot clears at the first check where neither holds. If it stays on:
+
+- send fewer logs: drop noisy sources at the sender, or with [drop rules](RULES_GUIDE.md#ingestion-drop-rules) in LogShed;
+- simplify or remove regex alert and drop rules;
+- move busy senders to TCP, which slows them down instead of losing messages.
+
+The same figures are in `GET /api/health` and `GET /api/v1/system/metrics`: `ingest_rate`, `queue_depth`, `dropped_logs` (Lost), `udp_receive_errors` (UDP lost), and `loop_lag_ms`, `loop_lag_p95_ms` and `loop_lag_max_ms`.
 
 ---
 

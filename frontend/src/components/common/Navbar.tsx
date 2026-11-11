@@ -65,7 +65,10 @@ export const getRateTooltip = (health: HealthResponse): string => {
   if (typeof health.loop_lag_p95_ms !== 'number') return 'Ingestion Rate';
   return (
     `Ingestion Rate\nEvent loop lag (last 60 s): ${health.loop_lag_ms ?? 0} ms now, ` +
-    `${health.loop_lag_p95_ms} ms 95th percentile, ${health.loop_lag_max_ms ?? 0} ms max`
+    `${health.loop_lag_p95_ms} ms 95th percentile, ${health.loop_lag_max_ms ?? 0} ms max\n` +
+    `Loop lag is how late LogShed gets to its work. Healthy: a few ms at the 95th percentile ` +
+    `(short spikes in the max are normal); ${LOOP_LAG_WARNING_MS} ms or more for ` +
+    `${NEAR_LIMIT_DURATION_MS / 1000} s turns on the amber dot.`
   );
 };
 

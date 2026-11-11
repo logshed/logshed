@@ -206,7 +206,7 @@ Step-by-step setup guides and references live in [`docs/`](docs/):
 
 | Guide | Description |
 |---|---|
-| [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Home Assistant, Linux, and Docker, plus the [HTTP ingest API](docs/SENDING_LOGS.md#http-ingest-api) |
+| [Forwarding Logs Guide](docs/SENDING_LOGS.md) | Syslog setup for OPNsense, Proxmox VE, Synology DSM, UniFi, pfSense, Home Assistant, Linux, and Docker, plus the [HTTP ingest API](docs/SENDING_LOGS.md#http-ingest-api) and [what the navbar health figures mean](docs/SENDING_LOGS.md#reading-the-navbar-health-figures) |
 | [Configuration Reference](docs/CONFIGURATION.md) | Environment variables, Docker socket proxy setup, and storage paths |
 | [Rules Guide](docs/RULES_GUIDE.md) | Threshold, pattern, and rate-spike alert rules, plus ingestion drop rules |
 | [Model Context Protocol (MCP) Guide](docs/MCP_GUIDE.md) | Connect Claude Desktop, Cursor, Windsurf, or Antigravity to query logs and manage maintenance |

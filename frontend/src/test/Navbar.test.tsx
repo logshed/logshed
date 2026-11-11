@@ -577,7 +577,9 @@ describe('Navbar event loop lag', () => {
     render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
     const rate = (await screen.findByText('1.0 logs/s')).parentElement as HTMLElement;
     expect(rate.getAttribute('title')).toBe(
-      'Ingestion Rate\nEvent loop lag (last 60 s): 12 ms now, 40 ms 95th percentile, 900 ms max',
+      'Ingestion Rate\nEvent loop lag (last 60 s): 12 ms now, 40 ms 95th percentile, 900 ms max\n' +
+        'Loop lag is how late LogShed gets to its work. Healthy: a few ms at the 95th percentile ' +
+        '(short spikes in the max are normal); 50 ms or more for 30 s turns on the amber dot.',
     );
   });
 
