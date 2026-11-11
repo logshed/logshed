@@ -1018,4 +1018,45 @@ describe('LogDetailModal "Create Alert Rule"', () => {
     render(<LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /Create Alert Rule/i })).toBeNull();
   });
+
+  // jsdom applies no CSS, so these read the order the Tailwind classes give below and above the sm breakpoint
+  const orderOf = (el: Element, phone: boolean): number => {
+    if (!phone && el.classList.contains('sm:order-none')) return 0;
+    const m = Array.from(el.classList).find((c) => /^order-\d+$/.test(c));
+    return m ? Number(m.slice(6)) : 0;
+  };
+  const sectionNames = (phone: boolean): string[] => {
+    const facility = screen.getByText('Facility');
+    const body = facility.closest('.flex-col.gap-4')!;
+    const name = (el: Element): string => {
+      const text = el.textContent ?? '';
+      if (text.includes('Create Drop Rule')) return 'actions';
+      if (text.includes('Severity Code')) return 'info';
+      if (text.includes('Message Payload')) return 'message';
+      if (text.includes('Copy Raw')) return 'raw';
+      if (text.includes('Surrounding Context')) return 'context';
+      return 'other';
+    };
+    return Array.from(body.children)
+      .map((el, i) => ({ el, i }))
+      .sort((a, b) => orderOf(a.el, phone) - orderOf(b.el, phone) || a.i - b.i)
+      .map(({ el }) => name(el));
+  };
+
+  it('on a phone shows the message right after the actions, with the timestamps and codes after the raw record', () => {
+    render(
+      <LogDetailModal log={log} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} aiEnabled={true}
+        onAddAlias={vi.fn()} onCreateDropRule={vi.fn()} onCreateAlertRule={vi.fn()} onDeleteLog={vi.fn()} />
+    );
+    expect(sectionNames(true)).toEqual(['actions', 'message', 'raw', 'info', 'context']);
+    expect(sectionNames(false)).toEqual(['actions', 'info', 'message', 'raw', 'context']);
+
+    // Four actions in two columns, then Explain with AI across both
+    const ai = screen.getByRole('button', { name: /Explain with AI/i });
+    expect(ai.parentElement).toHaveClass('grid', 'grid-cols-2', 'sm:flex');
+    expect(ai).toHaveClass('col-span-2');
+    expect(Array.from(ai.parentElement!.children).map((b) => b.textContent)).toEqual([
+      'Modify Host Alias', 'Create Drop Rule', 'Create Alert Rule', 'Delete', 'Explain with AI',
+    ]);
+  });
 });

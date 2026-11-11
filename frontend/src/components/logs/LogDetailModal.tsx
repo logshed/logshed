@@ -283,7 +283,8 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
       }
       width="max-w-3xl"
     >
-      <div ref={drawerBodyRef} className="space-y-4 text-xs font-sans">
+      {/* On phones the message comes right after the actions; the timestamps and codes move below the raw record */}
+      <div ref={drawerBodyRef} className="flex flex-col gap-4 text-xs font-sans">
         {/* Action Header */}
         <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-dark-950 rounded-lg border border-dark-700">
           <div className="flex flex-wrap items-center gap-2">
@@ -294,7 +295,8 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <span className="text-slate-400">({log.source_ip})</span>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          {/* Phones: two columns, with Explain with AI across both below them */}
+          <div className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             {matchedDockerEndpoint && onEditDockerHost ? (
               <button
                 type="button"
@@ -386,7 +388,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {aiEnabled ? (
               <button
                 onClick={() => onExplainWithAi(log)}
-                className="flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded font-medium transition shadow-xs"
+                className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded font-medium transition shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Explain with AI</span>
@@ -396,7 +398,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               <button
                 onClick={() => onExplainWithAi(log)}
                 title={AI_OFF_TITLE}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-slate-300 border border-dark-600 rounded font-medium transition cursor-pointer"
+                className="col-span-2 flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-slate-300 border border-dark-600 rounded font-medium transition cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-slate-500" />
                 <span>Explain with AI</span>
@@ -443,7 +445,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
 
         {/* Structured Metadata Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="order-1 sm:order-none grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
           <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
               Timestamp {offsetBadge(log.timestamp)}
@@ -529,7 +531,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
         </div>
 
         {/* Surrounding Context Inspector */}
-        <div className="pt-2 border-t border-dark-800">
+        <div className="order-2 sm:order-none pt-2 border-t border-dark-800">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <button
               onClick={() => setShowContext(!showContext)}
