@@ -23,7 +23,6 @@ describe('LogRow Component and Optimization', () => {
     raw: '<11>1 2026-09-03T14:30:15.123Z homelab-host nginx - - - Upstream timeout error',
     formattedTimestamp: '14:30:15.123',
     cleanedMessage: 'Upstream timeout error',
-    strippedMessage: 'Upstream timeout error',
   };
 
   it('renders desktop view with precomputed fields and responds to interactions', () => {
@@ -49,6 +48,9 @@ describe('LogRow Component and Optimization', () => {
     expect(screen.getByText('Upstream timeout error')).toBeInTheDocument();
     expect(screen.getByText('homelab-host')).toBeInTheDocument();
     expect(screen.getByText('nginx')).toBeInTheDocument();
+
+    // No hover tooltip repeating the message: clicking the row shows it in full
+    expect(screen.getByText('Upstream timeout error')).not.toHaveAttribute('title');
 
     // Check row click triggers onClick
     const row = screen.getByText('Upstream timeout error').closest('.log-row');
@@ -177,7 +179,6 @@ describe('LogRow Component and Optimization', () => {
     const prepared = prepareLogEntry(rawLog);
     expect(prepared.formattedTimestamp).toBeDefined();
     expect(prepared.cleanedMessage).toBe('Slow query detected');
-    expect(prepared.strippedMessage).toBe('Slow query detected');
   });
 
   it('prepareLogEntry keeps the alias of a former Docker host instead of the syslog alias of its address', () => {
@@ -331,7 +332,6 @@ describe('LogRow AI controls follow the AI setting', () => {
     raw: 'Upstream timeout error',
     formattedTimestamp: '14:30:15.123',
     cleanedMessage: 'Upstream timeout error',
-    strippedMessage: 'Upstream timeout error',
   };
 
   const renderRow = (isMobile: boolean, aiEnabled?: boolean) =>

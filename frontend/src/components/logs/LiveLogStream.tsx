@@ -30,7 +30,7 @@ import { fetchAliases } from '../../api/aliases.ts';
 import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { fetchSettings, getCachedServerTimezone } from '../../api/settings.ts';
 import { useMediaQuery, useClipboard } from '../../utils/hooks.ts';
-import { stripAnsi, cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
+import { cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import {
   LogRow,
@@ -270,7 +270,6 @@ export function prepareLogEntry(
       existing.formattedTimestamp ??
       formatStreamTimestamp(entry.timestamp, entry.received_at, timeZone, todayKey),
     cleanedMessage: existing.cleanedMessage ?? cleanLogMessageForDisplay(entry.message),
-    strippedMessage: existing.strippedMessage ?? stripAnsi(entry.message),
   };
 }
 

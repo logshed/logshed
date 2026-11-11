@@ -8,7 +8,6 @@ export interface ProcessedLogEntry extends LogEntry {
   storedSourceAlias?: string;
   formattedTimestamp: string;
   cleanedMessage: string;
-  strippedMessage: string;
 }
 
 // Desktop column layout, shared by the table header and every row so they stay aligned.
@@ -95,8 +94,7 @@ export function areLogRowPropsEqual(prevProps: LogRowProps, nextProps: LogRowPro
       prevProps.log.timestamp !== nextProps.log.timestamp ||
       prevProps.log.received_at !== nextProps.log.received_at ||
       prevProps.log.formattedTimestamp !== nextProps.log.formattedTimestamp ||
-      prevProps.log.cleanedMessage !== nextProps.log.cleanedMessage ||
-      prevProps.log.strippedMessage !== nextProps.log.strippedMessage
+      prevProps.log.cleanedMessage !== nextProps.log.cleanedMessage
     ) {
       return false;
     }
@@ -120,7 +118,6 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
 }) => {
   const displayTimestamp = log.formattedTimestamp;
   const displayMessage = log.cleanedMessage;
-  const displayTitle = log.strippedMessage;
 
   if (isMobile) {
     return (
@@ -235,7 +232,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       </div>
 
       {/* Raw Text Message without dangerouslySetInnerHTML */}
-      <div className="text-slate-200 truncate pr-3 select-text" title={displayTitle}>
+      <div className="text-slate-200 truncate pr-3 select-text">
         {displayMessage.trim() ? (
           displayMessage
         ) : (
