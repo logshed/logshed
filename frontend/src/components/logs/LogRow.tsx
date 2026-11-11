@@ -131,7 +131,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         data-focused={isFocused || undefined}
         onClick={() => onClick(log)}
         style={style}
-        className={`log-row flex flex-col px-3 py-1 border-b border-dark-900 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
+        className={`log-row flex flex-col px-3 py-1 border-b border-dark-700 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
           rowStateClass(isSelected, isFocused)
         }${isCursor ? CURSOR_CLASS : ''}`}
       >

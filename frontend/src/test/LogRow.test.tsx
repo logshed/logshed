@@ -91,6 +91,18 @@ describe('LogRow Component and Optimization', () => {
     expect(onDiagnoseAi).toHaveBeenCalledWith([baseLog]);
   });
 
+  it('gives phone cards a visible divider and leaves desktop rows as they were', () => {
+    const props = { log: baseLog, index: 0, isSelected: false, style: {}, onSelect: vi.fn(), onClick: vi.fn(), onDiagnoseAi: vi.fn() };
+    const { rerender } = render(<LogRow {...props} isMobile={true} />);
+    const card = screen.getByRole('option');
+    // dark-900 on the dark-950 page cannot be seen; dark-700 matches the toolbar dividers above the list
+    expect(card).toHaveClass('border-b', 'border-dark-700');
+    expect(card).not.toHaveClass('border-dark-900');
+
+    rerender(<LogRow {...props} isMobile={false} />);
+    expect(screen.getByRole('option')).toHaveClass('border-b', 'border-dark-900');
+  });
+
   it('brightens a selected or alert row on hover instead of dropping its highlight', () => {
     const props = { log: baseLog, index: 0, isMobile: false, style: {}, onSelect: vi.fn(), onClick: vi.fn(), onDiagnoseAi: vi.fn() };
     const { rerender } = render(<LogRow {...props} isSelected={false} />);
