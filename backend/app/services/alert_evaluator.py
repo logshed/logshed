@@ -7,7 +7,7 @@ Integrates with QueueConsumer batch processing, redactor, AI diagnosis, and noti
 """
 
 import asyncio
-from collections import Counter, deque
+from collections import deque
 from contextlib import nullcontext
 import datetime
 import logging
@@ -30,8 +30,17 @@ from app.core.regex_validator import (
 from app.core.rule_index import RuleIndex, entry_key, exact_match_key
 from app.core.utils import compile_wildcard, parse_iso_to_epoch
 from app.services.notifier import get_notifier
-from app.services.alert_presets import extract_ip_from_message
-from app.services.rate_window import RateSnapshot, RateWindow, culprit_values
+from app.services.alert_incident import (
+    AiEnrichment,
+    AlertFacts,
+    ai_incident_summary,
+    build_alert_prompt,
+    collect_alert_facts,
+    format_alert_notification,
+    plain_incident_summary,
+    short_error_note,
+)
+from app.services.rate_window import RateSnapshot, RateWindow
 from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
@@ -39,12 +48,6 @@ logger = logging.getLogger(__name__)
 # Characters that make an alert pattern a regular expression; anything else is plain text
 _REGEX_METACHARS_BEFORE_BACKSLASH = frozenset("*+?[](){}^$|")
 _REGEX_METACHARS = _REGEX_METACHARS_BEFORE_BACKSLASH | {"\\"}
-
-
-def _log_id(entry: dict[str, Any]) -> Optional[int]:
-    """The stored id of a log entry (set by the queue consumer after its insert), or None."""
-    value = entry.get("id")
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 # A threshold window keeps whole entries only for its newest matches: the alert dispatch reads the
@@ -62,34 +65,6 @@ def _rate_payload(entry: dict[str, Any]) -> dict[str, Any]:
         "source_ip": entry.get("source_ip"),
         "message": str(entry.get("message") or entry.get("raw") or "")[:200],
     }
-
-
-def format_sample_log_for_alert(raw_msg: str, max_lines: int = 5, max_chars: int = 500) -> str:
-    """
-    Format and truncate log message for clean mobile/webhook push notifications.
-    Truncates long multi-line or excessively long strings to preserve readability.
-    """
-    if not raw_msg:
-        return ""
-    cleaned = raw_msg.strip()
-    lines = cleaned.splitlines()
-    if len(lines) > max_lines:
-        cleaned = "\n".join(lines[:max_lines]) + "\n... [truncated]"
-    if len(cleaned) > max_chars:
-        cleaned = cleaned[:max_chars] + "... [truncated]"
-    return cleaned
-
-
-def strip_markdown(text: str) -> str:
-    """Strip markdown formatting syntax for clean plain-text push notifications."""
-    if not text:
-        return ""
-    t = re.sub(r"```[a-zA-Z]*\n?", "", text)
-    t = t.replace("```", "").replace("`", "")
-    t = re.sub(r"^#{1,6}\s+", "", t, flags=re.MULTILINE)
-    t = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", t)
-    t = re.sub(r"^\s*[-*+]\s+", "", t, flags=re.MULTILINE)
-    return t.strip()
 
 
 class CompiledAlertRule:
@@ -671,290 +646,163 @@ class AlertEvaluator:
         rate: Optional[RateSnapshot] = None,
     ) -> None:
         """
-        Process alert firing:
-        1. Persist rule trigger state to SQLite non-blocking via asyncio.to_thread.
-        2. Extract IP indicators (for security canary alerts).
-        3. Perform AI diagnosis enrichment if enabled.
-        4. Persist record into alert_history table non-blocking via asyncio.to_thread.
-        5. Send notification via NotifierService.
+        Process alert firing: store the rule's trigger state, read the facts of the triggering
+        logs, ask the AI for a diagnosis if the rule wants one, record the alert in history and,
+        outside maintenance, send the notification.
         """
-        # Persist rule trigger state to SQLite non-blocking in worker thread
         await asyncio.to_thread(self._update_rule_trigger_state, rule)
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
-        now_iso = now_utc.isoformat()
-
-        # Extract offending IP, host, and app/container if present in triggering logs
-        sample_log = ""
-        sample_log_id: Optional[int] = None
-        extracted_ip = None
-        extracted_host = None
-        extracted_app = None
-        if triggering_logs:
-            sample_entry = triggering_logs[-1]
-            if isinstance(sample_entry, dict):
-                sample_log = str(sample_entry.get("message") or sample_entry.get("raw") or "")
-                sample_log_id = _log_id(sample_entry)
-            for log_entry in reversed(triggering_logs):
-                if not isinstance(log_entry, dict):
-                    continue
-                if not extracted_ip:
-                    msg = str(log_entry.get("message") or "")
-                    cand_ip = extract_ip_from_message(msg)
-                    if cand_ip:
-                        extracted_ip = cand_ip
-                if not extracted_host:
-                    cand_host = log_entry.get("source_alias") or log_entry.get("source_ip") or log_entry.get("host")
-                    if cand_host:
-                        extracted_host = str(cand_host).strip()
-                if not extracted_app:
-                    cand_app = log_entry.get("app_name") or log_entry.get("container_name") or log_entry.get("tag")
-                    if cand_app:
-                        extracted_app = str(cand_app).strip()
-
-        # Culprit frequency analysis using collections.Counter
-        culprit_app: Optional[str] = None
-        culprit_host: Optional[str] = None
-        culprit_msg: Optional[str] = None
-        measured_rate: Optional[float] = None
-
-        # A rate rule's window counts its matches and keeps only the newest as triggering_logs
-        log_count = rate.total if rate is not None else len(triggering_logs)
-
-        if triggering_logs:
-            total_logs = log_count
-            if rate is not None:
-                app_counter, host_counter, msg_counter = rate.apps, rate.hosts, rate.messages
-            else:
-                app_counter = Counter()
-                host_counter = Counter()
-                msg_counter = Counter()
-                for log_entry in triggering_logs:
-                    if not isinstance(log_entry, dict):
-                        continue
-                    app_val, host_val, msg_val = culprit_values(log_entry)
-                    app_counter[app_val] += 1
-                    host_counter[host_val] += 1
-                    if msg_val:
-                        msg_counter[msg_val] += 1
-
-            if app_counter:
-                top_app, app_count = app_counter.most_common(1)[0]
-                # Counters of a rate window may include a little of the time just before the window
-                app_count = min(app_count, total_logs)
-                app_pct = round((app_count / total_logs) * 100)
-                culprit_app = f"{top_app} ({app_count}/{total_logs}, {app_pct}%)"
-                if rule.rule_type == "rate":
-                    extracted_app = top_app
-                    top_app_entry = rate.newest_by_app.get(top_app) if rate is not None else next(
-                        (
-                            log_entry
-                            for log_entry in reversed(triggering_logs)
-                            if isinstance(log_entry, dict) and culprit_values(log_entry)[0] == top_app
-                        ),
-                        None,
-                    )
-                    if top_app_entry is not None:
-                        sample_log = str(top_app_entry.get("message") or top_app_entry.get("raw") or "")
-                        sample_log_id = _log_id(top_app_entry)
-            if host_counter:
-                top_host, host_count = host_counter.most_common(1)[0]
-                host_count = min(host_count, total_logs)
-                host_pct = round((host_count / total_logs) * 100)
-                culprit_host = f"{top_host} ({host_count}/{total_logs}, {host_pct}%)"
-                if rule.rule_type == "rate":
-                    extracted_host = top_host
-            if msg_counter:
-                top_msg, msg_count = msg_counter.most_common(1)[0]
-                # Notifications and the AI prompt show this message, so it is redacted like the sample log
-                top_msg = str(redact(top_msg))
-                msg_count = min(msg_count, total_logs)
-                msg_pct = round((msg_count / total_logs) * 100)
-                culprit_msg = f"{top_msg} (x{msg_count}, {msg_pct}%)"
-
-            measured_rate = round(total_logs / max(1.0, float(rule.window_seconds)), 1)
-
-        incident_summary = None
-        ai_success = False
-        ai_error_note = None
-        actual_ai_model = None
-        saved_audit_id = None
-        ai_enabled = False
-
-        # Perform AI enrichment if enabled on the rule
+        facts = collect_alert_facts(rule, triggering_logs, rate)
         if rule.ai_enrichment and triggering_logs:
-            try:
-                from app.api.deps import run_db_query
-                from app.services.ai_service import read_ai_settings, resolve_ai_provider_settings
-                from app.services.ai_engine import escape_code_fences, execute_ai_analysis, format_prompt_log_line
-
-                ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
-
-                provider_settings = resolve_ai_provider_settings(ai_settings)
-                ai_enabled = provider_settings["ai_enabled"]
-
-                if not ai_enabled:
-                    logger.info(
-                        f"AI enrichment skipped for alert rule '{rule.name}' because AI features are disabled."
-                    )
-                    ai_success = False
-                    if rule.rule_type == "rate":
-                        incident_summary = (
-                            f"Log storm detected: {log_count} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
-                            f"### Primary Culprits\n"
-                            f"- Top Service / App: {culprit_app or 'Unknown'}\n"
-                            f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
-                            f"- Top Pattern: {culprit_msg or 'N/A'}"
-                        )
-                    else:
-                        incident_summary = f"Alert triggered with {log_count} matching event(s)."
-                else:
-                    ai_provider = provider_settings["provider"]
-                    ai_model = provider_settings["model"]
-                    ai_key = provider_settings["api_key"]
-                    ai_base = provider_settings["base_url"]
-                    fallback_models = provider_settings["fallback_models"]
-
-                    # Format and redact log window
-                    raw_lines = [
-                        format_prompt_log_line(
-                            timestamp=entry.get("timestamp"),
-                            source=entry.get("source_alias") or entry.get("source_ip"),
-                            app_name=entry.get("app_name"),
-                            message=entry.get("message", ""),
-                            severity=entry.get("severity"),
-                            raw=entry.get("raw"),
-                        )
-                        for entry in triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
-                    ]
-                    redacted_lines = await asyncio.to_thread(redact, raw_lines)
-                    redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
-                    # A log line must not close the prompt's code fence
-                    redacted_text = escape_code_fences(redacted_text)
-
-                    if rule.rule_type == "rate":
-                        threshold_line = f"- Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s (Measured: {measured_rate} logs/s)"
-                        culprit_section = (
-                            f"### Primary Culprits\n"
-                            f"- Top Service / App: {culprit_app or 'Unknown'}\n"
-                            f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
-                            f"- Top Pattern: {culprit_msg or 'N/A'}\n\n"
-                        )
-                    else:
-                        threshold_line = f"- Threshold: {rule.threshold_count} matches in {rule.window_seconds}s"
-                        culprit_section = ""
-
-                    prompt = (
-                        f"### Security / Operations Incident Alert\n"
-                        f"- Alert Rule: {rule.name}\n"
-                        f"- Rule Type: {rule.rule_type}\n"
-                        f"- Host / Source: {extracted_host or 'Unknown'}\n"
-                        f"- App / Container: {extracted_app or 'Unknown'}\n"
-                        f"{threshold_line}\n"
-                        f"- Offending IP: {extracted_ip or 'None detected'}\n\n"
-                        f"{culprit_section}"
-                        f"### Redacted Log Stream (Chronological)\n"
-                        f"```\n{redacted_text}\n```\n\n"
-                        f"Review this incident and provide structured Summary, Root Cause, and Actionable Remediation."
-                    )
-
-                    logger.info(
-                        f"Starting AI incident analysis for rule '{rule.name}' with primary model '{ai_model or 'default'}' "
-                        f"and fallback models {fallback_models}"
-                    )
-
-                    ai_result = await execute_ai_analysis(
-                        provider=ai_provider,
-                        model=ai_model,
-                        api_key=ai_key,
-                        base_url=ai_base,
-                        source_alias=triggering_logs[0].get("source_alias") or "alert",
-                        app_name=triggering_logs[0].get("app_name") or "alert",
-                        redacted_logs=redacted_text,
-                        log_count=log_count,
-                        prompt_override=prompt,
-                        fallback_models=fallback_models,
-                        timeout=provider_settings["ai_timeout"],
-                        thinking_level=provider_settings["ai_thinking_level"],
-                    )
-                    actual_ai_model = ai_result.model_used
-
-                    if ai_result.fallback_attempts:
-                        logger.info(
-                            f"AI enrichment for alert '{rule.name}' succeeded via fallback model '{actual_ai_model}' "
-                            f"after failovers: {ai_result.fallback_attempts}"
-                        )
-
-                    summary = ai_result.summary
-                    diag_parts = []
-                    if summary and summary.strip():
-                        diag_parts.append(summary.strip())
-                    if ai_result.root_cause and ai_result.root_cause.strip():
-                        diag_parts.append(f"### Root Cause\n{ai_result.root_cause.strip()}")
-                    if ai_result.remediation and ai_result.remediation.strip():
-                        diag_parts.append(f"### Remediation\n{ai_result.remediation.strip()}")
-                    incident_summary = "\n\n".join(diag_parts) if diag_parts else (summary or "Incident review complete.")
-                    ai_success = True
-
-                    from app.services.ai_service import save_diagnosis_audit
-
-                    audit_source_alias = (
-                        extracted_host
-                        or (triggering_logs[0].get("source_alias") if triggering_logs else None)
-                        or (triggering_logs[0].get("source_ip") if triggering_logs else None)
-                        or "alert"
-                    )
-                    audit_app_name = (
-                        extracted_app
-                        or (triggering_logs[0].get("app_name") if triggering_logs else None)
-                        or "alert"
-                    )
-
-                    try:
-                        saved_audit_id = await save_diagnosis_audit(
-                            source_alias=audit_source_alias,
-                            app_name=audit_app_name,
-                            log_count=log_count,
-                            user_context=f"Alert Rule: {rule.name}",
-                            actual_model=actual_ai_model,
-                            prompt_sent=ai_result.prompt_sent or prompt,
-                            raw_response=incident_summary or ai_result.raw_response,
-                            tokens_in=ai_result.tokens_in or 0,
-                            tokens_out=ai_result.tokens_out or 0,
-                            tokens_thoughts=ai_result.tokens_thoughts or 0,
-                            tokens_used=ai_result.tokens_used or 0,
-                            system_prompt=ai_settings.get("ai_system_prompt") or None,
-                            trigger_source="alert",
-                            custom_db_path=self.db_path,
-                        )
-                    except Exception as audit_err:
-                        logger.warning(
-                            f"Failed to record AI audit log for alert rule '{rule.name}': {audit_err}"
-                        )
-
-            except Exception as ai_err:
-                logger.warning(
-                    f"AI enrichment failed for alert rule '{rule.name}' after attempting candidate models: {ai_err}"
-                )
-                ai_success = False
-                clean_err = str(ai_err).splitlines()[0]
-                if len(clean_err) > 250:
-                    clean_err = clean_err[:247] + "..."
-                incident_summary = f"AI analysis failed: {clean_err}"
-                ai_error_note = clean_err
+            ai = await self._enrich_with_ai(rule, triggering_logs, facts)
         else:
-            if rule.rule_type == "rate":
-                incident_summary = (
-                    f"Log storm detected: {log_count} logs in {rule.window_seconds}s ({measured_rate} logs/s).\n\n"
-                    f"### Primary Culprits\n"
-                    f"- Top Service / App: {culprit_app or 'Unknown'}\n"
-                    f"- Top Host / Source: {culprit_host or 'Unknown'}\n"
-                    f"- Top Pattern: {culprit_msg or 'N/A'}"
-                )
-            else:
-                incident_summary = f"Alert triggered with {log_count} matching event(s)."
+            ai = AiEnrichment(incident_summary=plain_incident_summary(rule, facts))
 
-        # Record event in alert_history table via worker thread
+        # The notification links to this record, or to the history list when it was not saved
+        history_id = await self._record_alert_history(rule, facts, ai, now_iso)
+
+        if await asyncio.to_thread(self._is_maintenance_active):
+            logger.info(
+                f"Global maintenance window active: skipping notification dispatch for alert rule '{rule.name}'"
+            )
+            return
+
+        from app.core.config import get_cached_setting
+        app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
+        title, body = format_alert_notification(rule, facts, ai, history_id, app_url)
+
+        notifier = get_notifier()
+        try:
+            await notifier.send_notification(title=title, body=body, channel_id=rule.channel_id)
+        except Exception as notify_err:
+            logger.error(f"Failed to dispatch alert notification for {rule.name}: {notify_err}")
+
+    async def _enrich_with_ai(
+        self, rule: CompiledAlertRule, triggering_logs: list[dict[str, Any]], facts: AlertFacts
+    ) -> AiEnrichment:
+        """Ask the configured AI provider for a diagnosis and record it in the AI audit log."""
+        ai = AiEnrichment()
+        try:
+            from app.api.deps import run_db_query
+            from app.services.ai_service import read_ai_settings, resolve_ai_provider_settings
+
+            ai_settings, _ = await run_db_query(read_ai_settings, custom_db_path=self.db_path)
+            provider_settings = resolve_ai_provider_settings(ai_settings)
+            ai.enabled = provider_settings["ai_enabled"]
+
+            if not ai.enabled:
+                logger.info(
+                    f"AI enrichment skipped for alert rule '{rule.name}' because AI features are disabled."
+                )
+                ai.incident_summary = plain_incident_summary(rule, facts)
+                return ai
+
+            from app.services.ai_engine import execute_ai_analysis
+
+            redacted_text = await self._redacted_prompt_logs(triggering_logs)
+            prompt = build_alert_prompt(rule, facts, redacted_text)
+            fallback_models = provider_settings["fallback_models"]
+            logger.info(
+                f"Starting AI incident analysis for rule '{rule.name}' with primary model "
+                f"'{provider_settings['model'] or 'default'}' and fallback models {fallback_models}"
+            )
+
+            ai_result = await execute_ai_analysis(
+                provider=provider_settings["provider"],
+                model=provider_settings["model"],
+                api_key=provider_settings["api_key"],
+                base_url=provider_settings["base_url"],
+                source_alias=triggering_logs[0].get("source_alias") or "alert",
+                app_name=triggering_logs[0].get("app_name") or "alert",
+                redacted_logs=redacted_text,
+                log_count=facts.log_count,
+                prompt_override=prompt,
+                fallback_models=fallback_models,
+                timeout=provider_settings["ai_timeout"],
+                thinking_level=provider_settings["ai_thinking_level"],
+            )
+            ai.model = ai_result.model_used
+            if ai_result.fallback_attempts:
+                logger.info(
+                    f"AI enrichment for alert '{rule.name}' succeeded via fallback model '{ai.model}' "
+                    f"after failovers: {ai_result.fallback_attempts}"
+                )
+
+            ai.summary = ai_result.summary
+            ai.incident_summary = ai_incident_summary(ai_result)
+            ai.success = True
+            ai.audit_id = await self._save_alert_audit(rule, triggering_logs, facts, ai, ai_result, prompt, ai_settings)
+
+        except Exception as ai_err:
+            logger.warning(
+                f"AI enrichment failed for alert rule '{rule.name}' after attempting candidate models: {ai_err}"
+            )
+            ai.success = False
+            ai.error_note = short_error_note(ai_err)
+            ai.incident_summary = f"AI analysis failed: {ai.error_note}"
+        return ai
+
+    @staticmethod
+    async def _redacted_prompt_logs(triggering_logs: list[dict[str, Any]]) -> str:
+        """The newest whole entries as prompt lines, redacted, so no line can close the prompt's code fence."""
+        from app.services.ai_engine import escape_code_fences, format_prompt_log_line
+
+        raw_lines = [
+            format_prompt_log_line(
+                timestamp=entry.get("timestamp"),
+                source=entry.get("source_alias") or entry.get("source_ip"),
+                app_name=entry.get("app_name"),
+                message=entry.get("message", ""),
+                severity=entry.get("severity"),
+                raw=entry.get("raw"),
+            )
+            for entry in triggering_logs[-FULL_ENTRIES_KEPT:]  # Only the newest are whole entries
+        ]
+        redacted_lines = await asyncio.to_thread(redact, raw_lines)
+        redacted_text = "\n".join(redacted_lines) if isinstance(redacted_lines, list) else str(redacted_lines)
+        return escape_code_fences(redacted_text)
+
+    async def _save_alert_audit(
+        self,
+        rule: CompiledAlertRule,
+        triggering_logs: list[dict[str, Any]],
+        facts: AlertFacts,
+        ai: AiEnrichment,
+        ai_result: Any,
+        prompt: str,
+        ai_settings: dict[str, str],
+    ) -> Optional[int]:
+        """Record the diagnosis in the AI audit log; None when that fails (the alert still goes out)."""
+        from app.services.ai_service import save_diagnosis_audit
+
+        first = triggering_logs[0]
+        try:
+            return await save_diagnosis_audit(
+                source_alias=facts.host or first.get("source_alias") or first.get("source_ip") or "alert",
+                app_name=facts.app or first.get("app_name") or "alert",
+                log_count=facts.log_count,
+                user_context=f"Alert Rule: {rule.name}",
+                actual_model=ai.model,
+                prompt_sent=ai_result.prompt_sent or prompt,
+                raw_response=ai.incident_summary or ai_result.raw_response,
+                tokens_in=ai_result.tokens_in or 0,
+                tokens_out=ai_result.tokens_out or 0,
+                tokens_thoughts=ai_result.tokens_thoughts or 0,
+                tokens_used=ai_result.tokens_used or 0,
+                system_prompt=ai_settings.get("ai_system_prompt") or None,
+                trigger_source="alert",
+                custom_db_path=self.db_path,
+            )
+        except Exception as audit_err:
+            logger.warning(f"Failed to record AI audit log for alert rule '{rule.name}': {audit_err}")
+            return None
+
+    async def _record_alert_history(
+        self, rule: CompiledAlertRule, facts: AlertFacts, ai: AiEnrichment, now_iso: str
+    ) -> Optional[int]:
+        """Insert the alert_history row; its id, or None when the insert failed."""
+
         def _execute_insert(conn: sqlite3.Connection) -> Optional[int]:
             cur = conn.execute(
                 """
@@ -966,91 +814,24 @@ class AlertEvaluator:
                     rule.id,
                     rule.name,
                     rule.channel_id,
-                    log_count,
-                    sample_log[:1000],
-                    sample_log_id,
-                    incident_summary,
-                    int(rule.ai_enrichment and ai_enabled),
-                    actual_ai_model,
-                    saved_audit_id,
+                    facts.log_count,
+                    facts.sample_log[:1000],
+                    facts.sample_log_id,
+                    ai.incident_summary,
+                    int(rule.ai_enrichment and ai.enabled),
+                    ai.model,
+                    ai.audit_id,
                     now_iso,
                 ),
             )
             return cur.lastrowid
 
-        # The notification links to this record, or to the history list when it was not saved
-        history_id: Optional[int] = None
         try:
             from app.api.deps import run_db_query
-            history_id = await run_db_query(_execute_insert, custom_db_path=self.db_path)
+            return await run_db_query(_execute_insert, custom_db_path=self.db_path)
         except Exception as db_err:
             logger.error(f"Failed to record alert history for rule {rule.id}: {db_err}")
-
-        # Check global maintenance window before dispatching external notification
-        in_maintenance = await asyncio.to_thread(self._is_maintenance_active)
-        if in_maintenance:
-            logger.info(
-                f"Global maintenance window active: skipping notification dispatch for alert rule '{rule.name}'"
-            )
-            return
-
-        # Construct clean push notification payload with secrets redacted
-        if rule.rule_type == "rate":
-            notification_title = str(redact(f"LogShed: [Log Storm] {rule.name} ({measured_rate} logs/s)"))
-        else:
-            notification_title = str(redact(f"LogShed: {rule.name}"))
-
-        redacted_sample_log = str(redact(sample_log)) if sample_log else ""
-        truncated_log = format_sample_log_for_alert(redacted_sample_log)
-        clean_log = truncated_log.replace("```", "").replace("`", "").strip()
-
-        if rule.rule_type == "rate":
-            body_lines = [
-                f"**Host:** {culprit_host or extracted_host or 'Unknown'}",
-                f"**App:** {culprit_app or extracted_app or 'Unknown'}",
-                f"**Rate:** {measured_rate} logs/s (Threshold: {rule.threshold_count} logs/s in {rule.window_seconds}s)",
-            ]
-            if culprit_msg:
-                body_lines.append(f"**Top Pattern:** {culprit_msg}")
-            if clean_log:
-                body_lines.append(f"**Sample Log:** {clean_log}")
-        else:
-            body_lines = [
-                f"**Host:** {extracted_host or 'Unknown'}",
-                f"**App:** {extracted_app or 'Unknown'}",
-                f"**Log:** {clean_log}",
-            ]
-
-        if rule.ai_enrichment and ai_enabled:
-            if ai_success and summary:
-                redacted_summary = str(redact(summary))
-                clean_summary = strip_markdown(redacted_summary)
-                if len(clean_summary) > 200:
-                    clean_summary = clean_summary[:197] + "..."
-                body_lines.append(f"**AI Analysis:** {clean_summary}")
-            elif ai_error_note:
-                redacted_error = str(redact(ai_error_note))
-                body_lines.append(f"**AI Analysis:** Unavailable ({redacted_error})")
-
-        from app.core.config import get_cached_setting
-        app_url = str(get_cached_setting("app_url", "")).strip().rstrip("/")
-        if app_url:
-            link = f"{app_url}/rules/history"
-            if history_id:
-                link += f"?id={history_id}"
-            body_lines.append(f"**Link:** {link}")
-
-        notification_body = "\n".join(body_lines)
-
-        notifier = get_notifier()
-        try:
-            await notifier.send_notification(
-                title=notification_title,
-                body=notification_body,
-                channel_id=rule.channel_id,
-            )
-        except Exception as notify_err:
-            logger.error(f"Failed to dispatch alert notification for {rule.name}: {notify_err}")
+            return None
 
     async def stop(self) -> None:
         """Wait for any in-flight alert dispatch tasks to complete."""

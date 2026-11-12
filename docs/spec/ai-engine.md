@@ -24,7 +24,7 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
 
 ### 1.2 Automated Alert Enrichment (Background Incident Enrichment)
 
-- **Implementation Reference:** [backend/app/services/alert_evaluator.py](../../backend/app/services/alert_evaluator.py)
+- **Implementation Reference:** [backend/app/services/alert_evaluator.py](../../backend/app/services/alert_evaluator.py) (the AI call, history record and sending) and [backend/app/services/alert_incident.py](../../backend/app/services/alert_incident.py) (the facts, prompt, incident summary and notification text built from the triggering logs)
 - **Rule Configuration:** Alert rules can optionally enable automated background incident enrichment (`ai_enrichment = 1` in `alert_rules`).
 - **Trigger Execution:** When an enabled alert rule with AI enrichment fires, `AlertEvaluator` redacts the triggering log sample, the log window and a rate rule's top message pattern through [backend/app/core/redactor.py](../../backend/app/core/redactor.py) and dispatches them to the configured LLM. Notifications carry the same redacted sample and top pattern.
 - **Incident Summary & Remediation:** The model generates a concise incident summary, root-cause diagnosis, and actionable remediation steps. This structured analysis is embedded directly into outbound notification payloads (dispatched via configured Apprise notification channels) and saved in `alert_history`.

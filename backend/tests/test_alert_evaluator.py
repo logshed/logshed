@@ -870,7 +870,7 @@ class TestQueueConsumerAlertIntegration:
 
     def test_format_sample_log_truncation(self):
         """Verify format_sample_log_for_alert truncates long and multi-line messages."""
-        from app.services.alert_evaluator import format_sample_log_for_alert
+        from app.services.alert_incident import format_sample_log_for_alert
 
         multiline_msg = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8"
         truncated = format_sample_log_for_alert(multiline_msg, max_lines=5)
@@ -890,7 +890,7 @@ class TestQueueConsumerAlertIntegration:
 
     def test_strip_markdown(self):
         """Verify strip_markdown removes headers, code fences, bold, and list markers."""
-        from app.services.alert_evaluator import strip_markdown
+        from app.services.alert_incident import strip_markdown
 
         md = "### Incident Summary\n**Critical:** `root` login from 10.0.0.1\n* Check sudoers\n```bash\njournalctl\n```"
         cleaned = strip_markdown(md)
