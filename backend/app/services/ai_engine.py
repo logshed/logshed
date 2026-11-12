@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Sequence, TypeVar
 
 import httpx
+import httpx2
 from anthropic import (
     AsyncAnthropic,
     APITimeoutError as AnthropicTimeoutError,
@@ -34,6 +35,10 @@ from app.core.utils import format_utc_offset
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+# A transport timeout from either HTTP library: google-genai 3 and the openai and anthropic SDKs run
+# on httpx2, and LogShed's own requests on httpx.
+HTTP_TIMEOUTS = (httpx.TimeoutException, httpx2.TimeoutException)
 
 DEFAULT_SYSTEM_PROMPT = """You are an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator.
 Review the following redacted server/container logs and provide a structured diagnosis in Markdown format.
@@ -77,7 +82,7 @@ def is_retryable_for_fallback(exc: Exception) -> bool:
     Deadline Exceeded, Model Overload, Rate Limit / Quota Exhaustion, or 404 Model Not Found error,
     or a refusal by the model, qualifying the request for failover to a fallback model.
     """
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, APITimeoutError, AnthropicTimeoutError, httpx.TimeoutException)):
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, APITimeoutError, AnthropicTimeoutError, *HTTP_TIMEOUTS)):
         return True
     if isinstance(exc, (AiServiceUnavailableError, AiRefusalError)):
         return True
@@ -957,7 +962,7 @@ async def _gemini_session(api_key: str, timeout: float, max_retries: int = 1) ->
         yield client
     except (asyncio.TimeoutError, TimeoutError):
         raise TimeoutError("Request timed out")
-    except httpx.TimeoutException as te:
+    except HTTP_TIMEOUTS as te:
         raise TimeoutError(f"Request timed out: {te}") from te
     except (ValueError, AiServiceUnavailableError):
         raise
@@ -1028,7 +1033,7 @@ async def _openai_session(api_key: str, base_url: Optional[str], timeout: float)
         raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
     except (asyncio.TimeoutError, TimeoutError):
         raise TimeoutError("OpenAI endpoint timed out")
-    except httpx.TimeoutException as te:
+    except HTTP_TIMEOUTS as te:
         raise TimeoutError(f"OpenAI endpoint timed out: {te}") from te
     except (ValueError, AiServiceUnavailableError):
         raise
@@ -1187,7 +1192,7 @@ async def _anthropic_session(api_key: str, timeout: float) -> AsyncIterator[Asyn
         raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
     except (asyncio.TimeoutError, TimeoutError):
         raise TimeoutError("Anthropic endpoint timed out")
-    except httpx.TimeoutException as te:
+    except HTTP_TIMEOUTS as te:
         raise TimeoutError(f"Anthropic endpoint timed out: {te}") from te
     except (ValueError, AiServiceUnavailableError, AiRefusalError):
         raise

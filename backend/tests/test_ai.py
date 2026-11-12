@@ -4638,3 +4638,91 @@ class TestClaudeRequestsThroughTheRealSdk:
         assert not any("temperature" in body for body in sent)
         assert "thinking" not in sent[1]
 
+
+class TestGeminiRequestsThroughTheRealSdk:
+    """The real google-genai client over a fake transport: the API version, the request fields and timeouts."""
+
+    MODELS_AND_LEVELS = [
+        ("gemini-2.0-flash", "low"),
+        ("gemini-2.5-flash", "off"),
+        ("gemini-2.5-pro", "off"),
+        ("gemini-3-flash", "low"),
+        ("gemini-flash-latest", "medium"),
+    ]
+    ANSWER = "## Summary\nOk\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix"
+
+    @classmethod
+    def _response(cls) -> dict:
+        return {
+            "candidates": [{"content": {"role": "model", "parts": [{"text": cls.ANSWER}]}, "finishReason": "STOP"}],
+            "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15},
+        }
+
+    def _patched_client(self, sent: list, handler=None):
+        """Patch the engine's genai.Client with the real class on a transport that records each request."""
+        import httpx2
+        from google import genai as real_genai
+
+        real_client = real_genai.Client
+
+        def default_handler(request: httpx2.Request) -> httpx2.Response:
+            sent.append((request.url.path, json.loads(request.content)))
+            if request.url.path.endswith(":streamGenerateContent"):
+                body = f"data: {json.dumps(self._response())}\n\n".encode()
+                return httpx2.Response(200, content=body, headers={"content-type": "text/event-stream"})
+            return httpx2.Response(200, json=self._response())
+
+        transport = httpx2.MockTransport(handler or default_handler)
+
+        def make_client(**kwargs):
+            options = kwargs.pop("http_options").model_copy(update={"async_client_args": {"transport": transport}})
+            return real_client(**kwargs, http_options=options)
+
+        return patch.object(ai_engine.genai, "Client", side_effect=make_client)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model,level", MODELS_AND_LEVELS)
+    async def test_analysis_request_goes_to_the_v1_api(self, model, level):
+        sent: list = []
+        with self._patched_client(sent):
+            text, *_rest = await ai_engine.call_gemini(api_key="g-key", model=model, prompt="p", thinking_level=level)
+        assert "Ok" in text
+        path, body = sent[0]
+        assert path == f"/v1/models/{model}:generateContent"
+        assert body["systemInstruction"]["parts"][0]["text"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model,level", MODELS_AND_LEVELS)
+    async def test_streamed_follow_up_goes_to_the_v1_api(self, model, level):
+        sent: list = []
+        with self._patched_client(sent):
+            text, *_rest = await ai_engine.dispatch_multi_turn_gemini(
+                api_key="g-key", model=model, messages=[{"role": "user", "content": "why?"}],
+                system_prompt="You help.", thinking_level=level,
+            )
+        assert "Ok" in text
+        assert sent[0][0] == f"/v1/models/{model}:streamGenerateContent"
+
+    @pytest.mark.asyncio
+    async def test_thinking_settings_reach_the_request_body(self):
+        sent: list = []
+        with self._patched_client(sent):
+            await ai_engine.call_gemini(api_key="g-key", model="gemini-3-flash", prompt="p", thinking_level="low")
+            await ai_engine.call_gemini(api_key="g-key", model="gemini-2.5-flash", prompt="p", thinking_level="off")
+        # The SDK writes these two fields in snake case, which the API accepts as well as camel case
+        assert sent[0][1]["generationConfig"]["thinkingConfig"] == {"thinking_level": "LOW"}
+        assert sent[1][1]["generationConfig"]["thinkingConfig"] == {"thinking_budget": 0}
+        assert sent[1][1]["generationConfig"]["temperature"] == 0.2
+
+    @pytest.mark.asyncio
+    async def test_a_timeout_is_reported_as_a_timeout_and_fails_over(self):
+        import httpx2
+
+        def timeout(request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.ReadTimeout("read timed out", request=request)
+
+        with self._patched_client([], handler=timeout):
+            with pytest.raises(TimeoutError) as excinfo:
+                await ai_engine.call_gemini(api_key="g-key", model="gemini-3-flash", prompt="p")
+        assert ai_engine.is_retryable_for_fallback(excinfo.value)
+        assert ai_engine.is_retryable_for_fallback(httpx2.ReadTimeout("read timed out"))
