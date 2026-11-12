@@ -26,7 +26,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
-from app.mcp.server import create_mcp_server
+from app.mcp.server import McpRefusal, create_mcp_server
 from app.services import maintenance_service as ms
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.drop_filter import init_drop_filter
@@ -298,7 +298,7 @@ class TestLimits:
     )
     async def test_mcp_rejects_values_rest_rejects(self, kwargs: dict, match: str, db_path: Path):
         tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
-        with pytest.raises(ValueError, match=match):
+        with pytest.raises(McpRefusal, match=match):
             await tool.fn(**kwargs)
         with open_db(db_path, row_factory=sqlite3.Row) as conn:
             assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0

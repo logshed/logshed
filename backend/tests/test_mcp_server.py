@@ -13,6 +13,7 @@ import sys
 import json
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from mcp.server.mcpserver import MCPServer
 
@@ -30,7 +31,7 @@ from app.core.security import (
 from app.core.sse import sse_manager
 from app.services.operation_guard import reset_operation_state
 from app.main import create_app
-from app.mcp.server import McpAccess, create_mcp_server, mcp_access_context
+from app.mcp.server import McpAccess, McpRefusal, create_mcp_server, mcp_access_context
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.fts_indexer import index_pending_logs
@@ -646,9 +647,9 @@ class TestPerToolScopes:
         for server in (create_mcp_server(stdio=True), create_mcp_server()):
             tool = server._tool_manager._tools["enable_maintenance"]
             with mcp_access_context(McpAccess(scopes=("*",), token_id=None, token_name="test")):
-                with pytest.raises(ValueError, match="target_app or target_host"):
+                with pytest.raises(McpRefusal, match="target_app or target_host"):
                     await tool.fn(duration_minutes=5, log_handling="drop_errors")
-                with pytest.raises(ValueError, match="target_app or target_host"):
+                with pytest.raises(McpRefusal, match="target_app or target_host"):
                     await tool.fn(duration_minutes=5, log_handling="drop_errors", target_app="   ")
                 res = await tool.fn(duration_minutes=5, log_handling="drop_errors", target_host="pve-node1")
                 assert res["target_host"] == "pve-node1"
@@ -658,9 +659,9 @@ class TestPerToolScopes:
     @pytest.mark.asyncio
     async def test_direct_calls_without_an_authenticated_caller_are_refused(self):
         server = create_mcp_server()
-        with pytest.raises(PermissionError):
+        with pytest.raises(McpRefusal):
             await server._tool_manager._tools["query_logs"].fn()
-        with pytest.raises(PermissionError):
+        with pytest.raises(McpRefusal):
             await server._resource_manager._resources["logshed://services"].fn()
 
     def test_instructions_and_descriptions_mark_log_content_as_untrusted(self):
@@ -1544,12 +1545,12 @@ class TestMCPDisableMaintenance:
     @pytest.mark.asyncio
     async def test_unknown_or_ended_session_id_is_a_tool_error(self):
         tools = create_mcp_server(stdio=True)._tool_manager._tools
-        with pytest.raises(ValueError, match="No active maintenance session with id 'does-not-exist'"):
+        with pytest.raises(McpRefusal, match="No active maintenance session with id 'does-not-exist'"):
             await tools["disable_maintenance"].fn(session_id="does-not-exist")
 
         started = await tools["enable_maintenance"].fn(duration_minutes=5)
         await tools["disable_maintenance"].fn(session_id=started["session_id"])
-        with pytest.raises(ValueError, match="No active maintenance session"):
+        with pytest.raises(McpRefusal, match="No active maintenance session"):
             await tools["disable_maintenance"].fn(session_id=started["session_id"])
 
     @pytest.mark.asyncio
@@ -2066,6 +2067,94 @@ class TestMcpSdkClientsOfEachProtocolRevision:
 
             services = await sdk.read_resource("logshed://services")
             assert "apps" in services.contents[0].text
+
+    @pytest.mark.asyncio
+    async def test_subscription_streams_are_not_served(self, client: AsyncClient, auth_headers: dict):
+        """
+        LogShed publishes no list-changed notices, and a subscriptions/listen stream is a POST that
+        would stay open past the revocation of its token, so the method is refused.
+        """
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        headers = {
+            **_streamable_headers(token["raw"]),
+            "MCP-Protocol-Version": "2026-07-28",
+            "Mcp-Method": "subscriptions/listen",
+        }
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "subscriptions/listen",
+            "params": {
+                "notifications": {"toolsListChanged": True},
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                },
+            },
+        }
+        res = await asyncio.wait_for(client.post("/mcp", headers=headers, json=payload), timeout=5.0)
+        reply = res.json() if res.headers["content-type"].startswith("application/json") else _sse_body_json(res.text)
+        assert reply["error"]["code"] == -32601, reply
+        assert "result" not in reply
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            PermissionError(13, "Permission denied", "/data/logs.db"),
+            ValueError("invalid literal for int() with base 10: 'secret-internal-value'"),
+            HTTPException(status_code=503, detail="worker at /data/logs.db is busy"),
+        ],
+        ids=["os-permission-error", "internal-value-error", "rest-5xx"],
+    )
+    async def test_an_internal_failure_names_the_tool_or_resource_but_not_the_cause(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch, mode: str, failure: Exception
+    ):
+        from mcp import MCPError
+
+        async def broken_facets(**_kwargs):
+            raise failure
+
+        monkeypatch.setattr("app.mcp.server.get_log_facets", broken_facets)
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sdk, http = self._sdk_client(token["raw"], mode)
+        async with http, sdk:
+            result = await sdk.call_tool("list_services", {})
+            with pytest.raises(MCPError) as resource_error:
+                await sdk.read_resource("logshed://services")
+        assert result.is_error is True
+        assert result.content[0].text == "Error executing tool list_services"
+        assert "logs.db" not in str(resource_error.value)
+        assert "secret-internal-value" not in str(resource_error.value)
+        assert "logshed://services" in str(resource_error.value)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
+    async def test_a_refusal_tells_the_client_what_to_change(
+        self, client: AsyncClient, auth_headers: dict, mode: str
+    ):
+        from mcp import MCPError
+
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sdk, http = self._sdk_client(token["raw"], mode)
+        async with http, sdk:
+            bad_severity = await sdk.call_tool("query_logs", {"severity": "loud"})
+            bad_time = await sdk.call_tool("query_logs", {"from_time": "not-a-time"})
+            missing_log = await sdk.call_tool("get_log_context", {"log_id": 987654321})
+            with pytest.raises(MCPError) as missing_scope:
+                await sdk.read_resource("logshed://system/metrics")
+        assert bad_severity.is_error is True
+        assert bad_severity.content[0].text.startswith(
+            "Error executing tool query_logs: Unknown severity name 'loud'."
+        )
+        assert bad_time.is_error is True
+        assert bad_time.content[0].text.startswith("Error executing tool query_logs: 422: ")
+        assert missing_log.content[0].text == "Error executing tool get_log_context: 404: Log entry 987654321 not found."
+        assert "needs the 'system:read' scope" in str(missing_scope.value)
 
     @pytest.mark.asyncio
     async def test_an_internal_failure_names_the_tool_but_not_the_cause(

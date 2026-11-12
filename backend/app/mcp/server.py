@@ -129,10 +129,24 @@ def _caller_of(context: Optional[Context]) -> object:
     return access if isinstance(access, McpAccess) else _UNAUTHENTICATED
 
 
-# Failures the handlers raise on purpose, whose message tells the client what to change: a missing
-# scope, a bad argument or a request the REST layer refused. Their text reaches the client; the SDK
-# keeps the text of any other failure from it.
-_CALLER_FACING_ERRORS = (PermissionError, ValueError, HTTPException)
+class McpRefusal(Exception):
+    """
+    A failure a handler raises on purpose, whose message tells the client what to change: a missing
+    scope or a bad argument. Its text reaches the client, so write it for the client.
+    """
+
+
+def _caller_facing_message(cause: Optional[BaseException]) -> Optional[str]:
+    """
+    The text of a failure that is meant for the client: an McpRefusal, or a request the REST layer
+    refused (an HTTPException with a 4xx status). Any other failure, such as an OSError naming a file
+    or a ValueError from inside LogShed, returns None, and the SDK keeps its text from the client.
+    """
+    if isinstance(cause, McpRefusal):
+        return str(cause)
+    if isinstance(cause, HTTPException) and 400 <= cause.status_code < 500:
+        return str(cause)
+    return None
 
 
 class LogShedMcpServer(MCPServer):
@@ -148,9 +162,10 @@ class LogShedMcpServer(MCPServer):
         try:
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError as exc:
-            if isinstance(exc.__cause__, _CALLER_FACING_ERRORS):
-                raise ToolError(f"Error executing tool {name}: {exc.__cause__}") from exc.__cause__
-            raise
+            message = _caller_facing_message(exc.__cause__)
+            if message is None:
+                raise
+            raise ToolError(f"Error executing tool {name}: {message}") from exc.__cause__
         finally:
             _request_caller.reset(reset_token)
 
@@ -159,9 +174,10 @@ class LogShedMcpServer(MCPServer):
         try:
             return await super().read_resource(uri, context)
         except UnexpectedResourceError as exc:
-            if isinstance(exc.__cause__, _CALLER_FACING_ERRORS):
-                raise ResourceError(f"Error reading resource {uri}: {exc.__cause__}") from exc.__cause__
-            raise
+            message = _caller_facing_message(exc.__cause__)
+            if message is None:
+                raise
+            raise ResourceError(f"Error reading resource {uri}: {message}") from exc.__cause__
         finally:
             _request_caller.reset(reset_token)
 
@@ -202,6 +218,15 @@ def _project_log_entry(
     return out
 
 
+def _severity_threshold(severity: Optional[str | int], severity_max: Optional[int]) -> Optional[int]:
+    """The severity filter of a tool call as an integer level; an unknown name or level is the client's to correct."""
+    chosen = severity if severity is not None else severity_max
+    try:
+        return resolve_severity(chosen)
+    except ValueError as exc:
+        raise McpRefusal(str(exc)) from None
+
+
 def _needs_raw(include_raw: bool, fields: Optional[list[str]]) -> bool:
     """Return True when the raw packet must be fetched (explicit include_raw or requested via fields)."""
     return bool(include_raw or (fields and "raw" in fields))
@@ -218,6 +243,9 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
     server = LogShedMcpServer(
         "LogShed",
         version=APP_VERSION,
+        # No subscriptions/listen streams: LogShed never publishes a list-changed notice, and such a
+        # stream is a POST that would stay open after its token is revoked (only GET streams are closed).
+        subscriptions=False,
         instructions=(
             "LogShed MCP Server. Use this server to inspect homelab system metrics, "
             "search logs using FTS5, retrieve surrounding incident context, "
@@ -235,16 +263,16 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         if isinstance(caller, McpAccess):
             return caller
         if caller is not None:
-            raise PermissionError("This MCP request is not authenticated.")
+            raise McpRefusal("This MCP request is not authenticated.")
         access = _access_override.get()
         if access is not None:
             return access
-        raise PermissionError("This MCP request is not authenticated.")
+        raise McpRefusal("This MCP request is not authenticated.")
 
     def _require(scope: str, name: str) -> McpAccess:
         access = _current_access()
         if not has_scope_permission(list(access.scopes), [scope]):
-            raise PermissionError(
+            raise McpRefusal(
                 f"{name} needs the '{scope}' scope, which the API token used for this MCP connection does not have."
             )
         return access
@@ -321,11 +349,7 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
     ) -> dict[str, Any]:
         """Count logs matching filters with optional grouping by severity, app, or source."""
         _require("logs:read", "count_logs")
-        effective_sev = None
-        if severity is not None:
-            effective_sev = resolve_severity(severity)
-        elif severity_max is not None:
-            effective_sev = resolve_severity(severity_max)
+        effective_sev = _severity_threshold(severity, severity_max)
 
         res = await count_logs_v1(
             query=query,
@@ -372,11 +396,7 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         """Search logs matching query filters, returning structured log entries and totals."""
         _require("logs:read", "query_logs")
         clamped_limit = min(max(1, limit), 200)
-        effective_sev = None
-        if severity is not None:
-            effective_sev = resolve_severity(severity)
-        elif severity_max is not None:
-            effective_sev = resolve_severity(severity_max)
+        effective_sev = _severity_threshold(severity, severity_max)
 
         res = await search_logs_v1(
             query=query,
@@ -493,11 +513,11 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
             problems = "; ".join(
                 f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()
             )
-            raise ValueError(f"Invalid maintenance request: {problems}") from None
+            raise McpRefusal(f"Invalid maintenance request: {problems}") from None
 
         # Log text reaches the agent, so a prompt-injected agent must not be able to silence every error
         if req.log_handling == "drop_errors" and not (req.target_app or "").strip() and not (req.target_host or "").strip():
-            raise ValueError(
+            raise McpRefusal(
                 "drop_errors maintenance started over MCP must name a target_app or target_host. "
                 "To drop errors from every source, use the LogShed web UI or the REST API "
                 "(POST /api/v1/maintenance/enable)."
@@ -541,7 +561,7 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
 
         terminated, remaining = await run_db_query(_disable)
         if session_id and session_id.strip() and terminated == 0:
-            raise ValueError(f"No active maintenance session with id {session_id.strip()!r}.")
+            raise McpRefusal(f"No active maintenance session with id {session_id.strip()!r}.")
         result: dict[str, Any] = {
             "status": "ok",
             # Same keys as the REST ExternalMaintenanceDisableResponse
