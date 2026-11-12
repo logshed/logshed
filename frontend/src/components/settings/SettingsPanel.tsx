@@ -1,34 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   Settings,
-  Brain,
-  Lock,
-  Check,
-  Save,
   AlertCircle,
   RefreshCw,
-  RotateCcw,
   FileText,
-  ArrowUp,
-  ArrowDown,
-  Plus,
-  X,
-  Info,
-  ExternalLink,
   ArrowUpCircle,
   Server,
   Shield,
-  AlertTriangle,
   Key,
 } from 'lucide-react';
-import { AiModelInfo, VersionInfo, SettingsSubTab } from '../../types.ts';
-import { fetchSettings, updateSettings, SettingsResponseData, MASKED_SECRET } from '../../api/settings.ts';
+import { VersionInfo, SettingsSubTab } from '../../types.ts';
+import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
 import { fetchVersion } from '../../api/system.ts';
-import { getAiModels } from '../../api/ai.ts';
-import { changePassword } from '../../api/auth.ts';
-import { useAuth } from '../../context/AuthContext.tsx';
-import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
-import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey, type AiProviderId } from '../../utils/aiProviders.ts';
 import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
@@ -36,9 +19,12 @@ import { ApiTokensTab } from './ApiTokensTab.tsx';
 import { DockerHostsTab } from './DockerHostsTab.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
-import { formatLocalTimestamp } from '../../utils/formatters.ts';
-import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
 import { useFlash } from '../../utils/hooks.ts';
+import { useAiProviderConfig, settingsAiEnabled } from './useAiProviderConfig.ts';
+import { AiProviderCard } from './AiProviderCard.tsx';
+import { StickySaveBar } from './StickySaveBar.tsx';
+import { AboutCard } from './AboutCard.tsx';
+import { ChangePasswordCard } from './ChangePasswordCard.tsx';
 
 
 export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
@@ -83,23 +69,6 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
   }
 };
 
-// Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
-// Docker host, which the LogShed container reaches as host.docker.internal.
-const OPENAI_COMPATIBLE_PRESETS: { label: string; url: string }[] = [
-  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
-  { label: 'Ollama (Docker host)', url: 'http://host.docker.internal:11434/v1' },
-  { label: 'LM Studio (Docker host)', url: 'http://host.docker.internal:1234/v1' },
-  { label: 'Groq', url: 'https://api.groq.com/openai/v1' },
-  { label: 'Mistral', url: 'https://api.mistral.ai/v1' },
-  { label: 'DeepSeek', url: 'https://api.deepseek.com' },
-];
-
-/** The preset URL the base URL matches (ignoring a trailing slash), or '' for a custom URL. */
-const BASE_URL_PRESET_OPTIONS: SelectOption[] = [
-  { value: '', label: 'Custom' },
-  ...OPENAI_COMPATIBLE_PRESETS.map((p) => ({ value: p.url, label: p.label })),
-];
-
 const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
   { value: 'WARNING', label: 'WARNING (Default - warnings & errors)' },
   { value: 'ERROR', label: 'ERROR (Errors & critical failures only)' },
@@ -108,64 +77,6 @@ const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
   { value: 'DEBUG', label: 'DEBUG (Detailed diagnostic traces)' },
   { value: 'DISABLED', label: 'DISABLED (Do not ingest internal logs)' },
 ];
-
-const AI_PROVIDER_OPTIONS: SelectOption[] = aiProviderOptions(4);
-
-function matchBaseUrlPreset(baseUrl: string): string {
-  const clean = baseUrl.trim().replace(/\/+$/, '');
-  return OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === clean)?.url ?? '';
-}
-
-interface ProviderLocalState {
-  apiKey: string;
-  hasKey: boolean;
-  model: string;
-  fallbackModels: string;
-  baseUrl: string;
-}
-
-/**
- * Builds the per-provider form state from a settings response. The same function produces the
- * baseline the dirty check compares against, so loading and comparing can never disagree.
- * The MASKED_SECRET placeholder only appears when the server says a key is stored: a keyless
- * OpenAI-compatible provider has an empty key field and an empty baseline.
- */
-const buildProviderStates = (
-  settRes: SettingsResponseData,
-): { configs: Record<string, ProviderLocalState>; activeProvider: AiProviderId } => {
-  const configs: Record<string, ProviderLocalState> = {
-    gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
-    openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
-    anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
-    openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
-  };
-
-  if (settRes.ai_providers_config) {
-    for (const [p, pCfg] of Object.entries(settRes.ai_providers_config)) {
-      if (configs[p]) {
-        configs[p] = {
-          apiKey: pCfg.has_api_key ? (pCfg.ai_api_key || '') : '',
-          hasKey: pCfg.has_api_key,
-          model: pCfg.ai_model || DEFAULT_PROVIDER_MODELS[p] || DEFAULT_AI_MODEL,
-          fallbackModels: pCfg.ai_fallback_models || '',
-          baseUrl: pCfg.ai_base_url || '',
-        };
-      }
-    }
-  }
-
-  const activeProvider = (settRes.ai_provider || DEFAULT_AI_PROVIDER) as AiProviderId;
-  if (configs[activeProvider]) {
-    configs[activeProvider] = {
-      apiKey: settRes.has_ai_api_key ? (settRes.ai_api_key || '') : '',
-      hasKey: settRes.has_ai_api_key,
-      model: settRes.ai_model || configs[activeProvider].model || DEFAULT_PROVIDER_MODELS[activeProvider] || DEFAULT_AI_MODEL,
-      fallbackModels: settRes.ai_fallback_models !== undefined ? settRes.ai_fallback_models : configs[activeProvider].fallbackModels,
-      baseUrl: settRes.ai_base_url || configs[activeProvider].baseUrl,
-    };
-  }
-  return { configs, activeProvider };
-};
 
 export interface SettingsPanelProps {
   initialSubTab?: SettingsSubTab;
@@ -197,7 +108,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setActiveAddIp(initialAddIp);
     }
   }, [initialAddIp]);
-  const { logout } = useAuth();
   const [settings, setSettings] = useState<SettingsResponseData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -243,37 +153,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, []);
 
   // Form states
-  const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderLocalState>>({
-    gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
-    openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
-    anthropic: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.anthropic, fallbackModels: '', baseUrl: '' },
-    openai_compatible: { apiKey: '', hasKey: true, model: DEFAULT_PROVIDER_MODELS.openai_compatible, fallbackModels: '', baseUrl: '' },
-  });
-
-  const [aiEnabled, setAiEnabled] = useState<boolean>(false);
-  const [aiProvider, setAiProvider] = useState<AiProviderId>(DEFAULT_AI_PROVIDER);
-  const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODEL);
-  const [aiFallbackModels, setAiFallbackModels] = useState<string>('');
-  const [aiApiKey, setAiApiKey] = useState<string>('');
-  const [aiBaseUrl, setAiBaseUrl] = useState<string>('');
-  const [aiSystemPrompt, setAiSystemPrompt] = useState<string>(DEFAULT_SYSTEM_PROMPT);
+  const ai = useAiProviderConfig(settings);
   const [internalLogLevel, setInternalLogLevel] = useState<string>('WARNING');
   const [checkForUpdates, setCheckForUpdates] = useState<boolean>(true);
   const [digestEnabled, setDigestEnabled] = useState<boolean>(false);
   const [digestChannelId, setDigestChannelId] = useState<number | null>(null);
   const [digestScheduleTime, setDigestScheduleTime] = useState<string>('09:00');
-
-  // Model discovery states
-  const [availableModels, setAvailableModels] = useState<AiModelInfo[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState<boolean>(false);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [hasApiKeyForProvider, setHasApiKeyForProvider] = useState<boolean>(true);
-  const [modelsCachedAt, setModelsCachedAt] = useState<string | null>(null);
   const serverTimezone = settings?.server_timezone || undefined;
-  const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
-  const [selectedFallbackToAdd, setSelectedFallbackToAdd] = useState<string>('');
-  const [customFallbackInput, setCustomFallbackInput] = useState<string>('');
-  const [showCustomFallbackInput, setShowCustomFallbackInput] = useState<boolean>(false);
 
   // Save feedback state
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
@@ -284,47 +170,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [saveInlineError, setSaveInlineError] = useState<string | null>(null);
 
   // Track dirty state against loaded baseline settings
-  const baselineAiEnabled = settings
-    ? (settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key))
-    : false;
   const baselineDigestEnabled = settings ? Boolean(settings.daily_digest_enabled) : false;
   const baselineDigestChannelId = settings ? (settings.daily_digest_channel_id ?? null) : null;
   const baselineDigestScheduleTime = settings ? (settings.daily_digest_schedule_time || '09:00') : '09:00';
 
-  // Every provider is compared with its own baseline, not just the active one, so an edit made to
-  // a provider that is no longer selected still counts as unsaved. The active provider's live
-  // fields are held in the individual states; the others in providerConfigs.
-  const baselineProviders = useMemo(() => (settings ? buildProviderStates(settings) : null), [settings]);
-  const providersDirty = (() => {
-    if (!baselineProviders) return false;
-    const live: Record<string, ProviderLocalState> = {
-      ...providerConfigs,
-      [aiProvider]: {
-        apiKey: aiApiKey,
-        hasKey: hasApiKeyForProvider,
-        model: aiModel,
-        fallbackModels: aiFallbackModels,
-        baseUrl: aiBaseUrl,
-      },
-    };
-    return Object.entries(live).some(([p, cfg]) => {
-      const base = baselineProviders.configs[p];
-      if (!base) return false;
-      return (
-        cfg.apiKey !== base.apiKey ||
-        cfg.model !== base.model ||
-        cfg.fallbackModels !== base.fallbackModels ||
-        cfg.baseUrl !== base.baseUrl
-      );
-    });
-  })();
-
   const isDirty = Boolean(
     settings &&
-    (aiEnabled !== baselineAiEnabled ||
-      aiProvider !== settings.ai_provider ||
-      providersDirty ||
-      normalizePrompt(aiSystemPrompt) !== normalizePrompt(settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT) ||
+    (ai.isDirty ||
       internalLogLevel !== (settings.internal_log_level || 'WARNING') ||
       checkForUpdates !== (settings.check_for_updates ?? true) ||
       digestEnabled !== baselineDigestEnabled ||
@@ -334,35 +186,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const isDirtyRef = useRef<boolean>(false);
   isDirtyRef.current = isDirty;
 
-  // Track if AI system instructions differ from system default
-  const isAiSystemPromptModified = normalizePrompt(aiSystemPrompt) !== normalizePrompt(DEFAULT_SYSTEM_PROMPT);
-
-  // Password reset state
-  const [currentPwd, setCurrentPwd] = useState<string>('');
-  const [newPwd, setNewPwd] = useState<string>('');
-  const [confirmPwd, setConfirmPwd] = useState<string>('');
-  const [isChangingPwd, setIsChangingPwd] = useState<boolean>(false);
-  const [pwdMsg, setPwdMsg] = useState<{ text: string; isError: boolean } | null>(null);
-
   // Application version & update state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
 
   const applySettingsResponse = (settRes: SettingsResponseData) => {
     setSettings(settRes);
-
-    const { configs: initialConfigs, activeProvider: activeP } = buildProviderStates(settRes);
-    setProviderConfigs(initialConfigs);
-
-    const curActive = initialConfigs[activeP];
-    const initialAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
-    setAiEnabled(initialAiEnabled);
-    setAiProvider(activeP);
-    setAiModel(curActive.model);
-    setAiFallbackModels(curActive.fallbackModels);
-    setAiApiKey(curActive.apiKey);
-    setHasApiKeyForProvider(curActive.hasKey);
-    setAiBaseUrl(curActive.baseUrl);
-    setAiSystemPrompt(settRes.ai_system_prompt || DEFAULT_SYSTEM_PROMPT);
+    ai.applySettings(settRes);
     setInternalLogLevel(settRes.internal_log_level || 'WARNING');
     setCheckForUpdates(settRes.check_for_updates ?? true);
     setDigestEnabled(Boolean(settRes.daily_digest_enabled));
@@ -385,180 +214,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const loadModels = async (
-    provider: string,
-    forceRefresh: boolean = false,
-    customApiKey?: string,
-    customBaseUrl?: string,
-  ) => {
-    try {
-      setIsLoadingModels(true);
-      setModelsError(null);
-      const res = (customApiKey !== undefined || customBaseUrl !== undefined)
-        ? await getAiModels(provider, forceRefresh, customApiKey, customBaseUrl)
-        : await getAiModels(provider, forceRefresh);
-      const discovered = res.models || [];
-      setAvailableModels(discovered);
-      setHasApiKeyForProvider(res.has_api_key);
-      setModelsCachedAt(res.cached_at || null);
-
-      if (res.has_api_key && customApiKey) {
-        setAiApiKey(MASKED_SECRET);
-        setProviderConfigs((prev) => ({
-          ...prev,
-          [provider]: {
-            ...prev[provider],
-            apiKey: MASKED_SECRET,
-            hasKey: true,
-          },
-        }));
-      }
-
-      if (discovered.length > 0) {
-        setAiModel((currentModel) => {
-          if (!isCustomModel && !discovered.some((m) => m.id === currentModel)) {
-            const defaultForProvider = DEFAULT_PROVIDER_MODELS[provider];
-            const hasDefault = discovered.some((m) => m.id === defaultForProvider);
-            const chosen = hasDefault ? defaultForProvider : discovered[0].id;
-            setProviderConfigs((prev) => ({
-              ...prev,
-              [provider]: {
-                ...prev[provider],
-                model: chosen,
-              },
-            }));
-            return chosen;
-          }
-          return currentModel;
-        });
-      }
-
-      if (res.error) {
-        setModelsError(res.error);
-      }
-    } catch (err: any) {
-      setModelsError(err.message || 'Failed to fetch available models.');
-      setAvailableModels([]);
-    } finally {
-      setIsLoadingModels(false);
-    }
-  };
-
-  const handleProviderChange = (newProvider: AiProviderId) => {
-    const updatedConfigs: Record<string, ProviderLocalState> = {
-      ...providerConfigs,
-      [aiProvider]: {
-        apiKey: aiApiKey,
-        hasKey: hasApiKeyForProvider,
-        model: aiModel,
-        fallbackModels: aiFallbackModels,
-        baseUrl: aiBaseUrl,
-      },
-    };
-    setProviderConfigs(updatedConfigs);
-
-    const target = updatedConfigs[newProvider] || {
-      apiKey: '',
-      hasKey: !providerNeedsApiKey(newProvider),
-      model: DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL,
-      fallbackModels: '',
-      baseUrl: '',
-    };
-
-    setAiProvider(newProvider);
-    setAiApiKey(target.apiKey);
-    setHasApiKeyForProvider(target.hasKey);
-    setAiModel(target.model || DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL);
-    setAiFallbackModels(target.fallbackModels || '');
-    setAiBaseUrl(target.baseUrl || '');
-    setIsCustomModel(false);
-    setSelectedFallbackToAdd('');
-    setShowCustomFallbackInput(false);
-    setModelsError(null);
-    setAvailableModels([]);
-
-    loadModels(newProvider);
-  };
-
-  const updateFallbackModels = (newFallbacks: string) => {
-    setAiFallbackModels(newFallbacks);
-    setProviderConfigs((prev) => ({
-      ...prev,
-      [aiProvider]: {
-        ...prev[aiProvider],
-        fallbackModels: newFallbacks,
-      },
-    }));
-  };
-
-  // Fallback ordering helpers
-  const fallbackList = aiFallbackModels
-    ? aiFallbackModels.split(',').map((s) => s.trim()).filter(Boolean)
-    : [];
-
-  const moveFallback = (index: number, direction: -1 | 1) => {
-    const target = index + direction;
-    if (target < 0 || target >= fallbackList.length) return;
-    const copy = [...fallbackList];
-    const [removed] = copy.splice(index, 1);
-    copy.splice(target, 0, removed);
-    updateFallbackModels(copy.join(', '));
-  };
-
-  const removeFallback = (index: number) => {
-    const copy = fallbackList.filter((_, i) => i !== index);
-    updateFallbackModels(copy.join(', '));
-  };
-
-  const addFallback = (modelName: string) => {
-    const trimmed = modelName.trim();
-    if (!trimmed || fallbackList.includes(trimmed)) return;
-    updateFallbackModels([...fallbackList, trimmed].join(', '));
-  };
-
-  const handlePrimaryModelChange = (newModel: string) => {
-    setAiModel(newModel);
-    setProviderConfigs((prev) => ({
-      ...prev,
-      [aiProvider]: {
-        ...prev[aiProvider],
-        model: newModel,
-      },
-    }));
-    if (fallbackList.includes(newModel)) {
-      const updated = fallbackList.filter((m) => m !== newModel);
-      updateFallbackModels(updated.join(', '));
-    }
-  };
-
-  // Moving the first fallback up swaps it with the primary model.
-  const promoteFirstFallback = () => {
-    const [promoted, ...rest] = fallbackList;
-    if (!promoted) return;
-    const demoted = aiModel.trim();
-    const updated = demoted && !rest.includes(demoted) ? [demoted, ...rest] : rest;
-    setIsCustomModel(availableModels.length > 0 && !availableModels.some((m) => m.id === promoted));
-    setAiModel(promoted);
-    setProviderConfigs((prev) => ({
-      ...prev,
-      [aiProvider]: {
-        ...prev[aiProvider],
-        model: promoted,
-      },
-    }));
-    updateFallbackModels(updated.join(', '));
-  };
-
   // Emptying the key field is a pending change like any other edit: it is sent as an empty
   // key by the normal Save, so leaving the field never saves (or discards) anything by itself.
   const handleApiKeyEnter = async () => {
     await executeSave();
-  };
-
-  const handleRefreshModels = async () => {
-    const keyToSend = (aiApiKey && aiApiKey !== MASKED_SECRET) ? aiApiKey.trim() : undefined;
-    const urlToSend = aiBaseUrl ? aiBaseUrl.trim() : undefined;
-    await loadModels(aiProvider, true, keyToSend, urlToSend);
   };
 
   // Always read the server state on mount: the module-level cache would hide changes made elsewhere
@@ -572,9 +231,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       applySettingsResponse(settRes);
 
       // Load models for provider if enabled
-      const initialAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
-      if (initialAiEnabled) {
-        loadModels(settRes.ai_provider);
+      if (settingsAiEnabled(settRes)) {
+        ai.loadModels(settRes.ai_provider);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load system settings.');
@@ -661,14 +319,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleResetChanges = () => {
     if (!settings) return;
     applySettingsResponse(settings);
-    setIsCustomModel(false);
-    setSelectedFallbackToAdd('');
-    setCustomFallbackInput('');
-    setShowCustomFallbackInput(false);
+    ai.resetModelPickers();
 
-    const resetAiEnabled = settings.ai_enabled !== undefined ? settings.ai_enabled : Boolean(settings.has_ai_api_key);
-    if (resetAiEnabled && aiProvider !== settings.ai_provider) {
-      loadModels(settings.ai_provider);
+    if (settingsAiEnabled(settings) && ai.aiProvider !== settings.ai_provider) {
+      ai.loadModels(settings.ai_provider);
     }
   };
 
@@ -688,28 +342,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         return false;
       }
 
-      const updatedProvidersConfig: Record<string, any> = {};
-      for (const [p, cfg] of Object.entries(providerConfigs)) {
-        const isCurrent = p === aiProvider;
-        updatedProvidersConfig[p] = {
-          has_api_key: isCurrent ? (Boolean(aiApiKey) || hasApiKeyForProvider) : cfg.hasKey,
-          ai_api_key: isCurrent ? aiApiKey : cfg.apiKey,
-          ai_model: isCurrent ? aiModel : cfg.model,
-          ai_fallback_models: isCurrent ? aiFallbackModels : cfg.fallbackModels,
-          // An emptied base URL is sent as '' so the server clears it (null would keep the old one).
-          ai_base_url: isCurrent ? aiBaseUrl.trim() : cfg.baseUrl.trim(),
-        };
-      }
-
       const saveRes = await updateSettings({
-        ai_enabled: aiEnabled,
-        ai_provider: aiProvider,
-        ai_model: aiModel,
-        ai_fallback_models: aiFallbackModels,
-        ai_api_key: aiApiKey,
-        ai_base_url: aiBaseUrl.trim(),
-        ai_system_prompt: aiSystemPrompt,
-        ai_providers_config: updatedProvidersConfig,
+        ...ai.buildSavePayload(),
         internal_log_level: internalLogLevel,
         check_for_updates: checkForUpdates,
         daily_digest_enabled: digestEnabled,
@@ -722,9 +356,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       applySettingsResponse(settRes);
 
       // Refresh model list with newly saved configuration if AI is enabled
-      const savedAiEnabled = settRes.ai_enabled !== undefined ? settRes.ai_enabled : Boolean(settRes.has_ai_api_key);
-      if (savedAiEnabled) {
-        loadModels(settRes.ai_provider);
+      if (settingsAiEnabled(settRes)) {
+        ai.loadModels(settRes.ai_provider);
       }
 
       // Refresh version info to reflect updated check_for_updates setting
@@ -781,36 +414,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       }
     };
   });
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newPwd.length < PASSWORD_MIN_LENGTH) {
-      setPwdMsg({ text: `New password must be at least ${PASSWORD_MIN_LENGTH} characters long.`, isError: true });
-      return;
-    }
-    if (newPwd !== confirmPwd) {
-      setPwdMsg({ text: 'New passwords do not match.', isError: true });
-      return;
-    }
-
-    try {
-      setIsChangingPwd(true);
-      setPwdMsg(null);
-      await changePassword(currentPwd, newPwd);
-      sessionStorage.setItem('login_notice', 'Admin password changed successfully. Please sign in with your new password.');
-      setPwdMsg({ text: 'Admin password changed successfully. Redirecting to sign in...', isError: false });
-      setCurrentPwd('');
-      setNewPwd('');
-      setConfirmPwd('');
-      setTimeout(() => {
-        logout();
-      }, 1000);
-    } catch (err: any) {
-      setPwdMsg({ text: err.message || 'Failed to update password.', isError: true });
-    } finally {
-      setIsChangingPwd(false);
-    }
-  };
 
   if (isLoading && !settings) {
     return (
@@ -943,432 +546,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </section>
 
         {/* AI Provider Section */}
-        <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Brain className="w-4 h-4 text-accent-500" />
-                <span>On-Demand AI Provider Configuration</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Fernet encryption secures API keys against exposure in database exports, disk clones, and backups.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/60 border border-emerald-800 text-[11px] font-mono text-emerald-400 shrink-0 self-start sm:self-auto">
-              <Lock className="w-3 h-3 text-emerald-400" />
-              <span>Keys encrypted at rest</span>
-            </div>
-          </div>
-
-          {/* AI Enablement Checkbox */}
-          <div className="p-3 bg-dark-950/80 border border-dark-800 rounded-lg flex items-start gap-3">
-            <input
-              type="checkbox"
-              id="ai-enabled-checkbox"
-              checked={aiEnabled}
-              onChange={(e) => {
-                const nextVal = e.target.checked;
-                setAiEnabled(nextVal);
-                if (nextVal && availableModels.length === 0) {
-                  loadModels(aiProvider);
-                }
-              }}
-              className="mt-0.5 w-4 h-4 rounded border-dark-700 bg-dark-900 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
-            />
-            <div className="flex-1">
-              <label htmlFor="ai-enabled-checkbox" className="text-xs font-semibold text-slate-200 cursor-pointer select-none">
-                Enable AI Features
-              </label>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Enable log inspection, incident summaries, and alert enrichment via AI models.
-              </p>
-            </div>
-          </div>
-
-          {!aiEnabled ? (
-            <div className="p-3.5 bg-dark-900 border border-dark-700 rounded-xl flex items-start gap-2.5 text-xs shadow-xs">
-              <Info className="w-4 h-4 text-accent-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-slate-200">AI Features Disabled</p>
-                <p className="text-slate-400 mt-0.5">
-                  AI settings are hidden while disabled. Existing alert rules configured with AI enrichment will continue to trigger and dispatch notifications, but will not be enriched.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label id="ai-provider-label" htmlFor="ai-provider" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                AI Provider
-              </label>
-              <SelectDropdown
-                variant="panel"
-                fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
-                id="ai-provider"
-                labelledBy="ai-provider-label"
-                label="AI Provider"
-                options={AI_PROVIDER_OPTIONS}
-                value={aiProvider}
-                onChange={(v) => handleProviderChange(v as any)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                API Key (Masked)
-              </label>
-              <input
-                type="password"
-                value={aiApiKey}
-                onChange={(e) => setAiApiKey(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleApiKeyEnter();
-                  }
-                }}
-                placeholder={hasApiKeyForProvider ? `Enter new API key or leave ${MASKED_SECRET} to preserve` : 'Enter API key'}
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
-              />
-            </div>
-
-            {getAiProvider(aiProvider)?.customBaseUrl && (
-              <div className="sm:col-span-2">
-                <label htmlFor="ai-base-url" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  Custom Base URL (Optional)
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="sm:w-56 shrink-0">
-                    <SelectDropdown
-                      variant="panel"
-                      fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
-                      label="Base URL preset"
-                      options={BASE_URL_PRESET_OPTIONS}
-                      value={matchBaseUrlPreset(aiBaseUrl)}
-                      onChange={(v) => {
-                        const preset = OPENAI_COMPATIBLE_PRESETS.find((p) => p.url === v);
-                        if (preset) setAiBaseUrl(preset.url);
-                      }}
-                    />
-                  </div>
-                  <input
-                    id="ai-base-url"
-                    type="text"
-                    value={aiBaseUrl}
-                    onChange={(e) => setAiBaseUrl(e.target.value)}
-                    placeholder="http://host.docker.internal:11434/v1"
-                    className="w-full min-w-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
-                  />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Any server that accepts OpenAI-style requests works. Leave empty to use http://localhost:11434/v1.
-                </p>
-              </div>
-            )}
-
-            {/* API Key Missing Notice */}
-            {!hasApiKeyForProvider && providerNeedsApiKey(aiProvider) && (
-              <div className="sm:col-span-2 p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start justify-between gap-3 text-amber-300 text-xs font-mono">
-                <div className="flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-amber-200">API Key Required to Discover Models:</span>
-                    <p className="text-[11px] text-amber-300/80 mt-0.5">
-                      Enter and save your API key above to query {getAiProvider(aiProvider)?.label ?? 'your endpoint'} and populate available text models.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRefreshModels}
-                  disabled={isLoadingModels}
-                  className="shrink-0 text-xs text-amber-200 hover:text-amber-100 underline cursor-pointer disabled:opacity-50 mt-0.5"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
-
-            {/* Models Error Banner */}
-            {modelsError && (hasApiKeyForProvider || !providerNeedsApiKey(aiProvider)) && (
-              <div className="sm:col-span-2 p-2.5 bg-dark-950 border border-dark-700 rounded-lg flex items-center justify-between text-xs font-mono text-slate-400">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="text-[11px] text-amber-300/90">{modelsError}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRefreshModels}
-                  disabled={isLoadingModels}
-                  className="text-[10px] text-accent-400 hover:text-accent-300 underline cursor-pointer disabled:opacity-50"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
-
-            {/* Model Discovery & Ordering Section Header */}
-            <div className="sm:col-span-2 pt-2 border-t border-dark-800 flex items-center justify-between">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                  Model Selection & Failover Ordering
-                </label>
-                <p className="text-[11px] text-slate-400">
-                  Select your default primary model and configure fallback models in priority order.{modelsCachedAt ? ` (Cache refreshed: ${formatLocalTimestamp(modelsCachedAt, true, serverTimezone)})` : ''}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleRefreshModels}
-                disabled={isLoadingModels}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 transition cursor-pointer disabled:opacity-50"
-                title="Query provider API for active models"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-accent-400 ${isLoadingModels ? 'animate-spin' : ''}`} />
-                <span>{isLoadingModels ? 'Fetching Models...' : 'Refresh Models'}</span>
-              </button>
-            </div>
-
-            {/* Default Primary Model */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label id="ai-model-label" htmlFor="ai-model" className="block text-[11px] font-semibold text-slate-400 uppercase">
-                  Default Primary Model
-                </label>
-                {isCustomModel && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCustomModel(false);
-                      const validModels = availableModels.filter(
-                        (m) => !fallbackList.includes(m.id)
-                      );
-                      if (validModels.length > 0) {
-                        handlePrimaryModelChange(validModels[0].id);
-                      } else if (availableModels.length > 0) {
-                        handlePrimaryModelChange(availableModels[0].id);
-                      }
-                    }}
-                    className="text-[10px] text-accent-400 hover:text-accent-300 underline cursor-pointer"
-                  >
-                    Use dropdown instead
-                  </button>
-                )}
-              </div>
-
-              {availableModels.length > 0 && !isCustomModel ? (
-                <SelectDropdown
-                  variant="panel"
-                  fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-100"
-                  id="ai-model"
-                  labelledBy="ai-model-label"
-                  label="Default Primary Model"
-                  options={[
-                    ...availableModels.filter((m) => m.id === aiModel || !fallbackList.includes(m.id)).map(aiModelOption),
-                    { value: '__custom__', label: 'Custom model name...' },
-                  ]}
-                  value={availableModels.some((m) => m.id === aiModel) ? aiModel : '__custom__'}
-                  onChange={(v) => {
-                    if (v === '__custom__') {
-                      setIsCustomModel(true);
-                    } else {
-                      handlePrimaryModelChange(v);
-                    }
-                  }}
-                />
-              ) : (
-                <input
-                  id="ai-model"
-                  type="text"
-                  value={aiModel}
-                  onChange={(e) => handlePrimaryModelChange(e.target.value)}
-                  placeholder={DEFAULT_PROVIDER_MODELS[aiProvider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
-                />
-              )}
-
-              <p className="text-[11px] text-slate-400 mt-1">
-                Queried first for all log inspection requests.
-              </p>
-            </div>
-
-            {/* Fallback Models Ordered List */}
-            <div className="space-y-2">
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase">
-                Fallback Models (Sequential Order)
-              </label>
-
-              {fallbackList.length === 0 ? (
-                <div className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-[11px] text-slate-400 font-mono">
-                  No fallback models configured. Add a model below to enable automatic failover.
-                </div>
-              ) : (
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {fallbackList.map((fb, idx) => {
-                    const modelInfo = availableModels.find((m) => m.id === fb);
-                    const isThinking = modelInfo?.supports_thinking;
-                    return (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between p-2 bg-dark-950 border border-dark-800 rounded text-xs font-mono"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold shrink-0">
-                            {`${getOrdinalSuffix(idx + 1)} Fallback`}
-                          </span>
-                          <span className="text-slate-200 font-medium truncate">{fb}</span>
-                          {isThinking && (
-                            <span className="px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] shrink-0">
-                              Reasoning
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0 ml-2">
-                          <button
-                            type="button"
-                            onClick={() => (idx === 0 ? promoteFirstFallback() : moveFallback(idx, -1))}
-                            className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
-                            title={idx === 0 ? 'Swap with primary model' : 'Move up in priority'}
-                            aria-label={idx === 0 ? 'Make primary model' : 'Move fallback up'}
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === fallbackList.length - 1}
-                            onClick={() => moveFallback(idx, 1)}
-                            className="p-1 text-slate-400 hover:text-slate-200 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
-                            title="Move down in priority"
-                            aria-label="Move fallback down"
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeFallback(idx)}
-                            className="p-1 text-red-400 hover:text-red-300 cursor-pointer"
-                            title="Remove fallback model"
-                            aria-label="Remove fallback"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Add Fallback Model Selector */}
-              <div className="space-y-1.5 pt-1">
-                {!showCustomFallbackInput ? (
-                  <div className="flex items-center gap-2 w-full">
-                    <div className="flex-1 min-w-0">
-                      <SelectDropdown
-                        variant="panel"
-                        fieldClassName="bg-dark-950 border-dark-700 rounded px-2.5 py-1.5 font-mono text-slate-200"
-                        label="Add Fallback Model"
-                        options={[
-                          { value: '', label: '-- Add Fallback Model --' },
-                          ...availableModels.filter((m) => m.id !== aiModel && !fallbackList.includes(m.id)).map(aiModelOption),
-                          { value: '__custom_fallback__', label: 'Custom fallback model...' },
-                        ]}
-                        value={selectedFallbackToAdd}
-                        onChange={(v) => {
-                          if (v === '__custom_fallback__') {
-                            setShowCustomFallbackInput(true);
-                            setSelectedFallbackToAdd('');
-                          } else {
-                            setSelectedFallbackToAdd(v);
-                          }
-                        }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!selectedFallbackToAdd}
-                      onClick={() => {
-                        addFallback(selectedFallbackToAdd);
-                        setSelectedFallbackToAdd('');
-                      }}
-                      className="shrink-0 px-3 py-1.5 bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 w-full">
-                    <input
-                      type="text"
-                      value={customFallbackInput}
-                      onChange={(e) => setCustomFallbackInput(e.target.value)}
-                      placeholder="Enter custom model ID"
-                      className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono"
-                    />
-                    <button
-                      type="button"
-                      disabled={!customFallbackInput.trim()}
-                      onClick={() => {
-                        addFallback(customFallbackInput);
-                        setCustomFallbackInput('');
-                        setShowCustomFallbackInput(false);
-                      }}
-                      className="shrink-0 px-3 py-1.5 bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowCustomFallbackInput(false);
-                        setCustomFallbackInput('');
-                      }}
-                      className="shrink-0 p-1.5 text-slate-400 hover:text-slate-200 cursor-pointer"
-                      title="Cancel custom fallback"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* AI System Instructions Card */}
-            <div className="sm:col-span-2 pt-3 border-t border-dark-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                    AI System Instructions (LLM Persona)
-                  </label>
-                  <p className="text-[11px] text-slate-400">
-                    System instructions that establish the LLM's diagnostic persona, reasoning guidelines, and response structure.
-                  </p>
-                </div>
-                {isAiSystemPromptModified && (
-                  <button
-                    type="button"
-                    onClick={() => setAiSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
-                    className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 transition cursor-pointer"
-                    title="Reset instructions to system default"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>Reset to Default</span>
-                  </button>
-                )}
-              </div>
-              <textarea
-                value={aiSystemPrompt}
-                onChange={(e) => setAiSystemPrompt(e.target.value)}
-                rows={7}
-                placeholder="Enter system instructions..."
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono leading-relaxed resize-y"
-              />
-            </div>
-          </div>
-          )}
-        </section>
+        <AiProviderCard ai={ai} onApiKeyEnter={handleApiKeyEnter} serverTimezone={serverTimezone} />
 
         {/* Notification Channels & Webhooks Section */}
         <NotificationsCard
@@ -1415,167 +593,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </section>
 
         {/* Sticky Action Bar: floats while scrolling form, locks into place above password section */}
-        {(isDirty || saveInlineSuccess || saveInlineError) && (
-          <aside
-            aria-label="Unsaved changes bar"
-            className={`sticky bottom-4 z-30 bg-dark-900/95 backdrop-blur-md border rounded-xl p-3 sm:px-5 sm:py-3 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 ${saveInlineSuccess
-                ? 'border-emerald-500/40'
-                : saveInlineError
-                  ? 'border-red-500/40'
-                  : 'border-amber-500/40'
-              }`}
-          >
-            <div className="flex items-center gap-2 text-xs font-medium">
-              {saveInlineSuccess ? (
-                <div className="flex items-center gap-2 text-emerald-400 font-mono">
-                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Settings saved successfully!</span>
-                  {saveNotice && (
-                    <span className="text-amber-300 font-sans">{saveNotice}</span>
-                  )}
-                </div>
-              ) : saveInlineError ? (
-                <div className="flex items-center gap-2 text-red-400 font-mono">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                  <span>{saveInlineError}</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-amber-300">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>You have unsaved changes</span>
-                </div>
-              )}
-            </div>
-
-            {isDirty && (
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                {isSavingSettings && (
-                  <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 font-mono mr-1">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent-500" />
-                    <span>Saving...</span>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={handleResetChanges}
-                  disabled={isSavingSettings}
-                  className="px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-lg transition cursor-pointer disabled:opacity-50"
-                >
-                  Discard
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingSettings}
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
-                >
-                  {isSavingSettings ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Save className="w-3.5 h-3.5" />
-                  )}
-                  <span>Save Changes</span>
-                </button>
-              </div>
-            )}
-          </aside>
-        )}
+        <StickySaveBar
+          isDirty={isDirty}
+          isSavingSettings={isSavingSettings}
+          saveInlineSuccess={saveInlineSuccess}
+          saveNotice={saveNotice}
+          saveInlineError={saveInlineError}
+          onDiscard={handleResetChanges}
+        />
           </form>
 
           {/* About LogShed Section */}
-          <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Info className="w-4 h-4 text-accent-500" />
-                <span>About LogShed</span>
-              </h3>
-              {versionInfo && (
-                <span className="font-mono text-xs px-2 py-0.5 rounded bg-dark-950 border border-dark-700 text-slate-300">
-                  v{versionInfo.current_version}
-                </span>
-              )}
-            </div>
-
-            {/* Version & Update Status */}
-            {versionInfo && (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                {versionInfo.repo_deprecated && (
-                  <div className="w-full flex items-start gap-2.5 p-3 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-200">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <div className="font-semibold text-amber-300">
-                        Container Repository Moved
-                      </div>
-                      <p className="text-slate-300 text-xs">
-                        This instance is running from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/logshed/logshed</code> to continue receiving future releases.
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {versionInfo.update_available && versionInfo.check_enabled !== false && checkForUpdates ? (
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-300">
-                    <ArrowUpCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>
-                      App update available: <strong className="font-semibold font-mono">v{versionInfo.latest_version}</strong>
-                    </span>
-                    <a
-                      href="https://github.com/logshed/logshed/releases"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-1 inline-flex items-center gap-1 text-amber-400 hover:text-amber-200 underline text-[11px]"
-                    >
-                      <span>Release Notes</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                ) : versionInfo.check_enabled === false || !checkForUpdates ? (
-                  <div className="flex items-center gap-1.5 text-slate-400 text-xs">
-                    <span>Update checks are disabled</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-slate-400 text-xs">
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>LogShed is up to date</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* License & Copyright */}
-            <p className="text-xs text-slate-400">
-              MIT License - Copyright (c) 2026 LogShed Contributors
-            </p>
-
-            {/* Links */}
-            <div className="flex flex-wrap items-center gap-4 text-xs pt-1 border-t border-dark-800">
-              <a
-                href="https://github.com/logshed/logshed"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
-              >
-                <span>GitHub Repository</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              <a
-                href="https://github.com/logshed/logshed/blob/main/CHANGELOG.md"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
-              >
-                <span>Changelog</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              <a
-                href="https://github.com/sponsors/BenHornerTech"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-accent-400 hover:text-accent-300 hover:underline transition"
-              >
-                <span>Sponsor LogShed</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          </section>
+          <AboutCard versionInfo={versionInfo} checkForUpdates={checkForUpdates} />
         </div>
       )}
 
@@ -1623,85 +652,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           />
 
           {/* Admin Password Reset Section */}
-          <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Lock className="w-4 h-4 text-accent-500" />
-              <span>Change Admin Password</span>
-            </h3>
-
-            {pwdMsg && (
-              <div
-                className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${pwdMsg.isError
-                    ? 'bg-red-950/60 border-red-800 text-red-300'
-                    : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-                  }`}
-              >
-                {pwdMsg.isError ? (
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                ) : (
-                  <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                )}
-                <span>{pwdMsg.text}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-              <div>
-                <label htmlFor="current-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  Current Password
-                </label>
-                <input
-                  id="current-password"
-                  type="password"
-                  value={currentPwd}
-                  onChange={(e) => setCurrentPwd(e.target.value)}
-                  required
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="new-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  New Password (min {PASSWORD_MIN_LENGTH} chars)
-                </label>
-                <input
-                  id="new-password"
-                  type="password"
-                  value={newPwd}
-                  onChange={(e) => setNewPwd(e.target.value)}
-                  minLength={PASSWORD_MIN_LENGTH}
-                  required
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="confirm-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                  Confirm New Password
-                </label>
-                <input
-                  id="confirm-password"
-                  type="password"
-                  value={confirmPwd}
-                  onChange={(e) => setConfirmPwd(e.target.value)}
-                  minLength={PASSWORD_MIN_LENGTH}
-                  required
-                  className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
-                />
-              </div>
-
-              <div className="sm:col-span-3 flex justify-end pt-1">
-                <button
-                  type="submit"
-                  disabled={isChangingPwd || !currentPwd || newPwd.length < PASSWORD_MIN_LENGTH || newPwd !== confirmPwd}
-                  className="w-full sm:w-auto justify-center bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-dark-600 font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>{isChangingPwd ? 'Updating...' : 'Update Password'}</span>
-                </button>
-              </div>
-            </form>
-          </section>
+          <ChangePasswordCard />
         </div>
       )}
 

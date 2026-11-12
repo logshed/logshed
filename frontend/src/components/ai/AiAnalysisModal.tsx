@@ -8,10 +8,6 @@ import {
   RotateCcw,
   Clock,
   ArrowRight,
-  ArrowUp,
-  ArrowDown,
-  Plus,
-  X,
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
@@ -21,7 +17,7 @@ import {
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
-import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, aiModelOption } from '../../utils/aiPrompt.ts';
 import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
@@ -29,6 +25,8 @@ import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { AiFollowUpThread } from './AiFollowUpThread.tsx';
 import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
+import { ModelChainEditor } from './ModelChainEditor.tsx';
+import { parseFallbackModels, promoteFirstFallback } from '../../utils/modelChain.ts';
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
@@ -82,9 +80,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [hasApiKeyForProvider, setHasApiKeyForProvider] = useState<boolean>(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
-  const [selectedFallbackToAdd, setSelectedFallbackToAdd] = useState<string>('');
-  const [customFallbackInput, setCustomFallbackInput] = useState<string>('');
-  const [showCustomFallbackInput, setShowCustomFallbackInput] = useState<boolean>(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState<boolean>(false);
 
   const [isDiagnosing, setIsDiagnosing] = useState<boolean>(false);
@@ -400,37 +395,13 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     setFallbackModels(target.fallbackModels || '');
     setHasApiKeyForProvider(target.hasKey);
     setIsCustomModel(false);
-    setSelectedFallbackToAdd('');
-    setShowCustomFallbackInput(false);
     setModelsError(null);
     setAvailableModels([]);
 
     loadModels(newProvider);
   };
 
-  const fallbackList = fallbackModels
-    ? fallbackModels.split(',').map((s) => s.trim()).filter(Boolean)
-    : [];
-
-  const moveFallback = (index: number, direction: -1 | 1) => {
-    const target = index + direction;
-    if (target < 0 || target >= fallbackList.length) return;
-    const copy = [...fallbackList];
-    const [removed] = copy.splice(index, 1);
-    copy.splice(target, 0, removed);
-    setFallbackModels(copy.join(', '));
-  };
-
-  const removeFallback = (index: number) => {
-    const copy = fallbackList.filter((_, i) => i !== index);
-    setFallbackModels(copy.join(', '));
-  };
-
-  const addFallback = (modelName: string) => {
-    const trimmed = modelName.trim();
-    if (!trimmed || fallbackList.includes(trimmed)) return;
-    setFallbackModels([...fallbackList, trimmed].join(', '));
-  };
+  const fallbackList = parseFallbackModels(fallbackModels);
 
   const handlePrimaryModelChange = (newModel: string) => {
     setModel(newModel);
@@ -440,15 +411,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     }
   };
 
-  // Moving the first fallback up swaps it with the primary model.
-  const promoteFirstFallback = () => {
-    const [promoted, ...rest] = fallbackList;
-    if (!promoted) return;
-    const demoted = model.trim();
-    const updated = demoted && !rest.includes(demoted) ? [demoted, ...rest] : rest;
-    setIsCustomModel(availableModels.length > 0 && !availableModels.some((m) => m.id === promoted));
-    setModel(promoted);
-    setFallbackModels(updated.join(', '));
+  const handlePromoteFirstFallback = () => {
+    const swapped = promoteFirstFallback(fallbackList, model);
+    if (!swapped) return;
+    setIsCustomModel(availableModels.length > 0 && !availableModels.some((m) => m.id === swapped.primary));
+    setModel(swapped.primary);
+    setFallbackModels(swapped.fallbacks.join(', '));
   };
 
 
@@ -968,154 +936,18 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   </div>
                 </div>
 
-                {/* Fallback Models Ordered Chain */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase">
-                      Fallback Models (Sequential Failover Chain)
-                    </label>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      Queried in order on 503, 504, or timeout
-                    </span>
-                  </div>
-
-                  {fallbackList.length === 0 ? (
-                    <div className="p-2 bg-dark-950 border border-dark-800 rounded text-[11px] text-slate-400 font-mono">
-                      No fallback models configured for this analysis.
-                    </div>
-                  ) : (
-                    <div className="space-y-1 max-h-36 overflow-y-auto">
-                      {fallbackList.map((fb, idx) => {
-                        const isThinking = availableModels.find((m) => m.id === fb)?.supports_thinking;
-                        return (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between p-1.5 bg-dark-950 border border-dark-800 rounded text-xs font-mono"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold shrink-0">
-                                {`${getOrdinalSuffix(idx + 1)} Fallback`}
-                              </span>
-                              <span className="text-slate-200 font-medium truncate">{fb}</span>
-                              {isThinking && (
-                                <span className="px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] shrink-0">
-                                  Reasoning
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 ml-2">
-                              <button
-                                type="button"
-                                onClick={() => (idx === 0 ? promoteFirstFallback() : moveFallback(idx, -1))}
-                                className="p-0.5 text-slate-400 hover:text-slate-200 cursor-pointer"
-                                title={idx === 0 ? 'Swap with primary model' : 'Move up in priority'}
-                                aria-label={idx === 0 ? 'Make primary model' : 'Move fallback up'}
-                              >
-                                <ArrowUp className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={idx === fallbackList.length - 1}
-                                onClick={() => moveFallback(idx, 1)}
-                                className="p-0.5 text-slate-400 hover:text-slate-200 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
-                                title="Move down in priority"
-                                aria-label="Move fallback down"
-                              >
-                                <ArrowDown className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => removeFallback(idx)}
-                                className="p-0.5 text-red-400 hover:text-red-300 cursor-pointer"
-                                title="Remove fallback model"
-                                aria-label="Remove fallback"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Add Fallback Model Selector */}
-                  <div className="pt-1">
-                    {!showCustomFallbackInput ? (
-                      <div className="flex items-center gap-2 w-full">
-                        <div className="flex-1 min-w-0">
-                          <SelectDropdown
-                            variant="panel"
-                            fieldClassName="bg-dark-950 border-dark-700 rounded px-2 py-1 font-mono text-slate-200"
-                            label="Add Fallback Model"
-                            options={[
-                              { value: '', label: '-- Add Fallback Model --' },
-                              ...availableModels
-                                .filter((m) => m.id !== model && !fallbackList.includes(m.id))
-                                .map(aiModelOption),
-                              { value: '__custom_fallback__', label: 'Custom fallback model...' },
-                            ]}
-                            value={selectedFallbackToAdd}
-                            onChange={(v) => {
-                              if (v === '__custom_fallback__') {
-                                setShowCustomFallbackInput(true);
-                                setSelectedFallbackToAdd('');
-                              } else {
-                                setSelectedFallbackToAdd(v);
-                              }
-                            }}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          disabled={!selectedFallbackToAdd}
-                          onClick={() => {
-                            addFallback(selectedFallbackToAdd);
-                            setSelectedFallbackToAdd('');
-                          }}
-                          className="shrink-0 px-2.5 py-1 bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 w-full">
-                        <input
-                          type="text"
-                          value={customFallbackInput}
-                          onChange={(e) => setCustomFallbackInput(e.target.value)}
-                          placeholder="Enter custom model ID"
-                          className="flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono"
-                        />
-                        <button
-                          type="button"
-                          disabled={!customFallbackInput.trim()}
-                          onClick={() => {
-                            addFallback(customFallbackInput);
-                            setCustomFallbackInput('');
-                            setShowCustomFallbackInput(false);
-                          }}
-                          className="shrink-0 px-2.5 py-1 bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowCustomFallbackInput(false);
-                            setCustomFallbackInput('');
-                          }}
-                          className="shrink-0 p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
-                          title="Cancel custom fallback"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <ModelChainEditor
+                  key={provider}
+                  size="compact"
+                  heading="Fallback Models (Sequential Failover Chain)"
+                  headingNote="Queried in order on 503, 504, or timeout"
+                  emptyText="No fallback models configured for this analysis."
+                  fallbacks={fallbackList}
+                  primaryModel={model}
+                  availableModels={availableModels}
+                  onChange={(next) => setFallbackModels(next.join(', '))}
+                  onPromoteFirst={handlePromoteFirstFallback}
+                />
               </div>
             </div>
 
