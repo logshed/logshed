@@ -464,7 +464,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             </div>
             <div className="flex items-start gap-2">
               <span className="text-accent-400 font-bold">•</span>
-              <span>Requires temporary free disk space equal to the current database size.</span>
+              <span>Needs free disk space of about twice the current database size while it runs.</span>
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">

@@ -482,33 +482,68 @@ def get_db_footprint_bytes(db_path: Union[str, Path]) -> int:
     return total_size
 
 
+def sqlite_temp_dir() -> Path:
+    """
+    The folder SQLite's unix VFS writes temporary files to: the first of SQLITE_TMPDIR, TMPDIR,
+    /var/tmp, /usr/tmp and /tmp that is a folder this process can write to. The Docker image sets
+    SQLITE_TMPDIR to a folder on the data volume (entrypoint.sh).
+    """
+    for candidate in (os.environ.get("SQLITE_TMPDIR"), os.environ.get("TMPDIR"), "/var/tmp", "/usr/tmp", "/tmp"):
+        if candidate and os.path.isdir(candidate) and os.access(candidate, os.W_OK | os.X_OK):
+            return Path(candidate)
+    return Path(".")
+
+
+def _filesystem_id(path: Path) -> int:
+    return os.stat(path).st_dev
+
+
+def _free_bytes(path: Path) -> int:
+    try:
+        return shutil.disk_usage(path).free
+    except FileNotFoundError:
+        return 0
+
+
 def check_vacuum_headroom(
     db_path: Union[str, Path],
     safe_margin_bytes: int = 100 * 1024 * 1024,
 ) -> tuple[int, int, int]:
     """
-    Verify that host disk has sufficient temporary space for compaction.
-    Returns (db_footprint, disk_free, required_headroom).
-    Raises InsufficientDiskSpaceError if disk_free < required_headroom.
+    Verify there is room for compaction. VACUUM builds a copy of the database in SQLite's temporary
+    folder, then writes every page again into the WAL beside the database, so each needs about the
+    database's size; when both are on one disk, that disk needs twice the size.
+    Returns (db_footprint, disk_free, required_headroom) for the database's disk.
+    Raises InsufficientDiskSpaceError if a disk has less free space than it needs.
     """
     db_path_obj = Path(db_path)
     db_size = get_db_footprint_bytes(db_path_obj)
+    db_dir = db_path_obj.parent
+    temp_dir = sqlite_temp_dir()
 
-    parent_dir = db_path_obj.parent
     try:
-        usage = shutil.disk_usage(parent_dir)
-        disk_free = usage.free
+        same_disk = _filesystem_id(db_dir) == _filesystem_id(temp_dir)
     except FileNotFoundError:
-        disk_free = 0
+        same_disk = True
 
-    required_headroom = db_size + safe_margin_bytes
-    if disk_free < required_headroom:
-        raise InsufficientDiskSpaceError(
-            f"Insufficient temporary disk headroom available for database compaction. "
-            f"Compaction requires at least {required_headroom} bytes free ({db_size} bytes database size + "
-            f"{safe_margin_bytes} bytes safe margin), but only {disk_free} bytes are available."
-        )
-    return db_size, disk_free, required_headroom
+    if same_disk:
+        checks = [(db_dir, 2 * db_size + safe_margin_bytes, "the temporary copy and the write-ahead log")]
+    else:
+        checks = [
+            (db_dir, db_size + safe_margin_bytes, "the write-ahead log"),
+            (temp_dir, db_size + safe_margin_bytes, "the temporary copy"),
+        ]
+
+    for folder, needed, purpose in checks:
+        free = _free_bytes(folder)
+        if free < needed:
+            raise InsufficientDiskSpaceError(
+                f"Insufficient temporary disk headroom available for database compaction. "
+                f"Compaction needs {needed} bytes free in {folder} for {purpose} "
+                f"({'twice ' if same_disk else ''}the database size of {db_size} bytes, "
+                f"plus a safe margin of {safe_margin_bytes} bytes), but only {free} bytes are available."
+            )
+    return db_size, _free_bytes(db_dir), checks[0][1]
 
 
 async def execute_vacuum(
@@ -519,7 +554,7 @@ async def execute_vacuum(
 ) -> dict:
     """
     Coordinates on-demand database compaction (VACUUM):
-    1. Checks host disk space against database footprint plus safe margin (100 MB).
+    1. Checks free disk space for the temporary copy and the WAL (about twice the database, see check_vacuum_headroom).
     2. Pauses QueueConsumer writes while incoming logs continue buffering in _log_queue.
     3. Waits for in-flight writes and FTS indexing to finish, then resets open connections.
     4. Executes PRAGMA wal_checkpoint(TRUNCATE), VACUUM, then another checkpoint so logs.db shrinks at once.

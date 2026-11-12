@@ -509,7 +509,7 @@ describe('RetentionSlider Component', () => {
       screen.getByText('SQLite database writes will pause briefly during compaction (incoming logs will buffer in memory).')
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Requires temporary free disk space equal to the current database size.')
+      screen.getByText('Needs free disk space of about twice the current database size while it runs.')
     ).toBeInTheDocument();
 
     // Clicking Cancel closes modal without calling triggerVacuum

@@ -45,6 +45,7 @@ The following environment variables are supplied at container start and are stri
 - `USER_REGEX_TIMEOUT_MS` - Per-match time limit for user alert and drop rule patterns (default `50`).
 - `MCP_ALLOW_QUERY_TOKEN` - Accepts MCP API tokens in the URL query string (default `false`; a supported opt-in for MCP clients that cannot send headers).
 - `SYSLOG_MAX_TCP_CONNECTIONS_PER_IP` - Concurrent Syslog TCP connections allowed from one source IP (default `20`; environment only, not a runtime setting).
+- `SQLITE_TMPDIR` - Folder for SQLite's temporary files (`VACUUM`'s copy of the database, sorts that spill). The image sets `/data/.tmp`; `entrypoint.sh` moves it beside the database when `DB_PATH` or `DATA_DIR` change, then creates it (owned by the app user, mode `0700`). A different value set by the user is left as it is. SQLite reads it once when the process starts, so it must be in the environment, not set from Python; `docker exec` commands get the image's value.
 - `SYSLOG_UDP_RECEIVE_BUFFER_BYTES` - Receive buffer requested for the UDP syslog socket, in bytes (default 8 MiB, `0` keeps the OS default; environment only). The kernel caps it at `net.core.rmem_max`.
 
 *Storage Compatibility Note:* `DB_PATH` and `SECRET_KEY_PATH` remain supported as backward-compatible path overrides.

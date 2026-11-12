@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Compact no longer fills the container's own disk**: SQLite's temporary files, including the full copy of the database that **Compact Database** builds and the spill of large sorts, went to `/var/tmp` inside the container. On Unraid that is `docker.img`, shared by every container, so compacting a large database could fill it and stop other containers. They now go to `/data/.tmp`, beside the database. Compact also checks for the space it really needs, about twice the database's size, and refuses with the figures when there is not enough.
 - **AI analysis with older Claude models**: In 1.3.0 and 1.3.1, with Thinking set to Off, an analysis or follow-up on Claude Sonnet 4.6, Opus 4.6 or a model up to Claude 4.5 failed with "Anthropic endpoint error: ... unexpected keyword argument 'temperature'", and so did Claude 3.5 models at any thinking level. They work again, at the model's default temperature, since Anthropic no longer accepts a lower one.
 
 ## [1.3.1] - 2026-11-12

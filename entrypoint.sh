@@ -79,6 +79,22 @@ if [ "$CURRENT_OWNER" != "$PUID:$PGID" ]; then
 fi
 chown -R appuser:appuser /data 2>/dev/null || true
 
+# SQLite writes its temporary files (the copy Compact makes, large sorts) to SQLITE_TMPDIR.
+# Without it they land in /var/tmp inside the container, which on Unraid is docker.img, shared
+# by every container on the host. The image sets /data/.tmp; follow DB_PATH or DATA_DIR when they
+# move the database. A folder the user chose is left as it is.
+if [ "${SQLITE_TMPDIR:-/data/.tmp}" = "/data/.tmp" ]; then
+    if [ -n "$DB_PATH" ]; then
+        SQLITE_TMPDIR="$(dirname "$DB_PATH")/.tmp"
+    else
+        SQLITE_TMPDIR="${DATA_DIR:-/data}/.tmp"
+    fi
+    mkdir -p "$SQLITE_TMPDIR"
+    chown appuser:appuser "$SQLITE_TMPDIR" 2>/dev/null || true
+    chmod 700 "$SQLITE_TMPDIR" 2>/dev/null || true
+fi
+export SQLITE_TMPDIR
+
 # Keep new files (logs.db, -wal, -shm) unreadable by other users on the host
 umask 027
 

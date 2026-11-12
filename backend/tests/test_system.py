@@ -1791,9 +1791,65 @@ class TestDatabaseVacuum:
             check_vacuum_headroom(db_file, safe_margin_bytes=100 * 1024 * 1024)
         assert "Insufficient temporary disk headroom" in str(exc_info.value)
 
+    @staticmethod
+    def _disks(monkeypatch, free_by_dir: dict, device_by_dir: dict):
+        """Give each folder a free-space figure and a filesystem id."""
+        from collections import namedtuple
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+        monkeypatch.setattr(
+            "shutil.disk_usage", lambda p: Usage(total=10**12, used=0, free=free_by_dir[str(p)])
+        )
+        monkeypatch.setattr("app.services.retention._filesystem_id", lambda p: device_by_dir[str(p)])
 
+    def test_compact_needs_twice_the_database_size_when_the_temporary_folder_shares_its_disk(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """VACUUM writes a temporary copy and then the whole database again into the WAL."""
+        db_file = tmp_path / "logs.db"
+        db_file.write_bytes(b"x" * 1000)
+        temp_dir = tmp_path / ".tmp"
+        temp_dir.mkdir()
+        monkeypatch.setenv("SQLITE_TMPDIR", str(temp_dir))
+        devices = {str(tmp_path): 1, str(temp_dir): 1}
 
+        self._disks(monkeypatch, {str(tmp_path): 1500, str(temp_dir): 1500}, devices)
+        with pytest.raises(InsufficientDiskSpaceError) as exc_info:
+            check_vacuum_headroom(db_file, safe_margin_bytes=0)
+        assert "Insufficient temporary disk headroom" in str(exc_info.value)
+        assert "2000 bytes" in str(exc_info.value)
 
+        self._disks(monkeypatch, {str(tmp_path): 2000, str(temp_dir): 2000}, devices)
+        db_size, free, required = check_vacuum_headroom(db_file, safe_margin_bytes=0)
+        assert (db_size, free, required) == (1000, 2000, 2000)
+
+    def test_compact_checks_the_temporary_folder_on_its_own_disk(self, tmp_path: Path, monkeypatch):
+        db_file = tmp_path / "logs.db"
+        db_file.write_bytes(b"x" * 1000)
+        temp_dir = tmp_path / "scratch"
+        temp_dir.mkdir()
+        monkeypatch.setenv("SQLITE_TMPDIR", str(temp_dir))
+        devices = {str(tmp_path): 1, str(temp_dir): 2}
+
+        self._disks(monkeypatch, {str(tmp_path): 1000, str(temp_dir): 1000}, devices)
+        check_vacuum_headroom(db_file, safe_margin_bytes=0)
+
+        self._disks(monkeypatch, {str(tmp_path): 10**9, str(temp_dir): 999}, devices)
+        with pytest.raises(InsufficientDiskSpaceError) as exc_info:
+            check_vacuum_headroom(db_file, safe_margin_bytes=0)
+        assert str(temp_dir) in str(exc_info.value)
+
+    def test_sqlite_temp_dir_follows_sqlite_tmpdir_then_tmpdir(self, tmp_path: Path, monkeypatch):
+        from app.services.retention import sqlite_temp_dir
+
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        second.mkdir()
+        monkeypatch.setenv("SQLITE_TMPDIR", str(first))
+        monkeypatch.setenv("TMPDIR", str(second))
+        # SQLite skips a folder that does not exist, as this check does
+        assert sqlite_temp_dir() == second
+        first.mkdir()
+        assert sqlite_temp_dir() == first
 
 
 class TestSuperviseWorkerBackoff:

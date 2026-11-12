@@ -219,6 +219,11 @@ class TestDockerfileStatic:
         assert "/api/health" in content
         assert 'ENTRYPOINT ["/entrypoint.sh"]' in content
 
+    def test_dockerfile_points_sqlite_temporary_files_at_the_data_volume(self):
+        """Commands run with docker exec skip the entrypoint, so the image itself sets the folder."""
+        content = DOCKERFILE_PATH.read_text()
+        assert "SQLITE_TMPDIR=/data/.tmp" in content
+
 
 class TestEntrypointStatic:
 
@@ -479,11 +484,15 @@ class TestEntrypointHardening:
             path.chmod(0o755)
 
         record = f'echo "{{name}} $*" >> "{log}"'
-        for name in ("usermod", "groupmod", "groupadd", "useradd", "chown", "mkdir", "tini"):
+        for name in ("usermod", "groupmod", "groupadd", "useradd", "chown", "chmod", "mkdir", "tini"):
             stub(name, record.format(name=name))
         stub("getent", "exit 2")
         stub("stat", f'echo "{socket_gid}"')
-        stub("gosu", f'echo "gosu $*" >> "{log}"\necho "umask $(umask)" >> "{log}"')
+        stub(
+            "gosu",
+            f'echo "gosu $*" >> "{log}"\necho "umask $(umask)" >> "{log}"\n'
+            f'echo "SQLITE_TMPDIR=$SQLITE_TMPDIR" >> "{log}"',
+        )
 
         env = {
             "PATH": f"{stubs}:/usr/bin:/bin",
@@ -567,6 +576,32 @@ class TestEntrypointHardening:
         res, calls = self._run_entrypoint(tmp_path, {})
         assert res.returncode == 0, res.stderr
         assert "umask 0027" in calls
+
+    @pytest.mark.parametrize(
+        "env_extra,folder",
+        [
+            ({}, "/data/.tmp"),
+            ({"SQLITE_TMPDIR": "/data/.tmp"}, "/data/.tmp"),
+            ({"DATA_DIR": "/srv/logshed"}, "/srv/logshed/.tmp"),
+            ({"DATA_DIR": "/srv/logshed", "DB_PATH": "/db/logs.db"}, "/db/.tmp"),
+        ],
+    )
+    def test_sqlite_temporary_files_go_beside_the_database(self, tmp_path: Path, env_extra: dict, folder: str):
+        """SQLite's temporary files (Compact's copy of the database, large sorts) stay on the data disk."""
+        res, calls = self._run_entrypoint(tmp_path, env_extra)
+        assert res.returncode == 0, res.stderr
+        assert f"mkdir -p {folder}" in calls
+        assert f"chown appuser:appuser {folder}" in calls
+        assert f"chmod 700 {folder}" in calls
+        assert f"SQLITE_TMPDIR={folder}" in calls
+        gosu = next(i for i, c in enumerate(calls) if c.startswith("gosu"))
+        assert calls.index(f"chown appuser:appuser {folder}") < gosu
+
+    def test_sqlite_temporary_folder_chosen_by_the_user_is_left_alone(self, tmp_path: Path):
+        res, calls = self._run_entrypoint(tmp_path, {"SQLITE_TMPDIR": "/scratch"})
+        assert res.returncode == 0, res.stderr
+        assert "SQLITE_TMPDIR=/scratch" in calls
+        assert not [c for c in calls if "/scratch" in c and not c.startswith("SQLITE_TMPDIR=")]
 
 
 # ===================================================================

@@ -25,7 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Set runtime environment variables
+# Set runtime environment variables. SQLITE_TMPDIR keeps SQLite's temporary files (the copy
+# Compact makes, large sorts) on the data volume instead of the container's own filesystem;
+# entrypoint.sh creates the folder, and moves it beside the database when DATA_DIR or DB_PATH do.
 ARG LOGSHED_IMAGE_REPO=logshed/logshed
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -33,6 +35,7 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8080 \
     PUID=1000 \
     PGID=1000 \
+    SQLITE_TMPDIR=/data/.tmp \
     LOGSHED_IMAGE_REPO=${LOGSHED_IMAGE_REPO}
 
 # Set application directory

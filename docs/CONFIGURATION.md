@@ -226,6 +226,7 @@ Login attempts are limited to 5 failures per client address per minute (IPv6 cli
 | `ENABLE_API_DOCS` | `true` | Docker Compose only | Serves the interactive API documentation (`/docs`, `/redoc`) and `/openapi.json`. The pages need the web login (without one, `/docs` and `/redoc` redirect to the login page and `/openapi.json` returns `401`); `/openapi.json` also accepts any valid API token in `Authorization: Bearer`. Swagger UI and ReDoc are served by LogShed itself, so they work offline. Set to `false` to turn them off. | 1.3.0 |
 | `LOGSHED_VERSION` | *(runtime build)* | Docker Compose only | Override the version string displayed in the web dashboard header. | 1.0.0 |
 | `LOGSHED_IMAGE_REPO` | `logshed/logshed` | Docker Compose only | Container image repository checked for version updates. | 1.1.0 |
+| `SQLITE_TMPDIR` | `/data/.tmp` | Docker Compose only | Folder for SQLite's temporary files (see [Data Persistence Paths](#data-persistence-paths)). The image sets it, and the container moves it beside the database when `DATA_DIR` or `DB_PATH` change. Set it only to put these files on another disk; the folder must exist and be writable by `PUID`, or SQLite falls back to `/var/tmp` inside the container. | 1.4.0 |
 
 ---
 
@@ -258,6 +259,9 @@ All persistent application data is stored under the `/data` directory:
 | `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). Anyone holding a backup of `/data` also holds this key. To keep the key out of `/data` backups, set `LOGSHED_SECRET_KEY` instead (see above) and store the value separately. It may be a symbolic link to a key file (a mounted secret, for example): LogShed reads the key through it. If the file exists but cannot be read, or is not a regular file (a dangling link or a directory, for example), LogShed stops at start-up with an error naming it rather than replace the key. An empty file is replaced, unless it is reached through a link: then LogShed stops with an error and leaves the link alone. |
 | `/data/presets/alerts/` | Directory for custom and community alert rule JSON definitions. |
 | `/data/presets/drops/` | Directory for custom and community ingestion drop rule JSON definitions. |
+| `/data/.tmp/` | SQLite's temporary files: the copy of the database that **Compact Database** builds, and large sorts. They are deleted as soon as they are created, so the folder looks empty while they take space. It sits beside the database (it follows `DATA_DIR` and `DB_PATH`), so this space comes from the `/data` disk and not from the container's own filesystem (on Unraid, `docker.img`). |
+
+**Free space for Compact Database:** compacting writes a copy of the database and then the whole database again into `logs.db-wal`, so it needs free space of about **twice the database's size** on the `/data` disk. LogShed checks before it starts and refuses with the figures if there is not enough. The extra space is released when it finishes.
 
 > [!WARNING]
 > Always host the `/data` directory on a local filesystem (such as ext4, btrfs, or zfs) or an SSD cache pool. Network mounts (NFS, SMB) and Unraid FUSE user shares (`/mnt/user/`) do not reliably support POSIX shared memory (`mmap`) or file locking required for SQLite WAL mode.
