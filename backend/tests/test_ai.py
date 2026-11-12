@@ -1330,6 +1330,45 @@ class TestAiDiagnoseWorkflow:
 # 7. Default Model Configuration & Fallback Tests (Issue 5)
 # ===================================================================
 
+class TestUnknownProviderRefused:
+    """Saving settings for a provider LogShed does not know stores nothing and says why."""
+
+    @staticmethod
+    def _ai_rows(tmp_path):
+        conn = sqlite3.connect(str(tmp_path / "logs.db"))
+        rows = dict(conn.execute("SELECT key, value FROM system_settings WHERE key LIKE 'ai_%'").fetchall())
+        conn.close()
+        return rows
+
+    @pytest.mark.asyncio
+    async def test_unknown_active_provider_is_refused(self, populated_db, auth_client, tmp_path):
+        before = self._ai_rows(tmp_path)
+        res = await auth_client.post("/api/settings", json={"ai_provider": "not-a-provider", "ai_model": "m"})
+        assert res.status_code == 422
+        assert "not-a-provider" in res.text
+        assert self._ai_rows(tmp_path) == before
+
+    @pytest.mark.asyncio
+    async def test_unknown_provider_in_the_per_provider_settings_is_refused(self, populated_db, auth_client, tmp_path):
+        before = self._ai_rows(tmp_path)
+        res = await auth_client.post("/api/settings", json={
+            "ai_providers_config": {"openai": {"ai_model": "gpt-x"}, "not-a-provider": {"ai_model": "m"}},
+        })
+        assert res.status_code == 422
+        assert self._ai_rows(tmp_path) == before
+
+    @pytest.mark.asyncio
+    async def test_known_provider_in_any_case_is_saved(self, populated_db, auth_client, tmp_path):
+        res = await auth_client.post("/api/settings", json={
+            "ai_provider": "OpenAI_Compatible",
+            "ai_providers_config": {" Anthropic ": {"ai_model": "claude-x"}},
+        })
+        assert res.status_code == 200
+        rows = self._ai_rows(tmp_path)
+        assert rows["ai_provider"] == "openai_compatible"
+        assert rows["ai_model_anthropic"] == "claude-x"
+
+
 class TestDefaultModelFallback:
 
     def test_settings_response_default_model(self):

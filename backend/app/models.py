@@ -7,7 +7,7 @@ import re
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
-from app.core.ai_providers import DEFAULT_AI_PROVIDER
+from app.core.ai_providers import AI_PROVIDERS, DEFAULT_AI_PROVIDER
 from app.core.config import DEFAULT_AI_MODEL, get_max_retention_days
 
 
@@ -253,6 +253,15 @@ class SettingsResponse(BaseModel):
         return self
 
 
+def _known_provider_id(value: str) -> str:
+    """The registry id for a provider name in any case; ValueError (422) for an unknown one."""
+    provider_id = value.strip().lower()
+    if provider_id not in AI_PROVIDERS:
+        known = ", ".join(AI_PROVIDERS)
+        raise ValueError(f"Unknown AI provider '{value.strip()}'. Known providers: {known}.")
+    return provider_id
+
+
 class SettingsUpdateRequest(BaseModel):
     """Payload for updating runtime settings."""
     ai_enabled: Optional[bool] = None
@@ -370,6 +379,24 @@ class SettingsUpdateRequest(BaseModel):
     @classmethod
     def validate_ai_base_url(cls, v: Optional[str]) -> Optional[str]:
         return AiProviderConfig.validate_ai_base_url(v)
+
+    @field_validator("ai_provider")
+    @classmethod
+    def validate_ai_provider(cls, v: Optional[str]) -> Optional[str]:
+        """A known provider id, stored in lower case. An empty value keeps the saved provider."""
+        if not v:
+            return v
+        return _known_provider_id(v)
+
+    @field_validator("ai_providers_config")
+    @classmethod
+    def validate_ai_providers_config(
+        cls, v: Optional[dict[str, AiProviderConfig]]
+    ) -> Optional[dict[str, AiProviderConfig]]:
+        """Settings per known provider id, keyed in lower case. Empty keys are ignored."""
+        if v is None:
+            return v
+        return {_known_provider_id(k): cfg for k, cfg in v.items() if k.strip()}
 
     @field_validator("retention_days")
     @classmethod
