@@ -1,12 +1,12 @@
-fastapi==0.162.0
+fastapi==0.162.5
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 argon2-cffi==25.1.0
 cryptography==50.0.2
-pydantic==2.14.2
+pydantic==2.14.3
 google-genai==2.34.0
-openai==3.45.0
+openai==3.49.0
 anthropic==1.17.0
 apprise==1.13.1
 mcp==1.30.0
-regex==2026.9.29
+regex==2026.11.9
