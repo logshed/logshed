@@ -191,9 +191,9 @@ class TestNotifierUnit:
         assert valid is False
         assert "loopback" in (err or "").lower()
 
+        # Apprise 2 refuses this IPv4-compatible IPv6 form as an invalid address before the address check runs
         valid, err = validate_notification_url("json://[::127.0.0.1]:8080/hook")
         assert valid is False
-        assert "loopback" in (err or "").lower()
 
     def test_validate_unresolvable_domains_rejected(self):
         valid, err = validate_notification_url("gotify://unresolvable-domain-987654321.invalid/token")
@@ -536,7 +536,7 @@ class TestNotificationsApi:
             assert len(dispatched_payloads) == 1
             payload = dispatched_payloads[0]
             assert payload.get("html") == 1
-            assert "<strong>Alert: Auth Spike</strong>" in payload.get("message")
+            assert "<b>Alert: Auth Spike</b>" in payload.get("message")
             assert "**Alert:" not in payload.get("message")
 
     def test_pushover_removes_newline_gaps_between_fields(self):
@@ -569,9 +569,9 @@ class TestNotificationsApi:
             assert len(dispatched_payloads) == 1
             msg = dispatched_payloads[0].get("message")
             assert dispatched_payloads[0].get("html") == 1
-            assert "<strong>Host:</strong> homelab-host\n<strong>App:</strong> testapp" in msg
+            assert "<b>Host:</b> homelab-host\n<b>App:</b> testapp" in msg
             assert "<br" not in msg
-            assert msg.startswith("<strong>Host:</strong>")
+            assert msg.startswith("<b>Host:</b>")
             # Verify lock screen plain text retains clean line breaks
             import re
             plain_text = re.sub(r"<[^>]+>", "", msg)

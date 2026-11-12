@@ -10,6 +10,7 @@ test deliveries, and asynchronous dispatch using asyncio.to_thread.
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from contextvars import ContextVar
 import ipaddress
 import logging
 import re
@@ -468,14 +469,17 @@ requests.sessions.SessionRedirectMixin.get_redirect_target = _safe_get_redirect_
 #
 # validate_notification_url resolves names once, but Apprise (through requests/urllib3, smtplib
 # and similar) resolves them again when it connects, so a DNS answer can change in between.
-# socket.getaddrinfo is wrapped once, process-wide. The wrapper only acts in a thread that is
-# inside _pinned_destination_guard (a notification dispatch or channel test): there every
-# address a lookup returns, which is the address the client then connects to, is checked
-# against the same blocklist and the lookup fails if any address is blocked. Other threads,
-# including the event loop's resolver threads, are not affected. Apprise runs inside the guard
-# with async_mode off so that every send happens in the guarded thread.
+# socket.getaddrinfo is wrapped once, process-wide. The wrapper only acts inside
+# _pinned_destination_guard (a notification dispatch or channel test): there every address a
+# lookup returns, which is the address the client then connects to, is checked against the same
+# blocklist and the lookup fails if any address is blocked. The guard is a context variable, so it
+# also covers the worker threads Apprise sends from: Apprise 2 runs each send in its own thread
+# pool (to enforce a time limit) and copies the caller's context into it. Lookups that start with
+# a fresh context, such as the event loop's resolver threads, are not affected. Apprise runs with
+# async_mode off, so the services of one dispatch are sent one after another.
 
-_dispatch_guard = threading.local()
+# (allow_private, proxy_endpoints) inside _pinned_destination_guard, otherwise None
+_dispatch_guard: ContextVar[Optional[tuple[bool, frozenset]]] = ContextVar("logshed_notification_guard", default=None)
 
 
 class BlockedNotificationDestinationError(OSError):
@@ -568,12 +572,13 @@ def _is_proxy_lookup(host, port_num: Optional[int], endpoints: frozenset) -> boo
 
 def _guarded_getaddrinfo(host, port, *args, **kwargs):
     results = _system_getaddrinfo(host, port, *args, **kwargs)
-    allow_private = getattr(_dispatch_guard, "allow_private", None)
-    if allow_private is None:
+    guard = _dispatch_guard.get()
+    if guard is None:
         return results
+    allow_private, proxy_endpoints = guard
 
     port_num = _port_number(port)
-    if _is_proxy_lookup(host, port_num, getattr(_dispatch_guard, "proxy_endpoints", frozenset())):
+    if _is_proxy_lookup(host, port_num, proxy_endpoints):
         # The administrator's proxy, not a destination taken from a notification URL
         return results
     if port_num in _BLOCKED_PORTS:
@@ -608,7 +613,7 @@ socket.getaddrinfo = _guarded_getaddrinfo
 
 @contextmanager
 def _pinned_destination_guard():
-    """Check every address resolved in this thread against the notification blocklist."""
+    """Check every address resolved in this context (and the threads it starts) against the notification blocklist."""
     from app.core.config import get_cached_setting
 
     allow_private = bool(get_cached_setting("allow_private_notification_targets", True))
@@ -616,15 +621,11 @@ def _pinned_destination_guard():
     proxy_endpoints = _configured_proxy_endpoints()
     if proxy_endpoints:
         _log_proxy_notice_once(proxy_endpoints)
-    previous = getattr(_dispatch_guard, "allow_private", None)
-    previous_proxies = getattr(_dispatch_guard, "proxy_endpoints", frozenset())
-    _dispatch_guard.allow_private = allow_private
-    _dispatch_guard.proxy_endpoints = proxy_endpoints
+    reset_token = _dispatch_guard.set((allow_private, proxy_endpoints))
     try:
         yield
     finally:
-        _dispatch_guard.allow_private = previous
-        _dispatch_guard.proxy_endpoints = previous_proxies
+        _dispatch_guard.reset(reset_token)
 
 
 def _new_dispatch_apprise() -> apprise.Apprise:
