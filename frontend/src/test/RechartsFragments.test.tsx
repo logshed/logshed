@@ -6,7 +6,7 @@ import { render } from '@testing-library/react';
 import { BarChart, Bar, Cell, XAxis } from 'recharts';
 
 describe('Recharts with React fragments', () => {
-  it('colours bars with Cells wrapped in a fragment', () => {
+  it('fills each bar from its Cell when the Cells are wrapped in a fragment', () => {
     const data = [{ t: 'a', v: 2 }, { t: 'b', v: 5 }];
     const { container } = render(
       <BarChart width={300} height={150} data={data}>

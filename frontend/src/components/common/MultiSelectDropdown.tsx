@@ -80,7 +80,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
     if (isOpen) {
       updatePosition();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- updatePosition reads only refs and the window, so every render's copy does the same
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updatePosition reads only refs, the window and isForm (fixed while the list is open), so every render's copy does the same
   }, [isOpen]);
 
   // Update position on window scroll or resize
@@ -105,7 +105,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
       window.removeEventListener('resize', handleScrollOrResize);
       window.removeEventListener('scroll', handleScrollOrResize, true);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- updatePosition reads only refs and the window; listing it would add the listeners again on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updatePosition reads only refs, the window and isForm (fixed while the list is open); listing it would add the listeners again on every render
   }, [isOpen]);
 
   // Close on click outside (inspects both trigger container and portaled popover)

@@ -703,14 +703,14 @@ describe('LogSearchBar filter controls name what they show', () => {
 
   it('puts the active filter count in the names of the Filters and Reset buttons', async () => {
     await renderBar({ query: 'x', severity_max: 3, from: '1h' });
-    expect(screen.getByRole('button', { name: spacedName('Filters 3 active') })).toHaveTextContent('Filters 3');
-    expect(screen.getByRole('button', { name: spacedName('Reset 3 active filters') })).toHaveTextContent('Reset 3');
+    expect(screen.getByRole('button', { name: spacedName('Filters', '3', 'active') })).toHaveTextContent('Filters 3');
+    expect(screen.getByRole('button', { name: spacedName('Reset', '3', 'active filters') })).toHaveTextContent('Reset 3');
   });
 
   it('keeps the count in the names when the phone toolbar shows icons only', async () => {
     await renderBar({ query: 'x' }, <button type="button">Scroll</button>);
-    expect(screen.getByRole('button', { name: spacedName('Filters 1 active') })).toBeInTheDocument();
-    const reset = screen.getByRole('button', { name: spacedName('Reset 1 active filters') });
+    expect(screen.getByRole('button', { name: spacedName('Filters', '1', 'active') })).toBeInTheDocument();
+    const reset = screen.getByRole('button', { name: spacedName('Reset', '1', 'active filters') });
     // Out of sight on phones but still read, so the name starts with the word shown from md up
     expect(within(reset).getByText('Reset').className).toContain('sr-only md:not-sr-only');
   });
@@ -723,7 +723,7 @@ describe('LogSearchBar filter controls name what they show', () => {
   it('keeps the Host and App clear buttons out of the dropdown trigger', async () => {
     const { onFilterChange } = await renderBar({ sources: ['host-a', 'host-b'], source: 'host-a,host-b', apps: ['nginx'], app_name: 'nginx' });
     const hostClear = screen.getAllByRole('button', { name: 'Clear host / ip filter' })[0];
-    const hostTrigger = screen.getByRole('button', { name: spacedName('Host / IP: host-a (+1) 2 selected') });
+    const hostTrigger = screen.getByRole('button', { name: spacedName('Host / IP: host-a (+1) 2', 'selected') });
     expect(hostTrigger).not.toContainElement(hostClear);
     expect(hostTrigger.parentElement).toContainElement(hostClear);
     const appClear = screen.getAllByRole('button', { name: 'Clear app / container filter' })[0];
