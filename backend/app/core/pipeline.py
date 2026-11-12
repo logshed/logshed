@@ -914,6 +914,10 @@ def set_queue_consumer(consumer: Optional["QueueConsumer"]) -> None:
     _active_queue_consumer = consumer
 
 
+# The most log entries the consumer stores in one transaction
+MAX_BATCH_SIZE = 5000
+
+
 class QueueConsumer:
     """
     Background task that drains the shared queue and batch-inserts into SQLite.
@@ -996,7 +1000,7 @@ class QueueConsumer:
                 self._conn = None
 
     async def run(self) -> None:
-        """Main loop: drain queue with debounce-based batching (up to 5000 records or debounce window)."""
+        """Main loop: drain queue with debounce-based batching (up to MAX_BATCH_SIZE records or debounce window)."""
         self._started = True
         self._running = True
         self._drain_done.clear()
@@ -1028,43 +1032,10 @@ class QueueConsumer:
                         queue.task_done()
                         break
 
-                    batch = [item]
-                    batch_start = time.monotonic()
-
-                    # Drain up to 5000 items
-                    while len(batch) < 5000 and self._running and not self._stopping and not self._paused:
-                        # First try immediate drain of available items
-                        try:
-                            next_item = queue.get_nowait()
-                            if next_item is _QUEUE_SENTINEL:
-                                queue.task_done()
-                                self._running = False
-                                break
-                            batch.append(next_item)
-                            continue
-                        except asyncio.QueueEmpty:
-                            pass
-
-                        # If queue is empty, wait for next item up to remaining debounce window
-                        elapsed = time.monotonic() - batch_start
-                        remaining = self._debounce_seconds - elapsed
-                        if remaining <= 0:
-                            break
-
-                        try:
-                            next_item = await asyncio.wait_for(queue.get(), timeout=remaining)
-                            if next_item is _QUEUE_SENTINEL:
-                                queue.task_done()
-                                self._running = False
-                                break
-                            batch.append(next_item)
-                        except (asyncio.TimeoutError, asyncio.CancelledError):
-                            break
-
-                    if batch:
-                        success = await self._flush_batch(batch, queue)
-                        if not success and (not self._running or self._stopping):
-                            break
+                    batch = await self._fill_batch(queue, item)
+                    success = await self._flush_batch(batch, queue)
+                    if not success and (not self._running or self._stopping):
+                        break
         finally:
             self._running = False
             try:
@@ -1073,10 +1044,61 @@ class QueueConsumer:
             finally:
                 self._drain_done.set()
 
+    async def _fill_batch(self, queue: asyncio.Queue, first_item: dict) -> list[dict]:
+        """
+        A batch that starts with first_item: whatever the queue holds now, then what arrives within
+        the debounce window, up to MAX_BATCH_SIZE. The stop sentinel ends the batch and the consumer.
+        """
+        batch = [first_item]
+        batch_start = time.monotonic()
+        while len(batch) < MAX_BATCH_SIZE and self._running and not self._stopping and not self._paused:
+            # First try immediate drain of available items
+            try:
+                next_item = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                # If queue is empty, wait for next item up to remaining debounce window
+                remaining = self._debounce_seconds - (time.monotonic() - batch_start)
+                if remaining <= 0:
+                    break
+                try:
+                    next_item = await asyncio.wait_for(queue.get(), timeout=remaining)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    break
+            if next_item is _QUEUE_SENTINEL:
+                queue.task_done()
+                self._running = False
+                break
+            batch.append(next_item)
+        return batch
+
     async def _flush_batch(self, batch: list[dict], queue: asyncio.Queue) -> bool:
-        """Helper to insert batch with retry backoff and broadcast to SSE."""
+        """Insert a batch with retry backoff, then broadcast it to SSE and evaluate alert rules on it."""
         if not batch:
             return True
+        inserted, stored_batch = await self._insert_with_retries(batch)
+        if inserted:
+            record_ingest(len(stored_batch))
+            # Broadcast to SSE subscribers on the event loop thread
+            from app.core.sse import sse_manager
+            await sse_manager.broadcast_batch(stored_batch)
+
+            # Evaluate alert rules on ingested batch
+            if self._alert_evaluator is not None:
+                try:
+                    await self._alert_evaluator.evaluate_batch(stored_batch)
+                except Exception as e:
+                    logger.warning(f"Error evaluating alert rules on batch: {e}")
+
+        # Mark as done, a failed batch too, so the queue is not stuck
+        for _ in batch:
+            queue.task_done()
+        return inserted
+
+    async def _insert_with_retries(self, batch: list[dict]) -> tuple[bool, list[dict]]:
+        """
+        Store a batch, retrying a busy or locked database with backoff (a few quick tries during
+        shutdown). Returns whether it was stored and the entries that reached the database.
+        """
         inserted = False
         # The entries that reached the database (all of them, unless some could not be stored)
         stored_batch = batch
@@ -1131,35 +1153,13 @@ class QueueConsumer:
                         inserted = True
                         break
                     backoff = min(backoff * 2.0, self.RETRY_BACKOFF_MAX)
-
-        if inserted:
-            record_ingest(len(stored_batch))
-            # Broadcast to SSE subscribers on the event loop thread
-            from app.core.sse import sse_manager
-            await sse_manager.broadcast_batch(stored_batch)
-
-            # Evaluate alert rules on ingested batch
-            if self._alert_evaluator is not None:
-                try:
-                    await self._alert_evaluator.evaluate_batch(stored_batch)
-                except Exception as e:
-                    logger.warning(f"Error evaluating alert rules on batch: {e}")
-
-            # Mark as done
-            for _ in batch:
-                queue.task_done()
-            return True
-        else:
-            # Mark failed batch items as done so queue is not stuck
-            for _ in batch:
-                queue.task_done()
-            return False
+        return inserted, stored_batch
 
     async def _drain_queue(self, queue: asyncio.Queue) -> None:
-        """Drain all remaining items in queue in batches of up to 5000 and commit to SQLite."""
+        """Drain all remaining items in queue in batches of up to MAX_BATCH_SIZE and commit to SQLite."""
         while not queue.empty():
             batch = []
-            while len(batch) < 5000:
+            while len(batch) < MAX_BATCH_SIZE:
                 try:
                     item = queue.get_nowait()
                 except asyncio.QueueEmpty:

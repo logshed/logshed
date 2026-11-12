@@ -701,6 +701,292 @@ async def _cancel_and_wait(*tasks: asyncio.Task) -> None:
             pass
 
 
+class ContainerLogStream:
+    """
+    The log stream of one container, fed line by line through the assembler.
+
+    Requests logs with timestamps=true, tracks the latest timestamp seen and resumes with
+    since=<timestamp> on reconnect, dropping the lines Docker replays at that timestamp. A
+    container that was already running when LogShed attached has no history to resume from, so
+    it opens with tail=0. A container started while LogShed is running passes initial_since (its
+    start event time) so the lines it wrote before the stream opened are read too. A container
+    without a TTY sends multiplexed frames with 8-byte headers; one with a TTY sends raw text.
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        container_id: str,
+        container_name: str,
+        assembler: KeyedMultilineAssembler,
+        cancel_event: asyncio.Event,
+        container_last_seen: Optional[dict[str, str]] = None,
+        heartbeat_interval: Optional[float] = None,
+        container_last_messages: Optional[dict[str, set[str]]] = None,
+        alias_cache: Optional[AliasCache] = None,
+        endpoint_id: int = 1,
+        source_ip: str = "docker",
+        source_alias: str = "docker",
+        initial_since: Optional[str] = None,
+    ):
+        self.client = client
+        self.container_id = container_id
+        self.container_name = container_name
+        self.assembler = assembler
+        self.cancel_event = cancel_event
+        self.container_last_seen = container_last_seen
+        self.heartbeat_interval = _heartbeat_interval() if heartbeat_interval is None else heartbeat_interval
+        self.container_last_messages = container_last_messages
+        self.alias_cache = alias_cache
+        self.source_ip = source_ip
+        self.source_alias = source_alias
+        self.initial_since = initial_since
+        self.stream_key = f"docker:{endpoint_id}:{container_id}"
+        self.url = f"/containers/{container_id}/logs"
+        self.label = f"{container_name} ({container_id[:12]})"
+
+        self.last_seen_timestamp: Optional[str] = (
+            container_last_seen.get(container_id) if container_last_seen is not None else None
+        )
+        self.seen_at_last_timestamp: set[str] = (
+            container_last_messages.get(container_id, set()).copy()
+            if container_last_messages is not None
+            else set()
+        )
+        self.is_tty = False
+        # Bytes not yet split into lines (TTY) or into frames (multiplexed)
+        self.buffer = b""
+        # Multiplexed mode: text of a line whose newline has not arrived yet
+        self.line_buffer = ""
+
+    async def run(self) -> None:
+        """Stream until the container is gone or the cancel event is set, reconnecting with backoff."""
+        await self._detect_tty()
+        backoff = _CONTAINER_INITIAL_BACKOFF
+        while not self.cancel_event.is_set():
+            params = self._request_params()
+            try:
+                async with self.client.stream("GET", self.url, params=params) as resp:
+                    if getattr(resp, "status_code", None) == 404:
+                        logger.debug(f"Container {self.label} not found (404); stopping tailer.")
+                        return
+                    if getattr(resp, "status_code", None) == 400 and "since" in params:
+                        logger.warning(
+                            f"Docker rejected 'since' parameter for {self.label}: 400. "
+                            f"Resetting last seen timestamp and falling back to tail='0'."
+                        )
+                        self._forget_resume_point()
+                        continue
+                    resp.raise_for_status()
+                    backoff = _CONTAINER_INITIAL_BACKOFF
+                    if await self._follow(resp):
+                        return
+
+                # Stream ended normally (EOF)
+                if self.cancel_event.is_set():
+                    return
+                logger.debug(f"Log stream ended for container {self.label}; reconnecting in {backoff:.1f}s...")
+            except asyncio.CancelledError:
+                raise
+            except (httpx.RemoteProtocolError, httpx.HTTPError, Exception) as e:
+                if self.cancel_event.is_set():
+                    return
+                if isinstance(e, httpx.HTTPStatusError) and getattr(e.response, "status_code", None) == 404:
+                    logger.debug(f"Container {self.label} returned 404; stopping tailer task.")
+                    return
+                logger.debug(f"Log stream disconnected for {self.label}: {e}. Reconnecting in {backoff:.1f}s...")
+
+            try:
+                await asyncio.wait_for(self.cancel_event.wait(), timeout=backoff)
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            backoff = min(backoff * _CONTAINER_BACKOFF_FACTOR, _CONTAINER_MAX_BACKOFF)
+
+    async def _detect_tty(self) -> None:
+        """TTY mode sends raw text; without a TTY the stream is multiplexed. Multiplexed if inspect fails."""
+        try:
+            inspect_resp = await self.client.get(f"/containers/{self.container_id}/json")
+            if inspect_resp.status_code == 200:
+                config = inspect_resp.json().get("Config", {})
+                self.is_tty = bool(config.get("Tty", False))
+        except Exception:
+            pass
+
+    def _request_params(self) -> dict[str, str]:
+        params = {
+            "stdout": "true",
+            "stderr": "true",
+            "follow": "true",
+            "timestamps": "true",
+        }
+        if self.last_seen_timestamp:
+            params["since"] = _iso_to_unix_timestamp(self.last_seen_timestamp)
+        elif self.initial_since:
+            params["since"] = self.initial_since
+        else:
+            params["tail"] = "0"
+        return params
+
+    def _forget_resume_point(self) -> None:
+        self.last_seen_timestamp = None
+        self.initial_since = None
+        if self.container_last_seen is not None:
+            self.container_last_seen.pop(self.container_id, None)
+
+    async def _follow(self, resp: httpx.Response) -> bool:
+        """
+        Read one open stream with its keepalive until it ends. True when the cancel event stopped
+        it; raises the keepalive's timeout when the daemon stopped answering pings.
+        """
+        self.buffer = b""
+        self.line_buffer = ""
+        keepalive = _StreamKeepalive(
+            self.client,
+            self.heartbeat_interval,
+            self.cancel_event,
+            f"Docker keepalive heartbeat failed for {self.label}",
+            "Triggering reconnect.",
+        )
+        stream_task = asyncio.create_task(self._consume(resp, keepalive))
+        monitor_task = asyncio.create_task(keepalive.run(stream_task))
+        cancel_task = asyncio.create_task(self.cancel_event.wait())
+        try:
+            done, _pending = await asyncio.wait([stream_task, cancel_task], return_when=asyncio.FIRST_COMPLETED)
+            if cancel_task in done:
+                return True
+            if keepalive.failed:
+                raise keepalive.timeout_error()
+            await stream_task
+            return False
+        except asyncio.CancelledError:
+            if keepalive.failed:
+                raise keepalive.timeout_error()
+            raise
+        finally:
+            await _cancel_and_wait(cancel_task, stream_task, monitor_task)
+
+    async def _consume(self, resp: httpx.Response, keepalive: _StreamKeepalive) -> None:
+        async for chunk in resp.aiter_bytes():
+            if self.cancel_event.is_set():
+                return
+            keepalive.touch()
+            self.buffer += chunk
+            if self.is_tty:
+                await self._feed_tty_lines()
+            else:
+                await self._feed_frames()
+        # Flush any trailing TTY or multiplexed bytes on clean stream completion
+        await self._flush()
+
+    async def _feed_tty_lines(self) -> None:
+        """TTY mode: raw text, split by newline; a line longer than the cap is cut into pieces."""
+        while b"\n" in self.buffer:
+            line_bytes, self.buffer = self.buffer.split(b"\n", 1)
+            if not line_bytes:
+                continue
+            await self._emit(line_bytes.decode("utf-8", errors="replace").rstrip("\r"))
+
+        while len(self.buffer) > MAX_TTY_BUFFER:
+            logger.warning(
+                f"Docker TTY buffer exceeded {MAX_TTY_BUFFER} bytes without newline for container {self.container_name}. Truncating chunk."
+            )
+            chunk_bytes = self.buffer[:MAX_TTY_BUFFER]
+            self.buffer = self.buffer[MAX_TTY_BUFFER:]
+            await self._emit(chunk_bytes.decode("utf-8", errors="replace").rstrip("\r"))
+
+    async def _feed_frames(self) -> None:
+        """Multiplexed mode: demux frames with automatic header resynchronization, then split lines."""
+        frames, self.buffer = _demux_stream(self.buffer)
+        for _stream_type, payload in frames:
+            text = self.line_buffer + payload.decode("utf-8", errors="replace")
+            lines = text.split("\n")
+            self.line_buffer = lines.pop()
+            for line in lines:
+                line = line.rstrip("\r")
+                if line:
+                    await self._emit(line)
+
+            # Same cap as TTY mode: a container writing without "\n" must not
+            # grow the pending line (and the per-frame copy of it) without limit.
+            while len(self.line_buffer) > MAX_TTY_BUFFER:
+                logger.warning(
+                    f"Docker log line buffer exceeded {MAX_TTY_BUFFER} bytes without newline for container {self.container_name}. Truncating chunk."
+                )
+                line = self.line_buffer[:MAX_TTY_BUFFER].rstrip("\r")
+                self.line_buffer = self.line_buffer[MAX_TTY_BUFFER:]
+                if line:
+                    await self._emit(line)
+
+    async def _flush(self) -> None:
+        if self.is_tty and self.buffer:
+            while len(self.buffer) > MAX_TTY_BUFFER:
+                logger.warning(
+                    f"Docker TTY trailing buffer exceeded {MAX_TTY_BUFFER} bytes for container {self.container_name}. Truncating chunk."
+                )
+                chunk_bytes = self.buffer[:MAX_TTY_BUFFER]
+                self.buffer = self.buffer[MAX_TTY_BUFFER:]
+                line = chunk_bytes.decode("utf-8", errors="replace").rstrip("\r")
+                if line:
+                    await self._emit(line)
+            line = self.buffer.decode("utf-8", errors="replace").rstrip("\r")
+            self.buffer = b""
+            if line:
+                await self._emit(line)
+        elif not self.is_tty and self.line_buffer:
+            line = self.line_buffer.rstrip("\r")
+            self.line_buffer = ""
+            if line:
+                await self._emit(line)
+
+    async def _emit(self, line: str) -> None:
+        entry = self._process_line(line)
+        if entry:
+            await self.assembler.feed(self.stream_key, entry)
+
+    def _process_line(self, line: str) -> Optional[dict]:
+        """The log entry for one timestamped line, or None for a replay or an empty line."""
+        ts, message = _extract_docker_timestamp(line)
+        if ts and not self._note_timestamp(ts, message):
+            return None
+        if message or ts:
+            severity = _detect_severity(message)
+            parsed_message, parsed_sev = _parse_docker_message_content(message, severity)
+            return _make_log_entry(
+                self.container_name, self.container_id, parsed_message,
+                severity=parsed_sev, timestamp=ts,
+                alias_cache=self.alias_cache,
+                source_ip=self.source_ip,
+                source_alias=self.source_alias,
+                raw=message,
+            )
+        return None
+
+    def _note_timestamp(self, ts: str, message: str) -> bool:
+        """
+        Move the resume point to ts. False for a line Docker replays: older than the resume point,
+        or already seen at it (its 'since' filter is inclusive).
+        """
+        last = self.last_seen_timestamp
+        if last and ts == last:
+            if message in self.seen_at_last_timestamp:
+                return False
+            self.seen_at_last_timestamp.add(message)
+            if self.container_last_messages is not None:
+                self.container_last_messages[self.container_id] = self.seen_at_last_timestamp
+        elif last and ts < last:
+            return False
+        else:
+            self.last_seen_timestamp = ts
+            self.seen_at_last_timestamp = {message}
+            if self.container_last_seen is not None:
+                self.container_last_seen[self.container_id] = ts
+            if self.container_last_messages is not None:
+                self.container_last_messages[self.container_id] = self.seen_at_last_timestamp
+        return True
+
+
 async def _tail_container_logs(
     client: httpx.AsyncClient,
     container_id: str,
@@ -716,257 +1002,18 @@ async def _tail_container_logs(
     source_alias: str = "docker",
     initial_since: Optional[str] = None,
 ) -> None:
-    """
-    Stream logs for a single container, feeding lines through the assembler.
-
-    Requests logs with timestamps=true.
-    Tracks latest seen log timestamp and resumes via since=<timestamp> on reconnect.
-    A container that was already running when LogShed attached has no history to resume from,
-    so it opens with tail=0. A container started while LogShed is running passes initial_since
-    (its start event time) so the lines it wrote before the stream opened are read too.
-    Uses proper Docker multiplexed stream frame parsing when tty=false,
-    and newline-delimited raw text when tty=true.
-    """
-    stream_key = f"docker:{endpoint_id}:{container_id}"
-    url = f"/containers/{container_id}/logs"
-
-    if heartbeat_interval is None:
-        heartbeat_interval = _heartbeat_interval()
-
-    last_seen_timestamp: Optional[str] = (
-        container_last_seen.get(container_id) if container_last_seen is not None else None
-    )
-    seen_at_last_timestamp: set[str] = (
-        container_last_messages.get(container_id, set()).copy()
-        if container_last_messages is not None
-        else set()
-    )
-
-    # Detect whether the container is running in TTY mode.
-    # TTY mode sends raw text; non-TTY sends multiplexed frames with 8-byte headers.
-    is_tty = False
-    try:
-        inspect_resp = await client.get(f"/containers/{container_id}/json")
-        if inspect_resp.status_code == 200:
-            config = inspect_resp.json().get("Config", {})
-            is_tty = bool(config.get("Tty", False))
-    except Exception:
-        pass  # Default to multiplexed if inspect fails
-
-    def _process_line(line: str) -> Optional[dict]:
-        nonlocal last_seen_timestamp, seen_at_last_timestamp
-        ts, message = _extract_docker_timestamp(line)
-        if ts:
-            if last_seen_timestamp and ts == last_seen_timestamp:
-                if message in seen_at_last_timestamp:
-                    # Replayed duplicate from Docker due to inclusive 'since' filter
-                    return None
-                seen_at_last_timestamp.add(message)
-                if container_last_messages is not None:
-                    container_last_messages[container_id] = seen_at_last_timestamp
-            elif last_seen_timestamp and ts < last_seen_timestamp:
-                # Older than last seen timestamp
-                return None
-            else:
-                last_seen_timestamp = ts
-                seen_at_last_timestamp = {message}
-                if container_last_seen is not None:
-                    container_last_seen[container_id] = ts
-                if container_last_messages is not None:
-                    container_last_messages[container_id] = seen_at_last_timestamp
-
-        if message or ts:
-            severity = _detect_severity(message)
-            parsed_message, parsed_sev = _parse_docker_message_content(message, severity)
-            return _make_log_entry(
-                container_name, container_id, parsed_message,
-                severity=parsed_sev, timestamp=ts,
-                alias_cache=alias_cache,
-                source_ip=source_ip,
-                source_alias=source_alias,
-                raw=message,
-            )
-        return None
-
-    backoff = _CONTAINER_INITIAL_BACKOFF
-    while not cancel_event.is_set():
-        params = {
-            "stdout": "true",
-            "stderr": "true",
-            "follow": "true",
-            "timestamps": "true",
-        }
-        if last_seen_timestamp:
-            params["since"] = _iso_to_unix_timestamp(last_seen_timestamp)
-        elif initial_since:
-            params["since"] = initial_since
-        else:
-            params["tail"] = "0"
-
-        try:
-            async with client.stream("GET", url, params=params) as resp:
-                if getattr(resp, "status_code", None) == 404:
-                    logger.debug(
-                        f"Container {container_name} ({container_id[:12]}) not found (404); stopping tailer."
-                    )
-                    return
-                if getattr(resp, "status_code", None) == 400 and "since" in params:
-                    logger.warning(
-                        f"Docker rejected 'since' parameter for {container_name} ({container_id[:12]}): 400. "
-                        f"Resetting last seen timestamp and falling back to tail='0'."
-                    )
-                    last_seen_timestamp = None
-                    initial_since = None
-                    if container_last_seen is not None:
-                        container_last_seen.pop(container_id, None)
-                    continue
-                resp.raise_for_status()
-                backoff = _CONTAINER_INITIAL_BACKOFF
-                buffer = b""
-                line_buffer = ""
-
-                keepalive = _StreamKeepalive(
-                    client,
-                    heartbeat_interval,
-                    cancel_event,
-                    f"Docker keepalive heartbeat failed for {container_name} ({container_id[:12]})",
-                    "Triggering reconnect.",
-                )
-
-                async def _consume_stream() -> None:
-                    nonlocal buffer, line_buffer
-                    async for chunk in resp.aiter_bytes():
-                        if cancel_event.is_set():
-                            return
-                        keepalive.touch()
-                        buffer += chunk
-
-                        if is_tty:
-                            # TTY mode: raw text, split by newline
-                            while b"\n" in buffer:
-                                line_bytes, buffer = buffer.split(b"\n", 1)
-                                if not line_bytes:
-                                    continue
-                                line = line_bytes.decode("utf-8", errors="replace").rstrip("\r")
-                                entry = _process_line(line)
-                                if entry:
-                                    await assembler.feed(stream_key, entry)
-
-                            while len(buffer) > MAX_TTY_BUFFER:
-                                logger.warning(
-                                    f"Docker TTY buffer exceeded {MAX_TTY_BUFFER} bytes without newline for container {container_name}. Truncating chunk."
-                                )
-                                chunk_bytes = buffer[:MAX_TTY_BUFFER]
-                                buffer = buffer[MAX_TTY_BUFFER:]
-                                line = chunk_bytes.decode("utf-8", errors="replace").rstrip("\r")
-                                entry = _process_line(line)
-                                if entry:
-                                    await assembler.feed(stream_key, entry)
-                        else:
-                            # Multiplexed mode: demux frames with automatic header resynchronization
-                            frames, buffer = _demux_stream(buffer)
-                            for stream_type, payload in frames:
-                                text = line_buffer + payload.decode("utf-8", errors="replace")
-                                lines = text.split("\n")
-                                line_buffer = lines.pop()
-                                for line in lines:
-                                    line = line.rstrip("\r")
-                                    if not line:
-                                        continue
-                                    entry = _process_line(line)
-                                    if entry:
-                                        await assembler.feed(stream_key, entry)
-
-                                # Same cap as TTY mode: a container writing without "\n" must not
-                                # grow the pending line (and the per-frame copy of it) without limit.
-                                while len(line_buffer) > MAX_TTY_BUFFER:
-                                    logger.warning(
-                                        f"Docker log line buffer exceeded {MAX_TTY_BUFFER} bytes without newline for container {container_name}. Truncating chunk."
-                                    )
-                                    line = line_buffer[:MAX_TTY_BUFFER].rstrip("\r")
-                                    line_buffer = line_buffer[MAX_TTY_BUFFER:]
-                                    if line:
-                                        entry = _process_line(line)
-                                        if entry:
-                                            await assembler.feed(stream_key, entry)
-
-                    # Flush any trailing TTY or multiplexed bytes on clean stream completion
-                    if is_tty and buffer:
-                        while len(buffer) > MAX_TTY_BUFFER:
-                            logger.warning(
-                                f"Docker TTY trailing buffer exceeded {MAX_TTY_BUFFER} bytes for container {container_name}. Truncating chunk."
-                            )
-                            chunk_bytes = buffer[:MAX_TTY_BUFFER]
-                            buffer = buffer[MAX_TTY_BUFFER:]
-                            line = chunk_bytes.decode("utf-8", errors="replace").rstrip("\r")
-                            if line:
-                                entry = _process_line(line)
-                                if entry:
-                                    await assembler.feed(stream_key, entry)
-                        line = buffer.decode("utf-8", errors="replace").rstrip("\r")
-                        buffer = b""
-                        if line:
-                            entry = _process_line(line)
-                            if entry:
-                                await assembler.feed(stream_key, entry)
-                    elif not is_tty and line_buffer:
-                        line = line_buffer.rstrip("\r")
-                        line_buffer = ""
-                        if line:
-                            entry = _process_line(line)
-                            if entry:
-                                await assembler.feed(stream_key, entry)
-
-                stream_task = asyncio.create_task(_consume_stream())
-
-                monitor_task = asyncio.create_task(keepalive.run(stream_task))
-                cancel_task = asyncio.create_task(cancel_event.wait())
-                try:
-                    done, pending = await asyncio.wait(
-                        [stream_task, cancel_task],
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if cancel_task in done:
-                        return
-                    if keepalive.failed:
-                        raise keepalive.timeout_error()
-                    await stream_task
-                except asyncio.CancelledError:
-                    if keepalive.failed:
-                        raise keepalive.timeout_error()
-                    raise
-                finally:
-                    await _cancel_and_wait(cancel_task, stream_task, monitor_task)
-
-            # Stream ended normally (EOF)
-            if cancel_event.is_set():
-                return
-            logger.debug(
-                f"Log stream ended for container {container_name} ({container_id[:12]}); "
-                f"reconnecting in {backoff:.1f}s..."
-            )
-        except asyncio.CancelledError:
-            raise
-        except (httpx.RemoteProtocolError, httpx.HTTPError, Exception) as e:
-            if cancel_event.is_set():
-                return
-            if isinstance(e, httpx.HTTPStatusError) and getattr(e.response, "status_code", None) == 404:
-                logger.debug(
-                    f"Container {container_name} ({container_id[:12]}) returned 404; stopping tailer task."
-                )
-                return
-            logger.debug(
-                f"Log stream disconnected for {container_name} ({container_id[:12]}): {e}. "
-                f"Reconnecting in {backoff:.1f}s..."
-            )
-
-        try:
-            await asyncio.wait_for(cancel_event.wait(), timeout=backoff)
-            return
-        except asyncio.TimeoutError:
-            pass
-
-        backoff = min(backoff * _CONTAINER_BACKOFF_FACTOR, _CONTAINER_MAX_BACKOFF)
+    """Stream logs for a single container until it is gone or cancel_event is set (see ContainerLogStream)."""
+    await ContainerLogStream(
+        client, container_id, container_name, assembler, cancel_event,
+        container_last_seen=container_last_seen,
+        heartbeat_interval=heartbeat_interval,
+        container_last_messages=container_last_messages,
+        alias_cache=alias_cache,
+        endpoint_id=endpoint_id,
+        source_ip=source_ip,
+        source_alias=source_alias,
+        initial_since=initial_since,
+    ).run()
 
 
 def effective_source_ip(url: Optional[str], source_alias: Optional[str], endpoint_id: int) -> str:

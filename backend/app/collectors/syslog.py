@@ -242,6 +242,202 @@ def _rfc3164_datetime(
     return datetime.datetime(year, month, int(day_str), int(hour_str), int(minute_str), int(second_str))
 
 
+def _split_structured_data(remainder: str) -> str:
+    """The MSG after RFC 5424 STRUCTURED-DATA: "-" or one or more [sdid ...] blocks (bracket-aware)."""
+    if remainder.startswith("-"):
+        # NILVALUE structured data
+        return remainder[1:].lstrip(" ")
+    if not remainder.startswith("["):
+        # Malformed SD - treat entire remainder as message
+        return remainder
+    sd_end = 0
+    i = 0
+    while i < len(remainder) and remainder[i] == "[":
+        # Find matching closing bracket (not escaped)
+        j = i + 1
+        found_close = False
+        while j < len(remainder):
+            if remainder[j] == "]":
+                sd_end = j + 1
+                found_close = True
+                break
+            if remainder[j] == "\\" and j + 1 < len(remainder):
+                j += 1  # skip escaped char
+            j += 1
+        if not found_close:
+            break
+        i = sd_end
+        # skip optional space between SD elements
+        if i < len(remainder) and remainder[i] == " " and i + 1 < len(remainder) and remainder[i + 1] == "[":
+            i += 1
+    return remainder if sd_end == 0 else remainder[sd_end:].lstrip(" ")
+
+
+# Each format parser reads the text after PRI. When the text is in its format it fills result and
+# returns (the text the severity keyword check reads when the message gives no severity, whether
+# the format gave an explicit severity); otherwise it returns None and the next parser is tried.
+_FormatOutcome = Optional[tuple[str, bool]]
+
+
+def _parse_rfc5424(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Version MUST be exactly '1' followed by a space, followed by a valid timestamp or '-'.
+    # This prevents misidentifying Valkey/Redis messages like '1:M ...' or other numbers.
+    if not content.startswith("1 "):
+        return None
+    content = content[2:]  # skip "1 "
+    # TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID SP STRUCTURED-DATA [SP MSG]
+    header_parts = content.split(" ", 5)
+    if len(header_parts) < 6:
+        # Not enough fields for valid 5424 - treat as unparsed
+        return content, False
+    timestamp, hostname, app_name, _procid, _msgid = header_parts[:5]
+    msg = _split_structured_data(header_parts[5])
+
+    if timestamp != "-":
+        try:
+            dt = datetime.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt_utc = _resolve_naive(dt, now, local_tz)
+            else:
+                dt_utc = dt.astimezone(datetime.timezone.utc)
+            result["timestamp"] = _correct_future_timestamp(dt_utc, now).isoformat()
+        except Exception:
+            result["timestamp"] = timestamp
+    if hostname != "-":
+        result["hostname"] = hostname
+    if app_name != "-":
+        result["app_name"] = app_name
+    result["message"] = msg
+    return content, False
+
+
+def _parse_rfc3164(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Mmm dd HH:MM:SS or Mmm  d HH:MM:SS
+    ts_match = _RE_RFC3164_TIMESTAMP.match(content)
+    if not ts_match:
+        return None
+    content = content[ts_match.end():]
+    try:
+        # Add current year since RFC 3164 doesn't include it
+        dt = _rfc3164_datetime(now.year, *ts_match.groups())
+        parsed_month = dt.month
+        # Year boundary heuristic: if parsed month is ahead of current month,
+        # the message likely came from the previous year.
+        # Conversely, if receiver is in December and sender in positive timezone emitted January,
+        # the message belongs to the next year.
+        if parsed_month > now.month:
+            dt = dt.replace(year=now.year - 1)
+        elif now.month == 12 and parsed_month == 1:
+            dt = dt.replace(year=now.year + 1)
+
+        # RFC 3164 timestamps lack timezone information and are emitted either in
+        # the sender's local time or in UTC.
+        dt_utc = _correct_future_timestamp(_resolve_naive(dt, now, local_tz), now)
+
+        # Preserve microsecond arrival precision for proper sub-second ordering
+        result["timestamp"] = dt_utc.replace(microsecond=now.microsecond).isoformat()
+    except ValueError:
+        pass
+
+    # RFC 3164 Section 4.1.2 / 4.1.3: The HOSTNAME field is optional.
+    _parse_hostname_and_msg(result, content)
+    return content, False
+
+
+def _parse_bracketed_iso(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Bracketed timestamp envelope: [TIMESTAMP] [HOST] [APP] MSG or [TIMESTAMP] MSG
+    m_bracket = _RE_BRACKETED_ISO_TIMESTAMP.match(content)
+    if not m_bracket:
+        return None
+    result["timestamp"] = _parse_iso_or_datetime(m_bracket.group(1), now, local_tz)
+    rem = content[m_bracket.end():]
+    m_env = _RE_HOST_APP_ENVELOPE.match(rem)
+    if m_env:
+        result["hostname"] = m_env.group(1)
+        result["app_name"] = m_env.group(2)
+        result["message"] = m_env.group(3)
+    else:
+        m_host = _RE_BRACKETED_HOST.match(rem)
+        if m_host and m_host.group(1).lower() not in SEVERITY_NAME_MAP:
+            result["hostname"] = m_host.group(1)
+            _parse_msg_into_app_and_content(result, m_host.group(2))
+        else:
+            _parse_msg_into_app_and_content(result, rem)
+    return content, False
+
+
+def _parse_iso(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Unbracketed ISO 8601 / RFC 3339 / standard datetime: TIMESTAMP HOSTNAME TAG: MSG
+    m_iso = _RE_ISO_TIMESTAMP.match(content)
+    if not m_iso:
+        return None
+    result["timestamp"] = _parse_iso_or_datetime(m_iso.group(1), now, local_tz)
+    _parse_hostname_and_msg(result, content[m_iso.end():])
+    return content, False
+
+
+def _parse_valkey(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Valkey / Redis server format: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
+    m_valkey = _RE_VALKEY.match(content)
+    if not m_valkey:
+        return None
+    result["timestamp"] = _parse_valkey_datetime(
+        m_valkey.group(2), m_valkey.group(3), m_valkey.group(4), m_valkey.group(5), now, local_tz
+    )
+    result["severity"] = VALKEY_SEVERITY.get(m_valkey.group(6), 6)
+    result["message"] = m_valkey.group(7)
+    return content, True
+
+
+def _parse_app_pipe(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Application-prefixed pipe format: [maintainerr] | 03/10/2026 16:00:33 [INFO] ...
+    m_app_pipe = _RE_APP_PIPE.match(content)
+    if not m_app_pipe:
+        return None
+    result["app_name"] = m_app_pipe.group(1)
+    result["timestamp"] = _parse_dmy_or_datetime(m_app_pipe.group(2), m_app_pipe.group(3), now, local_tz)
+    rem = m_app_pipe.group(4)
+    m_level = _RE_BRACKETED_LEVEL.match(rem)
+    if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
+        result["severity"] = SEVERITY_NAME_MAP[m_level.group(1).lower()]
+        result["message"] = m_level.group(2)
+        return content, True
+    result["message"] = rem
+    return content, False
+
+
+def _parse_logfmt(result: dict[str, Any], content: str, now: datetime.datetime, local_tz: datetime.tzinfo) -> _FormatOutcome:
+    # Logfmt format: time="2026-10-03T14:56:31Z" level=info msg="..."
+    m_logfmt = _RE_LOGFMT.match(content)
+    if not m_logfmt:
+        return None
+    result["timestamp"] = _parse_iso_or_datetime(m_logfmt.group(1), now, local_tz)
+    rem = m_logfmt.group(2)
+    explicit_severity = False
+    m_level = RE_LOGFMT_LEVEL.search(rem)
+    if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
+        result["severity"] = SEVERITY_NAME_MAP[m_level.group(1).lower()]
+        explicit_severity = True
+    m_msg = RE_LOGFMT_MSG.search(rem)
+    if m_msg:
+        result["message"] = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
+    else:
+        result["message"] = rem
+    return content, explicit_severity
+
+
+# Tried in this order; the first that recognises the text wins
+_FORMAT_PARSERS = (
+    _parse_rfc5424,
+    _parse_rfc3164,
+    _parse_bracketed_iso,
+    _parse_iso,
+    _parse_valkey,
+    _parse_app_pipe,
+    _parse_logfmt,
+)
+
+
 def parse_syslog_message(
     data: bytes,
     source_ip: str,
@@ -278,12 +474,9 @@ def parse_syslog_message(
         "message": raw_str,
         "raw": raw_str
     }
-    
+
     content = raw_str
-    
-    # Parse PRI
     has_pri = False
-    explicit_severity = False
     pri_match = _RE_PRI.match(content)
     if pri_match:
         has_pri = True
@@ -291,161 +484,16 @@ def parse_syslog_message(
         result["facility"] = pri // 8
         result["severity"] = pri % 8
         content = content[pri_match.end():]
-    # Check RFC 5424: version MUST be exactly '1' followed by a space, followed by a valid timestamp or '-'
-    # This prevents misidentifying Valkey/Redis messages like '1:M ...' or other numbers.
-    if content.startswith("1 ") and not content.startswith("1:"):
-        content = content[2:]  # skip "1 "
-        # RFC 5424 format after version:
-        # TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID SP STRUCTURED-DATA [SP MSG]
-        # Parse TIMESTAMP HOSTNAME APP-NAME PROCID MSGID by splitting on first 5 spaces
-        header_parts = content.split(" ", 5)
-        if len(header_parts) >= 6:
-            timestamp, hostname, app_name, procid, msgid = header_parts[:5]
-            remainder = header_parts[5]
-            
-            # Parse structured data (bracket-aware)
-            # SD is either "-" (NILVALUE) or one or more [sdid ...] blocks
-            if remainder.startswith("-"):
-                # NILVALUE structured data
-                msg = remainder[1:].lstrip(" ")
-            elif remainder.startswith("["):
-                # Bracket-aware extraction: consume all [...] blocks
-                sd_end = 0
-                i = 0
-                while i < len(remainder) and remainder[i] == "[":
-                    # Find matching closing bracket (not escaped)
-                    j = i + 1
-                    found_close = False
-                    while j < len(remainder):
-                        if remainder[j] == "]":
-                            sd_end = j + 1
-                            found_close = True
-                            break
-                        if remainder[j] == "\\" and j + 1 < len(remainder):
-                            j += 1  # skip escaped char
-                        j += 1
-                    if not found_close:
-                        break
-                    i = sd_end
-                    # skip optional space between SD elements
-                    if i < len(remainder) and remainder[i] == " " and i + 1 < len(remainder) and remainder[i + 1] == "[":
-                        i += 1
-                if sd_end == 0:
-                    msg = remainder
-                else:
-                    msg = remainder[sd_end:].lstrip(" ")
-            else:
-                # Malformed SD - treat entire remainder as message
-                msg = remainder
 
-            if timestamp != "-":
-                try:
-                    ts_clean = timestamp.replace("Z", "+00:00")
-                    dt = datetime.datetime.fromisoformat(ts_clean)
-                    if dt.tzinfo is None:
-                        dt_utc = _resolve_naive(dt, now, local_tz)
-                    else:
-                        dt_utc = dt.astimezone(datetime.timezone.utc)
-                    result["timestamp"] = _correct_future_timestamp(dt_utc, now).isoformat()
-                except Exception:
-                    result["timestamp"] = timestamp
-            if hostname != "-":
-                result["hostname"] = hostname
-            if app_name != "-":
-                result["app_name"] = app_name
-            result["message"] = msg
-        else:
-            # Not enough fields for valid 5424 - treat as unparsed
-            pass
-    elif (ts_match := _RE_RFC3164_TIMESTAMP.match(content)):
-        # RFC 3164: Mmm dd HH:MM:SS or Mmm  d HH:MM:SS
-        content = content[ts_match.end():]
-
-        # Try to parse timestamp
-        try:
-            # Add current year since RFC 3164 doesn't include it
-            dt = _rfc3164_datetime(now.year, *ts_match.groups())
-            parsed_month = dt.month
-            # Year boundary heuristic: if parsed month is ahead of current month,
-            # the message likely came from the previous year.
-            # Conversely, if receiver is in December and sender in positive timezone emitted January,
-            # the message belongs to the next year.
-            if parsed_month > now.month:
-                dt = dt.replace(year=now.year - 1)
-            elif now.month == 12 and parsed_month == 1:
-                dt = dt.replace(year=now.year + 1)
-
-            # RFC 3164 timestamps lack timezone information and are emitted either in
-            # the sender's local time or in UTC.
-            dt_utc = _correct_future_timestamp(_resolve_naive(dt, now, local_tz), now)
-
-            # Preserve microsecond arrival precision for proper sub-second ordering
-            dt_utc = dt_utc.replace(microsecond=now.microsecond)
-            result["timestamp"] = dt_utc.isoformat()
-        except ValueError:
-            pass
-
-        # RFC 3164 Section 4.1.2 / 4.1.3: The HOSTNAME field is optional.
-        _parse_hostname_and_msg(result, content)
-    elif (m_bracket := _RE_BRACKETED_ISO_TIMESTAMP.match(content)):
-        # Bracketed timestamp envelope: [TIMESTAMP] [HOST] [APP] MSG or [TIMESTAMP] MSG
-        result["timestamp"] = _parse_iso_or_datetime(m_bracket.group(1), now, local_tz)
-        rem = content[m_bracket.end():]
-        m_env = _RE_HOST_APP_ENVELOPE.match(rem)
-        if m_env:
-            result["hostname"] = m_env.group(1)
-            result["app_name"] = m_env.group(2)
-            result["message"] = m_env.group(3)
-        else:
-            m_host = _RE_BRACKETED_HOST.match(rem)
-            if m_host and m_host.group(1).lower() not in SEVERITY_NAME_MAP:
-                result["hostname"] = m_host.group(1)
-                _parse_msg_into_app_and_content(result, m_host.group(2))
-            else:
-                _parse_msg_into_app_and_content(result, rem)
-    elif (m_iso := _RE_ISO_TIMESTAMP.match(content)):
-        # Unbracketed ISO 8601 / RFC 3339 / standard datetime: TIMESTAMP HOSTNAME TAG: MSG
-        result["timestamp"] = _parse_iso_or_datetime(m_iso.group(1), now, local_tz)
-        _parse_hostname_and_msg(result, content[m_iso.end():])
-    elif (m_valkey := _RE_VALKEY.match(content)):
-        # Valkey / Redis server format: <pid>:<role> <day> <mon> <year> <time> <level_char> <msg>
-        result["timestamp"] = _parse_valkey_datetime(
-            m_valkey.group(2), m_valkey.group(3), m_valkey.group(4), m_valkey.group(5), now, local_tz
-        )
-        level_char = m_valkey.group(6)
-        result["severity"] = VALKEY_SEVERITY.get(level_char, 6)
-        explicit_severity = True
-        result["message"] = m_valkey.group(7)
-    elif (m_app_pipe := _RE_APP_PIPE.match(content)):
-        # Application-prefixed pipe format: [maintainerr] | 03/10/2026 16:00:33 [INFO] ...
-        result["app_name"] = m_app_pipe.group(1)
-        result["timestamp"] = _parse_dmy_or_datetime(
-            m_app_pipe.group(2), m_app_pipe.group(3), now, local_tz
-        )
-        rem = m_app_pipe.group(4)
-        m_level = _RE_BRACKETED_LEVEL.match(rem)
-        if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
-            result["severity"] = SEVERITY_NAME_MAP[m_level.group(1).lower()]
-            explicit_severity = True
-            result["message"] = m_level.group(2)
-        else:
-            result["message"] = rem
-    elif (m_logfmt := _RE_LOGFMT.match(content)):
-        # Logfmt format: time="2026-10-03T14:56:31Z" level=info msg="..."
-        result["timestamp"] = _parse_iso_or_datetime(m_logfmt.group(1), now, local_tz)
-        rem = m_logfmt.group(2)
-        m_level = RE_LOGFMT_LEVEL.search(rem)
-        if m_level and m_level.group(1).lower() in SEVERITY_NAME_MAP:
-            result["severity"] = SEVERITY_NAME_MAP[m_level.group(1).lower()]
-            explicit_severity = True
-        m_msg = RE_LOGFMT_MSG.search(rem)
-        if m_msg:
-            result["message"] = m_msg.group(1) or m_msg.group(2) or m_msg.group(3) or ""
-        else:
-            result["message"] = rem
+    for format_parser in _FORMAT_PARSERS:
+        outcome = format_parser(result, content, now, local_tz)
+        if outcome is not None:
+            content, explicit_severity = outcome
+            break
     else:
         # Fallback: unparsed message without recognized timestamp
         result["message"] = content
+        explicit_severity = False
 
     # Content-based severity fallback inspection:
     # If PRI was missing or has a generic default/notice priority (>= 5),

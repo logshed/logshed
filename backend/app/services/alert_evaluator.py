@@ -67,6 +67,63 @@ def _rate_payload(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _store_clamped_epochs(batch: list[dict[str, Any]], now_epoch: float) -> None:
+    """
+    Store each entry's time as epoch seconds in "_epoch_ts", clamped to between a day ago and the
+    future skew the ingest paths allow.
+    """
+    min_epoch = now_epoch - 86400.0
+    max_epoch = now_epoch + MAX_FUTURE_TIMESTAMP_SKEW_SECONDS
+    for entry in batch:
+        entry_epoch = parse_iso_to_epoch(entry.get("timestamp"), fallback=now_epoch)
+        if entry_epoch < min_epoch:
+            entry_epoch = min_epoch
+        elif entry_epoch > max_epoch:
+            entry_epoch = max_epoch
+        entry["_epoch_ts"] = entry_epoch
+
+
+def _add_threshold_match(
+    window: deque, entry: dict[str, Any], window_cutoff: float, max_window_size: int, now_epoch: float
+) -> bool:
+    """
+    Add one match to a threshold window in time order, after evicting what left the window.
+    False when the match itself is older than the window (it is not added).
+    """
+    entry_epoch = entry.get("_epoch_ts", now_epoch)
+
+    # Evict expired entries outside the sliding window
+    while window and window[0][0] < window_cutoff:
+        window.popleft()
+
+    # Skip entries that fall outside the active sliding window
+    if entry_epoch < window_cutoff:
+        return False
+
+    # Append entry preserving chronological order under timestamp jitter
+    if not window or entry_epoch >= window[-1][0]:
+        window.append((entry_epoch, entry))
+    else:
+        # Backwards linear search for insertion index to avoid full deque sorting
+        idx = len(window)
+        while idx > 0 and window[idx - 1][0] > entry_epoch:
+            idx -= 1
+        if len(window) - idx >= FULL_ENTRIES_KEPT:
+            window.insert(idx, (entry_epoch, _rate_payload(entry)))
+        else:
+            window.insert(idx, (entry_epoch, entry))
+
+    # The match that just left the newest FULL_ENTRIES_KEPT keeps only the light record
+    if len(window) > FULL_ENTRIES_KEPT:
+        older_epoch, older_entry = window[-FULL_ENTRIES_KEPT - 1]
+        window[-FULL_ENTRIES_KEPT - 1] = (older_epoch, _rate_payload(older_entry))
+
+    # Bound maximum deque size
+    while len(window) > max_window_size:
+        window.popleft()
+    return True
+
+
 class CompiledAlertRule:
     """Compiled alert rule representation with cached regex pattern."""
 
@@ -424,19 +481,7 @@ class AlertEvaluator:
                 entries_by_rule.setdefault(id(candidate), []).append(entry)
 
         now_iso = now_utc.isoformat()
-        min_epoch = now_epoch - 86400.0
-        max_epoch = now_epoch + MAX_FUTURE_TIMESTAMP_SKEW_SECONDS
-
-        # Pre-parse and store normalized float epoch timestamps on incoming log entries
-        for entry in batch:
-            entry_epoch = parse_iso_to_epoch(entry.get("timestamp"), fallback=now_epoch)
-
-            # Clamp entry timestamps to between a day ago and the future skew the ingest paths allow
-            if entry_epoch < min_epoch:
-                entry_epoch = min_epoch
-            elif entry_epoch > max_epoch:
-                entry_epoch = max_epoch
-            entry["_epoch_ts"] = entry_epoch
+        _store_clamped_epochs(batch, now_epoch)
 
         fired_events: list[tuple[CompiledAlertRule, list[dict[str, Any]], Optional[RateSnapshot]]] = []
 
@@ -454,65 +499,47 @@ class AlertEvaluator:
                         fired_events.append((rule, snapshot.samples, snapshot))
                     continue
 
-                needed = rule.threshold_count
-                max_window_size = rule.threshold_count * 2
-
-                for entry in rule_entries:
-                    try:
-                        if not rule.matches(entry):
-                            continue
-
-                        entry_epoch = entry.get("_epoch_ts", now_epoch)
-
-                        # Evict expired entries outside the sliding window
-                        while window and window[0][0] < window_cutoff:
-                            window.popleft()
-
-                        # Skip entries that fall outside the active sliding window
-                        if entry_epoch < window_cutoff:
-                            continue
-
-                        # Append entry preserving chronological order under timestamp jitter
-                        if not window or entry_epoch >= window[-1][0]:
-                            window.append((entry_epoch, entry))
-                        else:
-                            # Backwards linear search for insertion index to avoid full deque sorting
-                            idx = len(window)
-                            while idx > 0 and window[idx - 1][0] > entry_epoch:
-                                idx -= 1
-                            if len(window) - idx >= FULL_ENTRIES_KEPT:
-                                window.insert(idx, (entry_epoch, _rate_payload(entry)))
-                            else:
-                                window.insert(idx, (entry_epoch, entry))
-
-                        # The match that just left the newest FULL_ENTRIES_KEPT keeps only the light record
-                        if len(window) > FULL_ENTRIES_KEPT:
-                            older_epoch, older_entry = window[-FULL_ENTRIES_KEPT - 1]
-                            window[-FULL_ENTRIES_KEPT - 1] = (older_epoch, _rate_payload(older_entry))
-
-                        # Bound maximum deque size
-                        while len(window) > max_window_size:
-                            window.popleft()
-
-                        # Check threshold condition
-                        if len(window) >= needed:
-                            if self._is_suppressed(rule, now_epoch):
-                                # Cap window to needed during cooldown to avoid memory expansion
-                                while len(window) > needed:
-                                    window.popleft()
-                            else:
-                                # Trigger alert firing
-                                triggering_logs = [item[1] for item in list(window)]
-                                window.clear()
-                                self._mark_fired(rule, now_utc, now_iso)
-                                fired_events.append((rule, triggering_logs, None))
-                                break  # Break out of batch loop for this rule
-
-                    except Exception as e:
-                        logger.debug(f"Error evaluating rule {rule.id}: {e}")
-                        continue
+                triggering_logs = self._count_threshold_matches(rule, window, rule_entries, window_cutoff, now_epoch)
+                if triggering_logs is not None:
+                    self._mark_fired(rule, now_utc, now_iso)
+                    fired_events.append((rule, triggering_logs, None))
 
         return fired_events
+
+    def _count_threshold_matches(
+        self,
+        rule: CompiledAlertRule,
+        window: deque,
+        rule_entries: Any,
+        window_cutoff: float,
+        now_epoch: float,
+    ) -> Optional[list[dict[str, Any]]]:
+        """
+        Add a threshold rule's matches in the batch to its window. The triggering logs (and an
+        empty window) when it reaches the threshold outside its cooldown, else None.
+        """
+        needed = rule.threshold_count
+        max_window_size = rule.threshold_count * 2
+        for entry in rule_entries:
+            try:
+                if not rule.matches(entry):
+                    continue
+                if not _add_threshold_match(window, entry, window_cutoff, max_window_size, now_epoch):
+                    continue
+
+                if len(window) >= needed:
+                    if self._is_suppressed(rule, now_epoch):
+                        # Cap window to needed during cooldown to avoid memory expansion
+                        while len(window) > needed:
+                            window.popleft()
+                    else:
+                        triggering_logs = [item[1] for item in list(window)]
+                        window.clear()
+                        return triggering_logs
+            except Exception as e:
+                logger.debug(f"Error evaluating rule {rule.id}: {e}")
+                continue
+        return None
 
     def _count_rate_matches(
         self,
