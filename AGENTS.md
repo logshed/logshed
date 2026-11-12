@@ -31,7 +31,7 @@ These are the project rules for any AI coding agent working in this repository (
 - **`-m e2e` spends the developer's money and time.** `backend/tests/test_live_ai_models.py` calls OpenAI, Anthropic and Google Gemini with the keys in `.env` or the environment, and `TestDockerLiveContainer` in `test_deployment.py` builds a Docker image. Ask the developer before running any of them.
 - **Do not assume the developer can pay for every provider.** Many contributors have keys for one provider, free tiers only, or no keys at all. Ask which providers they can use, run only those tests (`-k`), and keep to the few calls that the check needs.
 - **A test without its key skips; a key without credit or quota fails** with the provider's error (for example `429`, "insufficient quota" or a billing message). That is the developer's plan, not a LogShed bug: report it, and do not change code or tests to make it pass. Overloaded providers (`503`, `504`, "high demand") are also not LogShed faults; retry later.
-- **Before choosing model names for a live check or a test,** list the provider's current models (free: OpenAI `GET /v1/models` shows each model's `shutdown_date`, Anthropic `GET /v1/models`, Gemini `GET /v1beta/models`). Pick models with no shutdown date.
+- **Before choosing model names for a live check or a test,** list the provider's current models (free: OpenAI `GET /v1/models` shows each model's `shutdown_date`, Anthropic `GET /v1/models`, Gemini `GET /v1/models`). Pick models with no shutdown date.
 - **Never print, log or commit keys.** `.env` is gitignored; refer to keys by variable name only (`OPENAI_API_KEY`, `CLAUDE_API_KEY`, `GEMINI_API_KEY`).
 
 ## Backend Test Conventions

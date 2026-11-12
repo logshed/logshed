@@ -142,7 +142,7 @@ async def test_live_claude_runs_an_analysis_at_a_thinking_level(thinking_level):
 
 @pytest.mark.asyncio
 async def test_live_older_claude_without_thinking_runs_an_analysis():
-    """Claude Haiku 4.5 with thinking off gets the low temperature in the request body, which the SDK no longer takes as an argument."""
+    """Claude Haiku 4.5 with thinking off is sent no temperature: the SDK no longer takes one and the API refuses it."""
     from app.services.ai_engine import call_anthropic
 
     keys = load_env_keys()
