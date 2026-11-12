@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="MIT License"></a>
   <a href="https://github.com/logshed/logshed/pkgs/container/logshed"><img src="https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white&style=flat-square" alt="GHCR Container"></a>
   <a href="#system-requirements"><img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blueviolet?style=flat-square" alt="Multi-Arch Support"></a>
-  <a href="#built-with"><img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12"></a>
+  <a href="#built-with"><img src="https://img.shields.io/badge/python-3.14-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.14"></a>
   <a href="#built-with"><img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="#built-with"><img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19"></a>
   <a href="#built-with"><img src="https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite FTS5"></a>
@@ -235,19 +235,19 @@ Step-by-step setup guides and references live in [`docs/`](docs/):
 
 ## Built With
 
-LogShed runs as a single process with Python 3.12, FastAPI, Uvicorn, and SQLite (WAL mode + FTS5 full-text search) on the backend, and React 19, Vite, and Tailwind CSS on the frontend. Notifications use [Apprise](https://github.com/caronc/apprise). See [docs/SPEC.md](docs/SPEC.md) for architecture details.
+LogShed runs as a single process with Python 3.14, FastAPI, Uvicorn, and SQLite (WAL mode + FTS5 full-text search) on the backend, and React 19, Vite, and Tailwind CSS on the frontend. Notifications use [Apprise](https://github.com/caronc/apprise). See [docs/SPEC.md](docs/SPEC.md) for architecture details.
 
 ---
 
 ## Local Development
 
-Requires **Python 3.12+** and **Node.js 24+**:
+Requires **Python 3.14+** and **Node.js 24+**:
 
 ```bash
 # 1. Clone and set up the Python virtual environment
 git clone https://github.com/logshed/logshed.git
 cd logshed
-python3.12 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 

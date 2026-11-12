@@ -14,7 +14,7 @@ import time
 import pytest
 import httpx
 
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.collectors.syslog import AliasCache, reload_active_alias_caches
 from app.core.pipeline import KeyedMultilineAssembler
 from app.collectors.docker_collector import (
@@ -35,6 +35,7 @@ from app.collectors.docker_collector import (
     _tail_container_logs,
     resolve_container_display_name,
 )
+from tests.db_helpers import open_db
 
 
 @pytest.fixture
@@ -2365,7 +2366,7 @@ class TestDockerHostAliases:
     def test_make_log_entry_resolves_alias_from_cache(self, db_path: Path):
         """_make_log_entry resolves source_alias to configured alias from AliasCache."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-unraid', ?)",
                 (now,),
@@ -2380,7 +2381,7 @@ class TestDockerHostAliases:
     def test_make_log_entry_unmapped_defaults_to_docker(self, db_path: Path):
         """_make_log_entry defaults source_alias to 'docker' when no alias is configured."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.1', 'router', ?)",
                 (now,),
@@ -2402,7 +2403,7 @@ class TestDockerHostAliases:
         assert entry["source_alias"] == "unraid-tower"
 
         # When 'docker' has an alias, it overrides the env default
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-primary', ?)",
                 (now,),
@@ -2415,7 +2416,7 @@ class TestDockerHostAliases:
     def test_make_log_entry_custom_env_alias_precedence(self, db_path: Path):
         """When both the configured Docker source alias and 'docker' have aliases, the specific custom alias takes precedence."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'generic-docker', ?)",
                 (now,),
@@ -2433,7 +2434,7 @@ class TestDockerHostAliases:
     def test_docker_tailer_initializes_with_alias_cache(self, db_path: Path):
         """DockerTailer initializes and preloads AliasCache from db_path."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-unraid', ?)",
                 (now,),
@@ -2448,7 +2449,7 @@ class TestDockerHostAliases:
     async def test_docker_tailer_resolves_alias_on_container_log_ingestion(self, db_path: Path):
         """_tail_container_logs sets resolved source_alias on all assembled entries."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-unraid', ?)",
                 (now,),
@@ -2568,7 +2569,7 @@ class TestDockerHostAliases:
         assert entries[0]["source_alias"] == "docker"
 
         # 2. Update alias to 'docker-unraid' and trigger reload_active_alias_caches
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-unraid', ?)",
                 (now,),
@@ -2583,7 +2584,7 @@ class TestDockerHostAliases:
         assert entries[1]["source_alias"] == "docker-unraid"
 
         # 4. Update alias again to 'unraid-main' and trigger reload
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "UPDATE host_aliases SET alias = 'unraid-main' WHERE ip = 'docker'"
             )
@@ -2605,7 +2606,7 @@ class TestDockerHostAliases:
     async def test_docker_tailer_runtime_alias_delete(self, db_path: Path):
         """Deleting an alias reverts incoming Docker logs back to 'docker'."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-unraid', ?)",
                 (now,),
@@ -2670,7 +2671,7 @@ class TestDockerHostAliases:
         assert entries[0]["source_alias"] == "docker-unraid"
 
         # Delete alias and reload active caches
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute("DELETE FROM host_aliases WHERE ip = 'docker'")
             conn.commit()
         reload_active_alias_caches()
@@ -2689,7 +2690,7 @@ class TestDockerHostAliases:
     async def test_docker_tailer_persists_across_restart(self, db_path: Path):
         """Simulates container restart: alias in host_aliases persists and applies to new DockerTailer."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('docker', 'docker-unraid', ?)",
                 (now,),
@@ -2861,7 +2862,7 @@ class TestBatchUpdateAppAliases:
     def test_batch_update_app_aliases_updates_existing_docker_logs(self, db_path: Path):
         """_batch_update_app_aliases retroactively modifies app_name for existing docker logs."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             cursor = conn.cursor()
             for i in range(5):
                 cursor.execute(

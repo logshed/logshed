@@ -11,11 +11,12 @@ from pathlib import Path
 import pytest
 
 from app.core import pipeline
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.models import LogDeleteRequest
 from app.services.fts_indexer import index_pending_logs
 from app.services.log_deletion import execute_delete_logs
 from app.services.retention import execute_prune
+from tests.db_helpers import open_db
 
 ROWS = 12_000  # three chunks of 5,000 at most
 
@@ -25,7 +26,7 @@ def db(tmp_path: Path, monkeypatch) -> Path:
     db_file = tmp_path / "logs.db"
     run_migrations(db_file)
     old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=40)).isoformat()
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.executemany(
             "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)"
             " VALUES (?, ?, '10.0.0.1', 'host', 'app', 1, 6, ?, ?)",
@@ -39,7 +40,7 @@ def db(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _count(db_file: Path) -> int:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         return conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
 
 

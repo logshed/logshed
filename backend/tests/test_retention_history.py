@@ -26,6 +26,7 @@ from app.services.alert_evaluator import init_alert_evaluator
 from app.services.drop_filter import init_drop_filter
 from app.services.operation_guard import reset_operation_state
 from app.services.retention import compute_prune_preview, execute_prune, get_prune_schedule
+from tests.db_helpers import open_db
 
 NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -146,19 +147,19 @@ def _insert_history(
 
 
 def _history_ids(db_path: Path) -> set[int]:
-    with get_connection(db_path) as conn:
+    with open_db(db_path, row_factory=sqlite3.Row) as conn:
         return {r[0] for r in conn.execute("SELECT id FROM alert_history")}
 
 
 def _audit_ids(db_path: Path) -> set[int]:
-    with get_connection(db_path) as conn:
+    with open_db(db_path, row_factory=sqlite3.Row) as conn:
         return {r[0] for r in conn.execute("SELECT id FROM ai_audit_log")}
 
 
 def _seed_mixed(db_path: Path) -> dict:
     """Old and recent rows of every kind. Returns ids grouped by expected fate."""
     ids: dict = {"delete_history": set(), "keep_history": set(), "delete_audit": set(), "keep_audit": set()}
-    with get_connection(db_path) as conn:
+    with open_db(db_path, row_factory=sqlite3.Row) as conn:
         # Alert firings
         ids["delete_history"].add(_insert_history(conn, _ago(30)))
         ids["keep_history"].add(_insert_history(conn, _ago(1)))
@@ -231,7 +232,7 @@ class TestHistoryPruning:
         assert result["deleted_ai_audit"] == len(ids["delete_audit"])
 
     def test_audit_row_still_referenced_by_a_kept_row_is_kept(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             shared = _insert_audit(conn, _ago(30))
             _insert_history(conn, _ago(30), ai_audit_id=shared)
             kept = _insert_history(conn, _ago(1), ai_audit_id=shared)
@@ -250,7 +251,7 @@ class TestHistoryPruning:
 
         execute_prune(db_path, retention_days=14)
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             present = {r[0] for r in conn.execute("SELECT session_id FROM maintenance_sessions")}
         assert old not in present
         assert recent in present
@@ -258,7 +259,7 @@ class TestHistoryPruning:
 
     def test_deleted_logs_counts_logs_only(self, db_path: Path):
         _seed_mixed(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             for _ in range(3):
                 _insert_log(conn, _ago(30))
             _insert_log(conn, _ago(1))
@@ -278,7 +279,7 @@ class TestHistoryPruning:
 class TestPreview:
     def test_preview_counts_match_what_prune_deletes(self, db_path: Path):
         _seed_mixed(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             for _ in range(4):
                 _insert_log(conn, _ago(30))
             _insert_log(conn, _ago(1))
@@ -288,7 +289,7 @@ class TestPreview:
 
         index_pending_logs(db_path)
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             preview = compute_prune_preview(conn, 14)
 
         result = execute_prune(db_path, retention_days=14)
@@ -302,7 +303,7 @@ class TestPreview:
 
     def test_preview_splits_history_by_kind(self, db_path: Path):
         _seed_mixed(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             preview = compute_prune_preview(conn, 14)
         assert preview["history_alerts"] == 1
         assert preview["history_digests"] == 1
@@ -313,13 +314,13 @@ class TestPreview:
     def test_preview_logs_honour_fts_indexed_guard(self, db_path: Path):
         from app.services.fts_indexer import index_pending_logs
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             _insert_log(conn, _ago(30))
             _insert_log(conn, _ago(30))
             conn.commit()
         index_pending_logs(db_path)
         # A third old log arrives after indexing and must not be counted or deleted yet
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             _insert_log(conn, _ago(30))
             conn.commit()
             preview = compute_prune_preview(conn, 14)
@@ -331,7 +332,7 @@ class TestPreview:
 
     def test_preview_is_read_only(self, db_path: Path):
         ids = _seed_mixed(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             compute_prune_preview(conn, 14)
         assert ids["delete_history"] <= _history_ids(db_path)
         assert ids["delete_audit"] <= _audit_ids(db_path)
@@ -357,7 +358,7 @@ class TestPreview:
     async def test_preview_defaults_to_saved_retention(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             _insert_history(conn, _ago(5))
             conn.execute(
                 "INSERT INTO system_settings (key, value, updated_at, is_encrypted) "
@@ -411,7 +412,7 @@ class TestPruneResponses:
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
         _seed_mixed(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             _insert_log(conn, _ago(30))
             conn.commit()
         res = await client.post("/api/maintenance/prune", headers=auth_headers)

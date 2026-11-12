@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -24,6 +24,7 @@ from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.fts_indexer import index_pending_logs
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +101,7 @@ class TestExternalLogsApi:
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # Seed test logs
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -149,7 +150,7 @@ class TestExternalLogsApi:
         db_path = tmp_path / "logs.db"
         now = datetime.now(timezone.utc)
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(5):
                 ts = (now + timedelta(seconds=i)).isoformat()
                 conn.execute(
@@ -182,7 +183,7 @@ class TestExternalLogsApi:
         db_path = tmp_path / "logs.db"
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -210,7 +211,7 @@ class TestExternalLogsApi:
         db_path = tmp_path / "logs.db"
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
@@ -268,7 +269,7 @@ _BASE_TS = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 def _make_logs_nullable(db_path: Path) -> None:
     """Recreate the logs table without NOT NULL on source_alias/app_name (defensive-path testing)."""
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.executescript(_NULLABLE_LOGS_DDL)
         conn.commit()
 
@@ -299,7 +300,7 @@ class TestExternalLogQueryHardening:
     ):
         db_path = tmp_path / "logs.db"
         _make_logs_nullable(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             _insert_log(conn, 1, "10.0.0.1", "host-a", "web")
             _insert_log(conn, 2, "10.0.0.1", "host-a", None)
             _insert_log(conn, 3, "10.0.0.2", None, None)
@@ -325,7 +326,7 @@ class TestExternalLogQueryHardening:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             n = 0
             for app_idx in range(5):
                 for _ in range(5 - app_idx):
@@ -381,7 +382,7 @@ class TestExternalLogQueryHardening:
     ):
         db_path = tmp_path / "logs.db"
         _make_logs_nullable(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             # ids 1..6, alternating hosts, all with NULL alias
             _insert_log(conn, 1, "10.0.0.1", None, "web")
             _insert_log(conn, 2, "10.0.0.2", None, "web")
@@ -408,7 +409,7 @@ class TestExternalLogQueryHardening:
     ):
         db_path = tmp_path / "logs.db"
         _make_logs_nullable(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             _insert_log(conn, 1, "10.0.0.1", "host-a", "web")
             _insert_log(conn, 2, "10.0.0.1", "host-a", "db")
             _insert_log(conn, 3, "10.0.0.1", "host-a", "web")
@@ -443,7 +444,7 @@ class TestExternalLogQueryHardening:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 4):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.commit()
@@ -479,7 +480,7 @@ class TestExternalLogQueryHardening:
         self, client: AsyncClient, auth_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             _insert_log(conn, 1, "10.0.0.1", "host-a", "web")
             conn.commit()
 
@@ -492,7 +493,7 @@ class TestExternalLogQueryHardening:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 1006):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.commit()
@@ -541,7 +542,7 @@ class TestExternalRedaction:
     """Secrets are scrubbed on external paths while the internal UI API stays unredacted."""
 
     def _seed(self, db_path: Path) -> None:
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 4):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.execute(
@@ -588,7 +589,7 @@ class TestExternalRedaction:
     async def test_alert_history_redacts_text_fields(
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             conn.execute(
                 """
                 INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
@@ -642,7 +643,7 @@ class TestKeysetPagination:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             # Groups of rows share a timestamp so the id tie-break is exercised across page edges
             for group in range(5):
                 ts = (_BASE_TS + timedelta(seconds=group)).isoformat()
@@ -662,7 +663,7 @@ class TestKeysetPagination:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 7):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.commit()
@@ -689,7 +690,7 @@ class TestKeysetPagination:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 7):
                 ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
                 _insert_log_at(
@@ -716,13 +717,13 @@ class TestKeysetPagination:
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
         db_path = tmp_path / "logs.db"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 11):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.commit()
 
         first = (await client.get("/api/v1/logs", params={"limit": 4}, headers=logs_token_headers)).json()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(100, 105):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.commit()
@@ -768,7 +769,7 @@ class TestKeysetPagination:
     def test_keyset_query_uses_an_index_without_a_full_sort(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         run_migrations(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 200):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web", severity=i % 8)
             conn.commit()
@@ -795,7 +796,7 @@ class TestLogPageTextBudget:
 
     @staticmethod
     def _seed(db_path: Path, count: int, size: int) -> list[int]:
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(count):
                 ts = (_BASE_TS + timedelta(seconds=i)).isoformat()
                 _insert_log_at(conn, ts, message=f"m{i:04d} " + "m" * (size - 6), raw=f"r{i:04d} " + "r" * (size - 6))
@@ -870,7 +871,7 @@ class TestFtsFallbackAndConsistency:
     """FTS5 syntax error fallback, busy mapping and indexer wake-up on the v1 log endpoints."""
 
     def _seed(self, db_path: Path) -> None:
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i, message in enumerate(
                 ["key=value pair seen", "foo-bar happened", "unbalanced quote", "a:b ratio", "plain row"], start=1
             ):
@@ -958,7 +959,7 @@ class TestAliasLessHosts:
     """Logs without an alias are stored with source_alias '' and must be told apart by IP."""
 
     def _seed(self, db_path: Path) -> None:
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 8):
                 _insert_log(conn, i, "10.0.0.1" if i % 2 else "10.0.0.2", "", "web")
             _insert_log(conn, 8, "10.0.0.3", "host-c", "web")
@@ -1011,7 +1012,7 @@ class TestKeysetPlans:
     def test_filtered_cursor_page_searches_a_time_index(self, tmp_path: Path, where: str, index: str):
         db_path = tmp_path / "logs.db"
         run_migrations(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 300):
                 _insert_log(conn, i, "10.0.0.1", "host-a" if i % 3 else "host-b", "web" if i % 2 else "db", severity=i % 8)
             conn.commit()
@@ -1032,7 +1033,7 @@ class TestKeysetPlans:
     def test_context_queries_search_the_source_time_index(self, tmp_path: Path):
         db_path = tmp_path / "logs.db"
         run_migrations(db_path)
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(1, 300):
                 _insert_log(conn, i, "10.0.0.1", "host-a", "web")
             conn.commit()

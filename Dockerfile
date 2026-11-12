@@ -13,9 +13,9 @@ COPY frontend/ ./
 RUN npm run build
 
 # ==========================================
-# Stage 2: Python 3.12 Runtime
+# Stage 2: Python 3.14 Runtime
 # ==========================================
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Install system utilities: tini (init), curl (healthchecks), gosu (privilege drop), procps
 RUN apt-get update && apt-get install -y --no-install-recommends \

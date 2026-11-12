@@ -29,6 +29,7 @@ from app.main import (
     create_app,
     get_internal_log_handler,
 )
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -269,7 +270,7 @@ class TestInternalLogHandler:
         db_file = tmp_path / "test_alias.db"
         run_migrations(db_file)
         import sqlite3
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('127.0.0.1', 'Local', '2026-09-01T00:00:00Z')")
             conn.commit()
 
@@ -288,7 +289,7 @@ class TestInternalLogHandler:
         db_file = tmp_path / "test_alias_name.db"
         run_migrations(db_file)
         import sqlite3
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('logshed', 'Local-Shed', '2026-09-01T00:00:00Z')")
             conn.commit()
 
@@ -528,7 +529,6 @@ class TestInternalLogHandler:
     async def test_internal_log_end_to_end_db_persistence(self, tmp_path: Path):
         """End-to-end verification that logger.warning persists to SQLite via QueueConsumer."""
         from app.core.pipeline import QueueConsumer
-        from app.core.migrations import get_connection
 
         db_file = tmp_path / "internal_logs.db"
         run_migrations(db_file)
@@ -548,7 +548,7 @@ class TestInternalLogHandler:
             await consumer.stop()
 
             # Query database
-            with get_connection(db_file) as conn:
+            with open_db(db_file) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT source_alias, app_name, severity, message FROM logs")
                 rows = cursor.fetchall()
@@ -603,7 +603,6 @@ class TestInternalLogHandler:
     async def test_internal_log_end_to_end_info_level(self, tmp_path: Path):
         """End-to-end verification that INFO level captures both info and warning logs."""
         from app.core.pipeline import QueueConsumer
-        from app.core.migrations import get_connection
 
         db_file = tmp_path / "internal_logs_info.db"
         run_migrations(db_file)
@@ -619,7 +618,7 @@ class TestInternalLogHandler:
 
             await consumer.stop()
 
-            with get_connection(db_file) as conn:
+            with open_db(db_file) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT source_alias, app_name, severity, message FROM logs ORDER BY id ASC")
                 rows = cursor.fetchall()

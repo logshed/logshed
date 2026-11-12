@@ -26,6 +26,7 @@ from app.main import create_app
 from app.models import LogDeleteRequest
 from app.services import log_deletion
 from app.services.fts_indexer import FTSIndexWorker, index_pending_logs, set_fts_worker
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -146,7 +147,7 @@ def _seed_test_logs(db_path: Path):
             :app_name, :facility, :severity, :message, :raw
         )
     """
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.executemany(query, entries)
         conn.commit()
 
@@ -314,7 +315,7 @@ async def test_delete_and_filter_symmetric_alias_expansion(client: AsyncClient, 
             :app_name, :facility, :severity, :message, :raw
         )
     """
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.executemany(query, entries)
         # Configure host alias mapping 127.0.0.1 -> 'LogShed Server'
         conn.execute(
@@ -481,13 +482,13 @@ async def test_delete_all_with_explicit_flag(client: AsyncClient, auth_cookie: d
 
 def _fts_consistent(db_path: Path) -> None:
     """Raises when logs_fts disagrees with the logs it indexes."""
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.execute("INSERT INTO logs_fts(logs_fts, rank) VALUES('integrity-check', 1)")
 
 
 def _insert_log(db_path: Path, message: str) -> int:
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         return conn.execute(
             "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)"
             " VALUES (?, ?, '192.168.1.30', 'pve3', 'late', 1, 6, ?, ?)",
@@ -505,7 +506,7 @@ async def test_delete_all_empties_the_search_index_and_new_logs_are_indexed(clie
     assert res.status_code == 200
     assert res.json()["deleted_count"] == 5
     _fts_consistent(db_path)
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM logs_fts").fetchone()[0] == 0
         assert conn.execute("SELECT last_indexed_id FROM fts_index_state").fetchone()[0] == 0
 
@@ -530,11 +531,11 @@ def test_delete_all_keeps_logs_that_arrive_while_it_runs(monkeypatch):
     result = log_deletion.execute_delete_logs(db_path, LogDeleteRequest(delete_all=True), batch_size=2)
 
     assert result["deleted_count"] == 5
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         assert [r[0] for r in conn.execute("SELECT id FROM logs")] == arrived
     assert index_pending_logs(db_path) == 1
     _fts_consistent(db_path)
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         assert conn.execute("SELECT rowid FROM logs_fts WHERE logs_fts MATCH 'zebra'").fetchall() == [(arrived[0],)]
 
 
@@ -569,7 +570,7 @@ def test_filtered_delete_still_removes_its_rows_from_the_search_index():
     result = log_deletion.execute_delete_logs(db_path, LogDeleteRequest(delete_all=True, apps=["nginx"]))
     assert result["deleted_count"] == 2
     _fts_consistent(db_path)
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH 'nginx'").fetchone()[0] == 0
         assert conn.execute("SELECT last_indexed_id FROM fts_index_state").fetchone()[0] > 0
 

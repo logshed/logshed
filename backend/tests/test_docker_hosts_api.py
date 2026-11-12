@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -21,6 +21,7 @@ from app.core.security import (
     reset_crypto_cache,
 )
 from app.main import create_app
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -193,7 +194,7 @@ class TestDockerHostsApi:
 
         # Check system_settings sync
         db_file = tmp_path / "docker_hosts_test.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cur = conn.cursor()
             cur.execute("SELECT value FROM system_settings WHERE key = 'docker_source_alias'")
             assert cur.fetchone()[0] == "my-docker"
@@ -204,7 +205,7 @@ class TestDockerHostsApi:
     ):
         """Updating a Docker endpoint alias updates historical logs for that source without clobbering syslog logs."""
         db_file = tmp_path / "docker_hosts_test.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cur = conn.cursor()
             # Seed logs for primary docker
             cur.execute(
@@ -247,7 +248,7 @@ class TestDockerHostsApi:
         )
         assert resp_sec.status_code == 200
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cur = conn.cursor()
             cur.execute("SELECT source_alias FROM logs WHERE source_ip = 'docker' ORDER BY id")
             pri_aliases = [row[0] for row in cur.fetchall()]
@@ -391,14 +392,14 @@ def _seed_endpoint(db_file: Path, **cols) -> None:
     base.update(cols)
     names = ", ".join(base.keys())
     marks = ", ".join("?" for _ in base)
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.execute(f"INSERT INTO docker_endpoints ({names}) VALUES ({marks})", tuple(base.values()))
         conn.commit()
 
 
 def _seed_logs(db_file: Path, rows: list[tuple[str, str, str]]) -> None:
     """Insert logs as (source_ip, source_alias, message) tuples."""
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.executemany(
             """
             INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -410,7 +411,7 @@ def _seed_logs(db_file: Path, rows: list[tuple[str, str, str]]) -> None:
 
 
 def _log_aliases(db_file: Path, source_ip: str) -> list[str]:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         cur = conn.execute("SELECT source_alias FROM logs WHERE source_ip = ? ORDER BY id", (source_ip,))
         return [r[0] for r in cur.fetchall()]
 
@@ -608,7 +609,7 @@ class TestDockerHostsFixes:
     ):
         """A primary host reached through a socket proxy backfills rows stamped with the proxy host name."""
         db_file = tmp_path / "docker_hosts_test.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute("UPDATE docker_endpoints SET url = 'tcp://socket-proxy:2375', source_alias = 'old-main' WHERE id = 1")
             conn.commit()
         _seed_logs(db_file, [("socket-proxy", "old-main", "a"), ("socket-proxy", "old-main", "b")])
@@ -623,7 +624,7 @@ class TestDockerHostsFixes:
     ):
         """The settings page alias change backfills rows from a socket-proxy primary host."""
         db_file = tmp_path / "docker_hosts_test.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute("UPDATE docker_endpoints SET url = 'tcp://socket-proxy:2375', source_alias = 'old-main' WHERE id = 1")
             conn.commit()
         _seed_logs(db_file, [("socket-proxy", "old-main", "a"), ("10.9.9.9", "old-main", "syslog")])
@@ -654,7 +655,7 @@ class TestDockerHostsFixes:
         """A Docker host named like the machine's syslog alias filters, and lists, only its own rows."""
         db_file = tmp_path / "docker_hosts_test.db"
         _seed_endpoint(db_file, id=2, name="Tower", url="tcp://192.168.1.50:2375", source_alias="Tower-Docker")
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.50', 'Tower', '2026-10-12T00:00:00Z')"
             )
@@ -676,7 +677,7 @@ class TestDockerHostsFixes:
     ):
         """The host list offers configured Docker aliases, but "docker" only while logs still carry it."""
         db_file = tmp_path / "docker_hosts_test.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute("UPDATE docker_endpoints SET source_alias = 'nas-docker' WHERE id = 1")
             conn.commit()
 
@@ -1020,7 +1021,7 @@ class TestFormerDockerHostLogsStayDocker:
     def _former(db_file: Path) -> list[str]:
         from app.core.utils import load_former_docker_aliases
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             return load_former_docker_aliases(conn)
 
     async def _messages(self, client: AsyncClient, headers: dict, source: str) -> list[str]:

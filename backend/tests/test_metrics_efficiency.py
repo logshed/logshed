@@ -10,6 +10,7 @@ import pytest
 import app.api.external_v1 as ext_v1_mod
 import app.services.storage_metrics as storage_mod
 from app.core.migrations import get_connection, run_migrations
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +43,7 @@ class TestConditionalAggregation:
     def test_single_query_counts_match_24h_and_1h_windows(self, tmp_path: Path):
         db = tmp_path / "logs.db"
         run_migrations(db)
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             _insert(conn, 10, 3)            # inside 1h and 24h
             _insert(conn, 30, 2)            # inside 1h and 24h
             _insert(conn, 120, 3, "db")     # inside 24h only
@@ -61,7 +62,7 @@ class TestConditionalAggregation:
     def test_empty_database_yields_zero_counts(self, tmp_path: Path):
         db = tmp_path / "logs.db"
         run_migrations(db)
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             conn.row_factory = sqlite3.Row
             stats = ext_v1_mod._fetch_error_aggregates(conn)
         assert stats["count_24h"] == 0
@@ -157,7 +158,7 @@ class TestStorageSnapshotCache:
         run_migrations(db)
         assert storage_mod.get_cached_storage_metrics(db)["total_logs_count"] == 0
 
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             _insert(conn, 1, 6)
             conn.commit()
 
@@ -179,7 +180,7 @@ class TestKeptLogCount:
             conn.close()
 
     def _add(self, db: Path, n: int, minutes_ago: float = 1) -> None:
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             for _ in range(n):
                 _insert(conn, minutes_ago, 6)
             conn.commit()
@@ -208,7 +209,7 @@ class TestKeptLogCount:
         assert self._count(db, []) == 6
         execute_prune(db, retention_days=30)
         assert self._count(db, []) == 4
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             first_id = conn.execute("SELECT MIN(id) FROM logs").fetchone()[0]
         execute_delete_logs(db, LogDeleteRequest(log_ids=[first_id]))
         assert self._count(db, []) == 3
@@ -249,7 +250,7 @@ class TestErrorAggregatePlans:
         db = tmp_path / "logs.db"
         run_migrations(db)
         statements: list[str] = []
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             for minutes, app in ((5, "a"), (10, "a"), (20, "b"), (60 * 30, "c")):
                 _insert(conn, minutes, 3, app_name=app)
             conn.execute("ANALYZE")

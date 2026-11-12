@@ -31,6 +31,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
+from tests.db_helpers import open_db
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOKEN_SCOPES_TS = _REPO_ROOT / "frontend/src/components/settings/tokenScopes.ts"
@@ -270,7 +271,7 @@ class TestApiTokensApi:
         raw_token = "ls_live_expiredtestsecret123456789"
         thash = hash_token(raw_token)
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO api_tokens (name, token_hash, token_prefix, scopes, created_at, expires_at)
@@ -304,7 +305,7 @@ class TestApiTokensApi:
         # Allow async task brief execution window
         await asyncio.sleep(0.05)
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             cur = conn.cursor()
             cur.execute("SELECT last_used_at FROM api_tokens WHERE id = ?", (token_id,))
             first_ts = cur.fetchone()[0]
@@ -315,7 +316,7 @@ class TestApiTokensApi:
         assert res2.status_code == 200
         await asyncio.sleep(0.05)
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             cur = conn.cursor()
             cur.execute("SELECT last_used_at FROM api_tokens WHERE id = ?", (token_id,))
             second_ts = cur.fetchone()[0]
@@ -647,7 +648,7 @@ class TestTokenEdit:
     ):
         raw_token = "ls_live_expirededitsecret123456789"
         expired_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             cur = conn.execute(
                 """
                 INSERT INTO api_tokens (name, token_hash, token_prefix, scopes, created_at, expires_at)
@@ -692,7 +693,7 @@ class TestTokenEdit:
 
         started = await client.post("/api/v1/maintenance/enable", json={"duration_minutes": 5}, headers=bearer)
         assert started.status_code == 200
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             label = conn.execute(
                 "SELECT trigger_label FROM maintenance_sessions WHERE session_id = ?",
                 (started.json()["session_id"],),

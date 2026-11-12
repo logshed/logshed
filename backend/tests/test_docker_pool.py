@@ -9,8 +9,9 @@ import pytest
 
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.docker_pool import DockerCollectorPool
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler
+from tests.db_helpers import open_db
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ class TestDockerCollectorPool:
     async def test_pool_error_isolation(self, test_db: Path, assembler: KeyedMultilineAssembler):
         """Crash or error in one endpoint does not prevent other endpoints from operating."""
         # Insert a secondary endpoint into the database
-        with get_connection(test_db) as conn:
+        with open_db(test_db) as conn:
             conn.execute(
                 """
                 INSERT INTO docker_endpoints (name, url, source_alias, enabled, tls_enabled, created_at, updated_at)
@@ -140,7 +141,7 @@ class TestDockerCollectorPool:
 
     @staticmethod
     def _add_remote(db: Path, enabled: int = 1) -> None:
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             conn.execute(
                 """
                 INSERT INTO docker_endpoints (name, url, source_alias, enabled, tls_enabled, created_at, updated_at)
@@ -182,7 +183,7 @@ class TestDockerCollectorPool:
     ):
         """A disabled local host does not keep remote hosts from starting."""
         self._add_remote(test_db)
-        with get_connection(test_db) as conn:
+        with open_db(test_db) as conn:
             conn.execute("UPDATE docker_endpoints SET enabled = 0 WHERE id = 1")
             conn.commit()
         pool = DockerCollectorPool(assembler=assembler, db_path=test_db)
@@ -287,7 +288,7 @@ class TestDockerTlsHostnameVerification:
         db = tmp_path / "beta.db"
         run_migrations(db)
         # Simulate a 1.3.0 beta database created before the column existed
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             conn.execute("ALTER TABLE docker_endpoints DROP COLUMN verify_hostname")
             conn.execute(
                 """
@@ -300,7 +301,7 @@ class TestDockerTlsHostnameVerification:
         run_migrations(db)
         run_migrations(db)
 
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(docker_endpoints)")]
             assert cols.count("verify_hostname") == 1
             values = {r[0] for r in conn.execute("SELECT verify_hostname FROM docker_endpoints")}

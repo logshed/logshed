@@ -11,7 +11,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -22,6 +22,7 @@ from app.core.security import (
 from app.core.sse import sse_manager
 from app.main import create_app
 from app.services.fts_indexer import index_pending_logs
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +79,7 @@ def _seed_logs(db_path: Path, entries: list[dict]):
             :app_name, :facility, :severity, :message, :raw
         )
     """
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.executemany(query, entries)
         conn.commit()
     index_pending_logs(db_path)
@@ -217,7 +218,7 @@ class TestLogQuerying:
             ("2026-08-30T10:01:00Z", "2026-08-30T10:01:01Z", "10.0.0.1", "server1", "nginx", 1, 3, "Connection timeout to redis", "<11>nginx: Connection timeout to redis"),
             ("2026-08-30T10:02:00Z", "2026-08-30T10:02:01Z", "10.0.0.2", "server2", "auth", 1, 2, "Authentication error: password mismatch", "<10>auth: Authentication error: password mismatch"),
         ]
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -279,7 +280,7 @@ class TestLogQuerying:
             )
             for i in range(1005)
         ]
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -314,7 +315,7 @@ class TestLogQuerying:
             ("2026-08-30T10:01:00Z", "2026-08-30T10:01:01Z", "10.0.0.1", "server1", "nginx", 1, 3, "Connection timeout to redis", "<11>nginx: Connection timeout to redis"),
             ("2026-08-30T10:02:00Z", "2026-08-30T10:02:01Z", "10.0.0.2", "server2", "auth", 1, 2, "Authentication error: password mismatch", "<10>auth: Authentication error: password mismatch"),
         ]
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -385,7 +386,7 @@ class TestLogQuerying:
             ("2026-08-30T10:01:00Z", "2026-08-30T10:01:01Z", "10.0.0.1", "backend-srv", "nginx", 1, 3, "Proxy pass to 10.0.0.1 failed", "<11>nginx: Proxy pass to 10.0.0.1 failed"),
             ("2026-08-30T10:02:00Z", "2026-08-30T10:02:01Z", "10.0.0.2", "auth-srv", "auth", 1, 2, "User login from 10.0.0.1 authenticated", "<10>auth: User login from 10.0.0.1 authenticated"),
         ]
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -441,7 +442,7 @@ class TestLogQuerying:
                 "10.0.0.3", "media-host", "radarr", 1, 6,
                 f"Not importing movie{i}, existing file is better", "raw",
             ))
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -700,7 +701,7 @@ class TestLogStreamAndFacets:
         ]
         _seed_logs(db_file, test_entries)
 
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
                 ("172.22.2.4", "NPM", ts1),
@@ -772,7 +773,7 @@ class TestLogStreamAndFacets:
         ]
         _seed_logs(db_file, test_entries)
 
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             # 1. Configured host alias with historical logs (> 7 days old)
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
@@ -859,7 +860,7 @@ class TestLogStreamAndFacets:
         ]
         _seed_logs(db_file, test_entries)
 
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
                 ("192.168.1.50", "nas-box", recent_ts),
@@ -916,7 +917,7 @@ class TestLogStreamAndFacets:
         ]
         _seed_logs(db_file, test_entries)
 
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
                 ("192.168.1.50", "nas-renamed", recent_ts),
@@ -1035,7 +1036,7 @@ class TestLogStreamAndFacets:
         ]
         _seed_logs(db_file, test_entries)
 
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, notes, created_at) VALUES (?, ?, ?, ?)",
                 ("10.0.0.99", "10.0.0.99", "Self-referential alias note", ts),
@@ -1084,7 +1085,7 @@ class TestLogStreamAndFacets:
         ts1 = (now_utc - datetime.timedelta(minutes=2)).isoformat()
         ts2 = (now_utc - datetime.timedelta(minutes=1)).isoformat()
 
-        with sqlite3.connect(str(db_file)) as conn:
+        with open_db(db_file, connect=sqlite3.connect) as conn:
             # 1. Host aliases (Syslog)
             conn.execute(
                 "INSERT OR REPLACE INTO host_aliases (ip, alias, notes, created_at) VALUES (?, ?, ?, ?)",

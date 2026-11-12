@@ -15,13 +15,14 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import SESSION_COOKIE_NAME, create_session_token, get_or_create_master_key, reset_crypto_cache
 from app.main import create_app
 from app.services import drop_filter as drop_filter_mod
 from app.services import maintenance_service
 from app.services.drop_filter import get_drop_filter
+from tests.db_helpers import open_db
 
 IP = "192.168.1.20"
 OTHER_IP = "192.168.1.21"
@@ -67,13 +68,13 @@ def _now() -> str:
 
 
 def _add_alias(db_file: Path, ip: str, alias: str) -> None:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)", (ip, alias, _now()))
         conn.commit()
 
 
 def _add_drop_rule(db_file: Path, source_pattern: str) -> int:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         cur = conn.execute(
             "INSERT INTO drop_rules (name, source_pattern, message_pattern, created_at) VALUES ('r', ?, 'noise', ?)",
             (source_pattern, _now()),
@@ -83,12 +84,12 @@ def _add_drop_rule(db_file: Path, source_pattern: str) -> int:
 
 
 def _pattern(db_file: Path, rule_id: int) -> str:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         return conn.execute("SELECT source_pattern FROM drop_rules WHERE id = ?", (rule_id,)).fetchone()[0]
 
 
 def _add_docker_host(db_file: Path, endpoint_id: int, alias: str) -> None:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.execute(
             """
             INSERT INTO docker_endpoints (id, name, url, source_alias, enabled, tls_enabled, created_at, updated_at)
@@ -101,7 +102,7 @@ def _add_docker_host(db_file: Path, endpoint_id: int, alias: str) -> None:
 
 def _add_session(db_file: Path, session_id: str, target_host: str, active: bool) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.execute(
             """
             INSERT INTO maintenance_sessions
@@ -114,7 +115,7 @@ def _add_session(db_file: Path, session_id: str, target_host: str, active: bool)
 
 
 def _session_target(db_file: Path, session_id: str) -> str:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         return conn.execute(
             "SELECT target_host FROM maintenance_sessions WHERE session_id = ?", (session_id,)
         ).fetchone()[0]
@@ -122,7 +123,7 @@ def _session_target(db_file: Path, session_id: str) -> str:
 
 def _add_view(db_file: Path, name: str, params) -> int:
     raw = params if isinstance(params, str) else json.dumps(params)
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         cur = conn.execute(
             "INSERT INTO saved_views (name, query_params, is_pinned, created_at) VALUES (?, ?, 0, ?)",
             (name, raw, _now()),
@@ -132,7 +133,7 @@ def _add_view(db_file: Path, name: str, params) -> int:
 
 
 def _view_params(db_file: Path, view_id: int) -> str:
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         return conn.execute("SELECT query_params FROM saved_views WHERE id = ?", (view_id,)).fetchone()[0]
 
 
@@ -233,7 +234,7 @@ async def test_active_maintenance_session_follows_and_an_ended_one_does_not(clie
     _add_session(env, "running", "nas", active=True)
     _add_session(env, "ended", "nas", active=False)
     _add_session(env, "wild", "nas*", active=True)
-    with get_connection(env) as conn:
+    with open_db(env) as conn:
         conn.row_factory = sqlite3.Row
         maintenance_service.refresh_maintenance_cache(conn)
 

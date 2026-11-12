@@ -19,7 +19,7 @@ from mcp.server.fastmcp import FastMCP
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
 from app.core.config import invalidate_settings_cache
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -37,6 +37,7 @@ from app.services.fts_indexer import index_pending_logs
 import app.api.external_v1 as ext_v1_mod
 import app.api.mcp as mcp_api_mod
 import app.cli as cli_mod
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +109,7 @@ def seed_sample_data(db_path: Path) -> dict:
     now_iso = datetime.now(timezone.utc).isoformat()
     past_iso = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         # Seed logs
         conn.execute(
             """
@@ -382,7 +383,7 @@ class TestLegacySseSessionAuth:
         try:
             await sse_initialize(client, sse)
             past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-            with get_connection(tmp_path / "logs.db") as conn:
+            with open_db(tmp_path / "logs.db") as conn:
                 conn.execute("UPDATE api_tokens SET expires_at = ? WHERE id = ?", (past, token["id"]))
                 conn.commit()
             mcp_api_mod._sse_token_cache.clear()
@@ -564,7 +565,7 @@ class TestPerToolScopes:
             assert scope in text
 
         # Nothing was started by the refused enable_maintenance call
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0
 
     @pytest.mark.asyncio
@@ -651,7 +652,7 @@ class TestPerToolScopes:
                     await tool.fn(duration_minutes=5, log_handling="drop_errors", target_app="   ")
                 res = await tool.fn(duration_minutes=5, log_handling="drop_errors", target_host="pve-node1")
                 assert res["target_host"] == "pve-node1"
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 2
 
     @pytest.mark.asyncio
@@ -687,7 +688,7 @@ class TestMCPListServicesTruncation:
     @pytest.mark.asyncio
     async def test_more_than_500_apps_is_truncated(self, tmp_path: Path):
         now_iso = datetime.now(timezone.utc).isoformat()
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             conn.executemany(
                 """
                 INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -1452,7 +1453,7 @@ class TestMCPCli:
 def _make_db_with_app(db_path: Path, app_name: str, enable_mcp_setting: bool) -> None:
     run_migrations(db_path)
     now_iso = datetime.now(timezone.utc).isoformat()
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.execute(
             """
             INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -1469,7 +1470,7 @@ def _make_db_with_app(db_path: Path, app_name: str, enable_mcp_setting: bool) ->
 
 
 def _maintenance_row(db_path: Path, session_id: str) -> dict:
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         row = conn.execute(
             "SELECT token_id, trigger_label, initiated_by FROM maintenance_sessions WHERE session_id = ?",
             (session_id,),
@@ -1861,7 +1862,7 @@ class TestMCPRedaction:
         db_path = tmp_path / "logs.db"
         seed_sample_data(db_path)
         secret = "token leaked password=hunter2secret here"
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute("UPDATE logs SET message = ?, raw = ? WHERE id = 2", (secret, secret))
             conn.execute("UPDATE alert_history SET sample_log = ?, incident_summary = ?", (secret, secret))
             conn.commit()

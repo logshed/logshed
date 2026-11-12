@@ -11,7 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -29,6 +29,7 @@ from app.services.daily_digest import (
 )
 from app.services.drop_filter import init_drop_filter
 from app.services.notifier import encrypt_channel_url
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +72,7 @@ def auth_headers():
 def _create_channel(db_file: Path, name: str, url: str = "gotify://example.com/token", is_enabled: bool = True) -> int:
     enc_url = encrypt_channel_url(url)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         cur = conn.cursor()
         cur.execute(
             """
@@ -85,7 +86,7 @@ def _create_channel(db_file: Path, name: str, url: str = "gotify://example.com/t
 
 def _set_setting(db_file: Path, key: str, value: str):
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         conn.execute(
             "INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
             (key, value, now_iso),
@@ -101,7 +102,7 @@ def _seed_logs(db_file: Path):
     old_ts = now - datetime.timedelta(hours=30)
     old_str = old_ts.strftime("%Y-%m-%d %H:%M:%S")
 
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         # Logs within 24h:
         # Service 1: nginx (5 logs, 2 errors from host-a)
         for i in range(3):
@@ -147,7 +148,7 @@ def _seed_logs(db_file: Path):
 
 def test_compute_daily_digest_rollup_empty(tmp_path: Path):
     db_file = tmp_path / "logs.db"
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         rollup = compute_daily_digest_rollup(conn, window_hours=24, db_path=db_file)
 
     assert rollup["total_logs"] == 0
@@ -161,7 +162,7 @@ def test_compute_daily_digest_rollup_with_data(tmp_path: Path):
     db_file = tmp_path / "logs.db"
     _seed_logs(db_file)
 
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         rollup = compute_daily_digest_rollup(conn, window_hours=24, db_path=db_file)
 
     # Total recent logs = 5 (nginx) + 3 (web-app) + 2 (postgres) + 1 (redis) = 11 (old log excluded)
@@ -200,7 +201,7 @@ def test_compute_daily_digest_rollup_docker_custom_alias_shows_app(tmp_path: Pat
     now = datetime.datetime.now(datetime.timezone.utc)
     recent_str = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         # Ingest error from docker container with custom source_alias (e.g. docker-unraid) and source_ip='docker'
         conn.execute(
             "INSERT INTO logs (timestamp, received_at, severity, facility, source_ip, source_alias, app_name, message, raw) VALUES (?, ?, 3, 1, 'docker', 'docker-unraid', 'seer', 'seer error occurred', 'seer error occurred')",
@@ -221,7 +222,7 @@ def test_compute_daily_digest_rollup_prioritizes_severity_over_error_count(tmp_p
     now = datetime.datetime.now(datetime.timezone.utc)
     recent_str = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         # Host 1: 5 error logs (severity 3)
         for i in range(5):
             conn.execute(
@@ -320,7 +321,7 @@ async def test_run_daily_digest_dispatches_and_records_history(tmp_path: Path):
     assert "[Link to LogShed (digest filters applied)](http://localhost:8000/" in sent_body
 
     # Verify alert_history table contains the digest WITHOUT the link to LogShed
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         row = conn.execute(
             "SELECT rule_name, trigger_count, channel_id, incident_summary FROM alert_history WHERE id = ?",
             (res["history_id"],),
@@ -362,7 +363,7 @@ async def test_run_daily_digest_without_channels_records_history(tmp_path: Path)
     assert res["channel_id"] is None
     assert res["notification_sent"] is False
 
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         row = conn.execute(
             "SELECT rule_name, trigger_count, channel_id FROM alert_history WHERE id = ?",
             (res["history_id"],),
@@ -570,7 +571,7 @@ def test_scheduled_digest_schedule_moved_later_after_todays_run_sends_nothing_mo
 
 
 def _read_setting(db_file: Path, key: str):
-    with get_connection(db_file) as conn:
+    with open_db(db_file) as conn:
         row = conn.execute("SELECT value, is_encrypted FROM system_settings WHERE key = ?", (key,)).fetchone()
     return None if row is None else (row[0], row[1])
 

@@ -14,6 +14,7 @@ from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler
 from app.services.ai_service import is_ai_enabled, resolve_ai_provider_settings
 from app.services.daily_digest import is_daily_digest_enabled
+from tests.db_helpers import open_db
 
 
 class TestParseBool:
@@ -80,8 +81,7 @@ class TestEnableDockerOff:
         db = tmp_path / "seed.db"
         with patch.dict("os.environ", {"ENABLE_DOCKER": "off"}):
             run_migrations(db)
-        from app.core.migrations import get_connection
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             row = conn.execute("SELECT enabled FROM docker_endpoints WHERE id = 1").fetchone()
         assert row[0] == 0
 

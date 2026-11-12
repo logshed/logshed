@@ -31,6 +31,7 @@ from app.services import maintenance_service as ms
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.drop_filter import init_drop_filter
 from app.services.retention import execute_prune
+from tests.db_helpers import open_db
 
 
 def get_connection(path):
@@ -111,14 +112,14 @@ async def api_token_headers(client: AsyncClient, auth_headers: dict):
 
 
 def _session_row(db_path: Path, session_id: str):
-    with get_connection(db_path) as conn:
+    with open_db(db_path, row_factory=sqlite3.Row) as conn:
         return conn.execute(
             "SELECT * FROM maintenance_sessions WHERE session_id = ?", (session_id,)
         ).fetchone()
 
 
 def _history_rows(db_path: Path, session_id: str):
-    with get_connection(db_path) as conn:
+    with open_db(db_path, row_factory=sqlite3.Row) as conn:
         return conn.execute(
             "SELECT * FROM alert_history WHERE maintenance_session_id = ?", (session_id,)
         ).fetchall()
@@ -126,7 +127,7 @@ def _history_rows(db_path: Path, session_id: str):
 
 class TestSchema:
     def test_audit_columns_exist(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             sess_cols = {r[1] for r in conn.execute("PRAGMA table_info(maintenance_sessions)")}
             hist_cols = {r[1] for r in conn.execute("PRAGMA table_info(alert_history)")}
         assert {"ended_at", "end_reason", "dropped_count", "trigger_label"} <= sess_cols
@@ -135,7 +136,7 @@ class TestSchema:
 
 class TestSessionLifecycle:
     def test_create_records_history_row_and_trigger(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(
                 conn, duration_minutes=30, trigger_label="UI", initiated_by="web_ui"
             )
@@ -151,7 +152,7 @@ class TestSessionLifecycle:
         assert history[0]["triggered_at"] == row["created_at"]
 
     def test_terminate_records_end(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30)
             terminated, remaining = ms.disable_maintenance_sessions(conn, session_id=data["session_id"])
         assert (terminated, remaining) == (1, 0)
@@ -162,7 +163,7 @@ class TestSessionLifecycle:
         assert row["ended_at"] < row["expires_at"]
 
     def test_expiry_sweep_records_planned_end(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30)
             past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)).isoformat()
             conn.execute(
@@ -177,7 +178,7 @@ class TestSessionLifecycle:
         assert row["ended_at"] == past
 
     def test_disable_after_expiry_is_expired_not_terminated(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30)
             past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)).isoformat()
             conn.execute(
@@ -192,7 +193,7 @@ class TestSessionLifecycle:
 
 class TestDropCounting:
     def test_pipeline_drop_is_counted_per_session(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(
                 conn, duration_minutes=30, log_handling="drop_errors", target_app="batch"
             )
@@ -216,14 +217,14 @@ class TestDropCounting:
         assert pipeline_mod.get_dropped_by_filter_count() == 3
         assert ms.get_pending_dropped_counts() == {session_id: 3}
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             assert ms.flush_dropped_counts(conn) == 1
         assert _session_row(db_path, session_id)["dropped_count"] == 3
         assert _history_rows(db_path, session_id)[0]["trigger_count"] == 3
         assert ms.get_pending_dropped_counts() == {}
 
     def test_termination_persists_pending_counts(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
             for _ in range(4):
                 ms.record_maintenance_drop(data["session_id"])
@@ -233,7 +234,7 @@ class TestDropCounting:
 
 class TestLimits:
     def test_concurrent_session_cap(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             for _ in range(ms.MAX_ACTIVE_MAINTENANCE_SESSIONS):
                 ms.create_maintenance_session(conn, duration_minutes=30)
             with pytest.raises(ms.MaintenanceSessionLimitError):
@@ -256,7 +257,7 @@ class TestLimits:
 
     @pytest.mark.asyncio
     async def test_ui_cap_returns_409(self, client: AsyncClient, auth_headers: dict, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             for _ in range(ms.MAX_ACTIVE_MAINTENANCE_SESSIONS):
                 ms.create_maintenance_session(conn, duration_minutes=30)
         until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
@@ -299,7 +300,7 @@ class TestLimits:
         tool = create_mcp_server(stdio=True)._tool_manager._tools["enable_maintenance"]
         with pytest.raises(ValueError, match=match):
             await tool.fn(**kwargs)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0
 
     @pytest.mark.asyncio
@@ -315,7 +316,7 @@ class TestLimits:
 
 class TestRetention:
     def test_prune_removes_old_ended_sessions_and_rows_only(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             old = ms.create_maintenance_session(conn, duration_minutes=30)
             recent = ms.create_maintenance_session(conn, duration_minutes=30)
             running = ms.create_maintenance_session(conn, duration_minutes=30)
@@ -398,7 +399,7 @@ class TestExposure:
     async def test_stopping_unknown_or_ended_session_returns_404(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             session_id = ms.create_maintenance_session(conn, duration_minutes=30)["session_id"]
 
         res = await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
@@ -445,7 +446,7 @@ class TestExposure:
     async def test_clear_history_keeps_session_audit_data(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30)
             ms.disable_maintenance_sessions(conn, session_id=data["session_id"])
         res = await client.delete("/api/alerts/history", headers=auth_headers)
@@ -454,7 +455,7 @@ class TestExposure:
         assert _session_row(db_path, data["session_id"]) is not None
 
     def test_ending_session_without_history_row_does_not_fail(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30)
             conn.execute("DELETE FROM alert_history WHERE maintenance_session_id = ?", (data["session_id"],))
             conn.commit()
@@ -466,7 +467,7 @@ class TestExposure:
     async def test_clear_history_keeps_rows_of_running_windows(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             running = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
             ended = ms.create_maintenance_session(conn, duration_minutes=30)
             ms.disable_maintenance_sessions(conn, session_id=ended["session_id"])
@@ -479,14 +480,14 @@ class TestExposure:
         res = await client.delete("/api/alerts/history", headers=auth_headers)
         assert res.status_code == 200
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             remaining = conn.execute("SELECT maintenance_session_id FROM alert_history").fetchall()
         assert [r["maintenance_session_id"] for r in remaining] == [running["session_id"]]
 
         # The running window still has an audit row to update when it ends
         for _ in range(3):
             ms.record_maintenance_drop(running["session_id"])
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             ms.disable_maintenance_sessions(conn, session_id=running["session_id"])
         assert _history_rows(db_path, running["session_id"])[0]["trigger_count"] == 3
 
@@ -519,7 +520,7 @@ def _set_expires(db_path: Path, session_id: str, minutes_from_now: int) -> str:
     value = (
         datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes_from_now)
     ).isoformat()
-    with get_connection(db_path) as conn:
+    with open_db(db_path, row_factory=sqlite3.Row) as conn:
         conn.execute(
             "UPDATE maintenance_sessions SET expires_at = ? WHERE session_id = ?", (value, session_id)
         )
@@ -531,7 +532,7 @@ class TestReadOnlyStatus:
     """Status reads must not take the SQLite write lock."""
 
     def test_status_performs_no_writes(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             live = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
             stale = ms.create_maintenance_session(conn, duration_minutes=30)
         _set_expires(db_path, stale["session_id"], -5)
@@ -552,7 +553,7 @@ class TestReadOnlyStatus:
         assert ms.get_pending_dropped_counts() == {live["session_id"]: 1}
 
     def test_expired_session_reported_inactive_before_sweep(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
         _set_expires(db_path, data["session_id"], -1)
 
@@ -570,7 +571,7 @@ class TestReadOnlyStatus:
         assert _session_row(db_path, data["session_id"])["is_active"] == 1
 
     def test_history_upkeep_without_pending_work_does_not_write(self, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             ms.create_maintenance_session(conn, duration_minutes=30)
         conn = get_connection(db_path)
         try:
@@ -583,7 +584,7 @@ class TestReadOnlyStatus:
     async def test_history_shows_flushed_counts_and_expiry(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             live = ms.create_maintenance_session(conn, duration_minutes=30, log_handling="drop_errors")
             expired = ms.create_maintenance_session(conn, duration_minutes=30)
         planned_end = _set_expires(db_path, expired["session_id"], -2)
@@ -615,7 +616,7 @@ class TestShutdownFlush:
 
         # Keep the 30s sweep worker out of the way so only the shutdown sequence can flush
         monkeypatch.setattr(main_mod, "_maintenance_sweep_worker", _idle_sweep_worker)
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             data = ms.create_maintenance_session(
                 conn, duration_minutes=30, log_handling="drop_errors", target_app="batch"
             )
@@ -661,7 +662,7 @@ class TestAtomicCap:
         assert len(outcomes) == attempts
         assert outcomes.count("created") == ms.MAX_ACTIVE_MAINTENANCE_SESSIONS
         assert outcomes.count("limit") == 5
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             active = conn.execute(
                 "SELECT COUNT(*) FROM maintenance_sessions WHERE is_active = 1"
             ).fetchone()[0]
@@ -686,7 +687,7 @@ class TestUiEndTime:
         res = await client.post("/api/alerts/maintenance", json={"until": until}, headers=auth_headers)
         assert res.status_code == 422
         assert res.json()["detail"] == "End time must be in the future"
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             assert conn.execute("SELECT COUNT(*) FROM maintenance_sessions").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM alert_history").fetchone()[0] == 0
 
@@ -707,7 +708,7 @@ class TestExtendSession:
     async def test_extend_moves_that_session_end_and_keeps_one_session(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             first = ms.create_maintenance_session(conn, duration_minutes=30, initiated_by="web_ui", trigger_label="UI")
             second = ms.create_maintenance_session(conn, duration_minutes=90, initiated_by="web_ui", trigger_label="UI")
         first_end = _parse(_session_row(db_path, first["session_id"])["expires_at"])
@@ -728,7 +729,7 @@ class TestExtendSession:
 
     @pytest.mark.asyncio
     async def test_extend_takes_custom_minutes(self, client: AsyncClient, auth_headers: dict, db_path: Path):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             session_id = ms.create_maintenance_session(conn, duration_minutes=10)["session_id"]
         before = _parse(_session_row(db_path, session_id)["expires_at"])
         res = await client.post(
@@ -763,7 +764,7 @@ class TestExtendSession:
     async def test_extend_unknown_or_ended_session_returns_404(
         self, client: AsyncClient, auth_headers: dict, db_path: Path
     ):
-        with get_connection(db_path) as conn:
+        with open_db(db_path, row_factory=sqlite3.Row) as conn:
             session_id = ms.create_maintenance_session(conn, duration_minutes=30)["session_id"]
         await client.delete(f"/api/alerts/maintenance/sessions/{session_id}", headers=auth_headers)
 

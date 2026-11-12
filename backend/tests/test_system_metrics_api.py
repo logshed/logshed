@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -28,6 +28,7 @@ from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 import app.api.external_v1 as ext_v1_mod
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -109,7 +110,7 @@ class TestSystemMetricsApi:
 
         # Seed sample logs: 3 recent errors (now), and 2 errors from 2 hours ago
         two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(3):
                 conn.execute(
                     """
@@ -162,7 +163,7 @@ class TestSystemMetricsApi:
         db_path = tmp_path / "logs.db"
         # 1. Alert fired 2 hours ago (outside 15-minute sliding window)
         old_iso = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
@@ -183,7 +184,7 @@ class TestSystemMetricsApi:
         # 2. Add an alert fired 5 minutes ago and an alert fired 1 minute ago
         five_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         one_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
@@ -230,7 +231,7 @@ class TestSystemMetricsApi:
             (3, two_days_ago, 9),
             (4, two_days_ago, 9),
         ]
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for severity, ts, count in seed:
                 for _ in range(count):
                     conn.execute(
@@ -282,7 +283,7 @@ class TestSystemMetricsApi:
         db_path = tmp_path / "logs.db"
         ten_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         one_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO alert_history (rule_name, trigger_count, sample_log, incident_summary, ai_enrichment, triggered_at)
@@ -314,7 +315,7 @@ class TestSystemMetricsApi:
         assert state["last_rule_name"] == "Real Rule"
 
         # With no alert firing at all, the newer digest and analysis rows still do not count
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute("DELETE FROM alert_history WHERE rule_name = 'Real Rule'")
             conn.commit()
 
@@ -434,7 +435,7 @@ class TestSystemVersionApi:
 
     @pytest.mark.asyncio
     async def test_check_disabled(self, client: AsyncClient, full_token_headers: dict, tmp_path: Path):
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_settings (key, value, updated_at) "
                 "VALUES ('check_for_updates', 'false', datetime('now'))"

@@ -9,7 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core import pipeline as pipeline_mod
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -27,6 +27,7 @@ from app.services.notifier import (
     mask_notification_url,
     validate_notification_url,
 )
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -302,7 +303,7 @@ class TestNotifierService:
         notifier = NotifierService(db_path=db_file)
 
         # Seed two channels: one enabled, one disabled
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             enc1 = encrypt_channel_url("discord://111/token1")
             enc2 = encrypt_channel_url("discord://222/token2")
             conn.execute(
@@ -325,7 +326,7 @@ class TestNotifierService:
         db_file = tmp_path / "logs.db"
         notifier = NotifierService(db_path=db_file)
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             enc1 = encrypt_channel_url("discord://111/token1")
             cur = conn.execute(
                 "INSERT INTO notification_channels (name, url, is_enabled, created_at, updated_at) VALUES (?, ?, 1, datetime('now'), datetime('now'))",
@@ -363,7 +364,7 @@ class TestNotificationsApi:
         channel_id = data["id"]
 
         # Verify ciphertext in database
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             stored = conn.execute("SELECT url FROM notification_channels WHERE id = ?", (channel_id,)).fetchone()[0]
         assert "my_real_secret_token" not in stored
         assert self._stored_url(tmp_path, channel_id) == "discord://123456789/my_real_secret_token"
@@ -426,7 +427,7 @@ class TestNotificationsApi:
 
     @staticmethod
     def _stored_url(tmp_path: Path, channel_id: int) -> str:
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             row = conn.execute("SELECT url FROM notification_channels WHERE id = ?", (channel_id,)).fetchone()
         return decrypt_channel_url(row[0])
 

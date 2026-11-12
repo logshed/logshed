@@ -17,6 +17,7 @@ from app.core.migrations import (
     set_user_version,
     run_migrations,
 )
+from tests.db_helpers import open_db
 
 # Indexes that duplicate another index (a UNIQUE autoindex or the leading columns of a composite index)
 REDUNDANT_INDEXES = (
@@ -1224,7 +1225,7 @@ class TestFTS5Sync:
         """migrate_v2 should sanitize any future-dated timestamps without touching past logs."""
         db_file = tmp_path / "sanitize_test.db"
         from app.core.migrations import migrate_v1
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             migrate_v1(conn)
             set_user_version(conn, 1)
             conn.commit()
@@ -1234,7 +1235,7 @@ class TestFTS5Sync:
         past_ts = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).isoformat()
         past_rec = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1, seconds=5)).isoformat()
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             # Insert a corrupted row with timestamp in the future relative to now
             conn.execute(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -1252,7 +1253,7 @@ class TestFTS5Sync:
         # Run migration runner to upgrade to v2
         run_migrations(db_file)
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             row = conn.execute("SELECT timestamp, received_at FROM logs WHERE message = 'corrupted'").fetchone()
             assert row[0] == row[1]
 

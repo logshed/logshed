@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.core.config import get_syslog_port
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.core.pipeline import KeyedMultilineAssembler, get_queue
 from app.collectors.syslog import (
     AliasCache,
@@ -21,6 +21,7 @@ from app.collectors.syslog import (
     dispatch_syslog_message,
     parse_syslog_message,
 )
+from tests.db_helpers import open_db
 
 
 @pytest.fixture
@@ -546,7 +547,7 @@ class TestSyslogNetworkAndProtocol:
                 received.append((stream_key, entry))
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('10.0.0.9', 'nas-box', ?)",
                 (now,),
@@ -661,7 +662,7 @@ class TestSyslogNetworkAndProtocol:
             async def feed(self, stream_key: str, entry: dict):
                 received.append((stream_key, entry))
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute("UPDATE docker_endpoints SET source_alias = 'tower' WHERE id = 1")
             conn.commit()
 
@@ -686,7 +687,7 @@ class TestSyslogNetworkAndProtocol:
                 received.append((stream_key, entry))
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.75', 'npm-server', ?)",
                 (now,),
@@ -1164,7 +1165,7 @@ class TestAliasCache:
 
     def test_alias_cache_resolves_known_ip(self, db_path: Path):
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.50', 'pihole', ?)",
                 (now,),
@@ -1182,7 +1183,7 @@ class TestAliasCache:
 
     def test_alias_cache_bulk_load(self, db_path: Path):
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             for i in range(50):
                 conn.execute(
                     "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)",
@@ -1199,7 +1200,7 @@ class TestAliasCache:
 
     def test_alias_resolution_persisted(self, db_path: Path):
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.99', 'truenas-core', ?)",
                 (now,),
@@ -1219,7 +1220,7 @@ class TestAliasCache:
 
         assert cache.resolve("192.168.1.10") == "192.168.1.10"
 
-        with get_connection(db_path) as conn:
+        with open_db(db_path) as conn:
             conn.execute(
                 "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.1.10', 'nas-primary', ?)",
                 (now,),

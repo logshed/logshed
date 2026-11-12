@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [1.4.0] - Unreleased
 
+### Upgrade Notes
+
+- **Source installs** need Python 3.14. The Docker image already has it.
+
+### Changed
+
+- **Python 3.14**: The Docker image runs on Python 3.14 instead of 3.12. Python 3.12 receives security fixes only; 3.14 gets bug fixes until October 2027 and security fixes until October 2030.
+
 ## [1.3.1] - 2026-11-12
 
 ### Upgrade Notes

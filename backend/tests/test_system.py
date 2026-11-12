@@ -41,6 +41,7 @@ from app.services.storage_metrics import (
     record_metrics,
     sample_storage_metrics,
 )
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +99,7 @@ def _seed_logs(db_path: Path, entries: list[dict]):
             :app_name, :facility, :severity, :message, :raw
         )
     """
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.executemany(query, entries)
         conn.commit()
 
@@ -282,7 +283,7 @@ class TestRetentionAndPruneWorker:
         await worker.stop()
         await task
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             count = conn.execute("SELECT COUNT(*) FROM logs WHERE message = 'old log pruned by worker'").fetchone()[0]
             assert count == 0
 
@@ -296,7 +297,7 @@ class TestRetentionAndPruneWorker:
             (old_time, old_time, f"192.168.1.{i % 250}", f"host-{i}", "app", 1, 6, f"large log payload with lots of text {i} " * 10, "raw")
             for i in range(1500)
         ]
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias,
                    app_name, facility, severity, message, raw)
@@ -310,7 +311,7 @@ class TestRetentionAndPruneWorker:
         assert res["deleted_logs"] == 1500
         assert res["status"] == "ok"
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             # In SQLite WAL mode without offline VACUUM, freelist pages exist for reuse by new rows
             freelist = conn.execute("PRAGMA freelist_count;").fetchone()[0]
             assert freelist > 0
@@ -321,7 +322,7 @@ class TestRetentionAndPruneWorker:
         run_migrations(db_file)
 
         # Seed recent logs (from today)
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             now = datetime.datetime.now(datetime.timezone.utc).isoformat()
             for i in range(10):
                 conn.execute(
@@ -340,7 +341,7 @@ class TestRetentionAndPruneWorker:
         res_neg = execute_prune(db_file, retention_days=-5)
         assert res_neg["deleted_logs"] == 0
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             remaining = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             assert remaining == 10
 
@@ -355,7 +356,7 @@ class TestRetentionAndPruneWorker:
         # 13 days ago (younger than 14 days retention)
         fresh_ts = (now - datetime.timedelta(days=13)).isoformat()
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 """
                 INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
@@ -375,7 +376,7 @@ class TestRetentionAndPruneWorker:
         res = execute_prune(db_file, retention_days=14)
         assert res["deleted_logs"] == 1
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             remaining = conn.execute("SELECT message FROM logs").fetchall()
             assert len(remaining) == 1
             assert remaining[0][0] == "fresh iso log"
@@ -390,7 +391,7 @@ class TestRetentionAndPruneWorker:
         # Allow worker to run its initial sample
         await asyncio.sleep(0.05)
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             initial_count = conn.execute("SELECT COUNT(*) FROM storage_metrics").fetchone()[0]
             assert initial_count == 1
 
@@ -402,7 +403,7 @@ class TestRetentionAndPruneWorker:
         # Allow background loop time to execute if it were incorrectly woken
         await asyncio.sleep(0.1)
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             after_count = conn.execute("SELECT COUNT(*) FROM storage_metrics").fetchone()[0]
             # Must be exactly 2 (1 initial + 1 manual trigger), not 3 (no duplicate background sample)
             assert after_count == 2
@@ -415,7 +416,7 @@ class TestRetentionAndPruneWorker:
         inserted = seed_logs(count=100, days=45, db_path=str(db_file))
         assert inserted == 100
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             count = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             assert count == 100
             min_ts, max_ts = conn.execute("SELECT MIN(timestamp), MAX(timestamp) FROM logs").fetchone()
@@ -592,7 +593,7 @@ class TestRetentionAndPruneWorker:
         run_migrations(db_file)
 
         # Seed log
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             now = datetime.datetime.now(datetime.timezone.utc).isoformat()
             conn.execute(
                 "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw) "
@@ -643,7 +644,7 @@ class TestRetentionAndPruneWorker:
                 })
 
         # Exiting lifespan triggers the shutdown sequence including queue draining
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             count = conn.execute(
                 "SELECT COUNT(*) FROM logs WHERE app_name = 'lifespan_test'"
             ).fetchone()[0]
@@ -687,7 +688,7 @@ class TestRetentionAndPruneWorker:
                     "raw": f"faulty_collector_msg_{i}",
                 })
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             count = conn.execute(
                 "SELECT COUNT(*) FROM logs WHERE app_name = 'faulty_collector_test'"
             ).fetchone()[0]
@@ -872,7 +873,7 @@ class TestSettingsEncryptionAndKeyManagement:
         assert res_post.status_code == 200
 
         db_file = tmp_path / "logs.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT key, value, is_encrypted FROM system_settings")
             rows = {r[0]: (r[1], bool(r[2])) for r in cursor.fetchall()}
@@ -902,7 +903,7 @@ class TestSettingsEncryptionAndKeyManagement:
         res_post2 = await client.post("/api/settings", json=update2)
         assert res_post2.status_code == 200
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_api_key'")
             val = cursor.fetchone()[0]
@@ -1076,7 +1077,7 @@ class TestSettingsEncryptionAndKeyManagement:
 
         # Verify DB value directly
         db_file = tmp_path / "logs.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_enabled'")
             row = cursor.fetchone()
@@ -1094,7 +1095,7 @@ class TestSettingsEncryptionAndKeyManagement:
         assert res_check_re_enabled.status_code == 200
         assert res_check_re_enabled.json()["ai_enabled"] is True
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_enabled'")
             row = cursor.fetchone()
@@ -1171,7 +1172,7 @@ class TestHostAliases:
         db_file = tmp_path / "logs.db"
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, '192.168.1.99', '192.168.1.99', 'kernel', 1, 3, 'Link down on eth0', 'raw log 1')""",
@@ -1232,7 +1233,7 @@ class TestHostAliases:
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         # Seed 1200 logs (more than 2 batches of 500) for target_ip
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, ?, 'app', 1, 6, ?, 'raw')""",
@@ -1277,7 +1278,7 @@ class TestHostAliases:
         assert len(concurrent_inserted) > 0
 
         # Verify all 1200 logs were updated to chunked-switch
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             updated_count = conn.execute(
                 "SELECT COUNT(*) FROM logs WHERE source_ip = ? AND source_alias = 'chunked-switch'",
                 (target_ip,),
@@ -1315,7 +1316,7 @@ class TestHostAliases:
         assert len(concurrent_deleted) > 0
 
         # Verify all 1200 logs reverted to target_ip
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             reverted_count = conn.execute(
                 "SELECT COUNT(*) FROM logs WHERE source_ip = ? AND source_alias = ?",
                 (target_ip, target_ip),
@@ -1332,7 +1333,7 @@ class TestHostAliases:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         # Seed initial Docker logs
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, 'docker', 'docker', 'caddy', 1, 6, 'Serving HTTP traffic', 'raw 1')""",
@@ -1488,7 +1489,7 @@ class TestHostAliases:
         from app.api.aliases import _batch_update_log_aliases
         db_file = tmp_path / "logs.db"
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (id, timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES (?, ?, ?, '192.168.1.50', '192.168.1.50', 'app', 1, 6, 'msg', 'raw')""",
@@ -1617,7 +1618,7 @@ class TestDatabaseVacuum:
         _seed_logs(db_file, entries)
 
         # Delete most logs to create empty freelist pages
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute("DELETE FROM logs WHERE id > 100")
             conn.commit()
 
@@ -1656,7 +1657,7 @@ class TestDatabaseVacuum:
             }
             for i in range(5000)
         ])
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute("DELETE FROM logs")
             conn.commit()
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
@@ -1705,7 +1706,7 @@ class TestDatabaseVacuum:
 
             # Check that log was NOT inserted into db while paused
             await asyncio.sleep(0.1)
-            with get_connection(db_file) as conn:
+            with open_db(db_file) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
                 assert count == 0
                 assert queue.qsize() == 1
@@ -1717,12 +1718,12 @@ class TestDatabaseVacuum:
             # Wait for consumer to drain buffered log to database
             for _ in range(20):
                 await asyncio.sleep(0.05)
-                with get_connection(db_file) as conn:
+                with open_db(db_file) as conn:
                     count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
                     if count == 1:
                         break
 
-            with get_connection(db_file) as conn:
+            with open_db(db_file) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
                 assert count == 1
         finally:
@@ -1864,7 +1865,7 @@ class TestRetentionOverridePersistence:
 
     @staticmethod
     def _stored(db_file: Path):
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             row = conn.execute(
                 "SELECT value, updated_at FROM system_settings WHERE key = 'retention_days'"
             ).fetchone()
@@ -1872,7 +1873,7 @@ class TestRetentionOverridePersistence:
 
     @staticmethod
     def _store(db_file: Path, days: int):
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 "INSERT INTO system_settings (key, value, is_encrypted, updated_at) "
                 "VALUES ('retention_days', ?, 0, '2026-01-01T00:00:00+00:00') "

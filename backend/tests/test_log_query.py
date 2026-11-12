@@ -10,7 +10,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.services import log_query
 from app.services.fts_indexer import index_pending_logs, set_fts_worker
 from app.services.log_query import (
@@ -21,6 +21,7 @@ from app.services.log_query import (
     run_search_query,
     to_utc_bound,
 )
+from tests.db_helpers import open_db
 
 
 class TestToUtcBound:
@@ -115,7 +116,7 @@ class TestExecuteWithFtsFallback:
 def _seed_numbered_logs(db_path, rows: list[tuple[str, str]]) -> None:
     """Insert (timestamp, message) rows in order, so ids follow the list, and index them."""
     run_migrations(db_path)
-    with get_connection(db_path) as conn:
+    with open_db(db_path) as conn:
         conn.executemany(
             "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility,"
             " severity, message, raw) VALUES (?, ?, '10.0.0.1', 'srv1', 'web', 1, 6, ?, ?)",
@@ -160,7 +161,7 @@ class TestRunNewestFirst:
         db = tmp_path / "logs.db"
         _seed_numbered_logs(db, [(_ts(i), f"timeout {i}") for i in range(1, 501)])
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             windowed = _newest_page(conn, "timeout", limit=10, cap=21, attempts=attempts)
             monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", ())
@@ -174,7 +175,7 @@ class TestRunNewestFirst:
         rows = [(_ts(i), "stale handle" if i % 100 == 0 else f"noise {i}") for i in range(1, 501)]
         _seed_numbered_logs(db, rows)
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             total, page = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts)
         # One match in the 50-row window: 1,050 rows would be needed, so the 200-row one is skipped
@@ -187,7 +188,7 @@ class TestRunNewestFirst:
         rows = [(_ts(i), "stale handle" if i % 100 == 0 else f"noise {i}") for i in range(1, 501)]
         _seed_numbered_logs(db, rows)
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             recent = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts, from_ts=_ts(460))
             # The range starts before the window, so only every row is complete
@@ -203,7 +204,7 @@ class TestRunNewestFirst:
         rows = [(_ts(i), "stale handle" if i % 5 == 0 else f"noise {i}") for i in range(1, 2001)]
         _seed_numbered_logs(db, rows)
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 100, 400))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             windowed = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts)
             monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", ())
@@ -219,7 +220,7 @@ class TestRunNewestFirst:
         rows = [(_ts(10_000), "timeout early")] + [(_ts(i), f"timeout {i}") for i in range(2, 501)]
         _seed_numbered_logs(db, rows)
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             total, page = _newest_page(conn, "timeout", limit=10, cap=21, attempts=attempts)
         assert attempts == [451, 301, 0]
@@ -232,7 +233,7 @@ class TestRunNewestFirst:
         rows = [(_ts(470), "stale early")] + [(_ts(i), "stale handle" if i == 480 else f"noise {i}") for i in range(2, 501)]
         _seed_numbered_logs(db, rows)
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             total, page = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts, from_ts=_ts(460))
         assert attempts == [451, 0]
@@ -243,7 +244,7 @@ class TestRunNewestFirst:
         db = tmp_path / "logs.db"
         _seed_numbered_logs(db, [(_ts(i), f"stale {i}") for i in range(1, 501)])
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        with get_connection(db) as conn:
+        with open_db(db) as conn:
             attempts: list[int] = []
             result = _newest_page(conn, "stale", limit=10, cap=21, attempts=attempts, from_ts=_ts(1000))
         assert attempts == [451]

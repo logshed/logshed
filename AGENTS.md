@@ -50,7 +50,7 @@ These are the project rules for any AI coding agent working in this repository (
 - Tests that download a file use `src/test/downloadStubs.ts`.
 
 ## Architecture
-- **Runtime:** Python 3.12 (the Docker image and CI) with `asyncio`, FastAPI and SQLite (WAL mode and FTS5); React, Vite and Tailwind CSS for the frontend, bundled into `backend/app/static`.
+- **Runtime:** Python 3.14 (the Docker image and CI) with `asyncio`, FastAPI and SQLite (WAL mode and FTS5); React, Vite and Tailwind CSS for the frontend, bundled into `backend/app/static`.
 - **Single process:** one container, one OS process, running supervised `asyncio` tasks: `SyslogServer`, `DockerCollectorPool` (one `DockerTailer` per Docker host), `QueueConsumer`, `FTSIndexWorker`, `PruneWorker`, `StorageMetricsWorker`, `ModelRefreshWorker`, `DropFilterWorker`, `MaintenanceSweepWorker`, `DailyDigestWorker` and `LoopLagMonitor` (started in `backend/app/main.py`). Never run more than one uvicorn worker (`--workers 1`): the ingest queue, rate limiters and drop counters live in process memory and would silently disagree across processes.
 - **Database:** stdlib `sqlite3` through `asyncio.to_thread()`, with thread-local connections (for reads and writes) reused by `run_db_query` (`backend/app/api/deps.py`). The schema version is `PRAGMA user_version`, set by the migrations in `backend/app/core/migrations.py`. Full-text indexing runs apart from ingestion in `FTSIndexWorker` (target catch-up under 1 s), with its progress in `fts_index_state`. No external database servers.
 - **Docker access:** talk to the Docker Engine API with `httpx` (`httpx.HTTPTransport(uds=...)` for the Unix socket), respecting `DOCKER_HOST` (a socket or `tecnativa/docker-socket-proxy`).

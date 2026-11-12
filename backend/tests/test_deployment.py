@@ -46,7 +46,7 @@ def is_docker_daemon_running() -> bool:
 class TestRuntimeSanity:
 
     def test_python_version(self):
-        assert sys.version_info >= (3, 12), f"Expected Python >= 3.12, got {sys.version_info}"
+        assert sys.version_info >= (3, 14), f"Expected Python >= 3.14, got {sys.version_info}"
 
     def test_directory_skeleton(self):
         backend_dir = REPO_ROOT / "backend"
@@ -206,7 +206,7 @@ class TestDockerfileStatic:
         assert "node:24-alpine" in content and "frontend-builder" in content
         assert "RUN npm ci" in content
         assert "npm run build" in content
-        assert "FROM python:3.12-slim" in content
+        assert "FROM python:3.14-slim" in content
         assert "tini" in content
         assert "curl" in content
         assert "gosu" in content

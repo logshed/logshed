@@ -13,9 +13,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.security import SESSION_COOKIE_NAME, create_session_token
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
 from app.main import create_app
 from tests.test_logs_api import _seed_logs
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +54,7 @@ class TestFacetsPerformanceAndEdgeCases:
         """Empty database returns empty facets without errors."""
         db_file = tmp_path / "empty.db"
         run_migrations(db_file)
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             cursor = conn.cursor()
             # Verify queries run on empty table cleanly
             cursor.execute("""
@@ -86,7 +87,7 @@ class TestFacetsPerformanceAndEdgeCases:
         # Add single log from infrequent host 45 days ago
         data.append(("2026-07-15T12:00:00", "2026-07-15T12:00:00", "10.10.10.5", "quarterly-backup", "zfs-sync", 1, 6, "done", "done"))
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw) VALUES (?,?,?,?,?,?,?,?,?)",
                 data,
@@ -220,7 +221,7 @@ class TestFacetsPerformanceAndEdgeCases:
             ip = f"10.0.0.{hosts.index(h) + 1}"
             data.append(("2026-09-01T12:00:00", "2026-09-01T12:00:00", ip, h, a, 1, 6, "msg", "msg"))
 
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw) VALUES (?,?,?,?,?,?,?,?,?)",
                 data,
@@ -295,7 +296,7 @@ class TestFacetsCaps:
     """Unauthenticated syslog can create any number of app or host names; facets stay bounded."""
 
     def _insert(self, db_file: Path, rows: list[tuple]) -> None:
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.executemany(
                 """INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, facility, severity, message, raw)
                    VALUES ('2026-10-15T12:00:00+00:00', '2026-10-15T12:00:00+00:00', ?, ?, ?, 1, 6, 'm', 'r')""",

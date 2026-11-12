@@ -39,6 +39,7 @@ from app.services.notifier import validate_notification_url
 from app.services.alert_evaluator import AlertEvaluator
 from app.collectors.syslog import SyslogServer
 from app.collectors.docker_collector import DockerTailer
+from tests.db_helpers import open_db
 
 
 @pytest.fixture(autouse=True)
@@ -315,7 +316,7 @@ class TestSettingsCache:
         assert get_cached_setting("ai_timeout") == 45.0
 
         # Update SQLite table directly
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('ai_timeout', '120.0', CURRENT_TIMESTAMP)"
             )
@@ -479,7 +480,7 @@ class TestSettingsApi:
         assert data["syslog_tcp_inactivity_timeout"] == 30.0
 
         # Verify persisted in SQLite
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             rows = dict(conn.execute("SELECT key, value FROM system_settings").fetchall())
             assert rows["ai_timeout"] == "65.5"
             assert rows["syslog_max_tcp_connections"] == "100"
@@ -503,7 +504,7 @@ class TestSettingsApi:
         assert res.json()["status"] == "ok"
 
         # Verify only enable_docker was written to SQLite system_settings
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             rows = dict(conn.execute("SELECT key, value FROM system_settings").fetchall())
             assert "enable_docker" in rows
             assert rows["enable_docker"] == "0"
@@ -586,7 +587,7 @@ class TestSubsystemIntegrations:
         import datetime
         db_file = tmp_path / "logs.db"
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('app_url', 'https://logshed.corp.lan', CURRENT_TIMESTAMP)"
             )
@@ -650,7 +651,7 @@ class TestSubsystemIntegrations:
         assert valid is True
 
         # Now set allow_private_notification_targets to False
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('allow_private_notification_targets', 'false', CURRENT_TIMESTAMP)"
             )
@@ -686,7 +687,7 @@ class TestSubsystemIntegrations:
 
         # Case 2: Configure trusted proxy in settings
         db_file = tmp_path / "logs.db"
-        with get_connection(db_file) as conn:
+        with open_db(db_file) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('trusted_proxies', '198.51.100.0/24', CURRENT_TIMESTAMP)"
             )
@@ -775,7 +776,7 @@ class TestSubsystemIntegrations:
 # ===================================================================
 
 def _stored_settings(tmp_path: Path) -> dict[str, str]:
-    with get_connection(tmp_path / "logs.db") as conn:
+    with open_db(tmp_path / "logs.db") as conn:
         return dict(conn.execute("SELECT key, value FROM system_settings").fetchall())
 
 
@@ -982,7 +983,7 @@ class TestSettingsAiBaseUrlAndKey:
         res = await client.post("/api/settings", json={"docker_source_alias": "  myalias  "})
         assert res.status_code == 200
         assert _stored_settings(tmp_path)["docker_source_alias"] == "myalias"
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             row = conn.execute("SELECT source_alias FROM docker_endpoints WHERE id = 1").fetchone()
         assert row[0] == "myalias"
         assert (await client.get("/api/settings")).json()["docker_source_alias"] == "myalias"
@@ -1060,7 +1061,7 @@ class TestSettingsReloadErrorsAndReads:
     ):
         """GET clamps retention in the response only and never writes system_settings."""
         client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
-        with get_connection(tmp_path / "logs.db") as conn:
+        with open_db(tmp_path / "logs.db") as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('retention_days', '25', CURRENT_TIMESTAMP)"
             )

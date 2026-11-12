@@ -10,7 +10,7 @@ Before starting work on a large new feature, please open a [Feature Request](htt
 
 ## Local Development Setup
 
-Prerequisites: **Python 3.12+** and **Node.js 24+**.
+Prerequisites: **Python 3.14+** and **Node.js 24+**.
 
 ```bash
 # 1. Clone the repository
@@ -18,7 +18,7 @@ git clone https://github.com/logshed/logshed.git
 cd logshed
 
 # 2. Set up the Python virtual environment and install backend dependencies
-python3.12 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt   # app and test dependencies
 

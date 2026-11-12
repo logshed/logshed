@@ -1,6 +1,6 @@
 # Ruff lints the backend: `ruff check backend`. It is a linter only; the code is not
 # reformatted with `ruff format`.
-target-version = "py312"
+target-version = "py314"
 
 [lint]
 # Pyflakes (unused imports and variables, undefined names) and pycodestyle's
