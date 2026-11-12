@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/logshed/logshed"><img src="https://img.shields.io/badge/version-1.3.1--dev-blue?style=flat-square" alt="Version 1.3.1-dev"></a>
+  <a href="https://github.com/logshed/logshed"><img src="https://img.shields.io/badge/version-1.3.1-blue?style=flat-square" alt="Version 1.3.1"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="MIT License"></a>
   <a href="https://github.com/logshed/logshed/pkgs/container/logshed"><img src="https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white&style=flat-square" alt="GHCR Container"></a>
   <a href="#system-requirements"><img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blueviolet?style=flat-square" alt="Multi-Arch Support"></a>
@@ -122,7 +122,7 @@ Start the container:
 docker compose up -d
 ```
 
-To pin a specific release instead of following `latest`, use a version tag such as `ghcr.io/logshed/logshed:1.3.0`.
+To pin a specific release instead of following `latest`, use a version tag such as `ghcr.io/logshed/logshed:1.3.1`.
 
 If you prefer not to mount `/var/run/docker.sock` directly, you can point `DOCKER_HOST` at a socket proxy such as `tecnativa/docker-socket-proxy` (with `CONTAINERS=1`). See [Docker Log Tailing](docs/CONFIGURATION.md#docker-log-tailing) for details. Additional Docker hosts can be added in the web UI under **Settings > Sources**.
 
