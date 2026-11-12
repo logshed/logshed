@@ -6,7 +6,7 @@
 export function extractCleanSummary(text: string): string {
   if (!text) return '';
 
-  let summary = '';
+  let summary: string;
   // Try extracting text between ## Summary and the next section (## Root Cause / ## Actionable)
   const match = text.match(/##\s*Summary(?:\s*Analysis)?[:\s-]*([\s\S]*?)(?=##\s*Root\s*Cause|##\s*Actionable|$)/i);
   if (match && match[1]?.trim()) {

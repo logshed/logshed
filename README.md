@@ -251,9 +251,10 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
-# 2. Install frontend dependencies, run tests, and build static assets
+# 2. Install frontend dependencies, lint, run tests, and build static assets
 cd frontend
 npm install
+npm run lint
 npm test
 npm run build
 cd ..

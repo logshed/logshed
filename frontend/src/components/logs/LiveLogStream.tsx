@@ -1370,7 +1370,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         setIsLoadingHistory(false);
       }
     }
-  }, [filters, updateFacetsWithNewLogs]);
+  }, [filters, updateFacetsWithNewLogs, getFormatContext]);
 
   const loadMoreLogs = useCallback(async () => {
     if (isLoadingMoreRef.current || !hasMoreLogs || isLoadingHistory) return;
@@ -1425,7 +1425,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [filters, hasMoreLogs, isLoadingHistory, updateFacetsWithNewLogs]);
+  }, [filters, hasMoreLogs, isLoadingHistory, updateFacetsWithNewLogs, getFormatContext]);
 
   // Reload on filter changes. Free-text query edits are debounced so search-as-you-type does not
   // dispatch a backend FTS query per keystroke (superseded queries keep running server-side);
@@ -1677,7 +1677,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const scrollTop = e.currentTarget.scrollTop;
     const firstInView = rowVirtualizer.getVirtualItems().find((item) => item.start + item.size > scrollTop)?.index ?? 0;
     const current = cursorIndex >= 0 ? cursorIndex : null;
-    let next: number | null = null;
+    let next: number;
     if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', 'Enter', ' '].includes(e.key)) {
       setCursorOutlined(true);
     }

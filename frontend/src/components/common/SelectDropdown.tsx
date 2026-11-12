@@ -160,7 +160,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     const height = listRef.current.offsetHeight;
     const bounds = scrollParentBounds(triggerRef.current);
     if (rect.bottom + height + 4 > bounds.bottom && rect.top - height - 4 >= bounds.top) setPlaceAbove(true);
-  }, [isOpen]);
+  }, [isOpen, isPanel]);
 
   // Panel variant: follow the trigger when the page or the dialog scrolls, or the window resizes
   useEffect(() => {

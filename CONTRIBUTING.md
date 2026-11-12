@@ -22,9 +22,10 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt   # app and test dependencies
 
-# 3. Install frontend dependencies, run tests, and build static assets
+# 3. Install frontend dependencies, lint, run tests, and build static assets
 cd frontend
 npm install
+npm run lint
 npm test
 npm run build
 cd ..
@@ -50,5 +51,5 @@ DATA_DIR=./data .venv/bin/python -m uvicorn app.main:app --app-dir backend --hos
 
 1. Create a new branch from `main`.
 2. Make your changes and add tests that cover what you added or changed.
-3. Lint the backend (`.venv/bin/ruff check backend`), run both test suites (`.venv/bin/pytest backend/tests/ -v` and `cd frontend && npm test`) and build the frontend (`cd frontend && npm run build`).
+3. Lint the backend (`.venv/bin/ruff check backend`) and the frontend (`cd frontend && npm run lint`), run both test suites (`.venv/bin/pytest backend/tests/ -v` and `cd frontend && npm test`) and build the frontend (`cd frontend && npm run build`).
 4. Open a Pull Request against `main` and fill out the PR template.

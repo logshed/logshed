@@ -158,6 +158,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
     } else if (!isOpen) {
       prevTargetKeyRef.current = '';
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fills the form on open or a new target (currentTargetKey stands for the rule and initial values), not on each new prop object, which would undo the user's edits
   }, [isOpen, currentTargetKey]);
 
   useEffect(() => {

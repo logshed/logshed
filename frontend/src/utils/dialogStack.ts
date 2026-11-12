@@ -172,5 +172,5 @@ export function useDialog(
       else stack[stack.length - 1]?.containerRef.current?.focus();
     };
     // containerRef is a stable ref object; onClose and closeOnEscape are read through refs
-  }, [isOpen]);
+  }, [isOpen, containerRef]);
 }

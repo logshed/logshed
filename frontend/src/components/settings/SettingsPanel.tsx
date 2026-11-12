@@ -608,6 +608,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     loadAllData();
     loadVersionData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loads once when Settings opens; the loaders are new functions each render
   }, []);
 
   useEffect(() => {

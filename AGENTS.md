@@ -15,13 +15,13 @@ These are the project rules for any AI coding agent working in this repository (
 - Python: always the project venv (`.venv/bin/python`, `.venv/bin/pytest`), never the system Python. Inspect installed packages with `.venv/bin/pip show <pkg>`, or `uv pip show <pkg>` in a venv built with `uv`.
 - Backend tests: `.venv/bin/pytest backend/tests/` (one file: `.venv/bin/pytest backend/tests/test_schema.py`).
 - Backend lint: `.venv/bin/ruff check backend` (rules in `ruff.toml`; CI runs it).
-- Frontend tests: `cd frontend && npm test`. Build: `cd frontend && npm run build` (runs `tsc`, then bundles to `backend/app/static`).
+- Frontend tests: `cd frontend && npm test`. Lint: `cd frontend && npm run lint` (ESLint with the React hooks rules; rules in `frontend/eslint.config.js`, and CI runs it). Build: `cd frontend && npm run build` (runs `tsc`, then bundles to `backend/app/static`).
 - `test_spa_serves_index_html_for_frontend_routes` needs the frontend built first.
 - Timing benchmarks (excluded by default; compare figures before and after a change on the same machine): `.venv/bin/pytest backend/tests/ -m benchmark -s`.
 - End-to-end tests: `.venv/bin/pytest backend/tests/ -m e2e`. They cost money or build Docker images; read "Paid API Calls and Secrets" before running them.
 
 ## Definition of Done
-- Both test suites pass, `ruff check backend` is clean and the frontend builds (commands above).
+- Both test suites pass, `ruff check backend` and `npm run lint` are clean and the frontend builds (commands above).
 - `docs/spec/` and the user docs (`docs/*.md`, `README.md`) describe any change to what LogShed does, its API or its configuration.
 - Anything users will notice has an entry in `CHANGELOG.md` under the unreleased version, in its section (`Added`, `Changed`, `Fixed`, `Security`). A change that needs action when upgrading also gets an `Upgrade Notes` entry.
 - New or changed backend code has tests in `backend/tests/`; a bug fix has a test that fails without the fix.
@@ -91,6 +91,7 @@ A new environment variable also goes into `.env.example`, `unraid-template.xml`,
 
 ## Code, Text and Commits
 - **Match the surrounding code:** naming, comment density and idiom. Ruff lints the backend; no formatter is configured, so do not run `ruff format`.
+- **Hook dependencies:** a dependency left out of a React hook's list on purpose gets `// eslint-disable-next-line react-hooks/exhaustive-deps -- <why>` on the line before the list, so the reason stays next to it.
 - **No plan or backlog IDs** (such as `BL-12`, `B-23`, `S-14`, `WP3` or `Item #4`) in code, comments, docstrings, test names, `describe` blocks or commit messages. They mean nothing to future readers; say what the code does instead.
 - **No em dashes** (the character U+2014) anywhere: code, UI text, error messages, tests and docs. Use ` - `, commas or parentheses. Avoid curly quotes and other typographic symbols in code strings.
 - **Dialect-neutral English** in everything users read (UI text, messages, tooltips, docs): avoid words spelled differently in US and British English (*-ize/-ise*, *-ization/-isation*, *-or/-our*, *license/licence*, *defense/defence*). Use words with one spelling, such as *redaction* for *sanitization*, *validation* for *standardization*, *efficiency* for *optimization*, *rely on* for *in favor of*. Code, SQL keywords (SQLite `OPTIMIZE`), library identifiers, HTTP headers and protocol terms keep their required spelling.

@@ -215,6 +215,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       setElapsedSeconds(0);
       setIsAiSettingsOpen(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the dialog opens or the selection changes; loadPreview is a new function each render
   }, [isOpen, selectedLogs]);
 
   // Timer effect to track elapsed seconds while diagnosing

@@ -199,10 +199,12 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
   // Sync internal state if prop updates
   React.useEffect(() => {
     setDays(clampDays(retentionDays));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clampDays is a new function each render; listing it would reset the slider while it is dragged
   }, [retentionDays]);
 
   React.useEffect(() => {
     setDays((prev) => clampDays(prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clampDays reads only min and max, listed here
   }, [max, min]);
 
   return (

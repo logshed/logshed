@@ -3,9 +3,11 @@
  */
 
 // Matches ANSI CSI sequences (e.g. \x1b[32m, \x1b[0m, \x1b[1;31m), OSC sequences, and two-character ESC codes
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const ANSI_REGEX = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\)|[@-Z\\-_])/g;
 
 // Matches non-printable ASCII control characters (ASCII 0-8, 11-12, 14-31, 127), preserving \t (9), \n (10), \r (13)
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL_CHARS_REGEX = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
 
 /**
@@ -124,7 +126,7 @@ const dateTimeFormatterCache = new Map<string, Intl.DateTimeFormat | null>();
 function getDateTimeFormatter(timeZone: string): Intl.DateTimeFormat | null {
   const cached = dateTimeFormatterCache.get(timeZone);
   if (cached !== undefined) return cached;
-  let formatter: Intl.DateTimeFormat | null = null;
+  let formatter: Intl.DateTimeFormat | null;
   try {
     formatter = new Intl.DateTimeFormat('en-US', {
       timeZone,
