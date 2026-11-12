@@ -1,0 +1,154 @@
+{
+ "rate/fail": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "AI analysis failed: 504 Deadline exceeded",
+   1,
+   null,
+   0
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1 (2/3, 67%)\n**App:** nginx (2/3, 67%)\n**Rate:** 0.1 logs/s (Threshold: 2 logs/s in 60s)\n**Top Pattern:** upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n**Sample Log:** upstream timed out from 198.51.100.4\n**AI Analysis:** Unavailable (504 Deadline exceeded)\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: [Log Storm] Upstream errors (0.1 logs/s)"
+   }
+  ],
+  "prompt": [
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: rate\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 logs/s in 60s (Measured: 0.1 logs/s)\n- Offending IP: 198.51.100.4\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+  ]
+ },
+ "rate/none": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "Log storm detected: 3 logs in 60s (0.1 logs/s).\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)",
+   0,
+   null,
+   0
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1 (2/3, 67%)\n**App:** nginx (2/3, 67%)\n**Rate:** 0.1 logs/s (Threshold: 2 logs/s in 60s)\n**Top Pattern:** upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n**Sample Log:** upstream timed out from 198.51.100.4\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: [Log Storm] Upstream errors (0.1 logs/s)"
+   }
+  ],
+  "prompt": []
+ },
+ "rate/off": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "Log storm detected: 3 logs in 60s (0.1 logs/s).\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)",
+   0,
+   null,
+   0
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1 (2/3, 67%)\n**App:** nginx (2/3, 67%)\n**Rate:** 0.1 logs/s (Threshold: 2 logs/s in 60s)\n**Top Pattern:** upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n**Sample Log:** upstream timed out from 198.51.100.4\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: [Log Storm] Upstream errors (0.1 logs/s)"
+   }
+  ],
+  "prompt": []
+ },
+ "rate/ok": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "**Upstream** is slow.\n\n### Root Cause\nBackend overloaded.\n\n### Remediation\nScale it.",
+   1,
+   "model-x",
+   1
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1 (2/3, 67%)\n**App:** nginx (2/3, 67%)\n**Rate:** 0.1 logs/s (Threshold: 2 logs/s in 60s)\n**Top Pattern:** upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n**Sample Log:** upstream timed out from 198.51.100.4\n**AI Analysis:** Upstream is slow.\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: [Log Storm] Upstream errors (0.1 logs/s)"
+   }
+  ],
+  "prompt": [
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: rate\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 logs/s in 60s (Measured: 0.1 logs/s)\n- Offending IP: 198.51.100.4\n\n### Primary Culprits\n- Top Service / App: nginx (2/3, 67%)\n- Top Host / Source: web-1 (2/3, 67%)\n- Top Pattern: upstream timed out from 203.0.113.9 password=[REDACTED] (x1, 33%)\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+  ]
+ },
+ "threshold/fail": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "AI analysis failed: 504 Deadline exceeded",
+   1,
+   null,
+   0
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1\n**App:** nginx\n**Log:** upstream timed out from 198.51.100.4\n**AI Analysis:** Unavailable (504 Deadline exceeded)\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: Upstream errors"
+   }
+  ],
+  "prompt": [
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: threshold\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 matches in 60s\n- Offending IP: 198.51.100.4\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+  ]
+ },
+ "threshold/none": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "Alert triggered with 3 matching event(s).",
+   0,
+   null,
+   0
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1\n**App:** nginx\n**Log:** upstream timed out from 198.51.100.4\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: Upstream errors"
+   }
+  ],
+  "prompt": []
+ },
+ "threshold/off": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "Alert triggered with 3 matching event(s).",
+   0,
+   null,
+   0
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1\n**App:** nginx\n**Log:** upstream timed out from 198.51.100.4\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: Upstream errors"
+   }
+  ],
+  "prompt": []
+ },
+ "threshold/ok": {
+  "history": [
+   3,
+   "upstream timed out from 198.51.100.4",
+   13,
+   "**Upstream** is slow.\n\n### Root Cause\nBackend overloaded.\n\n### Remediation\nScale it.",
+   1,
+   "model-x",
+   1
+  ],
+  "notification": [
+   {
+    "body": "**Host:** web-1\n**App:** nginx\n**Log:** upstream timed out from 198.51.100.4\n**AI Analysis:** Upstream is slow.\n**Link:** https://logshed.lan/rules/history?id=1",
+    "title": "LogShed: Upstream errors"
+   }
+  ],
+  "prompt": [
+   "### Security / Operations Incident Alert\n- Alert Rule: Upstream errors\n- Rule Type: threshold\n- Host / Source: web-1\n- App / Container: nginx\n- Threshold: 2 matches in 60s\n- Offending IP: 198.51.100.4\n\n### Redacted Log Stream (Chronological)\n```\n[2026-11-12T10:00:00+00:00] [web-1] [nginx] [ERROR] upstream timed out from 203.0.113.9 password=[REDACTED]\n[2026-11-12T10:00:01+00:00] [10.0.0.7] [unknown] [WARN] upstream timed out\n[2026-11-12T10:00:02+00:00] [web-1] [nginx] [ERROR] upstream timed out from 198.51.100.4\n```\n\nReview this incident and provide structured Summary, Root Cause, and Actionable Remediation."
+  ]
+ }
+}

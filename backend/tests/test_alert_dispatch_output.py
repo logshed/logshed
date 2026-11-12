@@ -13,7 +13,7 @@ from app.core.migrations import get_connection, run_migrations
 from app.services.ai_engine import AiAnalysisResult
 from app.services.alert_evaluator import AlertEvaluator, CompiledAlertRule
 
-GOLDEN = Path(__file__).parent / "data" / "alert_dispatch_golden.json"
+GOLDEN = Path(__file__).parent / "fixtures" / "alert_dispatch_golden.json"
 
 LOGS = [
     {"id": 11, "timestamp": "2026-11-12T10:00:00+00:00", "source_alias": "web-1", "app_name": "nginx",
