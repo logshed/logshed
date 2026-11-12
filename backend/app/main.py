@@ -238,6 +238,7 @@ async def _model_refresh_worker(db_path) -> None:
     Background worker that periodically refreshes available AI models
     every 12 hours if an API key is configured.
     """
+    from app.core.ai_providers import normalize_provider_id, provider_needs_api_key, stored_provider_setting
     from app.services.ai_engine import fetch_available_models
 
     while True:
@@ -246,11 +247,11 @@ async def _model_refresh_worker(db_path) -> None:
             await asyncio.sleep(60)
 
             settings = await run_db_query(get_all_system_settings, custom_db_path=Path(db_path))
-            provider = (settings.get("ai_provider") or "gemini").lower()
-            api_key = (settings.get(f"ai_api_key_{provider}") or settings.get("ai_api_key", "")).strip()
-            base_url = settings.get(f"ai_base_url_{provider}") or settings.get("ai_base_url")
+            provider = normalize_provider_id(settings.get("ai_provider"))
+            api_key = stored_provider_setting(settings, provider, "ai_api_key").strip()
+            base_url = stored_provider_setting(settings, provider, "ai_base_url") or None
 
-            if (provider == "openai_compatible") or api_key:
+            if not provider_needs_api_key(provider) or api_key:
                 try:
                     discovered = await fetch_available_models(provider, api_key=api_key or None, base_url=base_url)
                     if discovered:

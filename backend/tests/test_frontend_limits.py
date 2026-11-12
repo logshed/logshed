@@ -93,12 +93,21 @@ def test_navbar_queue_warning_is_half_the_ingestion_queue():
     assert depth == _QUEUE_MAXSIZE // 2
 
 
-def test_frontend_default_models_match_the_backend():
-    from app.core.config import DEFAULT_AI_MODEL, DEFAULT_AI_MODELS
+def test_frontend_ai_providers_match_the_backend():
+    from app.core.ai_providers import AI_PROVIDERS, DEFAULT_AI_PROVIDER
 
-    text = (FRONTEND_SRC / "utils" / "aiPrompt.ts").read_text(encoding="utf-8")
-    assert re.search(r"export const DEFAULT_AI_MODEL = '([^']+)';", text).group(1) == DEFAULT_AI_MODEL
-    block = text.split("export const DEFAULT_PROVIDER_MODELS", 1)[1].split("};", 1)[0]
-    frontend = dict(re.findall(r"(\w+): '([^']+)'", block))
-    frontend.update({name: DEFAULT_AI_MODEL for name in re.findall(r"(\w+): DEFAULT_AI_MODEL", block)})
-    assert frontend == DEFAULT_AI_MODELS
+    text = (FRONTEND_SRC / "utils" / "aiProviders.ts").read_text(encoding="utf-8")
+    table = text.split("export const AI_PROVIDERS", 1)[1].split("];", 1)[0]
+    frontend = {}
+    for entry in table.split("id: '")[1:]:
+        provider_id = entry.split("'", 1)[0]
+        frontend[provider_id] = (
+            re.search(r"label: '([^']+)'", entry).group(1),
+            re.search(r"needsApiKey: (true|false)", entry).group(1) == "true",
+            re.search(r"defaultModel: '([^']+)'", entry).group(1),
+        )
+    assert frontend == {p.id: (p.label, p.needs_api_key, p.default_model) for p in AI_PROVIDERS.values()}
+    assert list(frontend) == list(AI_PROVIDERS)
+    assert re.search(r"DEFAULT_AI_PROVIDER: AiProviderId = '([^']+)';", text).group(1) == DEFAULT_AI_PROVIDER
+    type_ids = re.search(r"export type AiProviderId = ([^;]+);", text).group(1)
+    assert re.findall(r"'(\w+)'", type_ids) == list(AI_PROVIDERS)

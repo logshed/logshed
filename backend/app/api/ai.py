@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, run_db_query
+from app.core.ai_providers import AI_PROVIDERS, get_ai_provider, normalize_provider_id, stored_provider_setting
 from app.core.config import is_debug_or_dev
 from app.core.rate_limiter import ai_rate_limiter
 from app.core.redactor import redact
@@ -152,9 +153,26 @@ async def _stream_worker_events(request: Request, queue: asyncio.Queue, worker):
         raise
 
 
+_PROVIDER_QUERY_HELP = "AI Provider (" + ", ".join(f"'{p}'" for p in AI_PROVIDERS) + ")"
+
+
+def _missing_api_key_response(provider: str) -> Optional[AiModelsResponse]:
+    """The reply for a provider that needs an API key when none is set, or None if it needs none."""
+    entry = get_ai_provider(provider)
+    if entry is None or not entry.needs_api_key:
+        return None
+    return AiModelsResponse(
+        provider=provider,
+        models=[],
+        has_api_key=False,
+        is_live=False,
+        error=f"No API key configured for {entry.label}. Please configure your API key in Settings to view available models.",
+    )
+
+
 @router.get("/models", response_model=AiModelsResponse)
 async def list_available_models(
-    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
+    provider: Optional[str] = Query(None, description=_PROVIDER_QUERY_HELP),
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
     """
@@ -163,29 +181,13 @@ async def list_available_models(
     If no API key is configured, returns has_api_key=False with an empty list.
     """
     stored_settings, updated_map = await run_db_query(read_ai_settings)
-    active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
+    active_db_provider = normalize_provider_id(stored_settings.get("ai_provider"))
     clean_provider = (provider or active_db_provider).lower()
 
-    # Provider-specific key check
-    api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
-    if not api_key and clean_provider == active_db_provider:
-        api_key = stored_settings.get("ai_api_key", "").strip()
+    api_key = stored_provider_setting(stored_settings, clean_provider, "ai_api_key", active_db_provider).strip()
 
-    # If the provider requires an API key and none is set, prompt user
-    if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
-        provider_names = {
-            "gemini": "Google Gemini",
-            "openai": "OpenAI",
-            "anthropic": "Anthropic Claude",
-        }
-        provider_name = provider_names.get(clean_provider, clean_provider)
-        return AiModelsResponse(
-            provider=clean_provider,
-            models=[],
-            has_api_key=False,
-            is_live=False,
-            error=f"No API key configured for {provider_name}. Please configure your API key in Settings to view available models.",
-        )
+    if not api_key and (missing := _missing_api_key_response(clean_provider)):
+        return missing
 
     cache_key = f"ai_models_cache_{clean_provider}"
     cached_json = stored_settings.get(cache_key)
@@ -221,7 +223,7 @@ async def list_available_models(
 
 @router.post("/models/refresh", response_model=AiModelsResponse)
 async def refresh_available_models(
-    provider: Optional[str] = Query(None, description="AI Provider ('gemini', 'openai', 'anthropic', 'openai_compatible')"),
+    provider: Optional[str] = Query(None, description=_PROVIDER_QUERY_HELP),
     payload: Optional[AiModelRefreshRequest] = None,
     user: dict = Depends(get_current_user),
 ) -> AiModelsResponse:
@@ -232,12 +234,10 @@ async def refresh_available_models(
     Requires authentication and CSRF header.
     """
     stored_settings, updated_map = await run_db_query(read_ai_settings)
-    active_db_provider = (stored_settings.get("ai_provider") or "gemini").lower()
+    active_db_provider = normalize_provider_id(stored_settings.get("ai_provider"))
     clean_provider = (provider or active_db_provider).lower()
 
-    stored_base_url = stored_settings.get(f"ai_base_url_{clean_provider}") or (
-        stored_settings.get("ai_base_url") if clean_provider == active_db_provider else None
-    )
+    stored_base_url = stored_provider_setting(stored_settings, clean_provider, "ai_base_url", active_db_provider) or None
     payload_base_url = payload.base_url.strip() if payload and payload.base_url and payload.base_url.strip() else None
     # The stored key belongs to the stored endpoint: never send it to a different host.
     foreign_base_url = payload_base_url is not None and payload_base_url.rstrip("/") != (stored_base_url or "").strip().rstrip("/")
@@ -249,9 +249,7 @@ async def refresh_available_models(
     elif foreign_base_url:
         api_key = ""
     else:
-        api_key = stored_settings.get(f"ai_api_key_{clean_provider}", "").strip()
-        if not api_key and clean_provider == active_db_provider:
-            api_key = stored_settings.get("ai_api_key", "").strip()
+        api_key = stored_provider_setting(stored_settings, clean_provider, "ai_api_key", active_db_provider).strip()
 
     if payload_base_url:
         base_url = payload_base_url
@@ -259,21 +257,8 @@ async def refresh_available_models(
         # The global ai_base_url belongs to the active provider only.
         base_url = stored_base_url
 
-    # If the provider requires an API key and none is set, prompt user
-    if clean_provider in ("gemini", "openai", "anthropic") and not api_key:
-        provider_names = {
-            "gemini": "Google Gemini",
-            "openai": "OpenAI",
-            "anthropic": "Anthropic Claude",
-        }
-        provider_name = provider_names.get(clean_provider, clean_provider)
-        return AiModelsResponse(
-            provider=clean_provider,
-            models=[],
-            has_api_key=False,
-            is_live=False,
-            error=f"No API key configured for {provider_name}. Please configure your API key in Settings to view available models.",
-        )
+    if not api_key and (missing := _missing_api_key_response(clean_provider)):
+        return missing
 
     cache_key = f"ai_models_cache_{clean_provider}"
     cached_json = stored_settings.get(cache_key)

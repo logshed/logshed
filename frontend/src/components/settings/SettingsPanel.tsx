@@ -28,6 +28,7 @@ import { getAiModels } from '../../api/ai.ts';
 import { changePassword } from '../../api/auth.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey, type AiProviderId } from '../../utils/aiProviders.ts';
 import { NotificationsCard } from './NotificationsCard.tsx';
 import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
@@ -81,8 +82,6 @@ export const settingsSubTabToPath = (subTab: SettingsSubTab): string => {
   }
 };
 
-type ProviderId = 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
-
 // Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
 // Docker host, which the LogShed container reaches as host.docker.internal.
 const OPENAI_COMPATIBLE_PRESETS: { label: string; url: string }[] = [
@@ -109,12 +108,7 @@ const INTERNAL_LOG_LEVEL_OPTIONS: SelectOption[] = [
   { value: 'DISABLED', label: 'DISABLED (Do not ingest internal logs)' },
 ];
 
-const AI_PROVIDER_OPTIONS: SelectOption[] = [
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic Claude' },
-  { value: 'openai_compatible', label: 'OpenAI-Compatible (OpenRouter, Ollama, LM Studio, Groq, ...)' },
-];
+const AI_PROVIDER_OPTIONS: SelectOption[] = aiProviderOptions(4);
 
 function matchBaseUrlPreset(baseUrl: string): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
@@ -137,7 +131,7 @@ interface ProviderLocalState {
  */
 const buildProviderStates = (
   settRes: SettingsResponseData,
-): { configs: Record<string, ProviderLocalState>; activeProvider: ProviderId } => {
+): { configs: Record<string, ProviderLocalState>; activeProvider: AiProviderId } => {
   const configs: Record<string, ProviderLocalState> = {
     gemini: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.gemini, fallbackModels: '', baseUrl: '' },
     openai: { apiKey: '', hasKey: false, model: DEFAULT_PROVIDER_MODELS.openai, fallbackModels: '', baseUrl: '' },
@@ -159,7 +153,7 @@ const buildProviderStates = (
     }
   }
 
-  const activeProvider = (settRes.ai_provider || 'gemini') as ProviderId;
+  const activeProvider = (settRes.ai_provider || DEFAULT_AI_PROVIDER) as AiProviderId;
   if (configs[activeProvider]) {
     configs[activeProvider] = {
       apiKey: settRes.has_ai_api_key ? (settRes.ai_api_key || '') : '',
@@ -257,7 +251,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   });
 
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
-  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'openai_compatible'>('gemini');
+  const [aiProvider, setAiProvider] = useState<AiProviderId>(DEFAULT_AI_PROVIDER);
   const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODEL);
   const [aiFallbackModels, setAiFallbackModels] = useState<string>('');
   const [aiApiKey, setAiApiKey] = useState<string>('');
@@ -457,7 +451,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleProviderChange = (newProvider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible') => {
+  const handleProviderChange = (newProvider: AiProviderId) => {
     const updatedConfigs: Record<string, ProviderLocalState> = {
       ...providerConfigs,
       [aiProvider]: {
@@ -472,7 +466,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
     const target = updatedConfigs[newProvider] || {
       apiKey: '',
-      hasKey: newProvider === 'openai_compatible',
+      hasKey: !providerNeedsApiKey(newProvider),
       model: DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL,
       fallbackModels: '',
       baseUrl: '',
@@ -1044,7 +1038,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               />
             </div>
 
-            {aiProvider === 'openai_compatible' && (
+            {getAiProvider(aiProvider)?.customBaseUrl && (
               <div className="sm:col-span-2">
                 <label htmlFor="ai-base-url" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                   Custom Base URL (Optional)
@@ -1079,14 +1073,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
 
             {/* API Key Missing Notice */}
-            {!hasApiKeyForProvider && aiProvider !== 'openai_compatible' && (
+            {!hasApiKeyForProvider && providerNeedsApiKey(aiProvider) && (
               <div className="sm:col-span-2 p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start justify-between gap-3 text-amber-300 text-xs font-mono">
                 <div className="flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
                     <span className="font-semibold text-amber-200">API Key Required to Discover Models:</span>
                     <p className="text-[11px] text-amber-300/80 mt-0.5">
-                      Enter and save your API key above to query {aiProvider === 'gemini' ? 'Google Gemini' : aiProvider === 'openai' ? 'OpenAI' : aiProvider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'} and populate available text models.
+                      Enter and save your API key above to query {getAiProvider(aiProvider)?.label ?? 'your endpoint'} and populate available text models.
                     </p>
                   </div>
                 </div>
@@ -1102,7 +1096,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
 
             {/* Models Error Banner */}
-            {modelsError && (hasApiKeyForProvider || aiProvider === 'openai_compatible') && (
+            {modelsError && (hasApiKeyForProvider || !providerNeedsApiKey(aiProvider)) && (
               <div className="sm:col-span-2 p-2.5 bg-dark-950 border border-dark-700 rounded-lg flex items-center justify-between text-xs font-mono text-slate-400">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />

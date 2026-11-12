@@ -1496,8 +1496,9 @@ class TestDefaultModelFallback:
             "ai_model_openai_compatible": "",
         }
 
-        from app.api import settings as settings_api
-        monkeypatch.setitem(settings_api.DEFAULT_AI_MODELS, "openai", "gpt-7-next")
+        import dataclasses
+        from app.core.ai_providers import AI_PROVIDERS
+        monkeypatch.setitem(AI_PROVIDERS, "openai", dataclasses.replace(AI_PROVIDERS["openai"], default_model="gpt-7-next"))
         res = await auth_client.get("/api/settings")
         config = res.json()["ai_providers_config"]
         assert config["openai"]["ai_model"] == "gpt-7-next"
@@ -4325,10 +4326,10 @@ class TestAnthropicRequestsPerModelFamily:
                 await ai_engine.call_anthropic(api_key="key", model="claude-sonnet-5-5", prompt="logs")
 
     def test_default_claude_model_is_sonnet_five_five(self):
-        from app.core.config import DEFAULT_AI_MODELS
+        from app.core.ai_providers import AI_PROVIDERS
         from app.services.ai_service import resolve_ai_provider_settings
 
-        assert DEFAULT_AI_MODELS["anthropic"] == "claude-sonnet-5-5"
+        assert AI_PROVIDERS["anthropic"].default_model == "claude-sonnet-5-5"
         assert resolve_ai_provider_settings({"ai_provider": "anthropic"})["model"] == "claude-sonnet-5-5"
 
 

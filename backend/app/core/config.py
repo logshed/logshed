@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar, Union
 
+from app.core.ai_providers import AI_PROVIDERS, DEFAULT_AI_PROVIDER
+
 logger = logging.getLogger(__name__)
 
 def get_data_dir() -> Path:
@@ -234,14 +236,8 @@ VALID_LOG_LEVELS: dict[str, Optional[int]] = {
     "0": None,
 }
 
-DEFAULT_AI_MODEL = "gemini-3.7-flash"
-# The model each provider uses when none is chosen
-DEFAULT_AI_MODELS: dict[str, str] = {
-    "gemini": DEFAULT_AI_MODEL,
-    "openai": "gpt-6.1-sol",
-    "anthropic": "claude-sonnet-5-5",
-    "openai_compatible": "llama3.2",
-}
+# The default provider's model; each provider's own default is in the registry (core/ai_providers.py)
+DEFAULT_AI_MODEL = AI_PROVIDERS[DEFAULT_AI_PROVIDER].default_model
 DEFAULT_AI_TIMEOUT: float = float(os.environ.get("LOGSHED_AI_TIMEOUT", "45.0"))
 # How much the AI model may think before it answers; ai_engine maps each level per provider
 AI_THINKING_LEVELS = ("off", "low", "medium", "high")

@@ -7,6 +7,7 @@ import re
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
+from app.core.ai_providers import DEFAULT_AI_PROVIDER
 from app.core.config import DEFAULT_AI_MODEL, get_max_retention_days
 
 
@@ -196,7 +197,7 @@ AiThinkingLevel = Literal["off", "low", "medium", "high"]
 class SettingsResponse(BaseModel):
     """Application runtime configuration response with masked secrets."""
     ai_enabled: bool = False
-    ai_provider: str = "gemini"
+    ai_provider: str = DEFAULT_AI_PROVIDER
     ai_model: str = DEFAULT_AI_MODEL
     ai_fallback_models: str = ""
     ai_api_key: str = ""

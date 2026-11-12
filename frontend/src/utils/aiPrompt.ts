@@ -1,18 +1,16 @@
 import { AiModelInfo } from '../types.ts';
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER } from './aiProviders.ts';
 
 /**
  * Shared AI prompt constants and helper functions.
  */
 
-export const DEFAULT_AI_MODEL = 'gemini-3.7-flash';
+/** The model each provider uses when none is chosen (from utils/aiProviders.ts). */
+export const DEFAULT_PROVIDER_MODELS: Record<string, string> = Object.fromEntries(
+  AI_PROVIDERS.map((p) => [p.id, p.defaultModel]),
+);
 
-/** The model each provider uses when none is chosen (DEFAULT_AI_MODELS in backend/app/core/config.py). */
-export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-  gemini: DEFAULT_AI_MODEL,
-  openai: 'gpt-6.1-sol',
-  anthropic: 'claude-sonnet-5-5',
-  openai_compatible: 'llama3.2',
-};
+export const DEFAULT_AI_MODEL = DEFAULT_PROVIDER_MODELS[DEFAULT_AI_PROVIDER];
 
 export const DEFAULT_SYSTEM_PROMPT = `You are an expert systems engineer, site reliability engineer (SRE), and Linux/Docker administrator.
 Review the following redacted server/container logs and provide a structured diagnosis in Markdown format.

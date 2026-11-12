@@ -17,8 +17,13 @@ from typing import Any, Optional
 from fastapi import HTTPException, status
 
 from app.api.deps import run_db_query
+from app.core.ai_providers import (
+    default_model_for,
+    normalize_provider_id,
+    provider_needs_api_key,
+    stored_provider_setting,
+)
 from app.core.config import (
-    DEFAULT_AI_MODELS,
     DEFAULT_AI_THINKING_LEVEL,
     DEFAULT_AI_TIMEOUT,
     get_all_system_settings,
@@ -152,7 +157,7 @@ def is_ai_enabled(settings: dict[str, str], provider: str, api_key: str) -> bool
     The stored AI switch. When it was never saved, AI is on with an API key, or with an
     OpenAI-compatible server, which may not need one.
     """
-    return parse_bool(settings.get("ai_enabled"), bool(api_key.strip()) or provider == "openai_compatible")
+    return parse_bool(settings.get("ai_enabled"), bool(api_key.strip()) or not provider_needs_api_key(provider))
 
 
 def resolve_ai_provider_settings(
@@ -165,17 +170,17 @@ def resolve_ai_provider_settings(
     Resolve the provider, model, credentials, fallback chain and runtime limits for an AI request
     from the current system settings, applying optional per-request overrides.
     """
-    active_db_provider = (settings.get("ai_provider") or "gemini").lower()
+    active_db_provider = normalize_provider_id(settings.get("ai_provider"))
     provider = (provider_override or active_db_provider).lower()
-    default_model = DEFAULT_AI_MODELS.get(provider, DEFAULT_AI_MODELS["openai_compatible"])
-    model = model_override or settings.get(f"ai_model_{provider}") or (settings.get("ai_model") if provider == active_db_provider else None) or default_model
-    api_key = (
-        settings.get(f"ai_api_key_{provider}")
-        or (settings.get("ai_api_key", "") if provider == active_db_provider else "")
-    )
-    base_url = settings.get(f"ai_base_url_{provider}") or (settings.get("ai_base_url") if provider == active_db_provider else None) or None
 
-    fallback_models_str = settings.get(f"ai_fallback_models_{provider}") or (settings.get("ai_fallback_models", "") if provider == active_db_provider else "")
+    def stored(name: str) -> str:
+        return stored_provider_setting(settings, provider, name, active_db_provider)
+
+    model = model_override or stored("ai_model") or default_model_for(provider)
+    api_key = stored("ai_api_key")
+    base_url = stored("ai_base_url") or None
+
+    fallback_models_str = stored("ai_fallback_models")
     configured_fallbacks = [m.strip() for m in fallback_models_str.split(",") if m.strip()]
     fallback_models = (
         fallback_models_override

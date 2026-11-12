@@ -11,9 +11,9 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
+from app.core.ai_providers import AI_PROVIDERS, DEFAULT_AI_PROVIDER, get_ai_provider, normalize_provider_id, stored_provider_setting
 from app.core.config import (
     DEFAULT_AI_MODEL,
-    DEFAULT_AI_MODELS,
     get_all_system_settings,
     get_max_retention_days,
     get_syslog_port,
@@ -48,13 +48,6 @@ def _normalize_base_url(value: Optional[str]) -> str:
     """Comparable form of an AI base URL (surrounding space and trailing slashes ignored)."""
     return (value or "").strip().rstrip("/")
 
-SENSITIVE_KEYS = {
-    "ai_api_key",
-    "ai_api_key_gemini",
-    "ai_api_key_openai",
-    "ai_api_key_anthropic",
-    "ai_api_key_openai_compatible",
-}
 
 def _model_to_store(provider: str, model: str) -> str:
     """
@@ -62,7 +55,9 @@ def _model_to_store(provider: str, model: str) -> str:
     Save, including defaults nobody chose, so the default is stored as "" (follow LogShed's
     default) and a later change of the default reaches that provider.
     """
-    return "" if model.strip() == DEFAULT_AI_MODELS.get(provider, DEFAULT_AI_MODEL) else model
+    entry = get_ai_provider(provider)
+    default_model = entry.default_model if entry else DEFAULT_AI_MODEL
+    return "" if model.strip() == default_model else model
 
 
 def persist_retention_override(conn) -> bool:
@@ -103,20 +98,20 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     """
     stored = await run_db_query(get_all_system_settings)
 
-    active_provider = (stored.get("ai_provider") or "gemini").lower()
+    active_provider = normalize_provider_id(stored.get("ai_provider"))
 
     providers_config: dict[str, AiProviderConfig] = {}
-    for p in ("gemini", "openai", "anthropic", "openai_compatible"):
-        pkey = stored.get(f"ai_api_key_{p}") or (stored.get("ai_api_key", "") if p == active_provider else "")
-        pmodel = stored.get(f"ai_model_{p}") or (stored.get("ai_model") if p == active_provider else "") or DEFAULT_AI_MODELS.get(p, DEFAULT_AI_MODEL)
-        pfallbacks = stored.get(f"ai_fallback_models_{p}") or (stored.get("ai_fallback_models", "") if p == active_provider else "")
-        pbase = stored.get(f"ai_base_url_{p}") or (stored.get("ai_base_url") if p == active_provider else None)
+    for p, entry in AI_PROVIDERS.items():
+        pkey = stored_provider_setting(stored, p, "ai_api_key", active_provider)
+        pmodel = stored_provider_setting(stored, p, "ai_model", active_provider) or entry.default_model
+        pfallbacks = stored_provider_setting(stored, p, "ai_fallback_models", active_provider)
+        pbase = stored_provider_setting(stored, p, "ai_base_url", active_provider) or None
         try:
             pbase = AiProviderConfig.validate_ai_base_url(pbase)
         except ValueError:
             # A value stored before per-provider validation existed must not break the read.
             pbase = None
-        has_pkey = bool(pkey.strip()) if p != "openai_compatible" else True
+        has_pkey = bool(pkey.strip()) if entry.needs_api_key else True
         providers_config[p] = AiProviderConfig(
             has_api_key=has_pkey,
             ai_api_key=mask_secret(pkey) if pkey else "",
@@ -125,9 +120,9 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
             ai_base_url=pbase,
         )
 
-    active_config = providers_config.get(active_provider) or providers_config["gemini"]
+    active_config = providers_config.get(active_provider) or providers_config[DEFAULT_AI_PROVIDER]
     has_active_key = active_config.has_api_key
-    ai_api_key_val = stored.get(f"ai_api_key_{active_provider}") or (stored.get("ai_api_key", "") if active_provider == (stored.get("ai_provider") or "gemini").lower() else "")
+    ai_api_key_val = stored_provider_setting(stored, active_provider, "ai_api_key", active_provider)
 
     retention_raw = stored.get("retention_days", "14")
     try:
@@ -188,7 +183,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
     return SettingsResponse(
         ai_enabled=ai_enabled,
         ai_provider=active_provider,
-        ai_model=active_config.ai_model or DEFAULT_AI_MODELS.get(active_provider, DEFAULT_AI_MODEL),
+        ai_model=active_config.ai_model,
         ai_fallback_models=active_config.ai_fallback_models or "",
         ai_api_key=mask_secret(ai_api_key_val) if ai_api_key_val else "",
         ai_base_url=active_config.ai_base_url,
@@ -265,8 +260,8 @@ async def update_settings(
 
         cursor.execute("SELECT value FROM system_settings WHERE key = 'ai_provider'")
         current_db_provider_row = cursor.fetchone()
-        current_db_provider = current_db_provider_row[0] if current_db_provider_row else "gemini"
-        target_provider = (req.ai_provider or current_db_provider or "gemini").lower()
+        current_db_provider = current_db_provider_row[0] if current_db_provider_row else DEFAULT_AI_PROVIDER
+        target_provider = normalize_provider_id(req.ai_provider or current_db_provider)
 
         if req.ai_enabled is not None:
             updates.append(("ai_enabled", "1" if req.ai_enabled else "0", 0))

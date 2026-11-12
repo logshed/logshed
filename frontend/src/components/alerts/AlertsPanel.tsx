@@ -41,6 +41,7 @@ import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { fetchSettings } from '../../api/settings.ts';
+import { providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import {
   slugify,
   formatLocalTimestamp,
@@ -281,7 +282,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         setIsAiConfigured(
           Boolean(
             settingsData.ai_enabled &&
-            (settingsData.has_ai_api_key || settingsData.ai_provider === 'openai_compatible')
+            (settingsData.has_ai_api_key || !providerNeedsApiKey(settingsData.ai_provider))
           )
         );
       }

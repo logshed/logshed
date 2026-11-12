@@ -25,6 +25,7 @@ import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
 import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
@@ -34,12 +35,7 @@ import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
 
-const PROVIDER_OPTIONS: SelectOption[] = [
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic Claude' },
-  { value: 'openai_compatible', label: 'OpenAI-Compatible (OpenRouter, Ollama, ...)' },
-];
+const PROVIDER_OPTIONS: SelectOption[] = aiProviderOptions(2);
 
 interface ProviderLocalState {
   hasKey: boolean;
@@ -71,7 +67,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [promptViewMode, setPromptViewMode] = useState<'analysis' | 'full'>('analysis');
 
   const [userContext, setUserContext] = useState<string>('');
-  const [provider, setProvider] = useState<string>('gemini');
+  const [provider, setProvider] = useState<string>(DEFAULT_AI_PROVIDER);
   const [model, setModel] = useState<string>(DEFAULT_AI_MODEL);
   const [fallbackModels, setFallbackModels] = useState<string>('');
 
@@ -190,7 +186,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
   const isAiDisabled = preview?.ai_enabled === false;
-  const isAiMissingKey = !hasApiKeyForProvider && provider !== 'openai_compatible';
+  const isAiMissingKey = !hasApiKeyForProvider && providerNeedsApiKey(provider);
   const isAiUnavailable = Boolean(isAiDisabled || isAiMissingKey);
 
   useEffect(() => {
@@ -293,7 +289,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       if (isStale()) return;
 
       setPreview(res);
-      const activeP = res.provider || 'gemini';
+      const activeP = res.provider || DEFAULT_AI_PROVIDER;
       setProvider(activeP);
 
       const initialFallbacks = res.fallback_models && res.fallback_models.length > 0
@@ -397,7 +393,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
     // 2. Load target provider's settings
     const target = updatedConfigs[newProvider] || {
-      hasKey: newProvider === 'openai_compatible',
+      hasKey: !providerNeedsApiKey(newProvider),
       model: DEFAULT_PROVIDER_MODELS[newProvider] || DEFAULT_AI_MODEL,
       fallbackModels: '',
     };
@@ -862,7 +858,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         no fallbacks
                       </span>
                     )}
-                    {!hasApiKeyForProvider && provider !== 'openai_compatible' && (
+                    {!hasApiKeyForProvider && providerNeedsApiKey(provider) && (
                       <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] flex items-center gap-1">
                         <AlertCircle className="w-3 h-3 text-amber-400" />
                         Key required
@@ -889,17 +885,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 className={isAiSettingsOpen ? 'p-3 pt-2.5 space-y-3 border-t border-dark-800' : 'hidden'}
               >
                 {/* Missing API Key Warning */}
-                {!hasApiKeyForProvider && provider !== 'openai_compatible' && (
+                {!hasApiKeyForProvider && providerNeedsApiKey(provider) && (
                   <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start gap-2 text-amber-300 text-xs font-mono">
                     <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <span>
-                      No API key configured for {provider === 'gemini' ? 'Google Gemini' : provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic Claude' : 'your endpoint'}. Please configure your API key in Settings to load models and run AI analysis.
+                      No API key configured for {getAiProvider(provider)?.label ?? 'your endpoint'}. Please configure your API key in Settings to load models and run AI analysis.
                     </span>
                   </div>
                 )}
 
                 {/* Models Loading Error Notice */}
-                {modelsError && (hasApiKeyForProvider || provider === 'openai_compatible') && (
+                {modelsError && (hasApiKeyForProvider || !providerNeedsApiKey(provider)) && (
                   <div className="p-2.5 bg-red-950/40 border border-red-800/60 rounded-lg flex items-start gap-2 text-red-300 text-xs font-mono">
                     <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                     <span>{modelsError}</span>

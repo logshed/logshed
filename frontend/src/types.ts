@@ -1,3 +1,5 @@
+import type { AiProviderId } from './utils/aiProviders.ts';
+
 export interface LogEntry {
   id: number;
   timestamp: string;
@@ -58,7 +60,7 @@ export type AiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 
 export interface SystemSettings {
   ai_enabled?: boolean;
-  ai_provider: 'gemini' | 'openai' | 'anthropic' | 'openai_compatible';
+  ai_provider: AiProviderId;
   ai_model: string;
   ai_fallback_models?: string;
   ai_api_key?: string;

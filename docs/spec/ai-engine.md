@@ -51,6 +51,7 @@ LogShed provides two distinct AI analysis modes: user-initiated on-demand log an
 ## 2. AI Provider Abstraction
 
 - **Implementation Reference:** [backend/app/services/ai_engine.py](../../backend/app/services/ai_engine.py)
+- **Provider registry:** each provider is one entry in `AI_PROVIDERS` ([backend/app/core/ai_providers.py](../../backend/app/core/ai_providers.py)): id, label, SDK, whether it needs an API key, and default model. Settings, the model list routes, the refresh worker and the engine read it; the engine picks its request, streaming and follow-up code by the entry's SDK, and model discovery has one lister per provider. The web UI keeps the same list in `frontend/src/utils/aiProviders.ts` (plus whether the user enters a base URL), and `test_frontend_limits.py` fails when the two differ. A provider's stored settings are `ai_api_key_<id>`, `ai_model_<id>`, `ai_base_url_<id>` and `ai_fallback_models_<id>`; the single keys without a suffix, from versions before per-provider settings, count for the active provider only (`stored_provider_setting`).
 - **Supported Providers & SDKs:**
   - Google Gemini via the `google-genai` SDK, on the Gemini API's stable `v1` version (the SDK's default from 3.0; LogShed 1.3 and earlier used `v1beta`). Model discovery lists what `v1` serves, and a saved model that only `v1beta` serves gets `404` and fails over.
   - Anthropic Claude via the `anthropic` SDK.
