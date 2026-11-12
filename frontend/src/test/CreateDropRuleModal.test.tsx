@@ -6,6 +6,7 @@ import * as dropRulesApi from '../api/dropRules.ts';
 import * as aliasesApi from '../api/aliases.ts';
 import { DropRule } from '../types.ts';
 import { optionLabels } from './selectDropdownHelpers.ts';
+import { spacedName } from './accessibleNames.ts';
 
 const mockRule: DropRule = {
   id: 10,
@@ -256,8 +257,8 @@ describe('CreateDropRuleModal host and app lists', () => {
     closeDropdown();
 
     // The trigger names the field and lists the selection
-    expect(hostTrigger()).toHaveAccessibleName('Hosts or IPs (Optional) pve-node1, pve-node2, 192.168.1.* 3 selected');
-    expect(appTrigger()).toHaveAccessibleName('Apps or Containers (Optional) sshd, cron* 2 selected');
+    expect(hostTrigger()).toHaveAccessibleName(spacedName('Hosts or IPs (Optional) pve-node1, pve-node2, 192.168.1.* 3 selected'));
+    expect(appTrigger()).toHaveAccessibleName(spacedName('Apps or Containers (Optional) sshd, cron* 2 selected'));
     // The sample host and app take the first entry
     expect(screen.getByPlaceholderText('e.g. 192.168.1.50')).toHaveValue('pve-node1');
     expect(screen.getByPlaceholderText('e.g. dnsmasq')).toHaveValue('sshd');
@@ -309,7 +310,7 @@ describe('CreateDropRuleModal host and app lists', () => {
         availableApps={['nginx']}
       />
     );
-    expect(hostTrigger()).toHaveAccessibleName('Hosts or IPs (Optional) web-01, web-02 2 selected');
+    expect(hostTrigger()).toHaveAccessibleName(spacedName('Hosts or IPs (Optional) web-01, web-02 2 selected'));
     // Unchanged lists are not unsaved changes
     fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
     expect(onClose).toHaveBeenCalledTimes(1);

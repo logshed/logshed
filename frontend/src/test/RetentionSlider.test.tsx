@@ -65,7 +65,9 @@ describe('RetentionSlider Component', () => {
       const expectedPercent = ((val - min) / (max - min)) * 100;
       const tickContainer = screen.getByTitle(`Set retention to ${val} days`);
       expect(tickContainer).toBeInTheDocument();
-      expect(tickContainer.style.left).toBe(`${expectedPercent}%`);
+      // jsdom keeps six significant digits of a percentage it reads back
+      expect(tickContainer.style.left).toMatch(/%$/);
+      expect(parseFloat(tickContainer.style.left)).toBeCloseTo(expectedPercent, 3);
     });
   });
 

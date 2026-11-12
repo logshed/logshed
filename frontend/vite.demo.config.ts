@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
 
-const outDir = path.resolve(__dirname, 'dist-demo');
+const outDir = path.resolve(import.meta.dirname, 'dist-demo');
 
 export default defineConfig({
   plugins: [
@@ -21,6 +21,6 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: true,
-    rollupOptions: { input: path.resolve(__dirname, 'demo.html') },
+    rolldownOptions: { input: path.resolve(import.meta.dirname, 'demo.html') },
   },
 });

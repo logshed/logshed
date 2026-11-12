@@ -1,4 +1,4 @@
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 
 // Mock ResizeObserver for Recharts & Virtualizer
 class ResizeObserverMock {

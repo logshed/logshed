@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 
-const outDir = path.resolve(__dirname, '../backend/app/static');
+const outDir = path.resolve(import.meta.dirname, '../backend/app/static');
 
 // Swagger UI and ReDoc for the backend's /docs and /redoc pages, served from /docs-assets/
 // instead of a CDN. Copied from node_modules after each build (the backend picks the URLs).
@@ -27,7 +27,7 @@ function copyDocsAssets(): Plugin {
       const target = path.join(outDir, 'docs-assets');
       fs.mkdirSync(target, { recursive: true });
       for (const [from, to] of DOCS_ASSETS) {
-        fs.copyFileSync(path.resolve(__dirname, 'node_modules', from), path.join(target, to));
+        fs.copyFileSync(path.resolve(import.meta.dirname, 'node_modules', from), path.join(target, to));
       }
     },
   };
