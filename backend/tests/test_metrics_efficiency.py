@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import app.api.external_v1 as ext_v1_mod
+import app.services.system_metrics as metrics_mod
 import app.services.storage_metrics as storage_mod
 from app.core.migrations import get_connection, run_migrations
 from tests.db_helpers import open_db
@@ -15,14 +15,14 @@ from tests.db_helpers import open_db
 
 @pytest.fixture(autouse=True)
 def reset_caches():
-    ext_v1_mod._cached_error_stats = None
-    ext_v1_mod._cached_error_stats_time = 0.0
-    ext_v1_mod._error_refresh_task = None
+    metrics_mod._cached_error_stats = None
+    metrics_mod._cached_error_stats_time = 0.0
+    metrics_mod._error_refresh_task = None
     storage_mod.clear_storage_snapshot_cache()
     yield
-    ext_v1_mod._cached_error_stats = None
-    ext_v1_mod._cached_error_stats_time = 0.0
-    ext_v1_mod._error_refresh_task = None
+    metrics_mod._cached_error_stats = None
+    metrics_mod._cached_error_stats_time = 0.0
+    metrics_mod._error_refresh_task = None
     storage_mod.clear_storage_snapshot_cache()
 
 
@@ -53,7 +53,7 @@ class TestConditionalAggregation:
             conn.commit()
 
             conn.row_factory = sqlite3.Row
-            stats = ext_v1_mod._fetch_error_aggregates(conn)
+            stats = metrics_mod._fetch_error_aggregates(conn)
 
         assert stats["count_24h"] == 4
         assert stats["count_1h"] == 2
@@ -64,7 +64,7 @@ class TestConditionalAggregation:
         run_migrations(db)
         with open_db(db) as conn:
             conn.row_factory = sqlite3.Row
-            stats = ext_v1_mod._fetch_error_aggregates(conn)
+            stats = metrics_mod._fetch_error_aggregates(conn)
         assert stats["count_24h"] == 0
         assert stats["count_1h"] == 0
         assert stats["top_apps"] == [] and stats["top_hosts"] == []
@@ -80,15 +80,15 @@ class TestSingleFlightRefresh:
             await asyncio.sleep(0.05)
             return {"count_24h": 7, "count_1h": 3, "top_apps": [], "top_hosts": []}
 
-        monkeypatch.setattr(ext_v1_mod, "run_db_query", _slow_query)
+        monkeypatch.setattr(metrics_mod, "run_db_query", _slow_query)
 
-        results = await asyncio.gather(*(ext_v1_mod._get_error_stats() for _ in range(10)))
+        results = await asyncio.gather(*(metrics_mod._get_error_stats() for _ in range(10)))
 
         assert len(calls) == 1
         assert all(r["count_24h"] == 7 for r in results)
 
         # Fresh cache is served without another query
-        await ext_v1_mod._get_error_stats()
+        await metrics_mod._get_error_stats()
         assert len(calls) == 1
 
     @pytest.mark.asyncio
@@ -101,10 +101,10 @@ class TestSingleFlightRefresh:
             await gate.wait()
             return {"count_24h": 1, "count_1h": 1, "top_apps": [], "top_hosts": []}
 
-        monkeypatch.setattr(ext_v1_mod, "run_db_query", _gated_query)
+        monkeypatch.setattr(metrics_mod, "run_db_query", _gated_query)
 
-        first = asyncio.create_task(ext_v1_mod._get_error_stats())
-        second = asyncio.create_task(ext_v1_mod._get_error_stats())
+        first = asyncio.create_task(metrics_mod._get_error_stats())
+        second = asyncio.create_task(metrics_mod._get_error_stats())
         await asyncio.sleep(0.02)
         first.cancel()
         gate.set()
@@ -120,11 +120,11 @@ class TestSingleFlightRefresh:
             calls.append(1)
             return {"count_24h": len(calls), "count_1h": 0, "top_apps": [], "top_hosts": []}
 
-        monkeypatch.setattr(ext_v1_mod, "run_db_query", _query)
-        assert (await ext_v1_mod._get_error_stats())["count_24h"] == 1
+        monkeypatch.setattr(metrics_mod, "run_db_query", _query)
+        assert (await metrics_mod._get_error_stats())["count_24h"] == 1
 
-        ext_v1_mod._cached_error_stats_time -= ext_v1_mod._METRICS_CACHE_TTL + 1
-        assert (await ext_v1_mod._get_error_stats())["count_24h"] == 2
+        metrics_mod._cached_error_stats_time -= metrics_mod._METRICS_CACHE_TTL + 1
+        assert (await metrics_mod._get_error_stats())["count_24h"] == 2
 
 
 class TestStorageSnapshotCache:
@@ -257,7 +257,7 @@ class TestErrorAggregatePlans:
             conn.commit()
             conn.row_factory = sqlite3.Row
             conn.set_trace_callback(statements.append)
-            result = ext_v1_mod._fetch_error_aggregates(conn)
+            result = metrics_mod._fetch_error_aggregates(conn)
             apps_sql = next(s for s in statements if "GROUP BY +app_name" in s)
             plan = [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + apps_sql)]
         assert [(e.name, e.count) for e in result["top_apps"]] == [("a", 2), ("b", 1)]

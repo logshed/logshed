@@ -4,29 +4,14 @@ Supports Bearer token authentication, scoped permissions, multi-session maintena
 system telemetry and metrics, and log and incident queries.
 """
 
-import asyncio
-import base64
 import datetime
-import json
 import logging
-import sqlite3
-import threading
-import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import require_api_token, require_auth_or_token, run_db_query
 from app.api.system import run_prune_operation, run_vacuum_operation
-from app.core.config import get_db_path
-from app.core.redactor import redact
-from app.core.pipeline import (
-    get_dropped_by_filter_count,
-    get_dropped_count,
-    get_ingest_rate,
-    get_queue,
-)
-from app.core.utils import format_severity_label, resolve_severity
 from app.models import (
     AlertHistoryItem,
     ApiTokenVerifyResponse,
@@ -40,12 +25,7 @@ from app.models import (
     LogFacetsResponse,
     ExternalLogListResponse,
     PruneResponse,
-    SeverityCounts24h,
-    SystemAlertState,
-    SystemMaintenanceMetrics,
     SystemMetricsResponse,
-    TopErrorBreakdown,
-    TopErrorEntity,
     VacuumResponse,
     VersionResponse,
 )
@@ -55,23 +35,17 @@ from app.services.maintenance_service import (
     disable_maintenance_sessions,
     get_maintenance_status,
 )
-from app.services.log_query import (
-    MAX_API_FILTER_VALUES,
-    InvalidTimeBound,
-    LogFilter,
-    build_where,
-    check_filter_value_counts,
-    db_busy_exception,
-    execute_with_fts_fallback,
-    fetch_log_context,
-    log_columns,
-    row_to_log_entry,
-    run_newest_first,
-    run_search_query,
+from app.services import system_metrics
+from app.services.alert_history import list_alert_history, redact_alert_item
+from app.services.log_facets import get_facets
+from app.services.log_search import (
+    MAX_CURSOR_LENGTH,
+    count_logs,
+    log_context,
+    parse_api_log_filter,
+    search_logs,
 )
-from app.services.storage_metrics import get_cached_storage_metrics
 from app.services.version_service import check_for_updates
-from app.version import APP_VERSION
 
 from app.api.ingest import router as ingest_router
 
@@ -79,13 +53,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["External API v1"])
 router.include_router(ingest_router)
-
-
-# Telemetry error stats in-memory cache (12-second TTL)
-_cached_error_stats: Optional[dict[str, Any]] = None
-_cached_error_stats_time: float = 0.0
-_error_cache_lock = threading.Lock()
-_METRICS_CACHE_TTL: float = 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -201,223 +168,12 @@ async def get_maintenance_status_v1(
 # System Telemetry & Metrics
 # ---------------------------------------------------------------------------
 
-_error_refresh_task: Optional["asyncio.Future[dict[str, Any]]"] = None
-
-# Alert state counts only alert rule firings: maintenance windows, daily digests and on-demand
-# analyses also live in alert_history but are not alerts (digest and on-demand rows have no rule_id)
-_ALERT_FIRING_FILTER = (
-    "maintenance_session_id IS NULL "
-    "AND NOT (rule_id IS NULL AND rule_name IN ('Daily Digest', 'On-Demand Analysis'))"
-)
-
-
-def _fetch_error_aggregates(conn) -> dict[str, Any]:
-    """Compute the rolling error counts and top offenders in as few passes as possible."""
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    since_24h = (now_utc - datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
-    since_1h = (now_utc - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
-    cur = conn.cursor()
-
-    # The error totals and per-severity counts (warning included) share one pass over the
-    # 24-hour range of idx_logs_time_sev, so use conditional aggregation
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(CASE WHEN severity <= 3 THEN 1 ELSE 0 END), 0) AS count_24h,
-               COALESCE(SUM(CASE WHEN severity <= 3 AND timestamp >= ? THEN 1 ELSE 0 END), 0) AS count_1h,
-               COALESCE(SUM(CASE WHEN severity = 0 THEN 1 ELSE 0 END), 0) AS count_emergency,
-               COALESCE(SUM(CASE WHEN severity = 1 THEN 1 ELSE 0 END), 0) AS count_alert,
-               COALESCE(SUM(CASE WHEN severity = 2 THEN 1 ELSE 0 END), 0) AS count_critical,
-               COALESCE(SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END), 0) AS count_error,
-               COALESCE(SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END), 0) AS count_warning
-        FROM logs
-        WHERE severity <= 4 AND timestamp >= ?
-        """,
-        (since_1h, since_24h),
-    )
-    counts = cur.fetchone()
-
-    # Top error apps (24h). The unary + keeps SQLite on the 24-hour range of idx_logs_time_sev:
-    # left to itself it walks every app's range of idx_logs_app_time (1.3 s instead of 0.13 s at
-    # 50 million logs).
-    cur.execute(
-        """
-        SELECT app_name, COUNT(*) as cnt
-        FROM logs
-        WHERE severity <= 3 AND timestamp >= ? AND +app_name IS NOT NULL AND +app_name != ''
-        GROUP BY +app_name
-        ORDER BY cnt DESC
-        LIMIT 5
-        """,
-        (since_24h,),
-    )
-    top_apps = [TopErrorEntity(name=r["app_name"], count=r["cnt"]) for r in cur.fetchall()]
-
-    # Top error hosts (24h)
-    cur.execute(
-        """
-        SELECT COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown') as host_val, COUNT(*) as cnt
-        FROM logs
-        WHERE severity <= 3 AND timestamp >= ?
-        GROUP BY host_val
-        ORDER BY cnt DESC
-        LIMIT 5
-        """,
-        (since_24h,),
-    )
-    top_hosts = [TopErrorEntity(name=r["host_val"] or "unknown", count=r["cnt"]) for r in cur.fetchall()]
-
-    return {
-        "count_24h": counts["count_24h"],
-        "count_1h": counts["count_1h"],
-        "severity_counts_24h": SeverityCounts24h(
-            emergency=counts["count_emergency"],
-            alert=counts["count_alert"],
-            critical=counts["count_critical"],
-            error=counts["count_error"],
-            warning=counts["count_warning"],
-        ),
-        "top_apps": top_apps,
-        "top_hosts": top_hosts,
-    }
-
-
-async def _refresh_error_stats() -> dict[str, Any]:
-    global _cached_error_stats, _cached_error_stats_time
-    fetched = await run_db_query(_fetch_error_aggregates)
-    with _error_cache_lock:
-        _cached_error_stats = fetched
-        _cached_error_stats_time = time.monotonic()
-    return fetched
-
-
-async def _get_error_stats() -> dict[str, Any]:
-    """
-    Return cached error aggregates, refreshing when stale. Concurrent callers that find the
-    cache stale share a single in-flight refresh instead of each running the aggregate queries.
-    """
-    global _error_refresh_task
-    with _error_cache_lock:
-        cached = _cached_error_stats
-        fresh = cached is not None and (time.monotonic() - _cached_error_stats_time) <= _METRICS_CACHE_TTL
-    if fresh:
-        return cached  # type: ignore[return-value]
-
-    # Event-loop code runs atomically between awaits, so the in-flight handle needs no extra lock
-    task = _error_refresh_task
-    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
-        task = asyncio.ensure_future(_refresh_error_stats())
-        _error_refresh_task = task
-    return await asyncio.shield(task)
-
-
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
 async def get_system_metrics(
     token: dict[str, Any] = Depends(require_api_token(["system:read"])),
 ) -> SystemMetricsResponse:
-    """
-    Retrieve comprehensive system metrics, throughput, error breakdown, and alert state.
-    Serves rolling error stats from an in-memory cache to maintain high polling performance.
-    """
-    from app.collectors.syslog import get_udp_receive_errors
-    from app.core.loop_lag import get_loop_lag
-
-    db_path = get_db_path()
-
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    since_15m = (now_utc - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%S")
-
-    error_stats = await _get_error_stats()
-
-    # Query system settings, alert state, and maintenance status
-    def _fetch_system_info(conn):
-        cur = conn.cursor()
-
-        # Instance identity
-        cur.execute("SELECT key, value FROM system_settings WHERE key IN ('instance_id', 'server_name')")
-        settings_map = {r["key"]: r["value"] for r in cur.fetchall()}
-        instance_id = settings_map.get("instance_id") or "00000000-0000-0000-0000-000000000000"
-        server_name = settings_map.get("server_name") or "LogShed"
-
-        # Alert state sliding 15-minute window
-        cur.execute(
-            f"SELECT COUNT(*) FROM alert_history WHERE triggered_at >= ? AND {_ALERT_FIRING_FILTER}",
-            (since_15m,),
-        )
-        recent_count = cur.fetchone()[0]
-        recent_active = recent_count > 0
-
-        cur.execute(
-            f"SELECT triggered_at, rule_name FROM alert_history WHERE {_ALERT_FIRING_FILTER} "
-            "ORDER BY triggered_at DESC, id DESC LIMIT 1"
-        )
-        last_row = cur.fetchone()
-        last_trig = last_row["triggered_at"] if last_row else None
-        last_rule = last_row["rule_name"] if last_row else None
-
-        # Maintenance status
-        maint_status = get_maintenance_status(conn)
-
-        return instance_id, server_name, recent_active, recent_count, last_trig, last_rule, maint_status
-
-    (
-        instance_id,
-        server_name,
-        alert_active,
-        alert_count,
-        alert_last_trig,
-        alert_last_rule,
-        maint_status,
-    ) = await run_db_query(_fetch_system_info)
-
-    # Storage metrics
-    storage_info = await asyncio.to_thread(get_cached_storage_metrics, db_path)
-    db_size_bytes = storage_info["db_size_bytes"]
-    db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
-    total_logs = storage_info["total_logs_count"]
-    disk_free = storage_info["disk_free_bytes"]
-    disk_total = storage_info["disk_total_bytes"]
-    disk_used_percent = (
-        round(((disk_total - disk_free) / disk_total) * 100, 1) if disk_total > 0 else 0.0
-    )
-
-    return SystemMetricsResponse(
-        status="ok",
-        version=APP_VERSION,
-        instance_id=instance_id,
-        server_name=server_name,
-        ingest_rate=get_ingest_rate(),
-        error_count_24h=error_stats["count_24h"],
-        error_count_1h=error_stats["count_1h"],
-        severity_counts_24h=error_stats["severity_counts_24h"],
-        top_error_breakdown=TopErrorBreakdown(
-            top_apps=error_stats["top_apps"],
-            top_hosts=error_stats["top_hosts"],
-        ),
-        alert_state=SystemAlertState(
-            active=alert_active,
-            recent_firing_count=alert_count,
-            last_triggered_at=alert_last_trig,
-            last_rule_name=alert_last_rule,
-        ),
-        queue_depth=get_queue().qsize(),
-        dropped_logs=get_dropped_count(),
-        dropped_by_filter=get_dropped_by_filter_count(),
-        db_size_bytes=db_size_bytes,
-        db_size_mb=db_size_mb,
-        total_logs_count=total_logs,
-        disk_free_bytes=disk_free,
-        disk_total_bytes=disk_total,
-        disk_used_percent=disk_used_percent,
-        maintenance=SystemMaintenanceMetrics(
-            active=maint_status.active,
-            until=maint_status.until,
-            remaining_seconds=maint_status.remaining_seconds,
-            active_sessions_count=maint_status.active_sessions_count,
-            log_handling=maint_status.log_handling,
-        ),
-        udp_receive_errors=get_udp_receive_errors(),
-        **get_loop_lag(),
-    )
+    """Retrieve system metrics, throughput, error breakdown, and alert state (cached error stats)."""
+    return await system_metrics.get_system_metrics()
 
 
 @router.get("/system/version", response_model=VersionResponse)
@@ -465,59 +221,6 @@ async def trigger_vacuum_v1(
 # Log & Incident Query Endpoints
 # ---------------------------------------------------------------------------
 
-def _parse_log_filter(
-    query: Optional[str],
-    source: Optional[list[str]],
-    app_name: Optional[list[str]],
-    severity_max: Optional[int],
-    severity: Optional[str],
-    from_: Optional[str],
-    to: Optional[str],
-) -> LogFilter:
-    """The filter of a log search or count; a named severity wins over severity_max. HTTP 422 on invalid input."""
-    check_filter_value_counts(MAX_API_FILTER_VALUES, source=source, app_name=app_name)
-    if severity is not None:
-        try:
-            severity_max = resolve_severity(severity)
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-    try:
-        return LogFilter.parse(
-            query=query, sources=source, apps=app_name, severity_max=severity_max, from_=from_, to=to
-        )
-    except InvalidTimeBound as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-
-_MAX_CURSOR_LENGTH = 200
-_INVALID_CURSOR_DETAIL = "Invalid cursor. Use the next_cursor value returned by the previous page."
-_TOTAL_CAP = 1001
-# Characters of message plus raw one page of GET /api/v1/logs redacts and returns at most (about
-# 8 MB); a page that reaches it ends early with a next_cursor. It always holds at least one row.
-LOG_PAGE_TEXT_BUDGET = 8 * 1024 * 1024
-
-
-def _encode_log_cursor(timestamp: str, log_id: int) -> str:
-    """Encode a (timestamp, id) position as an opaque URL-safe cursor."""
-    raw = json.dumps([timestamp, log_id], separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def _decode_log_cursor(cursor: str) -> tuple[str, int]:
-    """Decode a cursor produced by _encode_log_cursor, raising HTTP 422 when malformed."""
-    try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
-        timestamp, log_id = decoded
-        if not isinstance(timestamp, str) or not timestamp:
-            raise ValueError("bad timestamp")
-        if isinstance(log_id, bool) or not isinstance(log_id, int):
-            raise ValueError("bad id")
-        return timestamp, log_id
-    except (ValueError, TypeError, UnicodeError):
-        raise HTTPException(status_code=422, detail=_INVALID_CURSOR_DETAIL)
-
-
 @router.get("/logs", response_model=ExternalLogListResponse, response_model_exclude_none=True)
 async def search_logs_v1(
     query: Optional[str] = Query(None, description="Full-text search query (SQLite FTS5)"),
@@ -530,7 +233,7 @@ async def search_logs_v1(
     limit: int = Query(50, ge=1, le=1000, description="Max logs to return"),
     cursor: Optional[str] = Query(
         None,
-        max_length=_MAX_CURSOR_LENGTH,
+        max_length=MAX_CURSOR_LENGTH,
         description="Opaque pagination cursor from the previous page's next_cursor (newest first)",
     ),
     include_raw: bool = Query(False, description="Include the raw syslog packet in each entry"),
@@ -538,80 +241,8 @@ async def search_logs_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> ExternalLogListResponse:
     """Search and filter logs (newest first) with keyset pagination via next_cursor."""
-    log_filter = _parse_log_filter(query, source, app_name, severity_max, severity, from_, to)
-    cursor_pos = _decode_log_cursor(cursor) if cursor else None
-
-    def _query_db(conn):
-        where_sql, params = build_where(conn, log_filter)
-
-        # Total: capped count of all rows matching the filters (independent of the cursor
-        # position), which avoids full table scans on broad queries.
-        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
-
-        page_where = where_sql
-        cursor_params: dict[str, Any] = {}
-        if cursor_pos is not None:
-            keyset_sql = (
-                "(logs.timestamp < :cursor_ts OR (logs.timestamp = :cursor_ts AND logs.id < :cursor_id))"
-            )
-            page_where = f"{where_sql} AND {keyset_sql}" if where_sql else f"WHERE {keyset_sql}"
-            cursor_params["cursor_ts"], cursor_params["cursor_id"] = cursor_pos
-
-        select_sql = f"""
-            SELECT {log_columns(include_raw)}
-            FROM logs
-            {page_where}
-            ORDER BY logs.timestamp DESC, logs.id DESC
-            LIMIT :fetch_limit
-        """
-        db_cursor = conn.cursor()
-
-        def _run(run_params: dict[str, Any]):
-            db_cursor.execute(count_sql, {**run_params, "count_limit": _TOTAL_CAP})
-            run_total = db_cursor.fetchone()[0]
-            db_cursor.execute(select_sql, {**run_params, **cursor_params, "fetch_limit": limit + 1})
-            return run_total, db_cursor.fetchall()
-
-        def _oldest_needed(result: tuple[int, list]) -> Optional[str]:
-            run_total, run_rows = result
-            if run_total >= _TOTAL_CAP and len(run_rows) > limit:
-                return run_rows[-1]["timestamp"]
-            # Too few matches: still complete when the window covers the whole time range
-            return log_filter.from_ts
-
-        total, rows = execute_with_fts_fallback(
-            lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], _TOTAL_CAP),
-            params,
-            query,
-            empty=(0, []),
-        )
-
-        # One extra row signals another page exists
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-        # Stop at the text budget, so one request cannot redact up to limit times two 64 KB fields
-        text_chars = 0
-        for kept, r in enumerate(rows, start=1):
-            text_chars += len(r["message"] or "") + (len(r["raw"] or "") if include_raw else 0)
-            if text_chars >= LOG_PAGE_TEXT_BUDGET and kept < len(rows):
-                rows = rows[:kept]
-                has_more = True
-                break
-        next_cursor = _encode_log_cursor(str(rows[-1]["timestamp"]), rows[-1]["id"]) if has_more else None
-        logs_list = [row_to_log_entry(r, external=True, include_raw=include_raw) for r in rows]
-        return logs_list, total, next_cursor
-
-    try:
-        logs_out, total_count, next_cursor = await run_search_query(_query_db, request)
-    except sqlite3.OperationalError as exc:
-        raise db_busy_exception(exc, "searching logs")
-    return ExternalLogListResponse(
-        logs=logs_out,
-        total=total_count,
-        limit=limit,
-        total_capped=bool(total_count >= _TOTAL_CAP),
-        next_cursor=next_cursor,
-    )
+    log_filter = parse_api_log_filter(query, source, app_name, severity_max, severity, from_, to)
+    return await search_logs(log_filter, limit=limit, cursor=cursor, include_raw=include_raw, request=request)
 
 
 @router.get("/logs/count", response_model=LogCountResponse)
@@ -629,82 +260,9 @@ async def count_logs_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogCountResponse:
     """Count logs matching filters with optional grouping by severity, app, or source."""
-    log_filter = _parse_log_filter(query, source, app_name, severity_max, severity, from_, to)
+    log_filter = parse_api_log_filter(query, source, app_name, severity_max, severity, from_, to)
 
-    def _count_db(conn):
-        where_sql, params = build_where(conn, log_filter)
-        cursor = conn.cursor()
-        valid_group = (group_by or "").lower().strip()
-
-        def _total_count(run_params: dict[str, Any]) -> int:
-            cursor.execute(f"SELECT COUNT(*) FROM logs {where_sql}", run_params)
-            return cursor.fetchone()[0]
-
-        def _limited_group(run_params: dict[str, Any], expr: str, label: str):
-            """Run a capped GROUP BY, fetching one extra row to detect truncation."""
-            group_sql = f"""
-                SELECT {expr} as grp, COUNT(*) as cnt
-                FROM logs
-                {where_sql}
-                GROUP BY grp
-                ORDER BY cnt DESC, grp ASC
-                LIMIT :group_fetch_limit
-            """
-            cursor.execute(group_sql, {**run_params, "group_fetch_limit": group_limit + 1})
-            rows = cursor.fetchall()
-            truncated = len(rows) > group_limit
-            rows = rows[:group_limit]
-            breakdown = {r["grp"]: r["cnt"] for r in rows}
-            # When every group was returned, the group counts sum to the exact total,
-            # so the extra COUNT query is only needed when the breakdown is truncated.
-            total = _total_count(run_params) if truncated else sum(breakdown.values())
-            return total, label, breakdown, truncated
-
-        def _severity_groups(run_params: dict[str, Any]):
-            group_sql = f"""
-                SELECT logs.severity, COUNT(*) as cnt
-                FROM logs
-                {where_sql}
-                GROUP BY logs.severity
-                ORDER BY logs.severity ASC
-            """
-            cursor.execute(group_sql, run_params)
-            rows = cursor.fetchall()
-            breakdown: dict[str, int] = {}
-            total = 0
-            for r in rows:
-                sev_int = r["severity"]
-                cnt = r["cnt"]
-                total += cnt
-                label = format_severity_label(sev_int)
-                breakdown[label] = cnt
-            return total, "severity", breakdown, False
-
-        if valid_group in ("severity", "level"):
-            run, label = _severity_groups, "severity"
-        elif valid_group in ("app", "app_name"):
-            run, label = (lambda p: _limited_group(p, "COALESCE(logs.app_name, 'unknown')", "app")), "app"
-        elif valid_group in ("source", "source_alias", "host"):
-            run, label = (
-                lambda p: _limited_group(p, "COALESCE(NULLIF(logs.source_alias, ''), logs.source_ip, 'unknown')", "source")
-            ), "source"
-        else:
-            run, label = (lambda p: (_total_count(p), None, {}, False)), None
-
-        return execute_with_fts_fallback(run, params, query, empty=(0, label, {}, False))
-
-    try:
-        total, grouped_by_out, breakdown_out, truncated_out = await run_search_query(_count_db, request)
-    except sqlite3.OperationalError as exc:
-        raise db_busy_exception(exc, "counting logs")
-    return LogCountResponse(
-        total=total,
-        grouped_by=grouped_by_out,
-        breakdown=breakdown_out,
-        truncated=truncated_out,
-        time_range={"from": log_filter.from_ts, "to": log_filter.to_ts},
-    )
-
+    return await count_logs(log_filter, group_by=group_by, group_limit=group_limit, request=request)
 
 
 @router.get("/logs/{log_id}/context", response_model=ExternalLogContextResponse, response_model_exclude_none=True)
@@ -716,30 +274,7 @@ async def get_log_context_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> ExternalLogContextResponse:
     """Fetch symmetrical surrounding context logs before and after a specific log entry."""
-    def _fetch(conn):
-        found = fetch_log_context(conn, log_id, before=lines, after=lines, same_app=same_app, include_raw=include_raw)
-        if found is None:
-            return None, [], []
-        target_row, before_rows, after_rows = found
-
-        def _entries(rows):
-            return [row_to_log_entry(r, external=True, include_raw=include_raw) for r in rows]
-
-        return _entries([target_row])[0], _entries(before_rows), _entries(after_rows)
-
-    target_entry, before_entries, after_entries = await run_db_query(_fetch)
-    if not target_entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Log entry {log_id} not found.",
-        )
-
-    return ExternalLogContextResponse(
-        target_id=log_id,
-        target_log=target_entry,
-        before_logs=before_entries,
-        after_logs=after_entries,
-    )
+    return await log_context(log_id, lines=lines, same_app=same_app, include_raw=include_raw)
 
 
 @router.get("/logs/facets", response_model=LogFacetsResponse)
@@ -747,29 +282,7 @@ async def get_log_facets_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogFacetsResponse:
     """Retrieve distinct sources, applications, and source-to-application relationships."""
-    from app.api.logs import get_log_facets
-    # Reuse core facets calculation logic
-    return await get_log_facets(user={"auth_type": "api_token"})
-
-
-_ALERT_TEXT_FIELDS = (
-    "sample_log",
-    "incident_summary",
-    "prompt_sent",
-    "system_prompt",
-    "response_text",
-    "user_context",
-)
-
-
-def _redact_alert_item(item: AlertHistoryItem) -> AlertHistoryItem:
-    """Return a copy of an alert history item with free-text fields passed through the redactor."""
-    updates = {
-        name: redact(getattr(item, name))
-        for name in _ALERT_TEXT_FIELDS
-        if getattr(item, name)
-    }
-    return item.model_copy(update=updates)
+    return await get_facets()
 
 
 @router.get("/alerts/history", response_model=list[AlertHistoryItem])
@@ -780,11 +293,5 @@ async def list_alert_history_v1(
     token: dict[str, Any] = Depends(require_api_token(["alerts:read"])),
 ) -> list[AlertHistoryItem]:
     """Retrieve historical alert firing incidents and AI diagnosis summaries."""
-    from app.api.alerts import list_alert_history
-    history_resp = await list_alert_history(
-        limit=limit,
-        offset=offset,
-        rule_id=rule_id,
-        user={"auth_type": "api_token"},
-    )
-    return [_redact_alert_item(item) for item in history_resp.items]
+    history = await list_alert_history(limit, offset, rule_id)
+    return [redact_alert_item(item) for item in history.items]

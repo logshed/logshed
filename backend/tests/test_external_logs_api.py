@@ -807,7 +807,7 @@ class TestLogPageTextBudget:
     async def test_large_rows_stop_at_the_budget_with_a_cursor(
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path
     ):
-        from app.api.external_v1 import LOG_PAGE_TEXT_BUDGET
+        from app.services.log_search import LOG_PAGE_TEXT_BUDGET
 
         expected = self._seed(tmp_path / "logs.db", 150, 65536)
         rows_per_page = LOG_PAGE_TEXT_BUDGET // (2 * 65536)
@@ -847,16 +847,16 @@ class TestLogPageTextBudget:
     async def test_a_page_always_holds_one_row_and_ends_without_cursor_on_the_last_row(
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path, monkeypatch
     ):
-        import app.api.external_v1 as external_v1
+        import app.services.log_search as log_search
 
         expected = self._seed(tmp_path / "logs.db", 6, 100)
-        monkeypatch.setattr(external_v1, "LOG_PAGE_TEXT_BUDGET", 50)
+        monkeypatch.setattr(log_search, "LOG_PAGE_TEXT_BUDGET", 50)
         entries, pages = await TestKeysetPagination()._collect(client, logs_token_headers, limit=10)
         assert [e["id"] for e in entries] == expected
         assert pages == 6
 
         # The budget is reached on the page's last row and nothing follows: no cursor
-        monkeypatch.setattr(external_v1, "LOG_PAGE_TEXT_BUDGET", 600)
+        monkeypatch.setattr(log_search, "LOG_PAGE_TEXT_BUDGET", 600)
         res = await client.get("/api/v1/logs", params={"limit": 10}, headers=logs_token_headers)
         body = res.json()
         assert len(body["logs"]) == 6
@@ -909,11 +909,11 @@ class TestFtsFallbackAndConsistency:
     async def test_lock_error_returns_503(
         self, client: AsyncClient, logs_token_headers: dict, tmp_path: Path, monkeypatch
     ):
-        from app.api import external_v1 as v1_mod
+        from app.services import log_search as log_search_mod
         from tests.test_logs_api import _patch_locked_fts
 
         self._seed(tmp_path / "logs.db")
-        _patch_locked_fts(monkeypatch, v1_mod)
+        _patch_locked_fts(monkeypatch, log_search_mod)
         for path in ("/api/v1/logs", "/api/v1/logs/count"):
             res = await client.get(path, params={"query": "plain"}, headers=logs_token_headers)
             assert res.status_code == 503, path
@@ -1119,7 +1119,7 @@ class TestSearchesStopWithTheirClient:
     @pytest.mark.asyncio
     async def test_search_and_count_watch_their_request(self, client: AsyncClient, logs_token_headers: dict, monkeypatch):
         """Both routes pass their request on, so a disconnected client stops its query."""
-        from app.api import external_v1 as v1_mod
+        from app.services import log_search as log_search_mod
         from app.services.log_query import run_search_query
 
         seen = []
@@ -1128,7 +1128,7 @@ class TestSearchesStopWithTheirClient:
             seen.append(request)
             return await run_search_query(fn, request)
 
-        monkeypatch.setattr(v1_mod, "run_search_query", _spy)
+        monkeypatch.setattr(log_search_mod, "run_search_query", _spy)
         for path in ("/api/v1/logs", "/api/v1/logs/count"):
             res = await client.get(path, params={"query": "anything"}, headers=logs_token_headers)
             assert res.status_code == 200

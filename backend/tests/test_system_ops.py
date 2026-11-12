@@ -26,6 +26,7 @@ from app.main import create_app
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 import app.api.external_v1 as ext_v1_mod
+import app.services.system_metrics as metrics_mod
 import app.api.ingest as ingest_mod
 import app.api.mcp as mcp_api_mod
 import app.api.system as system_mod
@@ -54,8 +55,8 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     sse_manager.reset()
     _last_used_timestamps.clear()
     reset_operation_state()
-    ext_v1_mod._cached_error_stats = None
-    ext_v1_mod._cached_error_stats_time = 0.0
+    metrics_mod._cached_error_stats = None
+    metrics_mod._cached_error_stats_time = 0.0
 
     db_file = tmp_path / "logs.db"
     key_file = tmp_path / ".secret_key"

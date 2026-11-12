@@ -30,14 +30,11 @@ from pydantic import ValidationError
 
 from app.api.deps import run_db_query
 from app.core.api_tokens import has_scope_permission
-from app.api.external_v1 import (
-    count_logs_v1,
-    get_log_context_v1,
-    get_system_metrics as fetch_system_metrics_v1,
-    list_alert_history_v1,
-    search_logs_v1,
-)
-from app.api.logs import get_log_facets
+from app.services import system_metrics
+from app.services.alert_history import list_alert_history, redact_alert_item
+from app.services.log_facets import get_facets
+from app.services.log_search import count_logs as count_logs_service
+from app.services.log_search import log_context, parse_api_log_filter, search_logs
 from app.core.utils import format_severity_label, resolve_severity
 from app.models import ExternalMaintenanceEnableRequest
 from app.services.maintenance_service import (
@@ -292,7 +289,7 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
     async def get_system_metrics() -> dict[str, Any]:
         """Fetch system metrics, error distribution, and operational state."""
         _require("system:read", "get_system_metrics")
-        resp = await fetch_system_metrics_v1(token={"scopes": ["system:read"]})
+        resp = await system_metrics.get_system_metrics()
         data = resp.model_dump()
         if stdio:
             # The ingestion queue and drop/rate counters live in the web process's memory; this
@@ -314,7 +311,7 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
     async def list_services() -> dict[str, Any]:
         """Discover distinct application names and host sources."""
         _require("logs:read", "list_services")
-        facets = await get_log_facets(user={"auth_type": "api_token"})
+        facets = await get_facets()
         return {
             "apps": facets.apps,
             "sources": facets.sources,
@@ -351,18 +348,8 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         _require("logs:read", "count_logs")
         effective_sev = _severity_threshold(severity, severity_max)
 
-        res = await count_logs_v1(
-            query=query,
-            source=sources,
-            app_name=apps,
-            severity_max=effective_sev,
-            severity=None,
-            from_=from_time,
-            to=to_time,
-            group_by=group_by,
-            group_limit=min(max(1, group_limit), 200),
-            token={"scopes": ["logs:read"]},
-        )
+        log_filter = parse_api_log_filter(query, sources, apps, effective_sev, None, from_time, to_time)
+        res = await count_logs_service(log_filter, group_by=group_by, group_limit=min(max(1, group_limit), 200))
         return res.model_dump()
 
     @server.tool(
@@ -398,18 +385,9 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         clamped_limit = min(max(1, limit), 200)
         effective_sev = _severity_threshold(severity, severity_max)
 
-        res = await search_logs_v1(
-            query=query,
-            source=sources,
-            app_name=apps,
-            severity_max=effective_sev,
-            severity=None,
-            from_=from_time,
-            to=to_time,
-            limit=clamped_limit,
-            cursor=cursor,
-            include_raw=_needs_raw(include_raw, fields),
-            token={"scopes": ["logs:read"]},
+        log_filter = parse_api_log_filter(query, sources, apps, effective_sev, None, from_time, to_time)
+        res = await search_logs(
+            log_filter, limit=clamped_limit, cursor=cursor, include_raw=_needs_raw(include_raw, fields)
         )
         data = res.model_dump()
         projected_logs = [
@@ -438,12 +416,8 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         """Fetch chronological log lines surrounding a target log identifier."""
         _require("logs:read", "get_log_context")
         clamped_lines = min(max(1, lines), 50)
-        res = await get_log_context_v1(
-            log_id=log_id,
-            lines=clamped_lines,
-            same_app=same_app,
-            include_raw=_needs_raw(include_raw, fields),
-            token={"scopes": ["logs:read"]},
+        res = await log_context(
+            log_id, lines=clamped_lines, same_app=same_app, include_raw=_needs_raw(include_raw, fields)
         )
         data = res.model_dump()
         if data.get("target_log"):
@@ -472,13 +446,8 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         """Retrieve historical alert firing incidents."""
         _require("alerts:read", "get_recent_alerts")
         clamped_limit = min(max(1, limit), 50)
-        items = await list_alert_history_v1(
-            rule_id=None,
-            limit=clamped_limit,
-            offset=0,
-            token={"scopes": ["alerts:read"]},
-        )
-        return [item.model_dump() for item in items]
+        history = await list_alert_history(clamped_limit)
+        return [redact_alert_item(item).model_dump() for item in history.items]
 
     @server.tool(
         name="enable_maintenance",

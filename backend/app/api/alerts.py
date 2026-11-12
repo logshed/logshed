@@ -43,6 +43,7 @@ from app.models import (
     MessageResponse,
     RuleReorderRequest,
 )
+from app.services import alert_history
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.services.maintenance_service import MaintenanceSessionLimitError
@@ -812,75 +813,6 @@ async def install_preset(
 # Alert History Endpoints
 # ---------------------------------------------------------------------------
 
-_HISTORY_SELECT = """
-    SELECT h.id, h.rule_id, h.rule_name, h.channel_id, h.trigger_count,
-           h.sample_log, h.sample_log_id, h.incident_summary, h.ai_enrichment, h.ai_model,
-           h.ai_audit_id, h.triggered_at,
-           a.tokens_in, a.tokens_out, a.tokens_thoughts, a.tokens_used,
-           a.prompt_sent, a.system_prompt, a.response_text,
-           a.source_alias, a.app_name, a.user_context,
-           h.maintenance_session_id,
-           m.log_handling AS m_log_handling, m.created_at AS m_created_at,
-           m.ended_at AS m_ended_at, m.end_reason AS m_end_reason,
-           m.trigger_label AS m_trigger_label, m.target_app AS m_target_app,
-           m.target_host AS m_target_host, m.dropped_count AS m_dropped_count
-    FROM alert_history h
-    LEFT JOIN ai_audit_log a ON h.ai_audit_id = a.id
-    LEFT JOIN maintenance_sessions m ON h.maintenance_session_id = m.session_id
-"""
-
-
-def _history_item_from_row(r: sqlite3.Row, pending_drops: dict) -> AlertHistoryItem:
-    """Build an API history item from a row of `_HISTORY_SELECT`."""
-    p_sent = r["prompt_sent"]
-    if p_sent and not p_sent.startswith("### System Metadata") and not p_sent.startswith("### Redacted Log Stream") and not p_sent.startswith("### Security"):
-        from app.services.ai_engine import build_analysis_prompt
-        p_sent = build_analysis_prompt(
-            source_alias=r["source_alias"] or "unknown",
-            app_name=r["app_name"] or "unknown",
-            redacted_logs=p_sent,
-            log_count=r["trigger_count"] or 1,
-            user_context=r["user_context"],
-        )
-
-    return AlertHistoryItem(
-        id=r["id"],
-        rule_id=r["rule_id"],
-        rule_name=r["rule_name"],
-        channel_id=r["channel_id"],
-        trigger_count=r["trigger_count"] or 1,
-        sample_log=r["sample_log"],
-        sample_log_id=r["sample_log_id"],
-        incident_summary=r["incident_summary"],
-        ai_enrichment=bool(r["ai_enrichment"]),
-        ai_model=r["ai_model"],
-        ai_audit_id=r["ai_audit_id"],
-        triggered_at=str(r["triggered_at"]),
-        tokens_in=r["tokens_in"],
-        tokens_out=r["tokens_out"],
-        tokens_thoughts=r["tokens_thoughts"],
-        tokens_used=r["tokens_used"],
-        prompt_sent=p_sent,
-        system_prompt=r["system_prompt"],
-        response_text=r["response_text"],
-        source_alias=r["source_alias"],
-        app_name=r["app_name"],
-        user_context=r["user_context"],
-        maintenance_session_id=r["maintenance_session_id"],
-        maintenance_type=r["m_log_handling"],
-        maintenance_started_at=r["m_created_at"],
-        maintenance_ended_at=r["m_ended_at"],
-        maintenance_end_reason=r["m_end_reason"],
-        maintenance_trigger=r["m_trigger_label"],
-        maintenance_target_app=r["m_target_app"],
-        maintenance_target_host=r["m_target_host"],
-        maintenance_dropped_count=(
-            (r["m_dropped_count"] or 0) + pending_drops.get(r["maintenance_session_id"], 0)
-            if r["maintenance_session_id"] else None
-        ),
-    )
-
-
 @router.get("/history", response_model=AlertHistoryListResponse)
 async def list_alert_history(
     limit: int = Query(50, ge=1, le=200, description="Items per page"),
@@ -889,28 +821,7 @@ async def list_alert_history(
     user: dict = Depends(get_current_user),
 ) -> AlertHistoryListResponse:
     """Retrieve historical alert, AI analysis and maintenance window events with pagination."""
-    def _query(conn):
-        from app.services.maintenance_service import get_pending_dropped_counts, sweep_maintenance_sessions_if_needed
-        # Write only when there are pending drop counts or overdue sessions, so history reads stay read-only
-        sweep_maintenance_sessions_if_needed(conn)
-        pending_drops = get_pending_dropped_counts()
-        cur = conn.cursor()
-        where_sql = "WHERE h.rule_id = ?" if rule_id is not None else ""
-        count_where = "WHERE rule_id = ?" if rule_id is not None else ""
-        params = [rule_id] if rule_id is not None else []
-
-        cur.execute(f"SELECT COUNT(*) FROM alert_history {count_where}", params)
-        total = cur.fetchone()[0]
-
-        cur.execute(
-            f"{_HISTORY_SELECT} {where_sql} ORDER BY h.triggered_at DESC, h.id DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
-        )
-        items = [_history_item_from_row(r, pending_drops) for r in cur.fetchall()]
-        return items, total
-
-    items, total = await run_db_query(_query)
-    return AlertHistoryListResponse(items=items, total=total, limit=limit, offset=offset)
+    return await alert_history.list_alert_history(limit, offset, rule_id)
 
 
 @router.get("/history/{history_id}", response_model=AlertHistoryItem)
@@ -919,14 +830,7 @@ async def get_alert_history_item(
     user: dict = Depends(get_current_user),
 ) -> AlertHistoryItem:
     """Retrieve one history record, for notification links that open a specific incident."""
-    def _query(conn):
-        from app.services.maintenance_service import get_pending_dropped_counts, sweep_maintenance_sessions_if_needed
-        sweep_maintenance_sessions_if_needed(conn)
-        pending_drops = get_pending_dropped_counts()
-        row = conn.execute(f"{_HISTORY_SELECT} WHERE h.id = ?", (history_id,)).fetchone()
-        return _history_item_from_row(row, pending_drops) if row else None
-
-    item = await run_db_query(_query)
+    item = await alert_history.get_alert_history_item(history_id)
     if item is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -35,7 +35,7 @@ from app.mcp.server import McpAccess, McpRefusal, create_mcp_server, mcp_access_
 from app.services.drop_filter import init_drop_filter
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.fts_indexer import index_pending_logs
-import app.api.external_v1 as ext_v1_mod
+import app.services.system_metrics as metrics_mod
 import app.api.mcp as mcp_api_mod
 import app.cli as cli_mod
 from tests.db_helpers import open_db
@@ -53,8 +53,8 @@ def reset_test_env(tmp_path: Path, monkeypatch):
     _last_used_timestamps.clear()
     invalidate_settings_cache()
     reset_operation_state()
-    ext_v1_mod._cached_error_stats = None
-    ext_v1_mod._cached_error_stats_time = 0.0
+    metrics_mod._cached_error_stats = None
+    metrics_mod._cached_error_stats_time = 0.0
     # Token ids restart at 1 in every test database, so per-token MCP state must not leak between tests
     mcp_api_mod._sse_sessions.clear()
     mcp_api_mod._sse_token_cache.clear()
@@ -2117,7 +2117,7 @@ class TestMcpSdkClientsOfEachProtocolRevision:
         async def broken_facets(**_kwargs):
             raise failure
 
-        monkeypatch.setattr("app.mcp.server.get_log_facets", broken_facets)
+        monkeypatch.setattr("app.mcp.server.get_facets", broken_facets)
         await enable_mcp(client, auth_headers)
         token = await create_token(client, auth_headers, ["logs:read"])
         sdk, http = self._sdk_client(token["raw"], mode)
@@ -2163,7 +2163,7 @@ class TestMcpSdkClientsOfEachProtocolRevision:
         async def broken_facets(**_kwargs):
             raise RuntimeError("database file /data/logs.db is locked")
 
-        monkeypatch.setattr("app.mcp.server.get_log_facets", broken_facets)
+        monkeypatch.setattr("app.mcp.server.get_facets", broken_facets)
         await enable_mcp(client, auth_headers)
         token = await create_token(client, auth_headers, ["logs:read"])
         sdk, http = self._sdk_client(token["raw"], "2026-07-28")
@@ -2171,3 +2171,14 @@ class TestMcpSdkClientsOfEachProtocolRevision:
             result = await sdk.call_tool("list_services", {})
         assert result.is_error is True
         assert result.content[0].text == "Error executing tool list_services"
+
+
+class TestToolsCallServices:
+
+    def test_the_server_calls_no_rest_route_handler(self):
+        """Tools read through the services REST also uses, never through a route with a stand-in token or user."""
+        import app.mcp.server as server_mod
+
+        route_modules = {"app.api.external_v1", "app.api.logs", "app.api.alerts"}
+        used = {getattr(value, "__module__", None) for value in vars(server_mod).values()}
+        assert not used & route_modules
