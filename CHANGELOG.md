@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Python 3.14**: The Docker image runs on Python 3.14 instead of 3.12. Python 3.12 receives security fixes only; 3.14 gets bug fixes until October 2027 and security fixes until October 2030.
 
+### Fixed
+
+- **AI analysis with older Claude models**: In 1.3.0 and 1.3.1, with Thinking set to Off, an analysis or follow-up on Claude Sonnet 4.6, Opus 4.6 or a model up to Claude 4.5 failed with "Anthropic endpoint error: ... unexpected keyword argument 'temperature'", and so did Claude 3.5 models at any thinking level. They work again, at the model's default temperature, since Anthropic no longer accepts a lower one.
+
 ## [1.3.1] - 2026-11-12
 
 ### Upgrade Notes

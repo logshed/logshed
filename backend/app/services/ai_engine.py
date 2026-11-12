@@ -256,10 +256,11 @@ def _openai_reasoning_effort(model: str, thinking_level: Optional[str]) -> str:
 
 def _claude_thinking_kwargs(model: str, thinking_level: Optional[str]) -> dict[str, Any]:
     """
-    The thinking, effort, max_tokens and temperature arguments for a Claude model. Claude 4.6 and
-    later think adaptively at an effort level; from 4.7 on temperature is refused and the newest
-    models cannot turn thinking off, so off sends the lowest effort and leaves thinking at the
-    model's default. Claude 4.6 and earlier turn thinking off for off; 4.5 and earlier take a budget.
+    The thinking, effort and max_tokens arguments for a Claude model. Claude 4.6 and later think
+    adaptively at an effort level; the newest models cannot turn thinking off, so off sends the
+    lowest effort and leaves thinking at the model's default. Claude 4.6 and earlier turn thinking
+    off for off; 4.5 and earlier take a budget. No model gets a temperature: the SDK dropped the
+    sampling arguments, and the Messages API refuses them (in the body too) since 2026-10-21.
     """
     level = _thinking_level(thinking_level)
     version = _claude_version(model)
@@ -277,7 +278,7 @@ def _claude_thinking_kwargs(model: str, thinking_level: Optional[str]) -> dict[s
             "thinking": {"type": "enabled", "budget_tokens": budget},
             "max_tokens": max(4096, budget + 2048),
         }
-    return {"max_tokens": 4096, "temperature": 0.2}
+    return {"max_tokens": 4096}
 
 
 def _gemini_takes_thinking_level(model: str) -> bool:

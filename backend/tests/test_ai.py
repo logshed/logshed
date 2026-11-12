@@ -379,7 +379,7 @@ Multiple transaction queries deadlock on shared index.
             create_kwargs = mock_create.call_args[1]
             assert create_kwargs["model"] == "claude-3-5-haiku-20241022"
             assert "thinking" not in create_kwargs
-            assert create_kwargs["temperature"] == 0.2
+            assert "temperature" not in create_kwargs and "extra_body" not in create_kwargs
 
     @pytest.mark.asyncio
     async def test_call_anthropic_thinking(self):
@@ -407,7 +407,7 @@ Multiple transaction queries deadlock on shared index.
             create_kwargs = mock_create.call_args[1]
             assert create_kwargs["thinking"] == {"type": "adaptive"}
             assert create_kwargs["output_config"] == {"effort": "low"}
-            assert "temperature" not in create_kwargs
+            assert "extra_body" not in create_kwargs
 
     @pytest.mark.asyncio
     async def test_dispatch_gemini_legacy_model_omits_thinking_config(self):
@@ -4265,7 +4265,7 @@ class TestGeminiThinkingLevels:
 
 
 class TestAnthropicRequestsPerModelFamily:
-    """Claude 4.6 and later take adaptive thinking with an effort level; 4.7 and later refuse temperature."""
+    """Claude 4.6 and later take adaptive thinking with an effort level; no Claude request carries a temperature."""
 
     BUDGET_MODELS = ["claude-haiku-4-5-20251001", "claude-opus-4-5-20251101", "claude-sonnet-4-20250514", "claude-3-7-sonnet-20250219"]
     ADAPTIVE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"]
@@ -4284,7 +4284,7 @@ class TestAnthropicRequestsPerModelFamily:
         kwargs = self._kwargs(model, level)
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": budget}
         assert kwargs["max_tokens"] == max_tokens
-        assert "temperature" not in kwargs
+        assert "extra_body" not in kwargs
         assert "output_config" not in kwargs
 
     @pytest.mark.parametrize("level", ["low", "medium", "high"])
@@ -4293,20 +4293,20 @@ class TestAnthropicRequestsPerModelFamily:
         kwargs = self._kwargs(model, level)
         assert kwargs["thinking"] == {"type": "adaptive"}
         assert kwargs["output_config"] == {"effort": level}
-        assert "temperature" not in kwargs
+        assert "extra_body" not in kwargs
         assert kwargs["max_tokens"] >= 16000
 
     @pytest.mark.parametrize("model", BUDGET_MODELS + ADAPTIVE_MODELS + ["claude-3-5-haiku-20241022"])
-    def test_off_turns_thinking_off_up_to_four_six_with_the_low_temperature(self, model):
+    def test_off_turns_thinking_off_up_to_four_six_with_no_temperature(self, model):
         kwargs = self._kwargs(model, "off")
-        assert kwargs["temperature"] == 0.2
+        assert "temperature" not in kwargs and "extra_body" not in kwargs
         assert "thinking" not in kwargs
         assert "output_config" not in kwargs
 
     @pytest.mark.parametrize("model", NO_SAMPLING_MODELS)
     def test_off_on_newer_models_sends_no_temperature_and_the_lowest_effort(self, model):
         kwargs = self._kwargs(model, "off")
-        assert "temperature" not in kwargs
+        assert "extra_body" not in kwargs
         assert "thinking" not in kwargs
         assert kwargs["output_config"] == {"effort": "low"}
 
@@ -4545,3 +4545,96 @@ class TestProviderErrorRule:
         result = translate(_CodedProviderError(text, code))
         assert isinstance(result, ai_engine.AiServiceUnavailableError) is unavailable
         assert ai_engine.is_retryable_for_fallback(result) is unavailable
+
+
+@pytest.mark.filterwarnings("ignore:The model .* is deprecated:DeprecationWarning")
+class TestClaudeRequestsThroughTheRealSdk:
+    """
+    The other Claude tests replace the SDK client, so they never learn which arguments the real one
+    accepts. These run the real client over a fake transport, for every family of request LogShed builds
+    (retired models included, since a saved setting can still name one).
+    """
+
+    MODELS_AND_LEVELS = [
+        ("claude-3-5-haiku-20241022", "low"),
+        ("claude-haiku-4-5", "off"),
+        ("claude-sonnet-4-5", "medium"),
+        ("claude-sonnet-4-6", "off"),
+        ("claude-sonnet-4-6", "low"),
+        ("claude-opus-4-7", "off"),
+    ]
+
+    @staticmethod
+    def _message(model: str) -> dict:
+        return {
+            "id": "msg_1", "type": "message", "role": "assistant", "model": model,
+            "content": [{"type": "text", "text": "## Summary\nOk\n\n## Root Cause\nCause\n\n## Actionable Remediation\nFix"}],
+            "stop_reason": "end_turn", "stop_sequence": None,
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
+
+    @classmethod
+    def _stream_body(cls, model: str) -> bytes:
+        start = cls._message(model) | {"content": [], "stop_reason": None}
+        events = [
+            ("message_start", {"type": "message_start", "message": start}),
+            ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Streamed answer"}}),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 5}}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+        return "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events).encode()
+
+    def _patched_client(self, sent: list[dict]):
+        """Patch the engine's AsyncAnthropic with the real class on a transport that records each request body."""
+        import anthropic
+        import httpx2
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            body = json.loads(request.content)
+            sent.append(body)
+            if body.get("stream"):
+                return httpx2.Response(200, content=self._stream_body(body["model"]), headers={"content-type": "text/event-stream"})
+            return httpx2.Response(200, json=self._message(body["model"]))
+
+        def make_client(**kwargs):
+            return anthropic.AsyncAnthropic(**kwargs, http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)))
+
+        return patch("app.services.ai_engine.AsyncAnthropic", side_effect=make_client)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model,level", MODELS_AND_LEVELS)
+    async def test_analysis_request_is_accepted(self, model, level):
+        sent: list[dict] = []
+        with self._patched_client(sent):
+            text, *_rest, served = await ai_engine.call_anthropic(
+                api_key="ant-key", model=model, prompt="test prompt", thinking_level=level,
+            )
+        assert "Ok" in text
+        assert served == model
+        assert sent[0]["model"] == model
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model,level", MODELS_AND_LEVELS)
+    async def test_streamed_follow_up_is_accepted(self, model, level):
+        sent: list[dict] = []
+        with self._patched_client(sent):
+            text, *_rest = await ai_engine.dispatch_multi_turn_anthropic(
+                api_key="ant-key", model=model, messages=[{"role": "user", "content": "why?"}],
+                system_prompt="You help.", thinking_level=level,
+            )
+        assert text == "Streamed answer"
+        assert sent[0]["stream"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_request_carries_a_temperature(self):
+        # The Messages API refuses temperature (also in the body) since API version 2026-10-21
+        sent: list[dict] = []
+        with self._patched_client(sent):
+            for model, level in self.MODELS_AND_LEVELS:
+                await ai_engine.call_anthropic(api_key="ant-key", model=model, prompt="p", thinking_level=level)
+        assert len(sent) == len(self.MODELS_AND_LEVELS)
+        assert not any("temperature" in body for body in sent)
+        assert "thinking" not in sent[1]
+

@@ -141,6 +141,29 @@ async def test_live_claude_runs_an_analysis_at_a_thinking_level(thinking_level):
 
 
 @pytest.mark.asyncio
+async def test_live_older_claude_without_thinking_runs_an_analysis():
+    """Claude Haiku 4.5 with thinking off gets the low temperature in the request body, which the SDK no longer takes as an argument."""
+    from app.services.ai_engine import call_anthropic
+
+    keys = load_env_keys()
+    claude_key = keys.get("CLAUDE_API_KEY") or keys.get("ANTHROPIC_API_KEY")
+    if not claude_key:
+        pytest.skip("CLAUDE_API_KEY not configured in .env or environment")
+
+    text, tokens_in, tokens_out, tokens_thoughts, _tokens_used, served = await call_anthropic(
+        api_key=claude_key,
+        model="claude-haiku-4-5-20251001",
+        prompt="2026-11-02T10:00:00Z nas-01 smartd: Device /dev/sda, 8 Currently unreadable (pending) sectors",
+        timeout=120,
+        thinking_level="off",
+    )
+    print(f"\nclaude-haiku-4-5 off: in {tokens_in}, out {tokens_out}, thinking {tokens_thoughts}: {text[:160]!r}")
+    assert text.strip()
+    assert served == "claude-haiku-4-5-20251001"
+    assert tokens_thoughts == 0
+
+
+@pytest.mark.asyncio
 # Off asks for the lowest level. gemini-3.5-flash takes minimal; on 2026-11-03 gemini-3.8-flash refused it (as does gemini-3.7-flash, the default
 # Gemini model, which was overloaded that day) and OpenAI documented that gpt-6.1-sol (the default OpenAI model) refuses none, so both
 # requests are retried at low. None of these models has a shutdown date.
