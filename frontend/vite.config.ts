@@ -7,7 +7,8 @@ import zlib from 'zlib';
 const outDir = path.resolve(import.meta.dirname, '../backend/app/static');
 
 // Swagger UI and ReDoc for the backend's /docs and /redoc pages, served from /docs-assets/
-// instead of a CDN. Copied from node_modules after each build (the backend picks the URLs).
+// instead of a CDN. Copied from node_modules after each build (the backend picks the URLs). ReDoc 3
+// keeps its third-party license notices inside the bundle, so it has no separate LICENSE.txt.
 const DOCS_ASSETS: Array<[string, string]> = [
   ['swagger-ui-dist/swagger-ui-bundle.js', 'swagger-ui-bundle.js'],
   ['swagger-ui-dist/swagger-ui-bundle.js.LICENSE.txt', 'swagger-ui-bundle.js.LICENSE.txt'],
@@ -15,7 +16,6 @@ const DOCS_ASSETS: Array<[string, string]> = [
   ['swagger-ui-dist/LICENSE', 'swagger-ui-dist.LICENSE'],
   ['swagger-ui-dist/NOTICE', 'swagger-ui-dist.NOTICE'],
   ['redoc/bundles/redoc.standalone.js', 'redoc.standalone.js'],
-  ['redoc/bundles/redoc.standalone.js.LICENSE.txt', 'redoc.standalone.js.LICENSE.txt'],
   ['redoc/LICENSE', 'redoc.LICENSE'],
 ];
 

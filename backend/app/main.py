@@ -7,6 +7,7 @@ import asyncio
 import base64
 import datetime
 import hashlib
+import html
 import json
 import logging
 import re
@@ -20,7 +21,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -708,19 +709,50 @@ _OPENAPI_URL = "/openapi.json"
 _INLINE_SCRIPT_RE = re.compile(r"<script(?![^>]*\bsrc\s*=)[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
 
 
-def _inline_script_hashes(html: str) -> list[str]:
-    """CSP source expressions ('sha256-...') for every inline script in html."""
+def _inline_script_hashes(page: str) -> list[str]:
+    """CSP source expressions ('sha256-...') for every inline script in page."""
     return [
         "'sha256-" + base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii") + "'"
-        for script in _INLINE_SCRIPT_RE.findall(html)
+        for script in _INLINE_SCRIPT_RE.findall(page)
     ]
 
 
+def _redoc_html(title: str) -> str:
+    """
+    The ReDoc page. ReDoc 3's bundle uses import.meta, so it has to load as a module script, which
+    FastAPI's get_redoc_html does not do. disable-telemetry turns off ReDoc's usage reports (the
+    page's connect-src would block them anyway).
+    """
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<title>{html.escape(title)}</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="shortcut icon" href="{_DOCS_FAVICON_URL}">
+<style>
+  body {{
+    margin: 0;
+    padding: 0;
+  }}
+</style>
+</head>
+<body>
+<noscript>
+    ReDoc requires JavaScript to function. Please enable it to browse the documentation.
+</noscript>
+<redoc spec-url="{_OPENAPI_URL}" disable-telemetry="true"></redoc>
+<script type="module" src="{_DOCS_ASSETS_URL}/redoc.standalone.js"></script>
+</body>
+</html>
+"""
+
+
 def _docs_content_security_policy(script_hashes: list[str]) -> str:
-    """The strict app policy, plus the docs start-up script by hash and ReDoc's blob: worker."""
+    """The strict app policy, plus the docs start-up script by hash, ReDoc's blob: worker and its data: icon font."""
     script_src = " ".join(["'self'", *script_hashes])
     return (
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         f"script-src {script_src}; connect-src 'self'; worker-src 'self' blob:; "
         "object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
     )
@@ -739,13 +771,7 @@ def _register_api_docs(app: FastAPI) -> tuple[set[str], str]:
         # The online validator badge would send the spec URL to validator.swagger.io
         swagger_ui_parameters={"validatorUrl": None},
     ).body.decode("utf-8")
-    redoc_html = get_redoc_html(
-        openapi_url=_OPENAPI_URL,
-        title=f"{app.title} - ReDoc",
-        redoc_js_url=f"{_DOCS_ASSETS_URL}/redoc.standalone.js",
-        redoc_favicon_url=_DOCS_FAVICON_URL,
-        with_google_fonts=False,
-    ).body.decode("utf-8")
+    redoc_html = _redoc_html(f"{app.title} - ReDoc")
     policy = _docs_content_security_policy(
         _inline_script_hashes(swagger_html) + _inline_script_hashes(redoc_html)
     )

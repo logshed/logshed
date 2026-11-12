@@ -795,6 +795,8 @@ class TestApiDocsAccess:
         assert "'unsafe-inline'" not in directives["script-src"]
         assert "'unsafe-eval'" not in directives["script-src"]
         assert "https:" not in directives.get("img-src", [])
+        # ReDoc 3 inlines its icon font as a data: URI; fonts still come from nowhere else
+        assert directives["font-src"] == ["'self'", "data:"]
         assert directives["default-src"] == ["'self'"]
 
         scripts = self._inline_scripts(docs.text)
@@ -821,6 +823,15 @@ class TestApiDocsAccess:
         assert 'src="/docs-assets/redoc.standalone.js"' in redoc.text
         # The online validator badge would send the spec URL to validator.swagger.io
         assert '"validatorUrl": null' in docs.text
+
+    @pytest.mark.asyncio
+    async def test_redoc_loads_as_a_module_with_usage_reports_off(self, docs_env):
+        # ReDoc 3's bundle uses import.meta, which a classic script cannot run
+        async with self._client(create_app(), logged_in=True) as ac:
+            redoc = await ac.get("/redoc")
+        assert '<script type="module" src="/docs-assets/redoc.standalone.js"></script>' in redoc.text
+        assert '<redoc spec-url="/openapi.json" disable-telemetry="true"></redoc>' in redoc.text
+        assert "<title>LogShed - ReDoc</title>" in redoc.text
 
     @pytest.mark.asyncio
     async def test_any_valid_api_token_reads_openapi_json(self, docs_env):
