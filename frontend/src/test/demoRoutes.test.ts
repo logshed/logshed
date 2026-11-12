@@ -38,9 +38,10 @@ function calledPaths(): Array<[string, string]> {
 
 describe('browser demo routes', () => {
   let hasRoute: (method: string, path: string) => boolean;
+  let escapeRegExp: (text: string) => string;
   beforeAll(async () => {
     vi.useFakeTimers();
-    ({ hasRoute } = await import('../demo/server.ts'));
+    ({ hasRoute, escapeRegExp } = await import('../demo/server.ts'));
   });
   afterAll(() => {
     vi.useRealTimers();
@@ -53,5 +54,13 @@ describe('browser demo routes', () => {
   it('answers every method and path the web UI calls', () => {
     const missing = calledPaths().filter(([m, p]) => !hasRoute(m, p)).map(([m, p]) => `${m} ${p}`);
     expect(missing).toEqual([]);
+  });
+
+  it('matches a route base literally, whatever characters it holds', () => {
+    const base = '/api/a.b+c(d)[e]{f}|g*h?i^j$k\\l';
+    const route = new RegExp(`^${escapeRegExp(base)}$`);
+    expect(route.test(base)).toBe(true);
+    expect(route.test('/api/aXb+c(d)[e]{f}|g*h?i^j$k\\l')).toBe(false);
+    expect(new RegExp(`^${escapeRegExp('/api/a.b')}$`).test('/api/axb')).toBe(false);
   });
 });

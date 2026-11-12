@@ -141,9 +141,14 @@ function found<T>(item: T | undefined): T {
   return item;
 }
 
+/** `text` with every RegExp special character escaped, so a pattern built from it matches it literally. */
+export function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
 /** List, create, update and delete routes for one collection. */
 function crud<T extends { id: number }>(base: string, coll: store.Collection<T>, make: (body: Record<string, any>) => Omit<T, 'id'>): Array<[string, RegExp, Handler]> {
-  const esc = base.replace(/\//g, '\\/');
+  const esc = escapeRegExp(base);
   const one = new RegExp(`^${esc}\\/(\\d+)$`);
   return [
     ['GET', new RegExp(`^${esc}$`), () => coll.items],
