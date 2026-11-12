@@ -48,8 +48,7 @@ function renderTab(overrides: Partial<React.ComponentProps<typeof MaintenanceWin
     onSetPreset: vi.fn(),
     onExtendSession: vi.fn(),
     onApplyCustomWindow: vi.fn(),
-    onOpenAddScheduleModal: vi.fn(),
-    onOpenEditScheduleModal: vi.fn(),
+    onSaveSchedule: vi.fn().mockResolvedValue(true),
     onToggleScheduleEnabled: vi.fn(),
     onDeleteSchedule: vi.fn(),
     onDisableSession: vi.fn(),
@@ -115,18 +114,22 @@ describe('MaintenanceWindowTab', () => {
     expect(handlers.onToggleScheduleEnabled).toHaveBeenCalledWith(SCHEDULES[2]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Nightly backup' }));
-    expect(handlers.onOpenEditScheduleModal).toHaveBeenCalledWith(SCHEDULES[0]);
+    expect(screen.getByRole('dialog', { name: 'Edit Maintenance Schedule' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Schedule Name')).toHaveValue('Nightly backup');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Delete Patch Tuesday' }));
     expect(handlers.onDeleteSchedule).toHaveBeenCalledWith(SCHEDULES[1]);
     fireEvent.click(screen.getByRole('button', { name: /Add Schedule/ }));
-    expect(handlers.onOpenAddScheduleModal).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'Add Maintenance Schedule' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Schedule Name')).toHaveValue('');
   });
 
   it('shows the empty schedule state with a create button', () => {
-    const handlers = renderTab({ maintenance: { active: false, until: null, schedules: [], sessions: [] } });
+    renderTab({ maintenance: { active: false, until: null, schedules: [], sessions: [] } });
     expect(screen.queryByText(/Active Concurrent Sessions/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Create First Schedule/ }));
-    expect(handlers.onOpenAddScheduleModal).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'Add Maintenance Schedule' })).toBeInTheDocument();
   });
 
   it('starts a window from a preset or a custom end time, and clears an active one', () => {

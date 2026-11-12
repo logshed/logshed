@@ -1657,3 +1657,100 @@ describe('AlertsPanel hand-offs', () => {
     expect(params.get('source')).toBe('bastion');
   });
 });
+
+describe('AlertsPanel schedule edits, stopping a session and clearing history', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    window.history.pushState(null, '', '/rules');
+    vi.spyOn(alertsApi, 'fetchAlertRules').mockResolvedValue(mockRules);
+    vi.spyOn(alertsApi, 'fetchAlertPresets').mockResolvedValue(mockPresets);
+    vi.spyOn(alertsApi, 'fetchAlertHistory').mockResolvedValue(mockHistory);
+    vi.spyOn(notificationsApi, 'fetchNotificationChannels').mockResolvedValue(mockChannels);
+    vi.spyOn(dropRulesApi, 'fetchDropRules').mockResolvedValue(mockDropRules);
+  });
+
+  it('edits a schedule in place from its current values', async () => {
+    const sched = {
+      id: 'sched_1',
+      name: 'Sunday System Backup',
+      recurrence: 'weekly' as const,
+      start_time: '02:00',
+      duration_minutes: 60,
+      day_of_week: 0,
+      enabled: true,
+      is_active: false,
+    };
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null, schedules: [sched] });
+    const updateSpy = vi.spyOn(alertsApi, 'updateMaintenanceSchedules').mockResolvedValue({
+      active: false,
+      until: null,
+      schedules: [{ ...sched, name: 'Monthly Backup', recurrence: 'monthly', day_of_month: 15 }],
+    });
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Sunday System Backup' }));
+    expect(screen.getByRole('heading', { name: 'Edit Maintenance Schedule' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Schedule Name')).toHaveValue('Sunday System Backup');
+    expect(screen.getByLabelText('Duration in minutes')).toHaveValue(60);
+
+    fireEvent.change(screen.getByLabelText('Schedule Name'), { target: { value: 'Monthly Backup' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Monthly' }));
+    fireEvent.change(screen.getByLabelText('Day of the Month'), { target: { value: '15' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() =>
+      expect(updateSpy).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'sched_1',
+          name: 'Monthly Backup',
+          recurrence: 'monthly',
+          day_of_month: 15,
+          day_of_week: undefined,
+          start_time: '02:00',
+          duration_minutes: 60,
+        }),
+      ])
+    );
+    expect(await screen.findByText('Schedule "Monthly Backup" updated successfully.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Edit Maintenance Schedule' })).toBeNull();
+  });
+
+  it('stops one session and refreshes the history', async () => {
+    const end = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({
+      active: true,
+      until: end,
+      sessions: [{ session_id: 'ui-1', reason: 'Web Console', log_handling: 'silence_alerts', initiated_by: 'web_ui', expires_at: end }],
+      active_sessions_count: 1,
+    } as any);
+    const stopSpy = vi.spyOn(alertsApi, 'deleteMaintenanceSession').mockResolvedValue({ active: false, until: null, sessions: [] } as any);
+    render(<AlertsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
+    await waitFor(() => expect(alertsApi.fetchAlertHistory).toHaveBeenCalled());
+    const historyCalls = vi.mocked(alertsApi.fetchAlertHistory).mock.calls.length;
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop Session' }));
+
+    await waitFor(() => expect(stopSpy).toHaveBeenCalledWith('ui-1'));
+    expect(await screen.findByText('Maintenance session terminated.')).toBeInTheDocument();
+    expect(vi.mocked(alertsApi.fetchAlertHistory).mock.calls.length).toBeGreaterThan(historyCalls);
+  });
+
+  it('clears all history after the question is confirmed', async () => {
+    vi.spyOn(alertsApi, 'fetchMaintenanceWindow').mockResolvedValue({ active: false, until: null });
+    const clearSpy = vi.spyOn(alertsApi, 'clearAlertHistory').mockResolvedValue({ status: 'ok' } as any);
+    window.history.pushState(null, '', '/rules/history');
+    render(<AlertsPanel />);
+    expect((await screen.findAllByText('SSH Brute-Force Detection')).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear All/ }));
+    expect(screen.getByRole('dialog', { name: 'Clear All Alert History' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear All History' }));
+
+    await waitFor(() => expect(clearSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('All alert history records cleared.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});

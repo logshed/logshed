@@ -9,13 +9,11 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import {
-  AlertHistoryItem,
   AlertPreset,
   AlertRule,
   DropRule,
   NotificationChannel,
   MaintenanceSchedule,
-  MaintenanceWindowResponse,
 } from '../../types.ts';
 import {
   fetchAlertRules,
@@ -24,18 +22,11 @@ import {
   fetchAlertPresets,
   installAlertPreset,
   fetchAlertHistory,
-  fetchAlertHistoryItem,
-  deleteAlertHistoryItem,
-  clearAlertHistory,
   exportAllAlertRules,
   exportSingleAlertRule,
   importAlertRules,
   reorderAlertRules,
   fetchMaintenanceWindow,
-  setMaintenanceWindow,
-  updateMaintenanceSchedules,
-  deleteMaintenanceSession,
-  extendMaintenanceSession,
 } from '../../api/alerts.ts';
 import { fetchNotificationChannels } from '../../api/notifications.ts';
 import { fetchDropRules } from '../../api/dropRules.ts';
@@ -45,78 +36,27 @@ import { providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import {
   slugify,
   formatLocalTimestamp,
-  formatMaintenanceTime,
-  fromLocalDatetimeInputString,
 } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
-import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
 import { AlertRuleHandoff, takeAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
 import { AlertTestModal } from './AlertTestModal.tsx';
 import { AlertPresetsModal } from './AlertPresetsModal.tsx';
-import { useMediaQuery, usePolling, useServerTimezone } from '../../utils/hooks.ts';
+import { useMediaQuery, useServerTimezone } from '../../utils/hooks.ts';
 import { isMaintenanceItem } from '../../utils/maintenanceHistory.ts';
 import { useSerialReorder } from '../../utils/useSerialReorder.ts';
 import { downloadRuleExport, importRuleFile } from '../../utils/ruleTransfer.ts';
 import { AlertRulesTab } from './tabs/AlertRulesTab.tsx';
 import { DropRulesTab } from './tabs/DropRulesTab.tsx';
 import { AlertHistoryTab } from './tabs/AlertHistoryTab.tsx';
-import { MaintenanceWindowTab, DAYS_OF_WEEK } from './tabs/MaintenanceWindowTab.tsx';
+import { MaintenanceWindowTab } from './tabs/MaintenanceWindowTab.tsx';
+import { useMaintenance } from './useMaintenance.ts';
+import { useAlertHistory } from './useAlertHistory.ts';
 
-export type AlertViewTab = 'rules' | 'drop-rules' | 'history' | 'maintenance';
-
-// The longest delay setTimeout honours (2^31-1 ms, about 24.8 days)
-const MAX_TIMEOUT_MS = 2147483647;
-
-export const pathToAlertSubTab = (pathname: string): AlertViewTab => {
-  const clean = pathname.replace(/\/+$/, '').toLowerCase();
-  if (clean === '/rules/history') {
-    return 'history';
-  }
-  if (clean === '/rules/drop-rules' || clean === '/rules/drop') {
-    return 'drop-rules';
-  }
-  if (clean === '/rules/maintenance') {
-    return 'maintenance';
-  }
-  return 'rules';
-};
-
-export const alertSubTabToPath = (subTab: AlertViewTab): string => {
-  switch (subTab) {
-    case 'history':
-      return '/rules/history';
-    case 'drop-rules':
-      return '/rules/drop-rules';
-    case 'maintenance':
-      return '/rules/maintenance';
-    case 'rules':
-    default:
-      return '/rules/rules';
-  }
-};
-
-/**
- * Id of the incident to open, from the `id` parameter of /rules/history (notification links set it
- * to the alert's history record).
- */
-export function parseIncidentIdFromUrl(): number | null {
-  if (pathToAlertSubTab(window.location.pathname) !== 'history') return null;
-  const raw = new URLSearchParams(window.location.search).get('id');
-  if (!raw || !/^\d+$/.test(raw)) return null;
-  const id = parseInt(raw, 10);
-  return id > 0 ? id : null;
-}
-
-function removeIncidentIdFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  if (!params.has('id')) return;
-  params.delete('id');
-  const query = params.toString();
-  window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
-}
+import { type AlertViewTab, pathToAlertSubTab, alertSubTabToPath } from './alertRoutes.ts';
+export { type AlertViewTab, pathToAlertSubTab, alertSubTabToPath, parseIncidentIdFromUrl } from './alertRoutes.ts';
 
 const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
   <span
@@ -153,10 +93,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [presets, setPresets] = useState<AlertPreset[]>([]);
-  const [historyItems, setHistoryItems] = useState<AlertHistoryItem[]>([]);
-  const [historyTotal, setHistoryTotal] = useState<number>(0);
-  const [historyLimit] = useState<number>(50);
-  const [historyOffset, setHistoryOffset] = useState<number>(0);
   const [dropRules, setDropRules] = useState<DropRule[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
   const [isAiConfigured, setIsAiConfigured] = useState<boolean>(true);
@@ -169,12 +105,23 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     return () => clearTimeout(timer);
   }, [feedbackMsg]);
 
-  const [maintenance, setMaintenance] = useState<MaintenanceWindowResponse>({
-    active: false,
-    until: null,
-    schedules: [],
-  });
-  const [customUntil, setCustomUntil] = useState<string>('');
+  const history = useAlertHistory({ isShown: activeSubTab === 'history', onFeedback: setFeedbackMsg });
+  const {
+    historyItems,
+    historyTotal,
+    historyLimit,
+    historyOffset,
+    selectedHistoryItem,
+    setSelectedHistoryItem,
+    closeHistoryItem,
+    historyItemToDelete,
+    setHistoryItemToDelete,
+    isClearHistoryModalOpen,
+    setIsClearHistoryModalOpen,
+    refreshHistory,
+  } = history;
+  const maint = useMaintenance({ serverTimezone, onFeedback: setFeedbackMsg, onHistoryChanged: refreshHistory });
+  const { maintenance, setMaintenance, isMaintenanceActiveNow, isOnDemandActiveNow } = maint;
   const [appUrl, setAppUrl] = useState<string>('');
 
   const handleNavigateToSettings = () => {
@@ -193,31 +140,17 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const pendingRuleHandoffRef = useRef<AlertRuleHandoff | null>(null);
   const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
   const [ruleToDelete, setRuleToDelete] = useState<AlertRule | null>(null);
-  const [historyItemToDelete, setHistoryItemToDelete] = useState<AlertHistoryItem | null>(null);
   const [isTestModalOpen, setIsTestModalOpen] = useState<boolean>(false);
   const [ruleToTest, setRuleToTest] = useState<AlertRule | null>(null);
-  const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState<boolean>(false);
   const [isPresetsModalOpen, setIsPresetsModalOpen] = useState<boolean>(false);
 
-  // Scheduled maintenance window state
-  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState<boolean>(false);
-  const [scheduleToEdit, setScheduleToEdit] = useState<MaintenanceSchedule | null>(null);
+  // Maintenance confirmation questions
   const [scheduleToDelete, setScheduleToDelete] = useState<MaintenanceSchedule | null>(null);
   const [isClearMaintenanceModalOpen, setIsClearMaintenanceModalOpen] = useState<boolean>(false);
-  const [scheduleFormName, setScheduleFormName] = useState<string>('');
-  const [scheduleFormRecurrence, setScheduleFormRecurrence] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
-  const [scheduleFormStartTime, setScheduleFormStartTime] = useState<string>('02:00');
-  const [scheduleFormDuration, setScheduleFormDuration] = useState<number>(60);
-  const [scheduleFormDayOfWeek, setScheduleFormDayOfWeek] = useState<number>(0);
-  const [scheduleFormDayOfMonth, setScheduleFormDayOfMonth] = useState<number>(1);
-  const [scheduleFormEnabled, setScheduleFormEnabled] = useState<boolean>(true);
 
   // Presets installation state
   const [installingPresetId, setInstallingPresetId] = useState<string | null>(null);
   const [presetChannelId, setPresetChannelId] = useState<number | null>(null);
-
-  // History selected item state for modal overlay
-  const [selectedHistoryItem, setSelectedHistoryItem] = useState<AlertHistoryItem | null>(null);
 
   // Pre-index notification channels into a lookup Map using useMemo for O(1) lookups
   const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
@@ -238,7 +171,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, '', targetPath);
     }
-    fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
+    maint.refreshMaintenance();
     if (nextSubTab === 'history') {
       refreshHistory();
     }
@@ -251,7 +184,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [setMaintenance]);
 
   const loadAll = useCallback(async () => {
     try {
@@ -268,9 +201,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       setRules(rulesData);
       setChannels(channelsData);
       setPresets(presetsData);
-      setHistoryItems(historyData.items);
-      setHistoryTotal(historyData.total);
-      setHistoryOffset(0);
+      history.showFirstPage(historyData);
       setDropRules(dropRulesData);
       setMaintenance(maintData);
       if (facetsData?.apps) {
@@ -292,320 +223,12 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     } finally {
       setInitialLoadDone(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the setters it calls are stable; showFirstPage only calls state setters
   }, []);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
-
-  // A notification link opens its incident (/rules/history?id=N), which may be on any history page
-  useEffect(() => {
-    const id = parseIncidentIdFromUrl();
-    if (id === null) return;
-    let cancelled = false;
-    fetchAlertHistoryItem(id)
-      .then((item) => {
-        if (!cancelled) setSelectedHistoryItem(item);
-      })
-      .catch((err: any) => {
-        if (cancelled) return;
-        removeIncidentIdFromUrl();
-        setFeedbackMsg({
-          text:
-            err?.status === 404
-              ? `Incident record ${id} was not found. It may have been deleted or removed by retention.`
-              : err?.message || 'Failed to load the incident record.',
-          isError: true,
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const closeHistoryItem = () => {
-    setSelectedHistoryItem(null);
-    removeIncidentIdFromUrl();
-  };
-
-  const refreshHistory = useCallback(async () => {
-    try {
-      const data = await fetchAlertHistory(historyLimit, historyOffset);
-      setHistoryItems(data.items);
-      setHistoryTotal(data.total);
-    } catch {
-      // Keep the current list when a background refresh fails
-    }
-  }, [historyLimit, historyOffset]);
-
-  // The incident list refreshes every 10 seconds while shown. Maintenance status needs no poll here:
-  // the Navbar polls it and announces each result with a 'maintenance-updated' event (below).
-  usePolling(() => {
-    if (activeSubTab === 'history') refreshHistory();
-  }, 10000);
-
-  // Real-time timer to refresh state the exact second a window expires
-  useEffect(() => {
-    if (!maintenance.until) return;
-    const untilMs = new Date(maintenance.until).getTime();
-    if (isNaN(untilMs)) return;
-    const nowMs = Date.now();
-    const delay = untilMs - nowMs;
-    if (delay <= 0) {
-      fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
-      return;
-    }
-    // setTimeout runs a longer delay at once; the 10 second maintenance poll covers such a window
-    if (delay + 250 > MAX_TIMEOUT_MS) return;
-    const timer = setTimeout(() => {
-      fetchMaintenanceWindow()
-        .then((res) => {
-          setMaintenance(res);
-          window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-        })
-        .catch(() => {});
-    }, delay + 250);
-    return () => clearTimeout(timer);
-  }, [maintenance.until]);
-
-  const isMaintenanceActiveNow = Boolean(maintenance.active);
-  const isOnDemandActiveNow = Boolean(
-    maintenance.on_demand_until || (maintenance.sessions && maintenance.sessions.length > 0)
-  );
-
-  useEffect(() => {
-    const onMaintenanceUpdated = (e: Event) => {
-      const customEvent = e as CustomEvent<MaintenanceWindowResponse>;
-      if (customEvent.detail) {
-        setMaintenance(customEvent.detail);
-      } else {
-        fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
-      }
-    };
-    window.addEventListener('maintenance-updated', onMaintenanceUpdated);
-    return () => window.removeEventListener('maintenance-updated', onMaintenanceUpdated);
-  }, []);
-
-  const handleSetWindow = async (untilIso: string) => {
-    try {
-      const res = await setMaintenanceWindow(untilIso);
-      setMaintenance(res);
-      setCustomUntil('');
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      refreshHistory();
-      setFeedbackMsg({
-        text: `Maintenance window active until ${formatMaintenanceTime(res.until, serverTimezone)}.`,
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to set maintenance window.',
-        isError: true,
-      });
-    }
-  };
-
-  const handleClearMaintenance = () => {
-    setIsClearMaintenanceModalOpen(true);
-  };
-
-  const handleConfirmClearMaintenance = async () => {
-    setIsClearMaintenanceModalOpen(false);
-    try {
-      const res = await setMaintenanceWindow(null);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      refreshHistory();
-      setFeedbackMsg({
-        text: 'All maintenance sessions cleared.',
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to clear maintenance sessions.',
-        isError: true,
-      });
-    }
-  };
-
-  const handleDisableSession = async (sessionId: string) => {
-    try {
-      const res = await deleteMaintenanceSession(sessionId);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      refreshHistory();
-      setFeedbackMsg({
-        text: 'Maintenance session terminated.',
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to terminate maintenance session.',
-        isError: true,
-      });
-    }
-  };
-
-
-  const handleSetPreset = async (hours: number) => {
-    const targetDate = new Date(Date.now() + hours * 3600 * 1000);
-    await handleSetWindow(targetDate.toISOString());
-  };
-
-  /** Moves one session's end an hour later (from its end, or from now when that is later). */
-  const handleExtendSession = async (sessionId: string) => {
-    try {
-      const res = await extendMaintenanceSession(sessionId, 60);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      const extended = res.sessions?.find((s) => s.session_id === sessionId);
-      setFeedbackMsg({
-        text: extended
-          ? `Session extended until ${formatMaintenanceTime(extended.expires_at, serverTimezone)}.`
-          : 'Session extended.',
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to extend maintenance session.',
-        isError: true,
-      });
-    }
-  };
-
-  const handleApplyCustomWindow = async () => {
-    if (!customUntil) return;
-    // The picker shows the server clock, as the window's times are shown
-    const iso = fromLocalDatetimeInputString(customUntil, serverTimezone);
-    if (!iso) {
-      setFeedbackMsg({ text: 'Please enter a valid future date and time.', isError: true });
-      return;
-    }
-    await handleSetWindow(iso);
-  };
-
-  const handleOpenAddScheduleModal = () => {
-    setScheduleToEdit(null);
-    setScheduleFormName('');
-    setScheduleFormRecurrence('weekly');
-    setScheduleFormStartTime('02:00');
-    setScheduleFormDuration(60);
-    setScheduleFormDayOfWeek(0);
-    setScheduleFormDayOfMonth(1);
-    setScheduleFormEnabled(true);
-    setIsScheduleModalOpen(true);
-  };
-
-  const handleOpenEditScheduleModal = (sched: MaintenanceSchedule) => {
-    setScheduleToEdit(sched);
-    setScheduleFormName(sched.name);
-    setScheduleFormRecurrence(sched.recurrence || 'weekly');
-    setScheduleFormStartTime(sched.start_time || '02:00');
-    setScheduleFormDuration(sched.duration_minutes || 60);
-    setScheduleFormDayOfWeek(sched.day_of_week ?? 0);
-    setScheduleFormDayOfMonth(sched.day_of_month ?? 1);
-    setScheduleFormEnabled(sched.enabled ?? true);
-    setIsScheduleModalOpen(true);
-  };
-
-  const handleSaveSchedule = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const cleanName = scheduleFormName.trim();
-    if (!cleanName) {
-      setFeedbackMsg({ text: 'Schedule name is required.', isError: true });
-      return;
-    }
-    const currentList = maintenance.schedules || [];
-    let updatedList: MaintenanceSchedule[];
-
-    if (scheduleToEdit) {
-      updatedList = currentList.map((s) =>
-        s.id === scheduleToEdit.id
-          ? {
-              ...s,
-              name: cleanName,
-              recurrence: scheduleFormRecurrence,
-              start_time: scheduleFormStartTime,
-              duration_minutes: Number(scheduleFormDuration) || 60,
-              day_of_week: scheduleFormRecurrence === 'weekly' ? scheduleFormDayOfWeek : undefined,
-              day_of_month: scheduleFormRecurrence === 'monthly' ? scheduleFormDayOfMonth : undefined,
-              enabled: scheduleFormEnabled,
-            }
-          : s
-      );
-    } else {
-      const newSched: MaintenanceSchedule = {
-        id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        name: cleanName,
-        recurrence: scheduleFormRecurrence,
-        start_time: scheduleFormStartTime,
-        duration_minutes: Number(scheduleFormDuration) || 60,
-        day_of_week: scheduleFormRecurrence === 'weekly' ? scheduleFormDayOfWeek : undefined,
-        day_of_month: scheduleFormRecurrence === 'monthly' ? scheduleFormDayOfMonth : undefined,
-        enabled: scheduleFormEnabled,
-      };
-      updatedList = [...currentList, newSched];
-    }
-
-    try {
-      const res = await updateMaintenanceSchedules(updatedList);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      setIsScheduleModalOpen(false);
-      setFeedbackMsg({
-        text: `Schedule "${cleanName}" ${scheduleToEdit ? 'updated' : 'added'} successfully.`,
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to save maintenance schedule.',
-        isError: true,
-      });
-    }
-  };
-
-  const handleToggleScheduleEnabled = async (sched: MaintenanceSchedule) => {
-    const currentList = maintenance.schedules || [];
-    const updatedList = currentList.map((s) =>
-      s.id === sched.id ? { ...s, enabled: !s.enabled } : s
-    );
-    try {
-      const res = await updateMaintenanceSchedules(updatedList);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      setFeedbackMsg({
-        text: `Schedule "${sched.name}" ${!sched.enabled ? 'enabled' : 'disabled'}.`,
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to update schedule status.',
-        isError: true,
-      });
-    }
-  };
-
-  const handleConfirmDeleteSchedule = async () => {
-    if (!scheduleToDelete) return;
-    const currentList = maintenance.schedules || [];
-    const updatedList = currentList.filter((s) => s.id !== scheduleToDelete.id);
-    try {
-      const res = await updateMaintenanceSchedules(updatedList);
-      setMaintenance(res);
-      window.dispatchEvent(new CustomEvent('maintenance-updated', { detail: res }));
-      const deletedName = scheduleToDelete.name;
-      setScheduleToDelete(null);
-      setFeedbackMsg({
-        text: `Schedule "${deletedName}" removed.`,
-        isError: false,
-      });
-    } catch (err: any) {
-      setFeedbackMsg({
-        text: err.message || 'Failed to delete maintenance schedule.',
-        isError: true,
-      });
-    }
-  };
 
   // Open create modal
   const handleOpenCreateModal = () => {
@@ -721,60 +344,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
 
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) =>
     importRuleFile(e, importAlertRules, setFeedbackMsg, loadAll);
-
-  // Delete history item
-  const handleDeleteHistory = async (id: number) => {
-    try {
-      await deleteAlertHistoryItem(id);
-      setHistoryItems((prev) => prev.filter((h) => h.id !== id));
-      setHistoryTotal((prev) => Math.max(0, prev - 1));
-      if (selectedHistoryItem?.id === id) {
-        closeHistoryItem();
-      }
-      setHistoryItemToDelete(null);
-      // Refetch the current page, and step back one page when it is now empty
-      try {
-        let offset = historyOffset;
-        let data = await fetchAlertHistory(historyLimit, offset);
-        if (data.items.length === 0 && offset > 0) {
-          offset = Math.max(0, offset - historyLimit);
-          data = await fetchAlertHistory(historyLimit, offset);
-        }
-        setHistoryItems(data.items);
-        setHistoryTotal(data.total);
-        setHistoryOffset(offset);
-      } catch {
-        // Keep the locally updated list when the refetch fails
-      }
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to delete history record.', isError: true });
-    }
-  };
-
-  // Clear all history
-  const handleClearAllHistory = async () => {
-    try {
-      await clearAlertHistory();
-      setHistoryItems([]);
-      setHistoryTotal(0);
-      closeHistoryItem();
-      setIsClearHistoryModalOpen(false);
-      setFeedbackMsg({ text: 'All alert history records cleared.', isError: false });
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to clear alert history.', isError: true });
-    }
-  };
-
-  const handleHistoryPageChange = async (newOffset: number) => {
-    try {
-      const data = await fetchAlertHistory(historyLimit, newOffset);
-      setHistoryItems(data.items);
-      setHistoryTotal(data.total);
-      setHistoryOffset(newOffset);
-    } catch (err: any) {
-      setFeedbackMsg({ text: err.message || 'Failed to load history page.', isError: true });
-    }
-  };
 
   const getChannelStatus = (channelId?: number | null) => {
     if (channelId == null) {
@@ -939,7 +508,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           channels={channels}
           isMaintenanceActiveNow={isMaintenanceActiveNow}
           maintenance={maintenance}
-          onClearMaintenance={handleClearMaintenance}
+          onClearMaintenance={() => setIsClearMaintenanceModalOpen(true)}
           onNavigateToMaintenance={() => handleSubTabChange('maintenance')}
           onOpenPresetsModal={() => setIsPresetsModalOpen(true)}
           onExportAll={handleExportAll}
@@ -971,7 +540,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onDeleteHistoryItem={(item) => setHistoryItemToDelete(item)}
           limit={historyLimit}
           offset={historyOffset}
-          onPageChange={handleHistoryPageChange}
+          onPageChange={history.changePage}
         />
       )}
 
@@ -981,17 +550,16 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           appUrl={appUrl}
           maintenance={maintenance}
           isOnDemandActiveNow={isOnDemandActiveNow}
-          customUntil={customUntil}
-          setCustomUntil={setCustomUntil}
-          onClearMaintenance={handleClearMaintenance}
-          onSetPreset={handleSetPreset}
-          onExtendSession={handleExtendSession}
-          onApplyCustomWindow={handleApplyCustomWindow}
-          onOpenAddScheduleModal={handleOpenAddScheduleModal}
-          onOpenEditScheduleModal={handleOpenEditScheduleModal}
-          onToggleScheduleEnabled={handleToggleScheduleEnabled}
+          customUntil={maint.customUntil}
+          setCustomUntil={maint.setCustomUntil}
+          onClearMaintenance={() => setIsClearMaintenanceModalOpen(true)}
+          onSetPreset={maint.setPreset}
+          onExtendSession={maint.extendSession}
+          onApplyCustomWindow={maint.applyCustomWindow}
+          onSaveSchedule={maint.saveSchedule}
+          onToggleScheduleEnabled={maint.toggleScheduleEnabled}
           onDeleteSchedule={(sched) => setScheduleToDelete(sched)}
-          onDisableSession={handleDisableSession}
+          onDisableSession={maint.disableSession}
         />
       )}
 
@@ -1074,7 +642,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         isOpen={isClearHistoryModalOpen}
         title="Clear All Alert History"
         onCancel={() => setIsClearHistoryModalOpen(false)}
-        onConfirm={handleClearAllHistory}
+        onConfirm={history.clearAllHistory}
         confirmLabel="Clear All History"
       >
         <div className="flex items-start gap-3">
@@ -1094,7 +662,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         onCancel={() => setHistoryItemToDelete(null)}
         onConfirm={() => {
           if (historyItemToDelete) {
-            handleDeleteHistory(historyItemToDelete.id);
+            history.deleteHistory(historyItemToDelete.id);
           }
         }}
         confirmLabel="Delete Record"
@@ -1104,187 +672,16 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         </p>
       </ConfirmDialog>
 
-      {/* ADD / EDIT SCHEDULE MODAL */}
-      <Modal
-        isOpen={isScheduleModalOpen}
-        onClose={() => setIsScheduleModalOpen(false)}
-        title={scheduleToEdit ? 'Edit Maintenance Schedule' : 'Add Maintenance Schedule'}
-        maxWidth="max-w-md"
-      >
-        <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
-          {/* Name */}
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Schedule Name</label>
-            <input
-              type="text"
-              required
-              aria-label="Schedule Name"
-              value={scheduleFormName}
-              onChange={(e) => setScheduleFormName(e.target.value)}
-              placeholder="e.g. Weekly Server Maintenance"
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Recurrence Selection */}
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Recurrence</label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setScheduleFormRecurrence('daily')}
-                className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
-                  scheduleFormRecurrence === 'daily'
-                    ? 'bg-accent-700 text-white border-accent-500'
-                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
-                }`}
-              >
-                Daily
-              </button>
-              <button
-                type="button"
-                onClick={() => setScheduleFormRecurrence('weekly')}
-                className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
-                  scheduleFormRecurrence === 'weekly'
-                    ? 'bg-accent-700 text-white border-accent-500'
-                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
-                }`}
-              >
-                Weekly
-              </button>
-              <button
-                type="button"
-                onClick={() => setScheduleFormRecurrence('monthly')}
-                className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
-                  scheduleFormRecurrence === 'monthly'
-                    ? 'bg-accent-700 text-white border-accent-500'
-                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
-                }`}
-              >
-                Monthly
-              </button>
-            </div>
-          </div>
-
-          {/* Weekly Day of Week Picker */}
-          {scheduleFormRecurrence === 'weekly' && (
-            <div>
-              <label id="schedule-day-of-week-label" htmlFor="schedule-day-of-week" className="block text-slate-300 font-medium mb-1">Day of the Week</label>
-              <SelectDropdown
-                variant="panel"
-                fieldClassName="bg-dark-950 border-dark-700 rounded-lg px-3 py-2 text-slate-200"
-                id="schedule-day-of-week"
-                labelledBy="schedule-day-of-week-label"
-                label="Day of the Week"
-                options={DAYS_OF_WEEK.map((d) => ({ value: String(d.value), label: d.label }))}
-                value={String(scheduleFormDayOfWeek)}
-                onChange={(v) => setScheduleFormDayOfWeek(Number(v))}
-              />
-            </div>
-          )}
-
-          {/* Monthly Day of Month Picker */}
-          {scheduleFormRecurrence === 'monthly' && (
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">Day of the Month (1 - 31)</label>
-              <input
-                type="number"
-                min="1"
-                max="31"
-                aria-label="Day of the Month"
-                value={scheduleFormDayOfMonth}
-                onChange={(e) => setScheduleFormDayOfMonth(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
-              />
-            </div>
-          )}
-
-          {/* Start Time & Duration */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">Start Time (24h)</label>
-              <input
-                type="time"
-                required
-                aria-label="Start Time"
-                value={scheduleFormStartTime}
-                onChange={(e) => setScheduleFormStartTime(e.target.value)}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">Duration (minutes)</label>
-              <input
-                type="number"
-                required
-                min="1"
-                max="1440"
-                aria-label="Duration in minutes"
-                value={scheduleFormDuration}
-                onChange={(e) => setScheduleFormDuration(Number(e.target.value))}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Quick duration presets */}
-          <div className="flex items-center gap-1.5 pt-1">
-            <span className="text-[11px] text-slate-400">Presets:</span>
-            {[15, 30, 60, 120, 240].map((dur) => (
-              <button
-                key={dur}
-                type="button"
-                onClick={() => setScheduleFormDuration(dur)}
-                className={`px-2 py-0.5 text-[11px] rounded border transition cursor-pointer ${
-                  scheduleFormDuration === dur
-                    ? 'bg-accent-950 text-accent-300 border-accent-700'
-                    : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
-                }`}
-              >
-                {dur >= 60 ? `${dur / 60}h` : `${dur}m`}
-              </button>
-            ))}
-          </div>
-
-          {/* Enabled Switch */}
-          <div className="flex items-center gap-2 pt-2">
-            <input
-              type="checkbox"
-              id="schedule-enabled-check"
-              checked={scheduleFormEnabled}
-              onChange={(e) => setScheduleFormEnabled(e.target.checked)}
-              className="rounded border-dark-700 bg-dark-950 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900"
-            />
-            <label htmlFor="schedule-enabled-check" className="text-slate-300 select-none cursor-pointer">
-              Enable this maintenance schedule
-            </label>
-          </div>
-
-          {/* Modal Actions */}
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsScheduleModalOpen(false)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
-            >
-              {scheduleToEdit ? 'Save Changes' : 'Create Schedule'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
       {/* DELETE SCHEDULE CONFIRMATION MODAL */}
       <ConfirmDialog
         isOpen={scheduleToDelete !== null}
         title="Delete Maintenance Schedule"
         onCancel={() => setScheduleToDelete(null)}
-        onConfirm={handleConfirmDeleteSchedule}
+        onConfirm={async () => {
+          if (scheduleToDelete && (await maint.deleteSchedule(scheduleToDelete))) {
+            setScheduleToDelete(null);
+          }
+        }}
         confirmLabel="Delete Schedule"
       >
         <p className="text-slate-300 leading-relaxed">
@@ -1297,7 +694,10 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         isOpen={isClearMaintenanceModalOpen}
         title="Clear All Maintenance Sessions"
         onCancel={() => setIsClearMaintenanceModalOpen(false)}
-        onConfirm={handleConfirmClearMaintenance}
+        onConfirm={() => {
+          setIsClearMaintenanceModalOpen(false);
+          maint.clearAllSessions();
+        }}
         confirmLabel="Clear All Sessions"
         confirmClassName="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
       >

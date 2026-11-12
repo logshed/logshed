@@ -6,36 +6,16 @@ import {
   Edit2,
   Trash2,
   Terminal,
-  } from 'lucide-react';
+} from 'lucide-react';
 import { MaintenanceSchedule, MaintenanceWindowResponse } from '../../../types.ts';
 import { formatMaintenanceTime, timeInputZoneLabel, toLocalDatetimeInputString } from '../../../utils/formatters.ts';
 import { useServerTimezone } from '../../../utils/hooks.ts';
 import { CopyButton } from '../../common/CopyButton.tsx';
+import { formatScheduleRecurrence } from '../../../utils/maintenanceSchedule.ts';
+import { ScheduleEditorModal } from '../ScheduleEditorModal.tsx';
+import type { ScheduleFields } from '../useMaintenance.ts';
 
-export const DAYS_OF_WEEK = [
-  { value: 0, label: 'Sunday' },
-  { value: 1, label: 'Monday' },
-  { value: 2, label: 'Tuesday' },
-  { value: 3, label: 'Wednesday' },
-  { value: 4, label: 'Thursday' },
-  { value: 5, label: 'Friday' },
-  { value: 6, label: 'Saturday' },
-];
-
-export const formatScheduleRecurrence = (s: MaintenanceSchedule): string => {
-  if (s.recurrence === 'daily') {
-    return `Daily at ${s.start_time}`;
-  }
-  if (s.recurrence === 'weekly') {
-    const day = DAYS_OF_WEEK.find((d) => d.value === (s.day_of_week ?? 0))?.label || 'Sunday';
-    return `Weekly on ${day} at ${s.start_time}`;
-  }
-  if (s.recurrence === 'monthly') {
-    const day = s.day_of_month ?? 1;
-    return `Monthly on day ${day} at ${s.start_time}`;
-  }
-  return `At ${s.start_time}`;
-};
+export { formatScheduleRecurrence } from '../../../utils/maintenanceSchedule.ts';
 
 export interface MaintenanceWindowTabProps {
   maintenance: MaintenanceWindowResponse;
@@ -47,8 +27,8 @@ export interface MaintenanceWindowTabProps {
   /** Moves one session's end an hour later; shown on every active session row. */
   onExtendSession: (sessionId: string) => void;
   onApplyCustomWindow: () => void;
-  onOpenAddScheduleModal: () => void;
-  onOpenEditScheduleModal: (sched: MaintenanceSchedule) => void;
+  /** Saves a schedule from the editor (scheduleToEdit null adds one); resolves true when saved. */
+  onSaveSchedule: (fields: ScheduleFields, scheduleToEdit: MaintenanceSchedule | null) => Promise<boolean>;
   onToggleScheduleEnabled: (sched: MaintenanceSchedule) => void;
   onDeleteSchedule: (sched: MaintenanceSchedule) => void;
   onDisableSession?: (sessionId: string) => void;
@@ -65,13 +45,16 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   onExtendSession,
   appUrl,
   onApplyCustomWindow,
-  onOpenAddScheduleModal,
-  onOpenEditScheduleModal,
+  onSaveSchedule,
   onToggleScheduleEnabled,
   onDeleteSchedule,
   onDisableSession,
 }) => {
   const serverTimezone = useServerTimezone();
+  // The schedule editor: closed, adding (schedule null) or editing a schedule
+  const [editor, setEditor] = React.useState<{ schedule: MaintenanceSchedule | null } | null>(null);
+  const onOpenAddScheduleModal = () => setEditor({ schedule: null });
+  const onOpenEditScheduleModal = (sched: MaintenanceSchedule) => setEditor({ schedule: sched });
 
   const resolvedBaseUrl = React.useMemo(() => {
     if (appUrl && appUrl.trim()) {
@@ -424,6 +407,14 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           </div>
         </div>
       </div>
+
+      {editor && (
+        <ScheduleEditorModal
+          scheduleToEdit={editor.schedule}
+          onClose={() => setEditor(null)}
+          onSave={onSaveSchedule}
+        />
+      )}
     </div>
   );
 };
