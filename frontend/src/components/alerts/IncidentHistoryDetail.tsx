@@ -4,8 +4,6 @@ import {
   Brain,
   Bell,
   Zap,
-  Copy,
-  Check,
   AlertCircle,
   ChevronDown,
   ChevronRight,
@@ -17,7 +15,7 @@ import {
 } from 'lucide-react';
 import { AlertHistoryItem } from '../../types.ts';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
-import { useClipboard, useServerTimezone } from '../../utils/hooks.ts';
+import { useServerTimezone } from '../../utils/hooks.ts';
 import { IncidentStatusBadge } from './IncidentStatusBadge.tsx';
 import { AiFollowUpThread } from '../ai/AiFollowUpThread.tsx';
 import { DEFAULT_SYSTEM_PROMPT, buildFullEnvelope } from '../../utils/aiPrompt.ts';
@@ -28,6 +26,7 @@ import {
   MAINTENANCE_RULE_NAME,
 } from '../../utils/maintenanceHistory.ts';
 import { cleanIsoString, formatLocalTimestamp } from '../../utils/formatters.ts';
+import { CopyButton } from '../common/CopyButton.tsx';
 
 const CONSOLE_MARGIN_MS = 60 * 1000;
 
@@ -76,8 +75,6 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
   channelName,
   ruleWindowSeconds,
 }) => {
-  const { copied: copiedLog, copy: copyLog } = useClipboard();
-  const { copied: copiedPrompt, copy: copyPrompt } = useClipboard();
   const [showPromptDetails, setShowPromptDetails] = useState<boolean>(false);
   const [promptViewMode, setPromptViewMode] = useState<'analysis' | 'full'>('analysis');
   const [showFollowUp, setShowFollowUp] = useState<boolean>(false);
@@ -123,14 +120,11 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
     ? item.user_context
     : null;
 
-  const handleCopyPrompt = async () => {
-    if (item.prompt_sent) {
-      const textToCopy =
-        promptViewMode === 'full'
-          ? buildFullEnvelope(item.system_prompt || DEFAULT_SYSTEM_PROMPT, item.prompt_sent)
-          : item.prompt_sent;
-      await copyPrompt(textToCopy);
-    }
+  const promptToCopy = () => {
+    if (!item.prompt_sent) return '';
+    return promptViewMode === 'full'
+      ? buildFullEnvelope(item.system_prompt || DEFAULT_SYSTEM_PROMPT, item.prompt_sent)
+      : item.prompt_sent;
   };
 
   const displaySummary = useMemo(() => {
@@ -471,19 +465,12 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopyPrompt}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                <CopyButton
+                  text={promptToCopy}
+                  label="Copy Prompt"
                   title="Copy prompt"
-                >
-                  {copiedPrompt ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  <span>{copiedPrompt ? 'Copied' : 'Copy Prompt'}</span>
-                </button>
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                />
               </div>
 
               <pre className="p-3 bg-dark-950 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-60 leading-relaxed selection:bg-accent-900/50">
@@ -515,19 +502,12 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                 </a>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => copyLog(item.sample_log || '')}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+            <CopyButton
+              text={item.sample_log || ''}
+              label="Copy Log"
               title="Copy triggering log"
-            >
-              {copiedLog ? (
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-              <span>{copiedLog ? 'Copied' : 'Copy Log'}</span>
-            </button>
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+            />
           </div>
           <pre className="p-3 bg-dark-950 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-48 leading-relaxed selection:bg-accent-900/50">
             {item.sample_log}

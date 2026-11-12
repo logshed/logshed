@@ -4,7 +4,6 @@ import {
   Key,
   Plus,
   Trash2,
-  Copy,
   Check,
   AlertCircle,
   AlertTriangle,
@@ -21,7 +20,7 @@ import { updateSettings } from '../../api/settings.ts';
 import { formatDate } from '../../utils/formatters.ts';
 import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
-import { useClipboard, useMediaQuery } from '../../utils/hooks.ts';
+import { useMediaQuery } from '../../utils/hooks.ts';
 import { TokenScopeChooser } from './TokenScopeChooser.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { useDialog } from '../../utils/dialogStack.ts';
@@ -36,6 +35,7 @@ import {
   sameScopeSet,
   scopeGrants,
 } from './tokenScopes.ts';
+import { CopyButton } from '../common/CopyButton.tsx';
 
 const DEFAULT_PRESET_ID = 'ai_mcp';
 
@@ -135,22 +135,16 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
 
   // One-time created token modal
   const [createdRawToken, setCreatedRawToken] = useState<string | null>(null);
-  const { copied: hasCopied, copy: copyToken } = useClipboard();
   const tokenInputRef = useRef<HTMLInputElement>(null);
 
   // Revoke confirmation modal
   const [tokenToRevoke, setTokenToRevoke] = useState<ApiToken | null>(null);
   const [isRevoking, setIsRevoking] = useState<boolean>(false);
 
-  // MCP settings state & clipboards
+  // MCP settings state
   const [enableMcp, setEnableMcp] = useState<boolean>(settings?.enable_mcp ?? false);
   const [isUpdatingMcp, setIsUpdatingMcp] = useState<boolean>(false);
   const [mcpErrorMsg, setMcpErrorMsg] = useState<string | null>(null);
-
-  const { copied: hasCopiedSse, copy: copySse } = useClipboard();
-  const { copied: hasCopiedClaudeProxy, copy: copyClaudeProxy } = useClipboard();
-  const { copied: hasCopiedCursor, copy: copyCursor } = useClipboard();
-  const { copied: hasCopiedClaudeDocker, copy: copyClaudeDocker } = useClipboard();
 
   // Collapsible configuration snippets state (all collapsed by default)
   const [expandedSnippets, setExpandedSnippets] = useState<Record<string, boolean>>({});
@@ -345,14 +339,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
     }
   };
 
-  const handleCopyRawToken = async () => {
-    if (!createdRawToken) return;
+  // Selects the new token in its field as it is copied, so the user sees what was copied
+  const selectRawToken = () => {
     if (tokenInputRef.current) {
       tokenInputRef.current.focus();
       tokenInputRef.current.select();
       tokenInputRef.current.setSelectionRange(0, 99999);
     }
-    await copyToken(createdRawToken);
   };
 
   const handleConfirmRevoke = async () => {
@@ -635,24 +628,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   value={sseUrl}
                   className="flex-1 bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 select-all focus:outline-none focus:border-accent-500"
                 />
-                <button
-                  type="button"
-                  onClick={() => copySse(sseUrl)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-dark-800 hover:bg-dark-700 border border-dark-600 rounded-lg transition cursor-pointer shrink-0"
+                <CopyButton
+                  text={sseUrl}
                   title="Copy SSE URL"
-                >
-                  {hasCopiedSse ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-dark-800 hover:bg-dark-700 border border-dark-600 rounded-lg transition cursor-pointer shrink-0"
+                  copiedLabelClassName="text-emerald-400"
+                />
               </div>
             </div>
 
@@ -719,24 +700,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       <p className="text-[11px] text-slate-400">
                         Add to <code className="text-slate-300 font-mono">claude_desktop_config.json</code> on your local workstation:
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => copyClaudeProxy(claudeProxyConfigSnippet)}
-                        className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                      <CopyButton
+                        text={claudeProxyConfigSnippet}
                         title="Copy JSON configuration"
-                      >
-                        {hasCopiedClaudeProxy ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
+                        className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                        iconClassName="w-3 h-3"
+                        copiedLabelClassName="text-emerald-400"
+                      />
                     </div>
                     <pre className="p-2.5 bg-dark-900 border border-dark-800 rounded text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
                       {claudeProxyConfigSnippet}
@@ -782,24 +752,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       <p className="text-[11px] text-slate-400">
                         Add to <code className="text-slate-300 font-mono">.cursor/mcp.json</code> or your client settings:
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => copyCursor(cursorConfigSnippet)}
-                        className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                      <CopyButton
+                        text={cursorConfigSnippet}
                         title="Copy JSON configuration"
-                      >
-                        {hasCopiedCursor ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
+                        className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                        iconClassName="w-3 h-3"
+                        copiedLabelClassName="text-emerald-400"
+                      />
                     </div>
                     <pre className="p-2.5 bg-dark-900 border border-dark-800 rounded text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
                       {cursorConfigSnippet}
@@ -842,24 +801,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       <p className="text-[11px] text-slate-400">
                         Add to <code className="text-slate-300 font-mono">claude_desktop_config.json</code> when Docker runs locally:
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => copyClaudeDocker(claudeDockerConfigSnippet)}
-                        className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                      <CopyButton
+                        text={claudeDockerConfigSnippet}
                         title="Copy JSON configuration"
-                      >
-                        {hasCopiedClaudeDocker ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
+                        className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                        iconClassName="w-3 h-3"
+                        copiedLabelClassName="text-emerald-400"
+                      />
                     </div>
                     <pre className="p-2.5 bg-dark-900 border border-dark-800 rounded text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
                       {claudeDockerConfigSnippet}
@@ -1135,23 +1083,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                     value={createdRawToken}
                     className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-100 select-all"
                   />
-                  <button
-                    type="button"
-                    onClick={handleCopyRawToken}
+                  <CopyButton
+                    text={createdRawToken}
                     className="px-3 py-2 text-xs font-semibold bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-lg transition flex items-center gap-1.5 shrink-0 cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
-                  >
-                    {hasCopied ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400">Copied</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy</span>
-                      </>
-                    )}
-                  </button>
+                    copiedLabelClassName="text-emerald-400"
+                    beforeCopy={selectRawToken}
+                  />
                 </div>
               </div>
 

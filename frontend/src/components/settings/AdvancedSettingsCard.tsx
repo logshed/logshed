@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sliders,
   Cpu,
@@ -13,6 +13,7 @@ import {
 import { AiThinkingLevel, SystemSettings } from '../../types.ts';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { updateSettings } from '../../api/settings.ts';
+import { useFlash } from '../../utils/hooks.ts';
 
 const DEFAULT_THINKING_LEVEL: AiThinkingLevel = 'low';
 
@@ -50,16 +51,8 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   // Status state
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveInlineError, setSaveInlineError] = useState<string | null>(null);
-  const [saveInlineSuccess, setSaveInlineSuccess] = useState<boolean>(false);
-  const saveSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (saveSuccessTimeoutRef.current) {
-        clearTimeout(saveSuccessTimeoutRef.current);
-      }
-    };
-  }, []);
+  const [savedFlash, flashSaved, setSavedFlash] = useFlash<true>(3000);
+  const saveInlineSuccess = savedFlash !== null;
 
   // Populate from settings
   useEffect(() => {
@@ -107,7 +100,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
     setSyslogMaxTcpConnections(settings.syslog_max_tcp_connections ?? 250);
     setSyslogTcpInactivityTimeout(settings.syslog_tcp_inactivity_timeout ?? 0.0);
     setSaveInlineError(null);
-    setSaveInlineSuccess(false);
+    setSavedFlash(null);
   };
 
   // Resolves true when the edits were saved (or there was nothing to save), false on a validation
@@ -115,7 +108,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   const performSave = async (): Promise<boolean> => {
     if (!settings) return true;
     setSaveInlineError(null);
-    setSaveInlineSuccess(false);
+    setSavedFlash(null);
 
     // Validation
     if (aiTimeout <= 0) {
@@ -170,11 +163,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
       setIsSaving(true);
       await updateSettings(updates);
 
-      setSaveInlineSuccess(true);
-      if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
-      saveSuccessTimeoutRef.current = setTimeout(() => {
-        setSaveInlineSuccess(false);
-      }, 3000);
+      flashSaved(true);
 
       await onSettingsSaved();
       return true;

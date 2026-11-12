@@ -6,13 +6,11 @@ import {
   Edit2,
   Trash2,
   Terminal,
-  Copy,
-  Check,
-} from 'lucide-react';
+  } from 'lucide-react';
 import { MaintenanceSchedule, MaintenanceWindowResponse } from '../../../types.ts';
 import { formatMaintenanceTime, timeInputZoneLabel, toLocalDatetimeInputString } from '../../../utils/formatters.ts';
-import { copyToClipboard } from '../../../utils/clipboard.ts';
 import { useServerTimezone } from '../../../utils/hooks.ts';
+import { CopyButton } from '../../common/CopyButton.tsx';
 
 export const DAYS_OF_WEEK = [
   { value: 0, label: 'Sunday' },
@@ -73,16 +71,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   onDeleteSchedule,
   onDisableSession,
 }) => {
-  const [copiedSnippetId, setCopiedSnippetId] = React.useState<number | null>(null);
   const serverTimezone = useServerTimezone();
-
-  const copySnippet = async (text: string, id: number) => {
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      setCopiedSnippetId(id);
-      setTimeout(() => setCopiedSnippetId(null), 2500);
-    }
-  };
 
   const resolvedBaseUrl = React.useMemo(() => {
     if (appUrl && appUrl.trim()) {
@@ -395,14 +384,12 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-300">1. Start Maintenance Window (Drop Errors mode):</span>
-              <button
-                type="button"
-                onClick={() => copySnippet(startSnippet, 1)}
+              <CopyButton
+                text={startSnippet}
+                label="Copy cURL"
                 className="text-[11px] text-accent-400 hover:text-accent-300 flex items-center gap-1 cursor-pointer font-medium min-h-[32px] touch-manipulation select-none active:text-accent-200"
-              >
-                {copiedSnippetId === 1 ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedSnippetId === 1 ? 'Copied' : 'Copy cURL'}</span>
-              </button>
+                timeoutMs={2500}
+              />
             </div>
             {/* Focusable, so keyboard users can scroll a long command sideways */}
             <pre
@@ -418,14 +405,12 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-300">2. Stop Specific Maintenance Session:</span>
-              <button
-                type="button"
-                onClick={() => copySnippet(stopSnippet, 2)}
+              <CopyButton
+                text={stopSnippet}
+                label="Copy cURL"
                 className="text-[11px] text-accent-400 hover:text-accent-300 flex items-center gap-1 cursor-pointer font-medium min-h-[32px] touch-manipulation select-none active:text-accent-200"
-              >
-                {copiedSnippetId === 2 ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedSnippetId === 2 ? 'Copied' : 'Copy cURL'}</span>
-              </button>
+                timeoutMs={2500}
+              />
             </div>
             {/* Focusable, so keyboard users can scroll a long command sideways */}
             <pre

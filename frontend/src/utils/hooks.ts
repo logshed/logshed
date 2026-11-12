@@ -45,6 +45,50 @@ export function useClipboard(timeoutMs: number = 2000): UseClipboardReturn {
 }
 
 /**
+ * A value shown for a moment, such as a "Saved" mark or a success message.
+ * flash(value) shows it and clears it after durationMs (or the ms given); set(value) shows it
+ * until replaced, for errors that stay. Each call replaces the pending clear, so an older timer
+ * never hides a newer value, and the timer is cleared on unmount.
+ */
+export function useFlash<T>(
+  durationMs: number
+): [T | null, (value: T, ms?: number) => void, (value: T | null) => void] {
+  const [value, setValue] = useState<T | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancel = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  const set = useCallback(
+    (next: T | null) => {
+      cancel();
+      setValue(next);
+    },
+    [cancel]
+  );
+
+  const flash = useCallback(
+    (next: T, ms: number = durationMs) => {
+      cancel();
+      setValue(next);
+      timeoutRef.current = setTimeout(() => {
+        timeoutRef.current = null;
+        setValue(null);
+      }, ms);
+    },
+    [cancel, durationMs]
+  );
+
+  useEffect(() => cancel, [cancel]);
+
+  return [value, flash, set];
+}
+
+/**
  * Hook to evaluate a CSS media query and react to viewport resize / orientation changes.
  */
 export function useMediaQuery(query: string): boolean {

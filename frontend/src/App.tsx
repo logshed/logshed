@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { AlertCircle, RefreshCw, Save } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useAuth } from './context/AuthContext.tsx';
 import { AliasProvider } from './context/AliasContext.tsx';
 import { Navbar } from './components/common/Navbar.tsx';
-import { Modal } from './components/common/Modal.tsx';
+import { UnsavedChangesModal } from './components/common/UnsavedChangesModal.tsx';
 import { LoginForm } from './components/auth/LoginForm.tsx';
 import { SetupModal } from './components/auth/SetupModal.tsx';
 import { LiveLogStream } from './components/logs/LiveLogStream.tsx';
@@ -87,7 +87,6 @@ export const App: React.FC = () => {
   // Settings unsaved changes guard
   const [isSettingsDirty, setIsSettingsDirty] = useState<boolean>(false);
   const [pendingTab, setPendingTab] = useState<AppTab | null>(null);
-  const [isSavingModal, setIsSavingModal] = useState<boolean>(false);
   const saveSettingsTriggerRef = useRef<(() => Promise<boolean>) | null>(null);
   // Full URL of a link the guard held back (for example "View logs" opens /?source=<alias>), so
   // leaving afterwards keeps its filters; null for a plain tab change
@@ -332,65 +331,20 @@ export const App: React.FC = () => {
       </main>
 
       {/* Unsaved Changes Confirmation Modal */}
-      <Modal
+      <UnsavedChangesModal
         isOpen={pendingTab !== null}
-        onClose={() => finishPendingNavigation(null)}
-        title="Unsaved Changes"
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              You have unsaved changes in System Configuration. Leaving now will discard those edits.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-3 border-t border-dark-700">
-            <button
-              type="button"
-              onClick={() => finishPendingNavigation(null)}
-              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 transition cursor-pointer"
-            >
-              Keep Editing
-            </button>
-            <button
-              type="button"
-              onClick={() => finishPendingNavigation(pendingTab)}
-              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/40 border border-red-800/60 transition cursor-pointer"
-            >
-              Discard &amp; Leave
-            </button>
-            <button
-              type="button"
-              disabled={isSavingModal}
-              onClick={async () => {
-                setIsSavingModal(true);
-                try {
-                  const success = saveSettingsTriggerRef.current
-                    ? await saveSettingsTriggerRef.current()
-                    : true;
-                  if (success) {
-                    finishPendingNavigation(pendingTab);
-                  }
-                } finally {
-                  setIsSavingModal(false);
-                }
-              }}
-              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
-            >
-              {isSavingModal ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>Save &amp; Continue</span>
-            </button>
-          </div>
-        </div>
-      </Modal>
+        onKeepEditing={() => finishPendingNavigation(null)}
+        onDiscard={() => finishPendingNavigation(pendingTab)}
+        onSave={async () => {
+          const success = saveSettingsTriggerRef.current ? await saveSettingsTriggerRef.current() : true;
+          if (success) {
+            finishPendingNavigation(pendingTab);
+          }
+        }}
+        message="You have unsaved changes in System Configuration. Leaving now will discard those edits."
+        discardLabel="Discard & Leave"
+        zIndex="z-50"
+      />
       </div>
     </AliasProvider>
   );

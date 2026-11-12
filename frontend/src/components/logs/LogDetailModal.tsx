@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Copy, Check, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronUp, ChevronDown, BellPlus } from 'lucide-react';
+import { Sparkles, Plus, Edit2, Layers, Terminal, FilterX, Trash2, AlertTriangle, RefreshCw, AlertCircle, ChevronUp, ChevronDown, BellPlus } from 'lucide-react';
 import { LogEntry, DockerEndpoint } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
 import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp, formatUtcOffset } from '../../utils/formatters.ts';
 import { getCachedServerTimezone } from '../../api/settings.ts';
-import { useClipboard } from '../../utils/hooks.ts';
+import { CopyButton } from '../common/CopyButton.tsx';
 
 interface LogDetailModalProps {
   log: LogEntry | null;
@@ -77,8 +77,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   const hostIsAliased = Boolean(
     isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip)
   );
-  const { copied: copiedRaw, copy: copyRaw } = useClipboard();
-  const { copied: copiedMsg, copy: copyMsg } = useClipboard();
   const [contextLogs, setContextLogs] = useState<LogEntry[]>([]);
   const [isLoadingContext, setIsLoadingContext] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
@@ -236,15 +234,6 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   // HTTP-ingested logs have neither a syslog packet nor container output as their raw text
   const rawLabel = isDockerSource ? 'Raw Container Output' : isSyslogRaw ? 'Raw Syslog Packet' : 'Raw Log Record';
   const cleanedPayload = cleanLogMessageForDisplay(log?.message || '');
-
-  const handleCopyRaw = async () => {
-    if (!log) return;
-    await copyRaw(log.raw ?? '');
-  };
-
-  const handleCopyMsg = async () => {
-    await copyMsg(cleanedPayload);
-  };
 
   if (!log) return null;
 
@@ -485,15 +474,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               <Terminal className="w-3.5 h-3.5 text-slate-400" />
               <span>Message Payload</span>
             </span>
-            <button
-              type="button"
-              onClick={handleCopyMsg}
-              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+            <CopyButton
+              text={cleanedPayload}
+              label="Copy Message"
               title="Copy message payload"
-            >
-              {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedMsg ? 'Copied' : 'Copy Message'}</span>
-            </button>
+              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+            />
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto">
             {/* Sanitized text element without dangerouslySetInnerHTML */}
@@ -511,15 +497,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
               {rawLabel}
             </span>
-            <button
-              type="button"
-              onClick={handleCopyRaw}
-              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+            <CopyButton
+              text={log.raw ?? ''}
+              label="Copy Raw"
               title="Copy raw log record"
-            >
-              {copiedRaw ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedRaw ? 'Copied' : 'Copy Raw'}</span>
-            </button>
+              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+            />
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-400 text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto">
             {stripAnsi(log.raw).trim() ? (

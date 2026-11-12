@@ -23,6 +23,7 @@ import {
 } from '../../api/notifications.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 
 /**
@@ -685,38 +686,25 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
       </Modal>
 
       {/* Delete Confirmation Modal */}
-      <Modal
+      <ConfirmDialog
         isOpen={Boolean(channelToDelete)}
-        onClose={() => setChannelToDelete(null)}
         title="Delete Notification Target"
-        maxWidth="max-w-md"
+        onCancel={() => setChannelToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        confirmDisabled={isDeleting}
+        confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
+        confirmLabel="Delete Target"
+        bodyClassName="space-y-4"
+        footerClassName="flex justify-end gap-2 pt-2 border-t border-dark-800"
+        cancelClassName="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
+        confirmClassName="px-4 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50"
       >
-        <div className="space-y-4">
-          <p className="text-xs text-slate-300">
-            Are you sure you want to delete notification target{' '}
-            <strong className="text-slate-100 font-semibold">{channelToDelete?.name}</strong>?
-            This will permanently remove the channel from alerting pipelines.
-          </p>
-          <div className="flex justify-end gap-2 pt-2 border-t border-dark-800">
-            <button
-              type="button"
-              onClick={() => setChannelToDelete(null)}
-              className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmDelete}
-              disabled={isDeleting}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete Target</span>
-            </button>
-          </div>
-        </div>
-      </Modal>
+        <p className="text-xs text-slate-300">
+          Are you sure you want to delete notification target{' '}
+          <strong className="text-slate-100 font-semibold">{channelToDelete?.name}</strong>?
+          This will permanently remove the channel from alerting pipelines.
+        </p>
+      </ConfirmDialog>
     </section>
   );
 };

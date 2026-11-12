@@ -1,6 +1,5 @@
 import React from 'react';
-import { Copy, Check } from 'lucide-react';
-import { useClipboard } from '../../utils/hooks.ts';
+import { CopyButton } from './CopyButton.tsx';
 
 interface CodeBlockProps {
   language?: string;
@@ -8,27 +7,18 @@ interface CodeBlockProps {
 }
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
-  const { copied, copy } = useClipboard();
-
-  const handleCopy = () => {
-    copy(code);
-  };
-
   return (
     <div className="my-2 rounded-lg border border-dark-700 bg-dark-900 overflow-hidden shadow-xs">
       <div className="flex items-center justify-between px-3 py-1 bg-dark-950 border-b border-dark-800 text-[11px] font-mono text-slate-400">
         <span className="uppercase tracking-wider text-[10px] font-semibold text-slate-400">
           {language || 'code'}
         </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex items-center gap-1 hover:text-slate-200 transition text-[11px] px-1.5 py-0.5 rounded hover:bg-dark-800 cursor-pointer"
+        <CopyButton
+          text={code}
           title="Copy code"
-        >
-          {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-          <span>{copied ? 'Copied' : 'Copy'}</span>
-        </button>
+          className="flex items-center gap-1 hover:text-slate-200 transition text-[11px] px-1.5 py-0.5 rounded hover:bg-dark-800 cursor-pointer"
+          iconClassName="w-3 h-3"
+        />
       </div>
       <pre className="p-3 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed select-text">
         <code>{code}</code>

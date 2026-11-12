@@ -5,7 +5,6 @@ import {
   Trash2,
   Edit2,
   RefreshCw,
-  AlertTriangle,
   Zap,
   Download,
   Upload,
@@ -24,7 +23,7 @@ import {
 } from '../../../api/dropRules.ts';
 import { fetchLogFacets } from '../../../api/logs.ts';
 import { slugify } from '../../../utils/formatters.ts';
-import { Modal } from '../../common/Modal.tsx';
+import { ConfirmDialog } from '../../common/ConfirmDialog.tsx';
 import { useSerialReorder } from '../../../utils/useSerialReorder.ts';
 import { useReorderableList } from '../../../utils/useReorderableList.ts';
 import { downloadRuleExport, importRuleFile } from '../../../utils/ruleTransfer.ts';
@@ -33,6 +32,7 @@ import { CreateDropRuleModal } from '../CreateDropRuleModal.tsx';
 import { splitPatternList } from '../../../utils/patternList.ts';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
+import { useFlash } from '../../../utils/hooks.ts';
 
 export interface DropRulesTabProps {
   onRulesChange?: (rules: DropRule[]) => void;
@@ -49,7 +49,8 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [ruleToEdit, setRuleToEdit] = useState<DropRule | null>(null);
   const [ruleToDelete, setRuleToDelete] = useState<DropRule | null>(null);
-  const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  // Success messages clear after 3 seconds; errors stay until replaced
+  const [feedbackMsg, flashFeedback, setFeedbackMsg] = useFlash<{ text: string; isError: boolean }>(3000);
   const [availableSources, setAvailableSources] = useState<string[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,7 +66,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [setFeedbackMsg]);
 
   const loadPresets = useCallback(async () => {
     try {
@@ -105,8 +106,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
     try {
       const installed = await installDropPreset(preset.id);
       setRules((prev) => [...prev, installed]);
-      setFeedbackMsg({ text: `Drop preset "${preset.name}" installed.`, isError: false });
-      setTimeout(() => setFeedbackMsg(null), 3000);
+      flashFeedback({ text: `Drop preset "${preset.name}" installed.`, isError: false });
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to install drop preset.', isError: true });
     } finally {
@@ -127,8 +127,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
     try {
       await deleteDropRule(ruleId);
       setRules((prev) => prev.filter((r) => r.id !== ruleId));
-      setFeedbackMsg({ text: 'Drop rule deleted.', isError: false });
-      setTimeout(() => setFeedbackMsg(null), 3000);
+      flashFeedback({ text: 'Drop rule deleted.', isError: false });
     } catch (err: any) {
       setFeedbackMsg({ text: err.message || 'Failed to delete drop rule.', isError: true });
     }
@@ -408,70 +407,48 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
 
       {/* Delete Rule Confirmation Modal */}
       {ruleToDelete && (
-        <Modal
+        <ConfirmDialog
           isOpen={!!ruleToDelete}
-          onClose={() => setRuleToDelete(null)}
           title="Delete Ingestion Drop Rule"
-          maxWidth="max-w-md"
+          look="notice"
+          onCancel={() => setRuleToDelete(null)}
+          onConfirm={async () => {
+            const id = ruleToDelete.id;
+            setRuleToDelete(null);
+            await handleDeleteRule(id);
+          }}
+          confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
+          confirmLabel="Delete Rule"
         >
-          <div className="space-y-4 text-xs font-sans">
-            <div className="flex items-start gap-3 p-3 bg-red-950/30 border border-red-800/60 rounded-lg text-slate-200">
-              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-              <div className="space-y-2 flex-1">
-                <p className="font-semibold text-slate-100 text-xs">
-                  Delete this drop rule?
-                </p>
-                <p className="text-slate-400 leading-relaxed">
-                  Incoming matching logs will no longer be discarded and will resume being stored in SQLite and indexed by FTS5.
-                </p>
-                <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
-                  <div>
-                    <span className="text-slate-400">Name:</span> {ruleToDelete.name || ruleToDelete.app_pattern || ruleToDelete.source_pattern || 'Drop Rule'}
-                  </div>
-                  {ruleToDelete.source_pattern && (
-                    <div><span className="text-slate-400">Host:</span> {ruleToDelete.source_pattern}</div>
-                  )}
-                  {ruleToDelete.app_pattern && (
-                    <div><span className="text-slate-400">App:</span> {ruleToDelete.app_pattern}</div>
-                  )}
-                  {ruleToDelete.message_pattern && (
-                    <div><span className="text-slate-400">Pattern:</span> {ruleToDelete.message_pattern}</div>
-                  )}
-                  {ruleToDelete.severity_threshold != null && (
-                    <div><span className="text-slate-400">Severity:</span> {lessSevereLabel(ruleToDelete.severity_threshold)}</div>
-                  )}
-                  {ruleToDelete.dropped_count > 0 && (
-                    <div className="text-slate-400 text-[11px] pt-1 border-t border-dark-800">
-                      Total logs dropped by this rule: {ruleToDelete.dropped_count.toLocaleString()}
-                    </div>
-                  )}
-                </div>
+          <p className="font-semibold text-slate-100 text-xs">
+            Delete this drop rule?
+          </p>
+          <p className="text-slate-400 leading-relaxed">
+            Incoming matching logs will no longer be discarded and will resume being stored in SQLite and indexed by FTS5.
+          </p>
+          <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+            <div>
+              <span className="text-slate-400">Name:</span> {ruleToDelete.name || ruleToDelete.app_pattern || ruleToDelete.source_pattern || 'Drop Rule'}
+            </div>
+            {ruleToDelete.source_pattern && (
+              <div><span className="text-slate-400">Host:</span> {ruleToDelete.source_pattern}</div>
+            )}
+            {ruleToDelete.app_pattern && (
+              <div><span className="text-slate-400">App:</span> {ruleToDelete.app_pattern}</div>
+            )}
+            {ruleToDelete.message_pattern && (
+              <div><span className="text-slate-400">Pattern:</span> {ruleToDelete.message_pattern}</div>
+            )}
+            {ruleToDelete.severity_threshold != null && (
+              <div><span className="text-slate-400">Severity:</span> {lessSevereLabel(ruleToDelete.severity_threshold)}</div>
+            )}
+            {ruleToDelete.dropped_count > 0 && (
+              <div className="text-slate-400 text-[11px] pt-1 border-t border-dark-800">
+                Total logs dropped by this rule: {ruleToDelete.dropped_count.toLocaleString()}
               </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setRuleToDelete(null)}
-                className="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-600 rounded-lg transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const id = ruleToDelete.id;
-                  setRuleToDelete(null);
-                  await handleDeleteRule(id);
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow transition cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Rule</span>
-              </button>
-            </div>
+            )}
           </div>
-        </Modal>
+        </ConfirmDialog>
       )}
 
       {/* Create / Edit Rule Modal with Interactive Pattern Tester */}
@@ -492,11 +469,10 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
             }
             return [...prev, savedRule];
           });
-          setFeedbackMsg({
+          flashFeedback({
             text: ruleToEdit ? 'Drop rule updated successfully.' : 'Drop rule created successfully.',
             isError: false,
           });
-          setTimeout(() => setFeedbackMsg(null), 3000);
         }}
       />
 

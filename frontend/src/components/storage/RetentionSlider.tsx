@@ -3,8 +3,9 @@ import { Trash2, Clock, Check, RefreshCw, AlertCircle, Info, Lock, Database } fr
 import { fetchPrunePreview, triggerManualPrune, triggerVacuum } from '../../api/system.ts';
 import { formatBytes } from '../../utils/formatters.ts';
 import { PrunePreview, PruneResponse, VacuumResponse } from '../../types.ts';
-import { Modal } from '../common/Modal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { PrunePreviewModal, PrunePreviewMode } from './PrunePreviewModal.tsx';
+import { useFlash } from '../../utils/hooks.ts';
 
 interface RetentionSliderProps {
   retentionDays: number;
@@ -29,7 +30,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
   const [days, setDays] = useState<number>(() => clampDays(retentionDays));
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [saveSuccess, flashSaveSuccess] = useFlash<true>(2500);
 
   const [isPruning, setIsPruning] = useState<boolean>(false);
   const [pruneResult, setPruneResult] = useState<PruneResponse | null>(null);
@@ -71,8 +72,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
   const saveRetention = async () => {
     await onSaveRetention(days);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2500);
+    flashSaveSuccess(true);
   };
 
   const runPrune = async () => {
@@ -447,47 +447,35 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       />
 
       {/* Database Compaction Modal */}
-      <Modal
+      <ConfirmDialog
         isOpen={isVacuumModalOpen}
-        onClose={() => !isCompacting && setIsVacuumModalOpen(false)}
         title="Compact Database"
-        maxWidth="max-w-md"
+        onCancel={() => setIsVacuumModalOpen(false)}
+        onClose={() => !isCompacting && setIsVacuumModalOpen(false)}
+        onConfirm={handleVacuumConfirm}
+        cancelDisabled={isCompacting}
+        confirmDisabled={isCompacting}
+        confirmIcon={<Database className="w-3.5 h-3.5" />}
+        confirmLabel="Confirm & Compact"
+        bodyClassName="space-y-4 text-xs text-slate-300"
+        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-dark-800"
+        cancelClassName="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer"
+        confirmClassName="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
       >
-        <div className="space-y-4 text-xs text-slate-300">
-          <p className="leading-relaxed">
-            The database will be repacked to return unused space to the host filesystem.
-          </p>
-          <div className="space-y-2 bg-dark-950 border border-dark-800 rounded-lg p-3 text-[11px] text-slate-400">
-            <div className="flex items-start gap-2">
-              <span className="text-accent-400 font-bold">•</span>
-              <span>SQLite database writes will pause briefly during compaction (incoming logs will buffer in memory).</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-accent-400 font-bold">•</span>
-              <span>Needs free disk space of about twice the current database size while it runs.</span>
-            </div>
+        <p className="leading-relaxed">
+          The database will be repacked to return unused space to the host filesystem.
+        </p>
+        <div className="space-y-2 bg-dark-950 border border-dark-800 rounded-lg p-3 text-[11px] text-slate-400">
+          <div className="flex items-start gap-2">
+            <span className="text-accent-400 font-bold">•</span>
+            <span>SQLite database writes will pause briefly during compaction (incoming logs will buffer in memory).</span>
           </div>
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">
-            <button
-              type="button"
-              onClick={() => setIsVacuumModalOpen(false)}
-              disabled={isCompacting}
-              className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleVacuumConfirm}
-              disabled={isCompacting}
-              className="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Database className="w-3.5 h-3.5" />
-              <span>Confirm & Compact</span>
-            </button>
+          <div className="flex items-start gap-2">
+            <span className="text-accent-400 font-bold">•</span>
+            <span>Needs free disk space of about twice the current database size while it runs.</span>
           </div>
         </div>
-      </Modal>
+      </ConfirmDialog>
     </div>
   );
 };

@@ -87,6 +87,36 @@ describe('DropRulesTab Component', () => {
     expect(await screen.findByText('Disabled')).toBeInTheDocument();
   });
 
+  it('keeps an error shown after a success message instead of clearing it with the success timer', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.spyOn(dropRulesApi, 'deleteDropRule').mockResolvedValue({ status: 'ok' });
+      vi.spyOn(dropRulesApi, 'updateDropRule').mockRejectedValue(new Error('Rule status could not be saved.'));
+
+      render(<DropRulesTab />);
+      expect(await screen.findByText('Drop DHCPACK')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('Delete rule 1'));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete Rule' }));
+      expect(await screen.findByText('Drop rule deleted.')).toBeInTheDocument();
+
+      // An error two seconds later replaces the success message
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      fireEvent.click(screen.getByText('Disabled'));
+      expect(await screen.findByText('Rule status could not be saved.')).toBeInTheDocument();
+
+      // The success message's three seconds have passed: the error stays until replaced
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(screen.getByText('Rule status could not be saved.')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('allows editing an existing rule and resetting its counter inside the modal', async () => {
     const resetSpy = vi.spyOn(dropRulesApi, 'resetDropRuleCounter').mockResolvedValue({
       ...mockRules[0],

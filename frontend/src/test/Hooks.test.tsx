@@ -1,7 +1,7 @@
 import { renderHook, act, render, screen, fireEvent } from '@testing-library/react';
 import { SlideOver } from '../components/common/SlideOver.tsx';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useClipboard, usePolling } from '../utils/hooks.ts';
+import { useClipboard, useFlash, usePolling } from '../utils/hooks.ts';
 import { usePullToRefresh } from '../utils/usePullToRefresh.ts';
 import * as clipboardModule from '../utils/clipboard.ts';
 
@@ -84,6 +84,71 @@ describe('Custom Hooks (useClipboard)', () => {
       act(() => {
         vi.advanceTimersByTime(2000);
       });
+    });
+  });
+
+  describe('useFlash', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows a flashed value for its duration, then clears it', () => {
+      const { result } = renderHook(() => useFlash<string>(3000));
+      expect(result.current[0]).toBeNull();
+      act(() => result.current[1]('Saved'));
+      expect(result.current[0]).toBe('Saved');
+      act(() => {
+        vi.advanceTimersByTime(2999);
+      });
+      expect(result.current[0]).toBe('Saved');
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(result.current[0]).toBeNull();
+    });
+
+    it('takes a longer duration for one flash', () => {
+      const { result } = renderHook(() => useFlash<string>(3000));
+      act(() => result.current[1]('Key cleared', 10000));
+      act(() => {
+        vi.advanceTimersByTime(9000);
+      });
+      expect(result.current[0]).toBe('Key cleared');
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(result.current[0]).toBeNull();
+    });
+
+    it('never lets an older timer clear a newer value', () => {
+      const { result } = renderHook(() => useFlash<string>(3000));
+      act(() => result.current[1]('First'));
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      act(() => result.current[1]('Second'));
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(result.current[0]).toBe('Second');
+
+      // A value set without a timer (an error) stays
+      act(() => result.current[2]('Error'));
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+      expect(result.current[0]).toBe('Error');
+    });
+
+    it('clears its timer on unmount', () => {
+      const { result, unmount } = renderHook(() => useFlash<string>(3000));
+      act(() => result.current[1]('Saved'));
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 

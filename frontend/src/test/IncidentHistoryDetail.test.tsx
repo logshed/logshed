@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { IncidentHistoryDetail } from '../components/alerts/IncidentHistoryDetail.tsx';
 import { AlertHistoryItem } from '../types.ts';
 import { parseFiltersFromUrl } from '../utils/filters.ts';
 import * as settingsApi from '../api/settings.ts';
+import * as clipboardModule from '../utils/clipboard.ts';
+import { buildFullEnvelope } from '../utils/aiPrompt.ts';
 
 describe('IncidentHistoryDetail Component', () => {
   it('renders daily digest and hides link to LogShed from history view', () => {
@@ -200,5 +202,49 @@ describe('IncidentHistoryDetail "Inspect in Console"', () => {
   it('hides the Console links when the trigger time cannot be read', () => {
     render(<IncidentHistoryDetail item={{ ...ruleAlert, triggered_at: '' }} />);
     expect(screen.queryByRole('link', { name: 'Inspect in Console' })).toBeNull();
+  });
+});
+
+describe('IncidentHistoryDetail copy buttons', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const item: AlertHistoryItem = {
+    id: 7,
+    rule_id: 3,
+    rule_name: 'Disk errors',
+    channel_id: null,
+    trigger_count: 4,
+    sample_log: 'kernel: I/O error, dev sda, sector 1234',
+    incident_summary: 'Disk errors on nas',
+    ai_enrichment: true,
+    ai_model: 'gemini-3.7-flash',
+    ai_audit_id: null,
+    triggered_at: '2026-10-06T14:38:53Z',
+    prompt_sent: 'Analyse these logs',
+    system_prompt: 'You are a log analyst.',
+  };
+
+  it('copies the triggering log, and the prompt in the view that is shown', async () => {
+    const copySpy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
+    render(<IncidentHistoryDetail item={item} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Copy triggering log'));
+    });
+    expect(copySpy).toHaveBeenLastCalledWith('kernel: I/O error, dev sda, sector 1234');
+
+    fireEvent.click(screen.getByText('Expand'));
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Copy prompt'));
+    });
+    expect(copySpy).toHaveBeenLastCalledWith('Analyse these logs');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Full LLM Prompt' }));
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Copy prompt'));
+    });
+    expect(copySpy).toHaveBeenLastCalledWith(buildFullEnvelope('You are a log analyst.', 'Analyse these logs'));
   });
 });

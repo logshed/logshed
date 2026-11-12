@@ -49,6 +49,7 @@ import {
   fromLocalDatetimeInputString,
 } from '../../utils/formatters.ts';
 import { Modal } from '../common/Modal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { IncidentHistoryDetail } from './IncidentHistoryDetail.tsx';
 import { AlertRuleModal, AlertRulePrefill } from './AlertRuleModal.tsx';
@@ -1019,34 +1020,17 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       />
 
       {/* CONFIRM DELETE RULE MODAL */}
-      <Modal
+      <ConfirmDialog
         isOpen={ruleToDelete !== null}
-        onClose={() => setRuleToDelete(null)}
         title="Delete Alert Rule"
-        maxWidth="max-w-md"
+        onCancel={() => setRuleToDelete(null)}
+        onConfirm={handleConfirmDeleteRule}
+        confirmLabel="Delete Rule"
       >
-        <div className="space-y-4 text-xs">
-          <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to delete alert rule <strong className="text-white">"{ruleToDelete?.name}"</strong>?
-          </p>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setRuleToDelete(null)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmDeleteRule}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Delete Rule
-            </button>
-          </div>
-        </div>
-      </Modal>
+        <p className="text-slate-300 leading-relaxed">
+          Are you sure you want to delete alert rule <strong className="text-white">"{ruleToDelete?.name}"</strong>?
+        </p>
+      </ConfirmDialog>
 
       {/* HISTORICAL INCIDENT DETAIL MODAL */}
       {selectedHistoryItem && (
@@ -1086,73 +1070,39 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       />
 
       {/* CLEAR ALL HISTORY MODAL */}
-      <Modal
+      <ConfirmDialog
         isOpen={isClearHistoryModalOpen}
-        onClose={() => setIsClearHistoryModalOpen(false)}
         title="Clear All Alert History"
-        maxWidth="max-w-md"
+        onCancel={() => setIsClearHistoryModalOpen(false)}
+        onConfirm={handleClearAllHistory}
+        confirmLabel="Clear All History"
       >
-        <div className="space-y-4 text-xs">
-          <div className="flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <p className="text-slate-300 leading-relaxed">
-              Are you sure you want to permanently clear all alert and analysis history records? This action cannot be undone.
-            </p>
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+            <AlertTriangle className="w-5 h-5" />
           </div>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsClearHistoryModalOpen(false)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleClearAllHistory}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Clear All History
-            </button>
-          </div>
+          <p className="text-slate-300 leading-relaxed">
+            Are you sure you want to permanently clear all alert and analysis history records? This action cannot be undone.
+          </p>
         </div>
-      </Modal>
+      </ConfirmDialog>
 
       {/* CONFIRM DELETE SINGLE HISTORY RECORD MODAL */}
-      <Modal
+      <ConfirmDialog
         isOpen={historyItemToDelete !== null}
-        onClose={() => setHistoryItemToDelete(null)}
         title="Delete Incident Record"
-        maxWidth="max-w-md"
+        onCancel={() => setHistoryItemToDelete(null)}
+        onConfirm={() => {
+          if (historyItemToDelete) {
+            handleDeleteHistory(historyItemToDelete.id);
+          }
+        }}
+        confirmLabel="Delete Record"
       >
-        <div className="space-y-4 text-xs">
-          <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{formatLocalTimestamp(historyItemToDelete?.triggered_at, true, serverTimezone)}</span>? This action cannot be undone.
-          </p>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setHistoryItemToDelete(null)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (historyItemToDelete) {
-                  handleDeleteHistory(historyItemToDelete.id);
-                }
-              }}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Delete Record
-            </button>
-          </div>
-        </div>
-      </Modal>
+        <p className="text-slate-300 leading-relaxed">
+          Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{formatLocalTimestamp(historyItemToDelete?.triggered_at, true, serverTimezone)}</span>? This action cannot be undone.
+        </p>
+      </ConfirmDialog>
 
       {/* ADD / EDIT SCHEDULE MODAL */}
       <Modal
@@ -1330,64 +1280,31 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       </Modal>
 
       {/* DELETE SCHEDULE CONFIRMATION MODAL */}
-      <Modal
+      <ConfirmDialog
         isOpen={scheduleToDelete !== null}
-        onClose={() => setScheduleToDelete(null)}
         title="Delete Maintenance Schedule"
-        maxWidth="max-w-md"
+        onCancel={() => setScheduleToDelete(null)}
+        onConfirm={handleConfirmDeleteSchedule}
+        confirmLabel="Delete Schedule"
       >
-        <div className="space-y-4 text-xs">
-          <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to delete maintenance schedule <strong className="text-white">"{scheduleToDelete?.name}"</strong>?
-          </p>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setScheduleToDelete(null)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmDeleteSchedule}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Delete Schedule
-            </button>
-          </div>
-        </div>
-      </Modal>
+        <p className="text-slate-300 leading-relaxed">
+          Are you sure you want to delete maintenance schedule <strong className="text-white">"{scheduleToDelete?.name}"</strong>?
+        </p>
+      </ConfirmDialog>
 
       {/* CLEAR ALL MAINTENANCE SESSIONS CONFIRMATION MODAL */}
-      <Modal
+      <ConfirmDialog
         isOpen={isClearMaintenanceModalOpen}
-        onClose={() => setIsClearMaintenanceModalOpen(false)}
         title="Clear All Maintenance Sessions"
-        maxWidth="max-w-md"
+        onCancel={() => setIsClearMaintenanceModalOpen(false)}
+        onConfirm={handleConfirmClearMaintenance}
+        confirmLabel="Clear All Sessions"
+        confirmClassName="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
       >
-        <div className="space-y-4 text-xs">
-          <p className="text-slate-300 leading-relaxed">
-            Are you sure you want to terminate all active on-demand and API maintenance sessions? Alert notifications will immediately resume.
-          </p>
-          <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsClearMaintenanceModalOpen(false)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmClearMaintenance}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
-            >
-              Clear All Sessions
-            </button>
-          </div>
-        </div>
-      </Modal>
+        <p className="text-slate-300 leading-relaxed">
+          Are you sure you want to terminate all active on-demand and API maintenance sessions? Alert notifications will immediately resume.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 };

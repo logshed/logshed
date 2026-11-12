@@ -34,10 +34,11 @@ import { HostAliasManager } from '../aliases/HostAliasManager.tsx';
 import { AdvancedSettingsCard } from './AdvancedSettingsCard.tsx';
 import { ApiTokensTab } from './ApiTokensTab.tsx';
 import { DockerHostsTab } from './DockerHostsTab.tsx';
-import { Modal } from '../common/Modal.tsx';
+import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
+import { useFlash } from '../../utils/hooks.ts';
 
 
 export const pathToSettingsSubTab = (pathname: string): SettingsSubTab => {
@@ -213,7 +214,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const advancedDirtyRef = useRef<boolean>(false);
   const advancedSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const [pendingSubTab, setPendingSubTab] = useState<SettingsSubTab | null>(null);
-  const [isSavingSubTabModal, setIsSavingSubTabModal] = useState<boolean>(false);
   const activeSubTabRef = useRef<SettingsSubTab>(activeSubTab);
   activeSubTabRef.current = activeSubTab;
 
@@ -277,18 +277,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Save feedback state
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
-  const [saveInlineSuccess, setSaveInlineSuccess] = useState<boolean>(false);
+  // The "saved" mark, with a notice shown beside it when the save changed something else
+  const [savedFlash, flashSaved, setSavedFlash] = useFlash<{ notice: string | null }>(3000);
+  const saveInlineSuccess = savedFlash !== null;
+  const saveNotice = savedFlash?.notice ?? null;
   const [saveInlineError, setSaveInlineError] = useState<string | null>(null);
-  const [saveNotice, setSaveNotice] = useState<string | null>(null);
-  const saveSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (saveSuccessTimeoutRef.current) {
-        clearTimeout(saveSuccessTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Track dirty state against loaded baseline settings
   const baselineAiEnabled = settings
@@ -686,7 +679,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setIsSavingSettings(true);
       setErrorMsg(null);
       setSaveInlineError(null);
-      setSaveInlineSuccess(false);
+      setSavedFlash(null);
 
       if (digestEnabled && digestScheduleTime && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(digestScheduleTime.trim())) {
         const msg = 'Enter a valid 24-hour time for the daily digest schedule, e.g. 09:00 or 23:30.';
@@ -738,13 +731,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       loadVersionData(true);
 
       const keyCleared = Boolean(saveRes && saveRes.ai_api_key_cleared);
-      setSaveNotice(keyCleared ? 'API key cleared because the endpoint changed. Enter the key again if the new endpoint needs one.' : null);
-      setSaveInlineSuccess(true);
-      if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
-      saveSuccessTimeoutRef.current = setTimeout(() => {
-        setSaveInlineSuccess(false);
-        setSaveNotice(null);
-      }, keyCleared ? 10000 : 3000);
+      flashSaved(
+        {
+          notice: keyCleared
+            ? 'API key cleared because the endpoint changed. Enter the key again if the new endpoint needs one.'
+            : null,
+        },
+        keyCleared ? 10000 : 3000
+      );
       return true;
     } catch (err: any) {
       const msg = err.message || 'Failed to update settings.';
@@ -1712,69 +1706,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       )}
 
       {/* Unsaved Advanced edits: asked before another sub-tab replaces the Advanced tab */}
-      <Modal
+      <UnsavedChangesModal
         isOpen={pendingSubTab !== null}
-        onClose={() => setPendingSubTab(null)}
-        title="Unsaved Changes"
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              You have unsaved changes in Advanced System Settings. Switching tabs now will discard those edits.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-3 border-t border-dark-700">
-            <button
-              type="button"
-              onClick={() => setPendingSubTab(null)}
-              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 transition cursor-pointer"
-            >
-              Keep Editing
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const target = pendingSubTab;
-                setPendingSubTab(null);
-                if (target) commitSubTabChange(target);
-              }}
-              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/40 border border-red-800/60 transition cursor-pointer"
-            >
-              Discard &amp; Leave
-            </button>
-            <button
-              type="button"
-              disabled={isSavingSubTabModal}
-              onClick={async () => {
-                setIsSavingSubTabModal(true);
-                try {
-                  const saved = advancedSaveRef.current ? await advancedSaveRef.current() : true;
-                  if (saved) {
-                    const target = pendingSubTab;
-                    setPendingSubTab(null);
-                    if (target) commitSubTabChange(target);
-                  }
-                } finally {
-                  setIsSavingSubTabModal(false);
-                }
-              }}
-              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
-            >
-              {isSavingSubTabModal ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>Save &amp; Continue</span>
-            </button>
-          </div>
-        </div>
-      </Modal>
+        onKeepEditing={() => setPendingSubTab(null)}
+        onDiscard={() => {
+          const target = pendingSubTab;
+          setPendingSubTab(null);
+          if (target) commitSubTabChange(target);
+        }}
+        onSave={async () => {
+          const saved = advancedSaveRef.current ? await advancedSaveRef.current() : true;
+          if (saved) {
+            const target = pendingSubTab;
+            setPendingSubTab(null);
+            if (target) commitSubTabChange(target);
+          }
+        }}
+        message="You have unsaved changes in Advanced System Settings. Switching tabs now will discard those edits."
+        discardLabel="Discard & Leave"
+        zIndex="z-50"
+      />
     </div>
   );
 };

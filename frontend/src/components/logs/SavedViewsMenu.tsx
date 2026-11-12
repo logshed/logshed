@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bookmark, Pin, Plus, Trash2, ChevronDown, AlertTriangle, Pencil } from 'lucide-react';
+import { Bookmark, Pin, Plus, Trash2, ChevronDown, Pencil } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { Modal } from '../common/Modal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { isSavedViewNameTaken } from './useSavedViews.ts';
 import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
@@ -84,47 +85,26 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
 
   // Define deletion confirmation modal
   const deleteConfirmModal = viewToDelete && (
-    <Modal
+    <ConfirmDialog
       isOpen={!!viewToDelete}
-      onClose={() => setViewToDelete(null)}
       title="Delete Saved View"
-      maxWidth="max-w-md"
+      look="notice"
+      noticeClassName="space-y-1"
+      onCancel={() => setViewToDelete(null)}
+      onConfirm={(e) => {
+        onDeleteView(e, viewToDelete.id);
+        setViewToDelete(null);
+      }}
+      confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
+      confirmLabel="Delete View"
     >
-      <div className="space-y-4 text-xs font-sans">
-        <div className="flex items-start gap-3 p-3 bg-red-950/30 border border-red-800/60 rounded-lg text-slate-200">
-          <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-semibold text-slate-100 text-xs">
-              Delete &quot;{viewToDelete.name}&quot;?
-            </p>
-            <p className="text-slate-400 leading-relaxed">
-              This saved filter view will be removed. This action cannot be undone.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={() => setViewToDelete(null)}
-            className="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-600 rounded-lg transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              onDeleteView(e, viewToDelete.id);
-              setViewToDelete(null);
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow transition cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Delete View</span>
-          </button>
-        </div>
-      </div>
-    </Modal>
+      <p className="font-semibold text-slate-100 text-xs">
+        Delete &quot;{viewToDelete.name}&quot;?
+      </p>
+      <p className="text-slate-400 leading-relaxed">
+        This saved filter view will be removed. This action cannot be undone.
+      </p>
+    </ConfirmDialog>
   );
 
   // Desktop Dropdown Variant

@@ -1,8 +1,6 @@
 import React, { useEffect, useId, useState, useRef, useMemo } from 'react';
 import {
   Sparkles,
-  Copy,
-  Check,
   Shield,
   RefreshCw,
   AlertCircle,
@@ -23,7 +21,6 @@ import {
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
-import { useClipboard } from '../../utils/hooks.ts';
 import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, getOrdinalSuffix, aiModelOption } from '../../utils/aiPrompt.ts';
 import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { Modal } from '../common/Modal.tsx';
@@ -31,6 +28,7 @@ import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { AiFollowUpThread } from './AiFollowUpThread.tsx';
 import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { CopyButton } from '../common/CopyButton.tsx';
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
@@ -106,7 +104,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isFollowUpSending, setIsFollowUpSending] = useState<boolean>(false);
 
-  const { copied: copiedPrompt, copy: copyPrompt } = useClipboard();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
@@ -626,15 +623,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     return Math.max(1, Math.floor(promptText.length / 3.5) + Math.floor(currentSysLen / 3.5) + 50);
   }, [promptText, systemPrompt, preview]);
 
-  const handleCopyPrompt = async () => {
-    const textToCopy =
-      promptViewMode === 'full'
-        ? fullPromptText
-        : promptText;
-    if (textToCopy) {
-      await copyPrompt(textToCopy);
-    }
-  };
+  const promptToCopy = () => (promptViewMode === 'full' ? fullPromptText : promptText);
 
   return (
     <Modal
@@ -803,15 +792,11 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       <span>Reset Prompt</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={handleCopyPrompt}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                  <CopyButton
+                    text={promptToCopy}
+                    label="Copy Prompt"
                     title="Copy prompt"
-                  >
-                    {copiedPrompt ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedPrompt ? 'Copied' : 'Copy Prompt'}</span>
-                  </button>
+                  />
                 </div>
               </div>
               <textarea

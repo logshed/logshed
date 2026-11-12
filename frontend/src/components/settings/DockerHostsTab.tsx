@@ -28,6 +28,7 @@ import {
 } from '../../api/dockerHosts.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { Modal } from '../common/Modal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 import { HOST_ALIAS_MAX_LENGTH, NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 
@@ -953,44 +954,30 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
       </Modal>
 
       {/* Delete Confirmation Modal */}
-      <Modal
+      <ConfirmDialog
         isOpen={Boolean(hostToDelete)}
-        onClose={() => setHostToDelete(null)}
         title="Remove Docker Host"
-        maxWidth="max-w-md"
+        onCancel={() => setHostToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        cancelDisabled={isDeleting}
+        confirmDisabled={isDeleting}
+        confirmLabel={isDeleting ? 'Removing...' : 'Remove Host'}
+        bodyClassName="space-y-4"
+        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-dark-700"
+        cancelClassName="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition cursor-pointer"
+        confirmClassName="px-3.5 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer disabled:opacity-50"
       >
-        <div className="space-y-4">
-          <div className="p-3 rounded-lg border bg-amber-950/40 border-amber-800/80 text-amber-200 text-xs flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-amber-100">Confirm Removal</p>
-              <p className="mt-1 text-slate-300">
-                Are you sure you want to remove Docker host{' '}
-                <strong className="text-slate-100">{hostToDelete?.name}</strong>? Its active container collection task will stop immediately.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-700">
-            <button
-              type="button"
-              onClick={() => setHostToDelete(null)}
-              disabled={isDeleting}
-              className="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteConfirm}
-              disabled={isDeleting}
-              className="px-3.5 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer disabled:opacity-50"
-            >
-              {isDeleting ? 'Removing...' : 'Remove Host'}
-            </button>
+        <div className="p-3 rounded-lg border bg-amber-950/40 border-amber-800/80 text-amber-200 text-xs flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-amber-100">Confirm Removal</p>
+            <p className="mt-1 text-slate-300">
+              Are you sure you want to remove Docker host{' '}
+              <strong className="text-slate-100">{hostToDelete?.name}</strong>? Its active container collection task will stop immediately.
+            </p>
           </div>
         </div>
-      </Modal>
+      </ConfirmDialog>
 
       {/* Notice Modal when navigated to a Docker host that has been deleted */}
       {deletedHostNotice && (

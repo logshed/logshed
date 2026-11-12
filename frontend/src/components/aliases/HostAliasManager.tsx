@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Server, Plus, Trash2, Edit2, AlertCircle, AlertTriangle, Loader2, ScrollText } from 'lucide-react';
+import { Server, Plus, Trash2, Edit2, AlertCircle, Loader2, ScrollText } from 'lucide-react';
 import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { Modal } from '../common/Modal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
 
 interface HostAliasManagerProps {
@@ -396,56 +397,35 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
 
       {/* Delete Host Alias Confirmation Modal */}
       {deleteTargetIp && (
-        <Modal
+        <ConfirmDialog
           isOpen={!!deleteTargetIp}
-          onClose={() => setDeleteTargetIp(null)}
           title="Delete Host Alias"
-          maxWidth="max-w-md"
+          look="notice"
+          onCancel={() => setDeleteTargetIp(null)}
+          onConfirm={handleConfirmDelete}
+          confirmDisabled={isDeletingIp === deleteTargetIp}
+          confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
+          confirmLabel={isDeletingIp === deleteTargetIp ? 'Deleting...' : 'Delete Alias'}
+          confirmClassName="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <div className="space-y-4 text-xs font-sans">
-            <div className="flex items-start gap-3 p-3 bg-red-950/30 border border-red-800/60 rounded-lg text-slate-200">
-              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-              <div className="space-y-2 flex-1">
-                <p className="font-semibold text-slate-100 text-xs">
-                  Remove host alias mapping?
-                </p>
-                <p className="text-slate-400 leading-relaxed">
-                  Incoming logs from this IP address will no longer be assigned a friendly alias.
-                </p>
-                <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
-                  <div>
-                    <span className="text-slate-400">IP:</span> {deleteTargetIp}
-                  </div>
-                  {aliases.find((a) => a.ip === deleteTargetIp)?.alias && (
-                    <div>
-                      <span className="text-slate-400">Alias:</span>{' '}
-                      {aliases.find((a) => a.ip === deleteTargetIp)?.alias}
-                    </div>
-                  )}
-                </div>
+          <p className="font-semibold text-slate-100 text-xs">
+            Remove host alias mapping?
+          </p>
+          <p className="text-slate-400 leading-relaxed">
+            Incoming logs from this IP address will no longer be assigned a friendly alias.
+          </p>
+          <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+            <div>
+              <span className="text-slate-400">IP:</span> {deleteTargetIp}
+            </div>
+            {aliases.find((a) => a.ip === deleteTargetIp)?.alias && (
+              <div>
+                <span className="text-slate-400">Alias:</span>{' '}
+                {aliases.find((a) => a.ip === deleteTargetIp)?.alias}
               </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteTargetIp(null)}
-                className="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-600 rounded-lg transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isDeletingIp === deleteTargetIp}
-                onClick={handleConfirmDelete}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>{isDeletingIp === deleteTargetIp ? 'Deleting...' : 'Delete Alias'}</span>
-              </button>
-            </div>
+            )}
           </div>
-        </Modal>
+        </ConfirmDialog>
       )}
     </div>
   );

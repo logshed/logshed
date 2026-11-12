@@ -1,6 +1,6 @@
 import React from 'react';
-import { Check, Copy, FilterX, Inbox, Info } from 'lucide-react';
-import { useClipboard } from '../../utils/hooks.ts';
+import { FilterX, Inbox, Info } from 'lucide-react';
+import { CopyButton } from '../common/CopyButton.tsx';
 
 /** The syslog port LogShed uses when SYSLOG_PORT is not set. */
 export const DEFAULT_SYSLOG_PORT = 1514;
@@ -29,7 +29,6 @@ const FirstRunCard: React.FC<Pick<ConsoleEmptyStateProps, 'syslogPort' | 'onOpen
   syslogPort,
   onOpenSourcesSettings,
 }) => {
-  const { copied, copy } = useClipboard();
   const command = onboardingLoggerCommand(syslogPort);
   return (
     <div className="flex items-center justify-center min-h-full p-4">
@@ -46,15 +45,11 @@ const FirstRunCard: React.FC<Pick<ConsoleEmptyStateProps, 'syslogPort' | 'onOpen
         </p>
         <div className="flex items-center gap-2 bg-dark-950 border border-dark-700 rounded px-3 py-2">
           <code className="flex-1 min-w-0 font-mono text-[11px] text-slate-200 break-all">{command}</code>
-          <button
-            type="button"
-            onClick={() => copy(command)}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
+          <CopyButton
+            text={command}
             title="Copy command"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
+          />
         </div>
         {onOpenSourcesSettings && (
           <button

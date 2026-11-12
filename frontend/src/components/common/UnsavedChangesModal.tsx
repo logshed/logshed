@@ -1,12 +1,15 @@
-import React from 'react';
-import { AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { AlertCircle, RefreshCw, Save } from 'lucide-react';
 import { Modal } from './Modal.tsx';
 
 export interface UnsavedChangesModalProps {
   isOpen: boolean;
   onKeepEditing: () => void;
   onDiscard: () => void;
+  /** Adds a "Save & Continue" button; the caller saves, then moves on only if the save worked. */
+  onSave?: () => Promise<void>;
   message?: string;
+  discardLabel?: string;
   zIndex?: string;
 }
 
@@ -14,9 +17,23 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
   isOpen,
   onKeepEditing,
   onDiscard,
+  onSave,
   message = 'You have unsaved changes. Closing now will discard those edits.',
+  discardLabel = 'Discard Changes',
   zIndex = 'z-[60]',
 }) => {
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  const handleSave = async () => {
+    if (!onSave) return;
+    setIsSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -48,8 +65,23 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
             onClick={onDiscard}
             className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/40 border border-red-800/60 transition cursor-pointer"
           >
-            Discard Changes
+            {discardLabel}
           </button>
+          {onSave && (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSave}
+              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+            >
+              {isSaving ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              <span>Save &amp; Continue</span>
+            </button>
+          )}
         </div>
       </div>
     </Modal>

@@ -1,8 +1,9 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LogDetailModal } from '../components/logs/LogDetailModal.tsx';
 import { LogEntry } from '../types.ts';
 import * as logsApi from '../api/logs.ts';
+import * as clipboardModule from '../utils/clipboard.ts';
 
 describe('LogDetailModal Component (Items #8, #9, #11)', () => {
   const sampleLog: LogEntry = {
@@ -104,6 +105,22 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(screen.getByText('2026-10-25 01:59:59.000')).toBeInTheDocument();
     expect(screen.getByText('Received At (UTC+00:00)')).toBeInTheDocument();
     expect(screen.getByText('2026-10-25 01:00:01.000')).toBeInTheDocument();
+  });
+
+  it('copies the shown message and the raw record', async () => {
+    const copySpy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
+    render(<LogDetailModal log={sampleLog} isOpen={true} onClose={vi.fn()} onExplainWithAi={vi.fn()} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Copy message payload'));
+    });
+    expect(copySpy).toHaveBeenLastCalledWith('connection failed: 500 internal server error');
+    expect(screen.getByTitle('Copy message payload')).toHaveTextContent('Copied');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Copy raw log record'));
+    });
+    expect(copySpy).toHaveBeenLastCalledWith(sampleLog.raw);
   });
 
   it('renders "Add Host Alias" when isHostAliased is false', () => {
