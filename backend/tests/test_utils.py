@@ -195,6 +195,7 @@ class TestExpandSourceAliases:
         try:
             conn.execute("CREATE TABLE host_aliases (ip TEXT, alias TEXT)")
             conn.execute("CREATE TABLE docker_endpoints (name TEXT, source_alias TEXT, enabled INTEGER)")
+            conn.execute("CREATE TABLE system_settings (key TEXT, value TEXT)")
             conn.execute("INSERT INTO host_aliases VALUES ('192.168.1.50', 'Tower')")
             conn.execute("INSERT INTO docker_endpoints VALUES ('Tower', 'tower', 1)")
 
@@ -252,6 +253,25 @@ class TestFormerDockerAliases:
             conn.commit()
             assert "old-docker" not in load_docker_source_aliases(conn)
             assert self._filtered(conn) == ["container", "syslog"]
+        finally:
+            conn.close()
+
+    def test_docker_and_the_primary_alias_setting_are_docker_names_in_sql_too(self, tmp_path):
+        # A host once called "docker" (or named by the primary Docker alias setting) leaves rows
+        # under that name after it is deleted; no former alias records either name.
+        from app.core.utils import DOCKER_ALIASES_SQL, load_docker_source_aliases
+
+        conn = self._conn(tmp_path)
+        try:
+            conn.execute("DELETE FROM docker_endpoints")
+            conn.execute(
+                "INSERT INTO system_settings (key, value, updated_at, is_encrypted)"
+                " VALUES ('docker_source_alias', ' old-docker ', '', 0)"
+            )
+            conn.commit()
+            assert self._filtered(conn) == ["syslog"]
+            sql_names = {r[0] for r in conn.execute(DOCKER_ALIASES_SQL)}
+            assert sql_names == load_docker_source_aliases(conn) == {"docker", "old-docker"}
         finally:
             conn.close()
 

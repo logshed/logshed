@@ -216,14 +216,17 @@ def parse_multi_values(values: Optional[list[str]]) -> list[str]:
 # list is what keeps those hosts' old container logs classed as Docker.
 FORMER_DOCKER_ALIASES_KEY = "former_docker_aliases"
 
-# Every source_alias that marks a row as Docker output in SQL (for IN and NOT IN): the alias of
-# each Docker host and each former Docker alias. load_docker_source_aliases is the Python side.
-# Only text items of a JSON array are read, so a damaged setting can never put NULL into NOT IN.
+# Every source_alias that marks a row as Docker output: the alias of each Docker host (enabled or
+# not), the primary Docker alias setting, each former Docker alias and the built-in "docker". This
+# one statement is the definition: SQL uses it in IN and NOT IN, and load_docker_source_aliases runs
+# it. Only non-empty text is returned, so a damaged setting can never put NULL into NOT IN.
 DOCKER_ALIASES_SQL = (
-    "SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL"
-    " UNION SELECT value FROM json_each(COALESCE((SELECT value FROM system_settings"
+    "SELECT trim(source_alias) FROM docker_endpoints WHERE trim(source_alias) != ''"
+    " UNION SELECT trim(value) FROM system_settings WHERE key = 'docker_source_alias' AND trim(value) != ''"
+    " UNION SELECT trim(value) FROM json_each(COALESCE((SELECT value FROM system_settings"
     f" WHERE key = '{FORMER_DOCKER_ALIASES_KEY}' AND json_valid(value) AND json_type(value) = 'array'), '[]'))"
-    " WHERE type = 'text'"
+    " WHERE type = 'text' AND trim(value) != ''"
+    " UNION SELECT 'docker'"
 )
 
 
@@ -284,25 +287,17 @@ def note_docker_alias_change(conn: Any, old_alias: Optional[str], new_alias: Opt
 
 def load_docker_source_aliases(conn: Any) -> set[str]:
     """
-    Return the source_alias values that mark a log row as Docker container output: every
-    Docker host alias, the primary Docker alias setting, the former Docker aliases and "docker".
+    Return the source_alias values that mark a log row as Docker container output (the rows of
+    DOCKER_ALIASES_SQL): every Docker host alias, the primary Docker alias setting, the former
+    Docker aliases and "docker".
 
     Syslog and Docker rows from the same machine share a source_ip, so this set is what
     keeps them apart. Matching is exact (as in SQL `IN`), never case-insensitive.
     """
-    aliases = {"docker"}
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT source_alias FROM docker_endpoints WHERE source_alias IS NOT NULL")
-        aliases.update(str(r[0]).strip() for r in cursor.fetchall() if r[0] and str(r[0]).strip())
-        cursor.execute("SELECT value FROM system_settings WHERE key = 'docker_source_alias'")
-        row = cursor.fetchone()
-        if row and row[0] and str(row[0]).strip():
-            aliases.add(str(row[0]).strip())
+        return {"docker"} | {str(r[0]) for r in conn.execute(DOCKER_ALIASES_SQL).fetchall() if r[0]}
     except Exception:
-        pass
-    aliases.update(load_former_docker_aliases(conn))
-    return aliases
+        return {"docker"}
 
 
 def expand_source_aliases(
