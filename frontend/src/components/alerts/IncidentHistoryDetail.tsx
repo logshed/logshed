@@ -27,6 +27,7 @@ import {
 } from '../../utils/maintenanceHistory.ts';
 import { cleanIsoString, formatLocalTimestamp } from '../../utils/formatters.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
+import { TokenUsage } from '../ai/TokenUsage.tsx';
 
 const CONSOLE_MARGIN_MS = 60 * 1000;
 
@@ -303,21 +304,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               <span className="text-slate-300">
                 Total: <span className="text-slate-100 font-semibold">{item.tokens_used.toLocaleString()}</span>
               </span>
-              {item.tokens_in !== undefined && item.tokens_in !== null && (
-                <span className="bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 px-1.5 py-0.5 rounded">
-                  ↓ {item.tokens_in.toLocaleString()} in
-                </span>
-              )}
-              {item.tokens_out !== undefined && item.tokens_out !== null && (
-                <span className="bg-sky-950/60 border border-sky-800/80 text-sky-300 px-1.5 py-0.5 rounded">
-                  ↑ {item.tokens_out.toLocaleString()} out
-                </span>
-              )}
-              {Boolean(item.tokens_thoughts) && (
-                <span className="bg-purple-950/60 border border-purple-800/80 text-purple-300 px-1.5 py-0.5 rounded">
-                  ⚡ {item.tokens_thoughts!.toLocaleString()} thinking
-                </span>
-              )}
+              <TokenUsage tokensIn={item.tokens_in} tokensOut={item.tokens_out} tokensThoughts={item.tokens_thoughts} />
             </div>
           </div>
         )}

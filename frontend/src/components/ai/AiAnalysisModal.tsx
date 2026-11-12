@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useId, useState, useRef } from 'react';
 import {
   Sparkles,
   Shield,
@@ -17,7 +17,7 @@ import {
 import { LogEntry, AiPreviewResponse, AiDiagnosisResponse, AiModelInfo } from '../../types.ts';
 import { previewAiPrompt, diagnoseLogs, getAiModels, isAbortError } from '../../api/ai.ts';
 import { fetchSettings, getCachedServerTimezone, getCachedServerTzOffset } from '../../api/settings.ts';
-import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, DEFAULT_SYSTEM_PROMPT, buildFullEnvelope, parseFullEnvelope, normalizePrompt, aiModelOption } from '../../utils/aiPrompt.ts';
+import { DEFAULT_AI_MODEL, DEFAULT_PROVIDER_MODELS, aiModelOption } from '../../utils/aiPrompt.ts';
 import { DEFAULT_AI_PROVIDER, aiProviderOptions, getAiProvider, providerNeedsApiKey } from '../../utils/aiProviders.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
@@ -27,6 +27,8 @@ import { AI_USER_CONTEXT_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
 import { ModelChainEditor } from './ModelChainEditor.tsx';
 import { parseFallbackModels, promoteFirstFallback } from '../../utils/modelChain.ts';
+import { usePromptPreview } from './usePromptPreview.ts';
+import { TokenUsage } from './TokenUsage.tsx';
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
@@ -53,16 +55,26 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   onNavigateToSettings,
 }) => {
   const fieldId = useId();
-  const [preview, setPreview] = useState<AiPreviewResponse | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  const [promptText, setPromptText] = useState<string>('');
-  const [systemPrompt, setSystemPrompt] = useState<string>(DEFAULT_SYSTEM_PROMPT);
-  const [fullPromptText, setFullPromptText] = useState<string>('');
-  const [promptViewMode, setPromptViewMode] = useState<'analysis' | 'full'>('analysis');
-
-  const [userContext, setUserContext] = useState<string>('');
+  const prompt = usePromptPreview();
+  const {
+    preview,
+    isLoadingPreview,
+    setIsLoadingPreview,
+    previewError,
+    setPreviewError,
+    promptText,
+    systemPrompt,
+    fullPromptText,
+    promptViewMode,
+    userContext,
+    maskedValueCount,
+    isModified,
+    estimatedTokens,
+    handleUserContextChange,
+    handlePromptChange,
+    handleResetPrompt,
+    promptToCopy,
+  } = prompt;
   const [provider, setProvider] = useState<string>(DEFAULT_AI_PROVIDER);
   const [model, setModel] = useState<string>(DEFAULT_AI_MODEL);
   const [fallbackModels, setFallbackModels] = useState<string>('');
@@ -129,44 +141,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     if (analysisResult) contentRef.current?.scrollIntoView?.({ block: 'start' });
   }, [analysisResult]);
 
-  const buildCombinedPrompt = (basePrompt: string, ctx: string) => {
-    if (!ctx.trim()) return basePrompt;
-    const parts = basePrompt.split('### Redacted Log Stream');
-    if (parts.length === 2) {
-      return `${parts[0]}### Situational Context from Operator\n${ctx.trim()}\n\n### Redacted Log Stream${parts[1]}`;
-    }
-    return `${basePrompt}\n\n### Situational Context from Operator\n${ctx.trim()}`;
-  };
-
-  const defaultPrompt = useMemo(() => {
-    if (!preview) return '';
-    return buildCombinedPrompt(preview.redacted_prompt, userContext);
-  }, [preview, userContext]);
-
-  // Counted on the server's redacted prompt, not on the editable text, so edits cannot change it
-  const maskedValueCount = useMemo(
-    () => (preview ? preview.redacted_prompt.split('[REDACTED]').length - 1 : 0),
-    [preview]
-  );
-
-  const defaultFullPrompt = useMemo(() => {
-    if (!preview) return '';
-    return buildFullEnvelope(preview.system_prompt || DEFAULT_SYSTEM_PROMPT, defaultPrompt);
-  }, [preview, defaultPrompt]);
-
-  const hasEditedPrompt = Boolean(
-    preview && normalizePrompt(promptText) !== normalizePrompt(defaultPrompt)
-  );
-  const hasEditedSystem = Boolean(
-    preview &&
-      normalizePrompt(systemPrompt) !==
-        normalizePrompt(preview.system_prompt || DEFAULT_SYSTEM_PROMPT)
-  );
-  const hasEditedFull = Boolean(
-    preview && normalizePrompt(fullPromptText) !== normalizePrompt(defaultFullPrompt)
-  );
-  const isModified = promptViewMode === 'full' ? hasEditedFull : (hasEditedPrompt || hasEditedSystem);
-
   const handleGoToSettings = () => {
     onClose();
     if (onNavigateToSettings) {
@@ -187,17 +161,10 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     if (isOpen && selectedLogs.length > 0) {
       loadPreview();
     } else {
-      setIsLoadingPreview(false);
+      prompt.reset();
       setIsFollowUpSending(false);
-      setPreview(null);
       setAnalysisResult(null);
-      setPreviewError(null);
       setAnalysisError(null);
-      setUserContext('');
-      setPromptText('');
-      setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
-      setFullPromptText('');
-      setPromptViewMode('analysis');
       setFallbackModels('');
       setStreamProgress({ stage: 'init', failovers: [] });
       setElapsedSeconds(0);
@@ -280,7 +247,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       ]);
       if (isStale()) return;
 
-      setPreview(res);
+      prompt.applyPreview(res);
       const activeP = res.provider || DEFAULT_AI_PROVIDER;
       setProvider(activeP);
 
@@ -318,12 +285,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       };
 
       setProviderConfigs(configs);
-
-      const initialSys = res.system_prompt || DEFAULT_SYSTEM_PROMPT;
-      setSystemPrompt(initialSys);
-      const initialUser = buildCombinedPrompt(res.redacted_prompt, userContext);
-      setPromptText(initialUser);
-      setFullPromptText(buildFullEnvelope(initialSys, initialUser));
       loadModels(activeP, res);
     } catch (err: any) {
       if (isStale() || isAbortError(err)) return;
@@ -420,36 +381,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   };
 
 
-  const handleUserContextChange = (newContext: string) => {
-    const prevDefault = buildCombinedPrompt(preview?.redacted_prompt || '', userContext);
-    setUserContext(newContext);
-    const newDefault = buildCombinedPrompt(preview?.redacted_prompt || '', newContext);
-    // If promptText currently matches previous default, keep it in sync with newContext
-    if (preview && normalizePrompt(promptText) === normalizePrompt(prevDefault)) {
-      setPromptText(newDefault);
-      if (normalizePrompt(fullPromptText) === normalizePrompt(buildFullEnvelope(systemPrompt, prevDefault))) {
-        setFullPromptText(buildFullEnvelope(systemPrompt, newDefault));
-      }
-    }
-  };
-
-  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (promptViewMode === 'full') {
-      setFullPromptText(e.target.value);
-    } else {
-      setPromptText(e.target.value);
-    }
-  };
-
-  const handleResetPrompt = () => {
-    if (preview) {
-      setPromptText(defaultPrompt);
-      const defaultSys = preview.system_prompt || DEFAULT_SYSTEM_PROMPT;
-      setSystemPrompt(defaultSys);
-      setFullPromptText(buildFullEnvelope(defaultSys, defaultPrompt));
-    }
-  };
-
   const handleRunAnalysis = async () => {
     const validLogIds = selectedLogs
       .map((l) => l.id)
@@ -497,28 +428,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         failovers: [],
       });
 
-      let promptOverride: string | undefined = undefined;
-      let systemPromptOverride: string | undefined = undefined;
-
-      if (promptViewMode === 'full') {
-        if (hasEditedFull) {
-          const parsed = parseFullEnvelope(fullPromptText, systemPrompt);
-          const defaultSys = preview?.system_prompt || DEFAULT_SYSTEM_PROMPT;
-          if (normalizePrompt(parsed.userPrompt) !== normalizePrompt(defaultPrompt)) {
-            promptOverride = parsed.userPrompt.trim();
-          }
-          if (normalizePrompt(parsed.systemPrompt) !== normalizePrompt(defaultSys)) {
-            systemPromptOverride = parsed.systemPrompt.trim();
-          }
-        }
-      } else {
-        if (hasEditedPrompt) {
-          promptOverride = promptText.trim();
-        }
-        if (hasEditedSystem) {
-          systemPromptOverride = systemPrompt.trim();
-        }
-      }
+      const { promptOverride, systemPromptOverride } = prompt.buildOverrides();
 
       const client_timezone = getCachedServerTimezone() || Intl.DateTimeFormat().resolvedOptions().timeZone;
       const client_utc_offset_minutes = getCachedServerTzOffset() ?? -new Date().getTimezoneOffset();
@@ -582,16 +492,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
       }
     }
   };
-
-  const estimatedTokens = useMemo(() => {
-    if (!promptText) {
-      return preview ? preview.estimated_tokens : 0;
-    }
-    const currentSysLen = systemPrompt.length;
-    return Math.max(1, Math.floor(promptText.length / 3.5) + Math.floor(currentSysLen / 3.5) + 50);
-  }, [promptText, systemPrompt, preview]);
-
-  const promptToCopy = () => (promptViewMode === 'full' ? fullPromptText : promptText);
 
   return (
     <Modal
@@ -714,14 +614,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   <div className="flex items-center bg-dark-950 border border-dark-700 rounded p-0.5 text-[10px] font-mono">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (promptViewMode === 'full') {
-                          const parsed = parseFullEnvelope(fullPromptText, systemPrompt);
-                          setSystemPrompt(parsed.systemPrompt);
-                          setPromptText(parsed.userPrompt);
-                          setPromptViewMode('analysis');
-                        }
-                      }}
+                      onClick={prompt.showAnalysisView}
                       className={`px-2 py-0.5 rounded transition cursor-pointer ${
                         promptViewMode === 'analysis'
                           ? 'bg-accent-700 text-white font-medium shadow-xs'
@@ -732,12 +625,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (promptViewMode !== 'full') {
-                          setFullPromptText(buildFullEnvelope(systemPrompt, promptText));
-                          setPromptViewMode('full');
-                        }
-                      }}
+                      onClick={prompt.showFullView}
                       className={`px-2 py-0.5 rounded transition cursor-pointer ${
                         promptViewMode === 'full'
                           ? 'bg-accent-700 text-white font-medium shadow-xs'
@@ -1108,21 +996,11 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                   Total Tokens: <span className="text-slate-100 font-semibold">{analysisResult.tokens_used.toLocaleString()}</span>
                 </span>
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                  {analysisResult.tokens_in !== undefined && (
-                    <span className="bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 px-1.5 py-0.5 rounded">
-                      ↓ {analysisResult.tokens_in.toLocaleString()} in
-                    </span>
-                  )}
-                  {analysisResult.tokens_out !== undefined && (
-                    <span className="bg-sky-950/60 border border-sky-800/80 text-sky-300 px-1.5 py-0.5 rounded">
-                      ↑ {analysisResult.tokens_out.toLocaleString()} out
-                    </span>
-                  )}
-                  {Boolean(analysisResult.tokens_thoughts) && (
-                    <span className="bg-purple-950/60 border border-purple-800/80 text-purple-300 px-1.5 py-0.5 rounded">
-                      ⚡ {analysisResult.tokens_thoughts!.toLocaleString()} thinking
-                    </span>
-                  )}
+                  <TokenUsage
+                    tokensIn={analysisResult.tokens_in}
+                    tokensOut={analysisResult.tokens_out}
+                    tokensThoughts={analysisResult.tokens_thoughts}
+                  />
                 </div>
               </div>
             </div>
