@@ -159,12 +159,8 @@ describe('LogSearchBar Component (Items #6, #22, #31)', () => {
 
     // Select pve-node1
     fireEvent.click(screen.getByText('pve-node1'));
-    expect(handleFilterChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sources: ['pve-node1'],
-        source: 'pve-node1',
-      })
-    );
+    expect(handleFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sources: ['pve-node1'] }));
+    expect(handleFilterChange.mock.calls[0][0]).not.toHaveProperty('source');
   });
 
   it('does not display count indicator when no filters are active', async () => {
@@ -730,7 +726,9 @@ describe('LogSearchBar filter controls name what they show', () => {
     expect(screen.getByRole('button', { name: 'App / Container: nginx' })).not.toContainElement(appClear);
 
     fireEvent.click(hostClear);
-    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sources: [], source: undefined }));
+    // The single form a saved view may carry goes too, or it would keep filtering
+    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sources: [] }));
+    expect(onFilterChange.mock.calls[0][0]).not.toHaveProperty('source');
     // Clearing does not open the list
     expect(hostTrigger).toHaveAttribute('aria-expanded', 'false');
   });

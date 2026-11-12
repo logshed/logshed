@@ -3,12 +3,9 @@ import { Sparkles, CheckSquare, Square } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 
-export interface ProcessedLogEntry extends LogEntry {
-  /** source_alias as stored, before prepareLogEntry shows a syslog host alias in its place. */
-  storedSourceAlias?: string;
-  formattedTimestamp: string;
-  cleanedMessage: string;
-}
+import type { ProcessedLogEntry } from '../../utils/logEntry.ts';
+
+export type { ProcessedLogEntry };
 
 // Desktop column layout, shared by the table header and every row so they stay aligned.
 // Without AI the last (row actions) column is dropped.

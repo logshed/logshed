@@ -3,7 +3,7 @@ import type {
   LogEntry, LogFacetsResponse, AiDiagnosisRequest, AiDiagnosisResponse, AiConversationMessage,
   AiDiagnosisStreamEvent, AiFollowUpStreamEvent, AlertRule, MaintenanceSchedule,
 } from '../types.ts';
-import { matchesSearchQuery } from '../components/logs/LiveLogStream.tsx';
+import { matchesSearchQuery } from '../utils/searchQuery.ts';
 import { makeHistory, makeLog } from './generator.ts';
 import * as store from './store.ts';
 import { FOLLOW_UPS, pickDiagnosis } from './aiAnswers.ts';

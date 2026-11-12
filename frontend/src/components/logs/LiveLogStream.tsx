@@ -1,585 +1,54 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import {
-  Play,
-  Pause,
-  Sparkles,
-  CheckSquare,
-  Square,
-  ArrowUp,
-  Trash2,
-  Info,
-  Clock,
-  Loader2,
-  AlertCircle,
-  Server,
-  Box,
-  Copy,
-  Check,
-  FilterX,
-  Inbox,
-  Bookmark,
-} from 'lucide-react';
-import { LogEntry, LogFilterParams, DockerEndpoint } from '../../types.ts';
+import { CheckSquare, Square, ArrowUp, Loader2, AlertCircle } from 'lucide-react';
+import { LogEntry, LogFacetsResponse, LogFilterParams } from '../../types.ts';
 import { LogSearchBar } from './LogSearchBar.tsx';
 import { useSavedViews, findActiveView } from './useSavedViews.ts';
 import { LogDetailModal } from './LogDetailModal.tsx';
-import { fetchLogs, fetchLogFacets, deleteLogs } from '../../api/logs.ts';
+import { deleteLogs } from '../../api/logs.ts';
 import { getAuthStatus } from '../../api/auth.ts';
-import { fetchAliases } from '../../api/aliases.ts';
-import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { fetchSettings, getCachedServerTimezone } from '../../api/settings.ts';
-import { useMediaQuery, useClipboard } from '../../utils/hooks.ts';
-import { cleanLogMessageForDisplay, formatStreamTimestamp, getTodayKey } from '../../utils/formatters.ts';
+import { useMediaQuery } from '../../utils/hooks.ts';
+import { cleanLogMessageForDisplay } from '../../utils/formatters.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
+import { ProcessedLogEntry } from '../../utils/logEntry.ts';
+import { CompiledSearchQuery, compileSearchQuery, matchesSearchQuery } from '../../utils/searchQuery.ts';
+import {
+  appFilterList,
+  hasActiveLogFilters,
+  hostFilterList,
+  parseFiltersFromUrl,
+  parseFocusLogIdFromUrl,
+  removeFocusFromUrl,
+  renameFilterHosts,
+  syncFiltersToUrl,
+  toggleListValue,
+  withApps,
+  withHostAppLists,
+  withHosts,
+} from '../../utils/filters.ts';
 import {
   LogRow,
-  ProcessedLogEntry,
   logGridCols,
   logRowId,
   DESKTOP_LOG_ROW_HEIGHT,
   MOBILE_LOG_ROW_HEIGHT,
 } from './LogRow.tsx';
 import { setAlertRuleHandoff } from '../../utils/alertRuleHandoff.ts';
-import { Modal } from '../common/Modal.tsx';
-import { useAlias } from '../../context/AliasContext.tsx';
+import { SCROLLBACK_BUFFER_SIZE, useLogBuffer } from './useLogBuffer.ts';
+import { SELECT_ALL_LIMIT, useLogSelection } from './useLogSelection.ts';
+import { SourcesChange, useSourcesConfig } from './useSourcesConfig.ts';
+import { useLogFacets } from './useLogFacets.ts';
+import { useQuickFilterChips } from './useQuickFilterChips.ts';
+import { StreamToolbar } from './StreamToolbar.tsx';
+import { SelectionActionBar } from './SelectionActionBar.tsx';
+import { DeleteSelectedDialog } from './DeleteSelectedDialog.tsx';
+import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
 
 // Loaded on first use, not with the Console
 const CreateDropRuleModal = React.lazy(() =>
   import('../alerts/CreateDropRuleModal.tsx').then((m) => ({ default: m.CreateDropRuleModal }))
 );
-
-export function parseFiltersFromUrl(): LogFilterParams {
-  if (typeof window === 'undefined') return {};
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const initial: LogFilterParams = {};
-
-    const q = params.get('q');
-    if (q) initial.query = q;
-
-    const severity = params.get('severity');
-    if (severity !== null && severity !== '') {
-      const parsedSev = parseInt(severity, 10);
-      if (!isNaN(parsedSev) && parsedSev >= 0 && parsedSev <= 7) {
-        initial.severity_max = parsedSev;
-      }
-    }
-
-    const app = params.get('app');
-    if (app) {
-      const apps = app.split(',').map((s) => s.trim()).filter(Boolean);
-      if (apps.length > 1) {
-        initial.apps = apps;
-      } else if (apps.length === 1) {
-        initial.apps = [apps[0]];
-        initial.app_name = apps[0];
-      }
-    }
-
-    const source = params.get('source');
-    if (source) {
-      const sources = source.split(',').map((s) => s.trim()).filter(Boolean);
-      if (sources.length > 1) {
-        initial.sources = sources;
-      } else if (sources.length === 1) {
-        initial.sources = [sources[0]];
-        initial.source = sources[0];
-      }
-    }
-
-    const time = params.get('time');
-    if (time) {
-      initial.from = time;
-    }
-
-    // End of an absolute range, same format as `time`; with both set the Console opens in custom-time mode
-    const to = params.get('to');
-    if (to) {
-      initial.to = to;
-    }
-
-    return initial;
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Id of the log to scroll to and highlight, from the `focus` URL parameter (alert links set it to the
- * log that triggered the alert). It is not a filter, so it never reaches the API or a saved view.
- */
-export function parseFocusLogIdFromUrl(): number | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = new URLSearchParams(window.location.search).get('focus');
-    if (!raw || !/^\d+$/.test(raw)) return null;
-    const id = parseInt(raw, 10);
-    return id > 0 ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-function removeFocusFromUrl() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('focus')) return;
-    params.delete('focus');
-    const query = params.toString();
-    window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
-  } catch {
-    // Ignore URL manipulation failures in restricted environments
-  }
-}
-
-export function syncFiltersToUrl(filters: LogFilterParams) {
-  if (typeof window === 'undefined') return;
-  try {
-    const params = new URLSearchParams(window.location.search);
-
-    if (filters.query?.trim()) {
-      params.set('q', filters.query.trim());
-    } else {
-      params.delete('q');
-    }
-
-    if (filters.severity_max !== undefined && filters.severity_max !== null) {
-      params.set('severity', String(filters.severity_max));
-    } else {
-      params.delete('severity');
-    }
-
-    const apps = (filters.apps && filters.apps.length > 0)
-      ? filters.apps
-      : (filters.app_name ? (Array.isArray(filters.app_name) ? filters.app_name : [filters.app_name]) : []);
-    if (apps.length > 0) {
-      params.set('app', apps.join(','));
-    } else {
-      params.delete('app');
-    }
-
-    const sources = (filters.sources && filters.sources.length > 0)
-      ? filters.sources
-      : (filters.source ? (Array.isArray(filters.source) ? filters.source : [filters.source]) : []);
-    if (sources.length > 0) {
-      params.set('source', sources.join(','));
-    } else {
-      params.delete('source');
-    }
-
-    if (filters.from) {
-      params.set('time', filters.from);
-    } else {
-      params.delete('time');
-    }
-
-    if (filters.to) {
-      params.set('to', filters.to);
-    } else {
-      params.delete('to');
-    }
-
-    const newQuery = params.toString();
-    const newUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
-    if (window.location.search !== (newQuery ? `?${newQuery}` : '')) {
-      window.history.replaceState(null, '', newUrl);
-    }
-  } catch {
-    // Ignore URL manipulation failures in restricted environments
-  }
-}
-
-/**
- * Every source_alias that marks a row as Docker output: the configured Docker hosts' aliases and
- * the former ones of deleted or renamed hosts (their old container logs keep them).
- */
-export function buildDockerAliasSet(endpoints: DockerEndpoint[], formerAliases: string[]): Set<string> {
-  const s = new Set<string>(formerAliases);
-  endpoints.forEach((ep) => {
-    if (ep.source_alias) s.add(ep.source_alias);
-  });
-  return s;
-}
-
-/**
- * Give rows whose stored alias turns out to be a Docker alias that alias back. Rows prepared
- * before the Docker hosts and former Docker aliases were loaded may show the syslog alias of
- * their address instead. Returns the same array when nothing changes.
- */
-export function restoreDockerAliases(
-  logs: ProcessedLogEntry[],
-  dockerAliases: Set<string>
-): ProcessedLogEntry[] {
-  let changed = false;
-  const next = logs.map((log) => {
-    const stored = log.storedSourceAlias;
-    if (!stored || log.source_alias === stored || !dockerAliases.has(stored)) return log;
-    changed = true;
-    return { ...log, source_alias: stored };
-  });
-  return changed ? next : logs;
-}
-
-/**
- * Prepare the rows already shown again with a newly loaded alias map and Docker aliases, for rows
- * that arrived before the alias list did. Returns the same array when no row's host changes.
- */
-export function reapplyAliases(
-  logs: ProcessedLogEntry[],
-  aliases: Record<string, string>,
-  dockerAliases: Set<string>
-): ProcessedLogEntry[] {
-  let changed = false;
-  const next = logs.map((log) => {
-    const prepared = prepareLogEntry(log, aliases, undefined, dockerAliases);
-    if (prepared.source_alias === log.source_alias) return log;
-    changed = true;
-    return prepared;
-  });
-  return changed ? next : logs;
-}
-
-export function prepareLogEntry(
-  entry: LogEntry | ProcessedLogEntry,
-  aliases?: Record<string, string>,
-  timeZone?: string,
-  dockerAliases?: Set<string>,
-  todayKey?: string,
-): ProcessedLogEntry {
-  const existing = entry as Partial<ProcessedLogEntry>;
-  const storedSourceAlias = existing.storedSourceAlias ?? entry.source_alias;
-  const isDocker =
-    entry.source_ip === 'docker' ||
-    Boolean(
-      dockerAliases && storedSourceAlias && dockerAliases.has(storedSourceAlias)
-    );
-
-  const canonical =
-    !isDocker &&
-    aliases &&
-    ((storedSourceAlias && aliases[storedSourceAlias]) ||
-      (entry.source_ip && aliases[entry.source_ip]));
-  const source_alias = canonical || storedSourceAlias;
-
-  return {
-    ...entry,
-    source_alias,
-    storedSourceAlias,
-    formattedTimestamp:
-      existing.formattedTimestamp ??
-      formatStreamTimestamp(entry.timestamp, entry.received_at, timeZone, todayKey),
-    cleanedMessage: existing.cleanedMessage ?? cleanLogMessageForDisplay(entry.message),
-  };
-}
-
-/** Recomputes every row's display timestamp, for a new time zone or after midnight. */
-function reformatTimestamps(
-  logs: ProcessedLogEntry[],
-  timeZone: string | undefined,
-  todayKey: string,
-): ProcessedLogEntry[] {
-  return logs.map((l) => ({
-    ...l,
-    formattedTimestamp: formatStreamTimestamp(l.timestamp, l.received_at, timeZone, todayKey),
-  }));
-}
-
-
-/** A search query as an expression: terms joined by AND, OR and NOT (`a NOT b` is a and not b). */
-export type SearchNode =
-  | { op: 'term'; term: string }
-  | { op: 'and' | 'or' | 'not'; left: SearchNode; right: SearchNode };
-
-export interface CompiledSearchQuery {
-  /** Trimmed query, lower-cased */
-  lowered: string;
-  /** Words, phrases and column filters, without boolean keywords or brackets */
-  terms: string[];
-  /** The query as an expression, or null when its operators are incomplete (every term must match) */
-  expr: SearchNode | null;
-  /** True when the query uses AND, OR or NOT */
-  hasOperators: boolean;
-}
-
-const SEARCH_OPERATORS = new Set(['and', 'or', 'not']);
-const SEARCH_COLUMNS = new Set(['app_name', 'app', 'source_alias', 'source', 'host', 'message', 'msg']);
-// The same tokens format_fts_query (backend/app/core/utils.py) reads: phrases, column filters, brackets, words
-const SEARCH_TOKEN_RE = /("[^"]*"|'[^']*'|[a-z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)/g;
-
-const isSearchOperator = (token: string | undefined) => token !== undefined && SEARCH_OPERATORS.has(token);
-
-/**
- * True when history search would run the query as an expression. Like format_fts_query, it refuses
- * unbalanced quotes or brackets, an operator at either end, next to another or beside a bracket,
- * empty brackets, a term touching a bracket without an operator, and an empty column filter.
- */
-function isValidSearchExpression(lowered: string, tokens: string[]): boolean {
-  if (lowered.startsWith('*')) return false;
-  if ((lowered.split('"').length - 1) % 2 !== 0 || (lowered.split("'").length - 1) % 2 !== 0) return false;
-  let depth = 0;
-  for (const char of lowered) {
-    if (char === '(') depth++;
-    else if (char === ')' && --depth < 0) return false;
-  }
-  if (depth !== 0) return false;
-
-  const words = tokens.filter((t) => t !== '(' && t !== ')');
-  if (words.length === 0 || isSearchOperator(words[0]) || isSearchOperator(words[words.length - 1])) return false;
-  for (const word of words) {
-    const colon = word.indexOf(':');
-    if (colon > 0 && !word.startsWith('"') && !word.startsWith("'") && SEARCH_COLUMNS.has(word.slice(0, colon))) {
-      const val = word.slice(colon + 1);
-      if (!val || val === '*') return false;
-    }
-  }
-  for (let i = 0; i < tokens.length - 1; i++) {
-    const [t1, t2] = [tokens[i], tokens[i + 1]];
-    if (isSearchOperator(t1) && isSearchOperator(t2)) return false;
-    if (t1 === '(' && (isSearchOperator(t2) || t2 === ')')) return false;
-    if (isSearchOperator(t1) && t2 === ')') return false;
-    if (t2 === '(' && !isSearchOperator(t1) && t1 !== '(') return false;
-    if (t1 === ')' && !isSearchOperator(t2) && t2 !== ')') return false;
-  }
-  return true;
-}
-
-/**
- * Parses validated tokens with the FTS5 precedence history search uses, tightest first: terms side
- * by side (an implicit AND), then NOT, then AND, then OR, each grouping left to right.
- */
-function parseSearchTokens(tokens: string[]): SearchNode {
-  let pos = 0;
-  const parsePrimary = (): SearchNode => {
-    if (tokens[pos] === '(') {
-      pos++;
-      const inner = parseOr();
-      pos++; // the closing bracket
-      return inner;
-    }
-    return { op: 'term', term: tokens[pos++] };
-  };
-  const parseAdjacent = (): SearchNode => {
-    let node = parsePrimary();
-    while (pos < tokens.length && tokens[pos] !== ')' && !isSearchOperator(tokens[pos])) {
-      node = { op: 'and', left: node, right: parsePrimary() };
-    }
-    return node;
-  };
-  const parseBinary = (op: 'not' | 'and' | 'or', next: () => SearchNode) => (): SearchNode => {
-    let node = next();
-    while (tokens[pos] === op) {
-      pos++;
-      node = { op, left: node, right: next() };
-    }
-    return node;
-  };
-  const parseNot = parseBinary('not', parseAdjacent);
-  const parseAnd = parseBinary('and', parseNot);
-  const parseOr: () => SearchNode = parseBinary('or', parseAnd);
-  return parseOr();
-}
-
-/** Splits a search query once, so each incoming live log is matched without re-parsing it. */
-export function compileSearchQuery(query?: string): CompiledSearchQuery {
-  const lowered = (query || '').trim().toLowerCase();
-  const tokens = lowered.match(SEARCH_TOKEN_RE) || [];
-  const terms = tokens.filter((t) => t !== '(' && t !== ')' && !isSearchOperator(t));
-  const hasOperators = tokens.some(isSearchOperator);
-  const expr = lowered && isValidSearchExpression(lowered, tokens) ? parseSearchTokens(tokens) : null;
-  return { lowered, terms, expr, hasOperators };
-}
-
-// Word characters as the FTS5 unicode61 tokenizer of history search reads them: letters, digits and
-// private use characters; everything else separates words, and accents are folded away
-const SEARCH_WORD_RE = /[\p{L}\p{N}\p{Co}]+/gu;
-const COMBINING_MARKS_RE = /\p{M}+/gu;
-
-/** The words of a text as history search indexes them: lower-cased, accents removed. */
-export function searchWords(text: string): string[] {
-  return text.toLowerCase().normalize('NFD').replace(COMBINING_MARKS_RE, '').match(SEARCH_WORD_RE) || [];
-}
-
-/**
- * True when the words occur one after the other in fieldWords, as an FTS5 phrase: each word whole,
- * except that the last may be the start of a word when prefix is set (a term is sent as term*).
- */
-function wordsOccur(fieldWords: string[], words: string[], prefix: boolean): boolean {
-  const last = words.length - 1;
-  for (let i = 0; i + last < fieldWords.length; i++) {
-    let j = 0;
-    while (j < last && fieldWords[i + j] === words[j]) j++;
-    if (j === last && (prefix ? fieldWords[i + j].startsWith(words[j]) : fieldWords[i + j] === words[j])) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// As in history search: a term shorter than this matches whole words unless it ends in *.
-const MIN_AUTO_PREFIX_LENGTH = 3;
-
-/**
- * A term's words, and whether its last word is a prefix: yes unless the term is a quoted phrase
- * or shorter than MIN_AUTO_PREFIX_LENGTH characters without a trailing *.
- */
-function termWords(raw: string): { words: string[]; prefix: boolean } {
-  const quoted = raw.length >= 2 && (raw[0] === '"' || raw[0] === "'") && raw[raw.length - 1] === raw[0];
-  const prefix = !quoted && (raw.endsWith('*') || raw.length >= MIN_AUTO_PREFIX_LENGTH);
-  return { words: searchWords(quoted ? raw.slice(1, -1) : raw), prefix };
-}
-
-/** The words of each searchable field of one log, split once per log and only when a term needs them. */
-class LogWords {
-  private cache = new Map<string, string[]>();
-  constructor(private readonly log: LogEntry) {}
-  get(field: 'message' | 'app_name' | 'source_alias' | 'source_ip'): string[] {
-    let words = this.cache.get(field);
-    if (!words) {
-      words = searchWords(this.log[field] || '');
-      this.cache.set(field, words);
-    }
-    return words;
-  }
-}
-
-const FREE_TERM_FIELDS = ['message', 'app_name', 'source_alias', 'source_ip'] as const;
-
-/**
- * One word, "phrase" or column filter (app:, host:, source:, msg: and their long forms) against a
- * log, matched like history search: at word starts, a phrase as consecutive words within one field.
- */
-function matchesSearchTerm(term: string, logWords: LogWords): boolean {
-  const colon = term.indexOf(':');
-  if (colon > 0 && !term.startsWith('"') && !term.startsWith("'")) {
-    const col = term.slice(0, colon);
-    if (SEARCH_COLUMNS.has(col)) {
-      const { words, prefix } = termWords(term.slice(colon + 1));
-      if (words.length === 0) return true;
-      if (col === 'app_name' || col === 'app') return wordsOccur(logWords.get('app_name'), words, prefix);
-      if (col === 'message' || col === 'msg') return wordsOccur(logWords.get('message'), words, prefix);
-      return (
-        wordsOccur(logWords.get('source_alias'), words, prefix) ||
-        wordsOccur(logWords.get('source_ip'), words, prefix)
-      );
-    }
-  }
-
-  const { words, prefix } = termWords(term);
-  if (words.length === 0) return true;
-  return FREE_TERM_FIELDS.some((field) => wordsOccur(logWords.get(field), words, prefix));
-}
-
-function evaluateSearchNode(node: SearchNode, matchTerm: (term: string) => boolean): boolean {
-  switch (node.op) {
-    case 'term':
-      return matchTerm(node.term);
-    case 'and':
-      return evaluateSearchNode(node.left, matchTerm) && evaluateSearchNode(node.right, matchTerm);
-    case 'or':
-      return evaluateSearchNode(node.left, matchTerm) || evaluateSearchNode(node.right, matchTerm);
-    case 'not':
-      return evaluateSearchNode(node.left, matchTerm) && !evaluateSearchNode(node.right, matchTerm);
-  }
-}
-
-export function matchesSearchQuery(
-  log: LogEntry,
-  query?: string | CompiledSearchQuery,
-  precompiledRegex?: RegExp | null,
-): boolean {
-  const compiled = typeof query === 'string' || query === undefined ? compileSearchQuery(query) : query;
-  if (!compiled.lowered) return true;
-
-  // 1. A precompiled regex, when one is supplied, decides alone (the query is its source)
-  if (precompiledRegex) {
-    return [log.message, log.app_name, log.source_alias, log.source_ip].some((f) => precompiledRegex.test(f || ''));
-  }
-
-  // 2. The query as an expression (e.g. "error OR timeout", "auth NOT cron"), grouped like history search
-  const logWords = new LogWords(log);
-  const matchTerm = (term: string) => matchesSearchTerm(term, logWords);
-  if (compiled.expr) {
-    return evaluateSearchNode(compiled.expr, matchTerm);
-  }
-
-  // 3. Incomplete operators, as while typing ("error OR"): every remaining term must match
-  return compiled.terms.length > 0 && compiled.terms.every(matchTerm);
-}
-
-/** Number of host chips and of app chips shown in the Quick Filters bar. */
-export const QUICK_FILTER_CHIP_LIMIT = 6;
-/** While live, the chip ranking is refreshed at most this often, so chips do not jump as logs stream in. */
-export const QUICK_FILTER_RERANK_MS = 30_000;
-
-export interface QuickFilterCounts {
-  hosts: Record<string, number>;
-  apps: Record<string, number>;
-}
-
-/** Counts the buffer's rows per host (as shown in the Host column) and per app. */
-export function countQuickFilterVolumes(logs: LogEntry[]): QuickFilterCounts {
-  // No prototype, so host or app names such as "constructor" count like any other
-  const hosts: Record<string, number> = Object.create(null);
-  const apps: Record<string, number> = Object.create(null);
-  for (const log of logs) {
-    const host = log.source_alias || log.source_ip;
-    if (host) hosts[host] = (hosts[host] || 0) + 1;
-    if (log.app_name) apps[log.app_name] = (apps[log.app_name] || 0) + 1;
-  }
-  return { hosts, apps };
-}
-
-/**
- * Picks the Quick Filter chips: the `limit` busiest candidates by buffer volume (ties alphabetical),
- * then any selected value that fell outside them, so a chip in use can always be turned off.
- */
-export function rankQuickFilterChips(
-  candidates: string[],
-  counts: Record<string, number>,
-  selected: string[],
-  limit: number = QUICK_FILTER_CHIP_LIMIT,
-): string[] {
-  const countOf = (key: string) => (Object.prototype.hasOwnProperty.call(counts, key) ? counts[key] : 0);
-  const ranked = Array.from(new Set(candidates)).sort((a, b) => {
-    const diff = countOf(b) - countOf(a);
-    if (diff !== 0) return diff;
-    return a < b ? -1 : a > b ? 1 : 0;
-  });
-  const shown = ranked.slice(0, limit);
-  const shownSet = new Set(shown);
-  for (const value of selected) {
-    if (!shownSet.has(value)) {
-      shown.push(value);
-      shownSet.add(value);
-    }
-  }
-  return shown;
-}
-
-/** True when any Console filter (search, severity, host, app or time) is set. */
-export function hasActiveLogFilters(filters: LogFilterParams): boolean {
-  const listed = (v?: string | string[]) =>
-    Array.isArray(v) ? v.length > 0 : Boolean(v && v.trim());
-  return Boolean(
-    (filters.query && filters.query.trim()) ||
-      (filters.severity_max !== undefined && filters.severity_max !== null) ||
-      (filters.sources && filters.sources.length > 0) ||
-      listed(filters.source) ||
-      (filters.apps && filters.apps.length > 0) ||
-      listed(filters.app_name) ||
-      filters.from ||
-      filters.to
-  );
-}
-
-/** The syslog port LogShed uses when SYSLOG_PORT is not set. */
-export const DEFAULT_SYSLOG_PORT = 1514;
-
-/** Example command in the first-run card; the host part is a placeholder the user replaces. */
-export function onboardingLoggerCommand(port: number = DEFAULT_SYSLOG_PORT): string {
-  return `logger -n <logshed-host> -P ${port} "Hello from LogShed"`;
-}
 
 interface LiveLogStreamProps {
   onDiagnoseAi: (selectedLogs: LogEntry[]) => void;
@@ -592,17 +61,8 @@ interface LiveLogStreamProps {
   pullTouchHandlers?: PullTouchHandlers;
 }
 
-// Rows kept while auto-scroll is on, and while the user is scrolled back reading history
-const LIVE_BUFFER_SIZE = 3000;
 // Pages of older logs loaded at most while looking for a focused log (500 logs each)
 const MAX_FOCUS_PAGES = 10;
-const SCROLLBACK_BUFFER_SIZE = 20000;
-const BATCH_FLUSH_INTERVAL_MS = 100;
-// How long after the last scroll event (or a finger lifting) scrolling counts as stopped
-const SCROLL_IDLE_MS = 150;
-// Longest the Paused and jump-to-top buttons' smooth scroll to the top may take
-const RESUME_SCROLL_MAX_MS = 1500;
-const SEARCH_DEBOUNCE_MS = 300;
 
 const EMPTY_SELECTED_LOGS: ProcessedLogEntry[] = [];
 
@@ -615,66 +75,28 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   clearSelectionSignal,
   pullTouchHandlers,
 }) => {
-  const [logs, setLogs] = useState<ProcessedLogEntry[]>([]);
-  const [dockerEndpoints, setDockerEndpoints] = useState<DockerEndpoint[]>([]);
-  const dockerEndpointsRef = useRef<DockerEndpoint[]>([]);
-  const dockerAliasesRef = useRef<Set<string>>(new Set());
-  const [formerDockerAliases, setFormerDockerAliases] = useState<string[]>([]);
-  const formerDockerAliasesRef = useRef<string[]>([]);
-  const [autoScroll, setAutoScroll] = useState<boolean>(true);
-  const [missedLogsCount, setMissedLogsCount] = useState<number>(0);
-  const [selectedLogIds, setSelectedLogIds] = useState<Set<number>>(new Set());
-  const [lastSelectedLogIndex, setLastSelectedLogIndex] = useState<number | null>(null);
-  const lastSelectedLogIndexRef = useRef<number | null>(null);
-  const logsRef = useRef<ProcessedLogEntry[]>([]);
-
-  useEffect(() => {
-    lastSelectedLogIndexRef.current = lastSelectedLogIndex;
-  }, [lastSelectedLogIndex]);
-
-  useEffect(() => {
-    logsRef.current = logs;
-    if (logs.length > 0) setDatabaseHasLogs(true);
-  }, [logs]);
-
-  // Clear selection when signaled from parent (e.g. AI modal closed)
-  useEffect(() => {
-    if (clearSelectionSignal !== undefined && clearSelectionSignal > 0) {
-      setSelectedLogIds(new Set());
-      setLastSelectedLogIndex(null);
-    }
-  }, [clearSelectionSignal]);
-  const [activeLogDetail, setActiveLogDetail] = useState<LogEntry | null>(null);
-  const [dropRuleTargetLog, setDropRuleTargetLog] = useState<LogEntry | null>(null);
-  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
-  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
-  const [hasMoreLogs, setHasMoreLogs] = useState<boolean>(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [streamDisconnected, setStreamDisconnected] = useState<boolean>(false);
-  const [streamReconnectNonce, setStreamReconnectNonce] = useState<number>(0);
-  const [totalCount, setTotalCount] = useState<number | null>(null);
-  const [totalCapped, setTotalCapped] = useState<boolean>(false);
-  const historicalOffsetRef = useRef<number>(0);
-  const isLoadingMoreRef = useRef<boolean>(false);
+  // Host and app filters are lists only (utils/filters.ts); withHostAppLists converts any others
   const [filters, setFilters] = useState<LogFilterParams>(() => parseFiltersFromUrl());
   // The log an alert link points at: scrolled into view and highlighted once, cleared when the filters change
   const [focusLogId, setFocusLogId] = useState<number | null>(() => parseFocusLogIdFromUrl());
   const initialFiltersKeyRef = useRef<string>(JSON.stringify(filters));
   const focusScrolledRef = useRef<boolean>(false);
   const focusPagesLoadedRef = useRef<number>(0);
+  const [activeLogDetail, setActiveLogDetail] = useState<LogEntry | null>(null);
+  const [dropRuleTargetLog, setDropRuleTargetLog] = useState<LogEntry | null>(null);
   const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] = useState<boolean>(false);
-  const [isDeletingSelected, setIsDeletingSelected] = useState<boolean>(false);
-  const [deleteSelectedError, setDeleteSelectedError] = useState<string | null>(null);
-  const [activeAliasesMap, setActiveAliasesMap] = useState<Record<string, string>>({});
+  const [streamDisconnected, setStreamDisconnected] = useState<boolean>(false);
+  const [streamReconnectNonce, setStreamReconnectNonce] = useState<number>(0);
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
-  const { aliasVersion } = useAlias();
-  const lastHandledAliasVersionRef = useRef<number>(aliasVersion);
   // Off until settings load, so users who never turned AI on do not see AI buttons flash in
   const [aiEnabled, setAiEnabled] = useState<boolean>(false);
   // The listening port from settings, for the first-run card; undefined until settings load
   const [syslogPort, setSyslogPort] = useState<number | undefined>(undefined);
-  const { copied: copiedOnboardingCmd, copy: copyOnboardingCmd } = useClipboard();
-  const onboardingCommand = onboardingLoggerCommand(syslogPort);
+  // Whether the database holds any logs: null until the facets arrive, true once any log is seen.
+  // It picks the empty-state text: "Waiting for new logs..." or the first-run card.
+  const [databaseHasLogs, setDatabaseHasLogs] = useState<boolean | null>(null);
+  // Set when the Quick Filter chips should be ranked again from the next list (new results, cleared buffer)
+  const chipRerankRef = useRef<boolean>(true);
 
   useEffect(() => {
     fetchSettings()
@@ -686,23 +108,6 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       .catch(() => {});
   }, []);
 
-  // Time zone and calendar day the buffer's display timestamps were last formatted with
-  const formatTzRef = useRef<string>(serverTimezone);
-  const formatDayRef = useRef<string>(getTodayKey(serverTimezone || undefined));
-  const getFormatContext = useCallback(() => {
-    const timeZone = formatTzRef.current || undefined;
-    return { timeZone, todayKey: getTodayKey(timeZone) };
-  }, []);
-
-  // Rows loaded before the server time zone arrived were formatted in browser time: re-format them
-  useEffect(() => {
-    if (serverTimezone === formatTzRef.current) return;
-    formatTzRef.current = serverTimezone;
-    const fmt = getFormatContext();
-    formatDayRef.current = fmt.todayKey;
-    setLogs((prev) => reformatTimestamps(prev, fmt.timeZone, fmt.todayKey));
-  }, [serverTimezone, getFormatContext]);
-
   useEffect(() => {
     syncFiltersToUrl(filters);
   }, [filters]);
@@ -713,24 +118,90 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     removeFocusFromUrl();
   }, [filters, focusLogId]);
 
-  // Decoupled facet accumulation states
-  const [accumulatedSources, setAccumulatedSources] = useState<string[]>([]);
-  const [accumulatedApps, setAccumulatedApps] = useState<string[]>([]);
-  const [facetsTruncated, setFacetsTruncated] = useState<boolean>(false);
-  const [facetsLimit, setFacetsLimit] = useState<number | undefined>(undefined);
-  // Whether the database holds any logs: null until the facets arrive, true once any log is seen.
-  // It picks the empty-state text: "Waiting for new logs..." or the first-run card.
-  const [databaseHasLogs, setDatabaseHasLogs] = useState<boolean | null>(null);
-  const chipRankDirtyRef = useRef<boolean>(true);
-  const chipRankedAtRef = useRef<number>(0);
-  const [hostToAppsMap, setHostToAppsMap] = useState<Record<string, string[]>>({});
-  const [appToHostsMap, setAppToHostsMap] = useState<Record<string, string[]>>({});
+  const activeSources = useMemo(() => hostFilterList(filters), [filters]);
+  const activeApps = useMemo(() => appFilterList(filters), [filters]);
 
-  // Incoming SSE batch buffer & flush timer
-  const incomingBufferRef = useRef<LogEntry[]>([]);
-  // Live rows held back while scrolled back with a full scrollback buffer (newest first)
-  const heldLiveRowsRef = useRef<ProcessedLogEntry[]>([]);
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMobile = useMediaQuery('(max-width: 767px)');
+
+  // The list as last rendered, shared by the buffer and the selection's Shift-click ranges
+  const logsRef = useRef<ProcessedLogEntry[]>([]);
+  const selection = useLogSelection(logsRef, clearSelectionSignal);
+  const { shiftAnchor, clearAnchor } = selection;
+  const selectionAnchor = useMemo(() => ({ shift: shiftAnchor, clear: clearAnchor }), [shiftAnchor, clearAnchor]);
+
+  // The handlers below run after the aliases or facets load, by when buffer and facets (declared
+  // further down, because they need the aliases) exist
+  const sources = useSourcesConfig({
+    onLoaded: (aliases, dockerAliases) => buffer.reapplyRowAliases(aliases, dockerAliases),
+    onChanged: (change: SourcesChange) => {
+      buffer.remapRows(change.remapRow);
+      facets.applySourcesChange(change);
+      // Keep the host filter on a renamed or removed alias
+      setFilters((prev) => renameFilterHosts(prev, change.hostReplacements));
+    },
+  });
+
+  const handleFacetsLoaded = (facets: LogFacetsResponse) => {
+    const dockerAliases = sources.applyFormerDockerAliases(facets.former_docker_aliases ?? []);
+    buffer.restoreRowDockerAliases(dockerAliases);
+    // Only the apps come from stored rows alone: the hosts include configured syslog aliases and
+    // Docker hosts (the Primary Docker host always exists), so they say nothing about stored logs
+    const hasStoredApps = (facets.apps?.length ?? 0) > 0;
+    setDatabaseHasLogs((prev) => prev === true || hasStoredApps);
+  };
+
+  const facets = useLogFacets({
+    aliases: sources.aliases,
+    aliasesRef: sources.aliasesRef,
+    dockerAliasesRef: sources.dockerAliasesRef,
+    activeHosts: activeSources,
+    activeApps,
+    onLoaded: handleFacetsLoaded,
+  });
+
+  const handleFirstPage = useCallback((page: { total: number; logs: LogEntry[] }, pageFilters: LogFilterParams) => {
+    // An unfiltered page counts every stored row, so its total says whether the database has logs
+    if (!hasActiveLogFilters(pageFilters)) {
+      setDatabaseHasLogs((prev) => prev === true || page.total > 0 || page.logs.length > 0);
+    }
+    // New results for new filters: rank the Quick Filter chips again from them
+    chipRerankRef.current = true;
+  }, []);
+
+  const buffer = useLogBuffer({
+    filters,
+    serverTimezone,
+    isMobile,
+    logsRef,
+    aliasesRef: sources.aliasesRef,
+    dockerAliasesRef: sources.dockerAliasesRef,
+    selectionAnchor,
+    onLogsReceived: facets.addLogs,
+    onFirstPage: handleFirstPage,
+  });
+  const {
+    logs,
+    autoScroll,
+    setAutoScroll,
+    missedLogsCount,
+    setMissedLogsCount,
+    isLoadingHistory,
+    isLoadingMore,
+    hasMoreLogs,
+    loadMoreLogs,
+    parentRef,
+    isAutoScrollRef,
+    isTouchingRef,
+    isLoadingMoreRef,
+    queueLiveLog,
+    dropPendingLiveLogs,
+    endResumingToTop,
+  } = buffer;
+
+  useEffect(() => {
+    if (logs.length > 0) setDatabaseHasLogs(true);
+  }, [logs]);
+
   // Search query split once per change, then matched against every incoming live log
   const compiledQueryRef = useRef<CompiledSearchQuery>(compileSearchQuery(filters.query));
 
@@ -738,740 +209,23 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     compiledQueryRef.current = compileSearchQuery(filters.query);
   }, [filters.query]);
 
-  // Abort an in-flight history request on unmount
-  useEffect(() => () => fetchAbortRef.current?.abort(), []);
-
-  const loadSourcesConfig = useCallback(() => {
-    Promise.all([
-      fetchAliases().catch((err) => {
-        console.error('Failed to load host aliases in stream', err);
-        return [];
-      }),
-      fetchDockerEndpoints().catch((err) => {
-        console.error('Failed to load Docker endpoints in stream', err);
-        return [];
-      }),
-    ]).then(([aliasesList, endpointsList]) => {
-      const map: Record<string, string> = {};
-      aliasesList.forEach((a) => {
-        if (a.ip && a.alias) {
-          map[a.ip] = a.alias;
-        }
-      });
-      setActiveAliasesMap(map);
-      mergedAliasesRef.current = map;
-
-      setDockerEndpoints(endpointsList);
-      dockerEndpointsRef.current = endpointsList;
-      dockerAliasesRef.current = buildDockerAliasSet(endpointsList, formerDockerAliasesRef.current);
-      const dockerAliases = dockerAliasesRef.current;
-      // The first history page may have been prepared before this list arrived
-      setLogs((prev) => reapplyAliases(prev, map, dockerAliases));
-    });
-  }, []);
-
-  useEffect(() => {
-    loadSourcesConfig();
-  }, [loadSourcesConfig]);
-
-  // Re-fetch aliases when aliasVersion changes (and is > 0)
-  useEffect(() => {
-    if (aliasVersion <= lastHandledAliasVersionRef.current) {
-      lastHandledAliasVersionRef.current = aliasVersion;
-      return;
-    }
-    lastHandledAliasVersionRef.current = aliasVersion;
-
-    const previousAliases = mergedAliasesRef.current || {};
-    const previousDockerEndpoints = dockerEndpointsRef.current || [];
-
-    Promise.all([
-      fetchAliases().catch((err) => {
-        console.error('Failed to reload host aliases in stream', err);
-        return [];
-      }),
-      fetchDockerEndpoints().catch((err) => {
-        console.error('Failed to reload Docker endpoints in stream', err);
-        return [];
-      }),
-    ])
-      .then(([list, endpointsList]) => {
-        if (endpointsList) {
-          setDockerEndpoints(endpointsList);
-          dockerEndpointsRef.current = endpointsList;
-          dockerAliasesRef.current = buildDockerAliasSet(endpointsList, formerDockerAliasesRef.current);
-        }
-
-        // Build all current and previous Docker aliases to reliably identify Docker logs
-        const allDockerAliases = new Set<string>(formerDockerAliasesRef.current);
-        endpointsList?.forEach((ep) => {
-          if (ep.source_alias) allDockerAliases.add(ep.source_alias);
-        });
-        previousDockerEndpoints.forEach((ep) => {
-          if (ep.source_alias) allDockerAliases.add(ep.source_alias);
-        });
-        allDockerAliases.add('docker');
-
-        const map: Record<string, string> = {};
-        list.forEach((a) => {
-          if (a.ip && a.alias) {
-            map[a.ip] = a.alias;
-          }
-        });
-        const newMerged = map;
-        mergedAliasesRef.current = newMerged;
-        setActiveAliasesMap(map);
-
-        // Build mapping of old host identifiers to new canonical hostnames
-        const hostReplacements: Record<string, string> = {};
-        const retiredHosts = new Set<string>();
-
-        Object.entries(previousAliases).forEach(([ip, oldAlias]) => {
-          const newAlias = newMerged[ip];
-          if (!newAlias) {
-            // Alias was deleted: revert to raw IP
-            hostReplacements[oldAlias] = ip;
-            retiredHosts.add(oldAlias);
-          } else if (newAlias !== oldAlias) {
-            // Alias was renamed
-            hostReplacements[oldAlias] = newAlias;
-            retiredHosts.add(oldAlias);
-          }
-        });
-
-        Object.entries(newMerged).forEach(([ip, newAlias]) => {
-          if (newAlias && (!previousAliases[ip] || previousAliases[ip] !== newAlias)) {
-            hostReplacements[ip] = newAlias;
-            retiredHosts.add(ip);
-          }
-        });
-
-        // Docker alias updates
-        const primaryPrev = previousDockerEndpoints.find((e) => e.id === 1);
-        const primaryCurr = endpointsList?.find((e) => e.id === 1);
-        if (primaryCurr) {
-          const oldPrimaryAlias = primaryPrev?.source_alias || 'docker';
-          const newPrimaryAlias = primaryCurr.source_alias || 'docker';
-          if (oldPrimaryAlias !== newPrimaryAlias) {
-            hostReplacements[oldPrimaryAlias] = newPrimaryAlias;
-            retiredHosts.add(oldPrimaryAlias);
-          }
-        }
-
-        if (endpointsList) {
-          endpointsList.forEach((ep) => {
-            if (ep.id > 1) {
-              const prevEp = previousDockerEndpoints.find((e) => e.id === ep.id);
-              if (prevEp && prevEp.source_alias && ep.source_alias && prevEp.source_alias !== ep.source_alias) {
-                hostReplacements[prevEp.source_alias] = ep.source_alias;
-                retiredHosts.add(prevEp.source_alias);
-              }
-            }
-          });
-        }
-
-        previousDockerEndpoints.forEach((prevEp) => {
-          if (endpointsList && !endpointsList.some((e) => e.id === prevEp.id)) {
-            if (prevEp.source_alias) {
-              retiredHosts.add(prevEp.source_alias);
-            }
-          }
-        });
-
-        // Update source_alias on matching in-memory logs with strict separation between Docker and Syslog
-        setLogs((prev) =>
-          prev.map((log) => {
-            const isDocker =
-              log.source_ip === 'docker' ||
-              Boolean(log.source_alias && allDockerAliases.has(log.source_alias));
-
-            if (isDocker) {
-              // Primary Docker endpoint
-              if (log.source_ip === 'docker') {
-                const targetAlias = primaryCurr?.source_alias || 'docker';
-                if (log.source_alias !== targetAlias) {
-                  return { ...log, source_alias: targetAlias };
-                }
-                return log;
-              }
-
-              // Remote Docker endpoints
-              if (log.source_alias && endpointsList) {
-                for (const ep of endpointsList) {
-                  if (ep.id > 1) {
-                    const prevEp = previousDockerEndpoints.find((e) => e.id === ep.id);
-                    if (prevEp && prevEp.source_alias && ep.source_alias && prevEp.source_alias !== ep.source_alias) {
-                      if (log.source_alias === prevEp.source_alias) {
-                        return { ...log, source_alias: ep.source_alias };
-                      }
-                    }
-                  }
-                }
-              }
-
-              // Docker log is completely protected from Syslog remapping
-              return log;
-            }
-
-            // Syslog logs ONLY
-            if (!log.source_ip) return log;
-            if (newMerged[log.source_ip]) {
-              const newAlias = newMerged[log.source_ip];
-              if (log.source_alias !== newAlias) {
-                return { ...log, source_alias: newAlias };
-              }
-            } else if (previousAliases[log.source_ip]) {
-              // Alias was removed; revert to raw IP matching backend behavior
-              if (log.source_alias !== log.source_ip) {
-                return { ...log, source_alias: log.source_ip };
-              }
-            }
-            return log;
-          })
-        );
-
-        // Update accumulatedSources: replace retired aliases/IPs with their new canonical names
-        setAccumulatedSources((prev) => {
-          const aliasedIps = new Set(Object.keys(newMerged));
-          const next = new Set<string>();
-          prev.forEach((s) => {
-            const mapped = hostReplacements[s] || (newMerged[s] ? newMerged[s] : s);
-            if (!retiredHosts.has(mapped) && !aliasedIps.has(mapped)) {
-              next.add(mapped);
-            }
-          });
-          Object.values(newMerged).forEach((alias) => {
-            if (alias && alias.trim()) next.add(alias.trim());
-          });
-          return Array.from(next).sort();
-        });
-
-        // Remap hostToAppsMap keys
-        setHostToAppsMap((prev) => {
-          const next: Record<string, string[]> = {};
-          Object.entries(prev).forEach(([h, apps]) => {
-            const mapped = hostReplacements[h] || (newMerged[h] ? newMerged[h] : h);
-            next[mapped] = Array.from(new Set([...(next[mapped] || []), ...apps])).sort();
-          });
-          return next;
-        });
-
-        // Remap appToHostsMap values
-        setAppToHostsMap((prev) => {
-          const next: Record<string, string[]> = {};
-          Object.entries(prev).forEach(([app, hosts]) => {
-            const mappedHosts = hosts
-              .map((h) => hostReplacements[h] || (newMerged[h] ? newMerged[h] : h))
-              .filter((h) => !retiredHosts.has(h));
-            next[app] = Array.from(new Set(mappedHosts)).sort();
-          });
-          return next;
-        });
-
-        // Update active filter if it is filtering on a retired source/alias
-        setFilters((prev) => {
-          let changed = false;
-          let nextSources = prev.sources;
-          let nextSource = prev.source;
-
-          if (prev.sources && Array.isArray(prev.sources)) {
-            const mapped = prev.sources.map((s) => hostReplacements[s] || s);
-            if (mapped.some((s, idx) => s !== prev.sources![idx])) {
-              nextSources = mapped;
-              changed = true;
-            }
-          }
-
-          if (prev.source) {
-            if (Array.isArray(prev.source)) {
-              const mapped = prev.source.map((s) => hostReplacements[s] || s);
-              if (mapped.some((s, idx) => s !== (prev.source as string[])[idx])) {
-                nextSource = mapped;
-                changed = true;
-              }
-            } else if (typeof prev.source === 'string') {
-              const parts = prev.source.split(',').map((s) => s.trim());
-              const mapped = parts.map((s) => hostReplacements[s] || s);
-              const mappedStr = mapped.join(',');
-              if (mappedStr !== prev.source) {
-                nextSource = mappedStr;
-                changed = true;
-              }
-            }
-          }
-
-          if (!changed) return prev;
-          return {
-            ...prev,
-            sources: nextSources,
-            source: nextSource,
-          };
-        });
-      })
-      .catch((err) => {
-        console.error('Failed to reload host aliases in stream', err);
-      });
-  }, [aliasVersion]);
-
-  const mergedAliases = activeAliasesMap;
-
-  const mergedAliasesRef = useRef(mergedAliases);
-  useEffect(() => {
-    mergedAliasesRef.current = mergedAliases;
-  }, [mergedAliases]);
-
-  const processedLogs = useMemo(() => {
-    return logs;
-  }, [logs]);
-
-  const isMobile = useMediaQuery('(max-width: 767px)');
-  // Read by flushIncomingLogs, which is cached by useCallback and would otherwise keep the first layout's row height
-  const isMobileRef = useRef<boolean>(isMobile);
-  isMobileRef.current = isMobile;
-  const parentRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const isAutoScrollRef = useRef<boolean>(true);
-  const pendingScrollAdjustmentRef = useRef<number>(0);
-  const isTouchingRef = useRef<boolean>(false);
-  // True from a scroll event (or a finger lifting) until SCROLL_IDLE_MS pass without another one, so a
-  // momentum glide counts as scrolling. Mobile browsers show a scrollTop write during a drag or glide as a jump.
-  const isScrollingRef = useRef<boolean>(false);
-  const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The scrollTop our own anchoring wrote, so its scroll event is not taken for the user's
-  const anchoredScrollTopRef = useRef<number | null>(null);
-  // Set when held rows were dropped (the scrollback buffer was full): they then wait for auto-scroll to
-  // resume, because joining them to the list would leave a gap
-  const heldRowsDroppedRef = useRef<boolean>(false);
-  // Set by the Paused and jump-to-top buttons while the smooth scroll to the top runs, so its scroll
-  // events do not pause auto-scroll again on the way up
-  const resumingToTopRef = useRef<boolean>(false);
-  const resumingToTopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Keep ref updated
-  useEffect(() => {
-    isAutoScrollRef.current = autoScroll;
-  }, [autoScroll]);
-
-  // Buffer cap, one rule for live rows and history pages: keep the newest LIVE_BUFFER_SIZE rows
-  // while auto-scroll is on, and up to SCROLLBACK_BUFFER_SIZE while scrolled back. Trimming drops the
-  // oldest rows, so the next history page must start that many rows earlier. Live batches trim
-  // themselves in flushIncomingLogs; this catches history pages and auto-scroll turning back on.
-  useLayoutEffect(() => {
-    const cap = autoScroll ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE;
-    if (logs.length <= cap) return;
-    const removed = logs.length - cap;
-    historicalOffsetRef.current = Math.max(0, historicalOffsetRef.current - removed);
-    setHasMoreLogs(true);
-    setLogs(logs.slice(0, cap));
-  }, [logs, autoScroll]);
-
-  // Rows held back while the scrollback buffer was full join the top once auto-scroll resumes
-  useEffect(() => {
-    if (!autoScroll || heldLiveRowsRef.current.length === 0) return;
-    const held = heldLiveRowsRef.current;
-    heldLiveRowsRef.current = [];
-    heldRowsDroppedRef.current = false;
-    setLogs((prev) => {
-      const existingIds = new Set(prev.map((l) => l.id));
-      return [...held.filter((l) => !existingIds.has(l.id)), ...prev];
-    });
-    setLastSelectedLogIndex(null);
-  }, [autoScroll]);
-
-  // Maintain scroll anchoring when new logs arrive while auto-scroll is paused
-  useLayoutEffect(() => {
-    if (pendingScrollAdjustmentRef.current > 0) {
-      const adjustment = pendingScrollAdjustmentRef.current;
-      pendingScrollAdjustmentRef.current = 0;
-      if (parentRef.current && !isAutoScrollRef.current) {
-        parentRef.current.scrollTop += adjustment;
-        anchoredScrollTopRef.current = parentRef.current.scrollTop;
-      }
-    }
-  }, [logs]);
-
-  // Incrementally accumulate facets from incoming batches without rescanning 50k logs
-  const updateFacetsWithNewLogs = useCallback((newLogs: LogEntry[]) => {
-    if (!newLogs || newLogs.length === 0) return;
-
-    const getLogCanonicalHost = (log: LogEntry): string => {
-      const isDocker =
-        log.source_ip === 'docker' ||
-        Boolean(dockerAliasesRef.current && log.source_alias && dockerAliasesRef.current.has(log.source_alias));
-
-      if (isDocker) {
-        return log.source_alias || 'docker';
-      }
-      return (
-        (log.source_alias && mergedAliasesRef.current[log.source_alias]) ||
-        (log.source_ip && mergedAliasesRef.current[log.source_ip]) ||
-        log.source_alias ||
-        log.source_ip ||
-        ''
-      );
-    };
-
-    // 1. Incrementally add any new sources
-    setAccumulatedSources((prev) => {
-      let added = false;
-      const currentSet = new Set(prev);
-      const aliasedIps = new Set(Object.keys(mergedAliasesRef.current || {}));
-      for (const log of newLogs) {
-        const canonical = getLogCanonicalHost(log);
-        if (canonical && !aliasedIps.has(canonical) && !currentSet.has(canonical)) {
-          currentSet.add(canonical);
-          added = true;
-        }
-      }
-      return added ? Array.from(currentSet).sort() : prev;
-    });
-
-    // 2. Incrementally add any new apps
-    setAccumulatedApps((prev) => {
-      let added = false;
-      const currentSet = new Set(prev);
-      for (const log of newLogs) {
-        if (log.app_name && !currentSet.has(log.app_name)) {
-          currentSet.add(log.app_name);
-          added = true;
-        }
-      }
-      return added ? Array.from(currentSet).sort() : prev;
-    });
-
-    // 3. Incrementally update hostToAppsMap
-    setHostToAppsMap((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const log of newLogs) {
-        if (log.app_name) {
-          const canonical = getLogCanonicalHost(log);
-          if (canonical) {
-            const currentApps = next[canonical] || [];
-            if (!currentApps.includes(log.app_name)) {
-              next[canonical] = [...currentApps, log.app_name].sort();
-              changed = true;
-            }
-          }
-        }
-      }
-      return changed ? next : prev;
-    });
-
-    // 4. Incrementally update appToHostsMap
-    setAppToHostsMap((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const log of newLogs) {
-        if (log.app_name) {
-          const canonical = getLogCanonicalHost(log);
-          if (canonical) {
-            const currentHosts = next[log.app_name] || [];
-            if (!currentHosts.includes(canonical)) {
-              next[log.app_name] = [...currentHosts, canonical].sort();
-              changed = true;
-            }
-          }
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, []);
-
-  // Put prepared live rows (newest first) at the top of the list
-  const prependLiveRows = useCallback((prepared: ProcessedLogEntry[]) => {
-    // "Today" is checked once per batch; after midnight the rows already shown get their date back
-    const fmt = getFormatContext();
-    const dayChanged = fmt.todayKey !== formatDayRef.current;
-    formatDayRef.current = fmt.todayKey;
-
-    // Trim to the buffer cap here rather than leaving it to the cap effect, which would render every
-    // batch twice once the buffer is full: once grown, then again trimmed
-    const cap = isAutoScrollRef.current ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE;
-    const removed = logsRef.current.length + prepared.length - cap;
-    if (removed > 0) {
-      historicalOffsetRef.current = Math.max(0, historicalOffsetRef.current - removed);
-      setHasMoreLogs(true);
-    }
-    setLogs((prev) => {
-      const base = dayChanged ? reformatTimestamps(prev, fmt.timeZone, fmt.todayKey) : prev;
-      const next = [...prepared, ...base];
-      return next.length > cap ? next.slice(0, cap) : next;
-    });
-
-    setLastSelectedLogIndex((prev) => (prev !== null ? prev + prepared.length : null));
-
-    if (!isAutoScrollRef.current) {
-      // Anchor scroll position by compensating for prepended items' height
-      pendingScrollAdjustmentRef.current += prepared.length * (isMobileRef.current ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT);
-    } else if (parentRef.current && !isTouchingRef.current) {
-      requestAnimationFrame(() => {
-        if (parentRef.current && isAutoScrollRef.current && !isTouchingRef.current) {
-          parentRef.current.scrollTop = 0;
-        }
-      });
-    }
-  }, [getFormatContext]);
-
-  // Rows held while the user was scrolling join the list in one batch, with one scroll correction,
-  // once scrolling has stopped. Rows held because the scrollback buffer is full wait for auto-scroll.
-  const releaseHeldLiveRows = useCallback(() => {
-    const held = heldLiveRowsRef.current;
-    if (
-      held.length === 0 ||
-      isAutoScrollRef.current ||
-      isTouchingRef.current ||
-      isScrollingRef.current ||
-      heldRowsDroppedRef.current ||
-      logsRef.current.length + held.length > SCROLLBACK_BUFFER_SIZE
-    ) {
-      return;
-    }
-    heldLiveRowsRef.current = [];
-    const existingIds = new Set(logsRef.current.map((l) => l.id));
-    const fresh = held.filter((l) => !existingIds.has(l.id));
-    if (fresh.length > 0) prependLiveRows(fresh);
-  }, [prependLiveRows]);
-
-  // A scroll event or a lifted finger: scrolling counts as stopped SCROLL_IDLE_MS after the last one
-  const noteScrollActivity = useCallback(() => {
-    isScrollingRef.current = true;
-    if (scrollIdleTimerRef.current !== null) clearTimeout(scrollIdleTimerRef.current);
-    scrollIdleTimerRef.current = setTimeout(() => {
-      scrollIdleTimerRef.current = null;
-      isScrollingRef.current = false;
-      releaseHeldLiveRows();
-    }, SCROLL_IDLE_MS);
-  }, [releaseHeldLiveRows]);
-
-  useEffect(() => () => {
-    if (scrollIdleTimerRef.current !== null) clearTimeout(scrollIdleTimerRef.current);
-    if (resumingToTopTimerRef.current !== null) clearTimeout(resumingToTopTimerRef.current);
-  }, []);
-
-  // Flush incoming buffered SSE logs to React state in a single batch
-  const flushIncomingLogs = useCallback(() => {
-    if (incomingBufferRef.current.length === 0) return;
-
-    const toFlush = incomingBufferRef.current;
-    incomingBufferRef.current = [];
-
-    // Incrementally update facets with new incoming logs
-    updateFacetsWithNewLogs(toFlush);
-
-    const fmt = getFormatContext();
-    // toFlush is in arrival order (oldest first, newest last): reverse it so the newest log is at the top
-    const prepared = toFlush
-      .map((entry) =>
-        prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-      )
-      .reverse();
-
-    if (!isAutoScrollRef.current) {
-      setMissedLogsCount((prev) => prev + toFlush.length);
-      // Scrolled back and either still scrolling, or with a full scrollback buffer: hold new rows
-      // (counted in the "N new" banner). Moving the list under a finger or a glide shows as a jump on
-      // phones, and trimming the full buffer would cut the history the user is reading.
-      const bufferFull = logsRef.current.length + heldLiveRowsRef.current.length + prepared.length > SCROLLBACK_BUFFER_SIZE;
-      if (heldLiveRowsRef.current.length > 0 || bufferFull || isTouchingRef.current || isScrollingRef.current) {
-        const held = [...prepared, ...heldLiveRowsRef.current];
-        if (bufferFull && held.length > LIVE_BUFFER_SIZE) {
-          heldRowsDroppedRef.current = true;
-          heldLiveRowsRef.current = held.slice(0, LIVE_BUFFER_SIZE);
-        } else {
-          heldLiveRowsRef.current = held;
-        }
-        return;
-      }
-    }
-
-    prependLiveRows(prepared);
-  }, [updateFacetsWithNewLogs, getFormatContext, prependLiveRows]);
-
-  // In-flight query cancellation / stale response guard
-  const fetchRequestIdRef = useRef<number>(0);
-  // Aborts the in-flight history request when a newer load supersedes it
-  const fetchAbortRef = useRef<AbortController | null>(null);
-  // Set by handleApplySavedView so the filter effect loads a saved view at once, without the search debounce
-  const skipSearchDebounceRef = useRef<boolean>(false);
-  // Pending debounced reload scheduled by free-text search edits
-  const searchDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Load initial logs on mount or on filter apply
-  const loadInitialLogs = useCallback(async (overrideFilters?: LogFilterParams) => {
-    if (searchDebounceTimerRef.current !== null) {
-      clearTimeout(searchDebounceTimerRef.current);
-      searchDebounceTimerRef.current = null;
-    }
-    const reqId = ++fetchRequestIdRef.current;
-    fetchAbortRef.current?.abort();
-    const controller = new AbortController();
-    fetchAbortRef.current = controller;
-    try {
-      setIsLoadingHistory(true);
-      historicalOffsetRef.current = 0;
-      setLoadError(null);
-      setHasMoreLogs(true);
-      if (flushTimerRef.current !== null) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      incomingBufferRef.current = [];
-      heldLiveRowsRef.current = [];
-      heldRowsDroppedRef.current = false;
-      pendingScrollAdjustmentRef.current = 0;
-
-      const activeFilters = overrideFilters !== undefined ? overrideFilters : filters;
-      const res = await fetchLogs({
-        ...activeFilters,
-        limit: 500,
-        offset: 0,
-      }, { signal: controller.signal });
-
-      // Discard stale responses from superseded requests
-      if (reqId !== fetchRequestIdRef.current) {
-        return;
-      }
-
-      // Keep newest logs at the top (res.logs is ordered DESC)
-      const fmt = getFormatContext();
-      const preparedLogs = res.logs.map((entry) =>
-        prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-      );
-      setLogs(preparedLogs);
-      // An unfiltered page counts every stored row, so its total says whether the database has logs
-      if (!hasActiveLogFilters(activeFilters)) {
-        setDatabaseHasLogs((prev) => prev === true || res.total > 0 || res.logs.length > 0);
-      }
-      // New results for new filters: rank the Quick Filter chips again from them
-      chipRankDirtyRef.current = true;
-      updateFacetsWithNewLogs(res.logs);
-      historicalOffsetRef.current = res.logs.length;
-      setTotalCount(res.total);
-      setTotalCapped(Boolean(res.total_capped));
-      if (res.logs.length < 500 || (res.total !== undefined && !res.total_capped && res.logs.length >= res.total)) {
-        setHasMoreLogs(false);
-      }
-      setMissedLogsCount(0);
-      setLastSelectedLogIndex(null);
-      // Auto-scroll to top after initial load
-      setTimeout(() => {
-        if (parentRef.current && isAutoScrollRef.current) {
-          parentRef.current.scrollTop = 0;
-        }
-      }, 50);
-    } catch (err) {
-      if (reqId === fetchRequestIdRef.current) {
-        console.error('Failed to load initial logs', err);
-        setLoadError(err instanceof Error ? err.message : 'Failed to load logs');
-      }
-    } finally {
-      if (reqId === fetchRequestIdRef.current) {
-        setIsLoadingHistory(false);
-      }
-    }
-  }, [filters, updateFacetsWithNewLogs, getFormatContext]);
-
-  const loadMoreLogs = useCallback(async () => {
-    if (isLoadingMoreRef.current || !hasMoreLogs || isLoadingHistory) return;
-    if (logsRef.current.length >= (isAutoScrollRef.current ? LIVE_BUFFER_SIZE : SCROLLBACK_BUFFER_SIZE)) return;
-    isLoadingMoreRef.current = true;
-    setIsLoadingMore(true);
-    const reqId = fetchRequestIdRef.current;
-    try {
-      const currentOffset = historicalOffsetRef.current;
-      const res = await fetchLogs({
-        ...filters,
-        limit: 500,
-        offset: currentOffset,
-      }, { signal: fetchAbortRef.current?.signal });
-
-      // Discard stale responses if filter changed while loading more
-      if (reqId !== fetchRequestIdRef.current) {
-        return;
-      }
-
-      historicalOffsetRef.current = currentOffset + res.logs.length;
-      if (res.total !== undefined) {
-        setTotalCount(res.total);
-        setTotalCapped(Boolean(res.total_capped));
-      }
-      if (res.logs.length < 500 || (res.total !== undefined && !res.total_capped && historicalOffsetRef.current >= res.total)) {
-        setHasMoreLogs(false);
-      }
-      if (res.logs.length > 0) {
-        updateFacetsWithNewLogs(res.logs);
-        const fmt = getFormatContext();
-        const preparedLogs = res.logs.map((entry) =>
-          prepareLogEntry(entry, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-        );
-        setLogs((prev) => {
-          const existingIds = new Set(prev.map((l) => l.id));
-          const uniqueIncoming = preparedLogs.filter((l) => !existingIds.has(l.id));
-          if (uniqueIncoming.length === 0 && res.logs.length > 0) {
-            if (res.logs.length < 500) {
-              setHasMoreLogs(false);
-            }
-            return prev;
-          }
-          return [...prev, ...uniqueIncoming];
-        });
-      }
-    } catch (err) {
-      if (reqId === fetchRequestIdRef.current) {
-        console.error('Failed to load more historical logs', err);
-      }
-    } finally {
-      isLoadingMoreRef.current = false;
-      setIsLoadingMore(false);
-    }
-  }, [filters, hasMoreLogs, isLoadingHistory, updateFacetsWithNewLogs, getFormatContext]);
-
-  // Reload on filter changes. Free-text query edits are debounced so search-as-you-type does not
-  // dispatch a backend FTS query per keystroke (superseded queries keep running server-side);
-  // structured filter changes (host, app, severity, time) reload immediately.
-  const previousQueryRef = useRef<string | undefined>(filters.query);
-  useEffect(() => {
-    const queryChanged = previousQueryRef.current !== filters.query;
-    previousQueryRef.current = filters.query;
-    const skipDebounce = skipSearchDebounceRef.current;
-    skipSearchDebounceRef.current = false;
-    if (!queryChanged || skipDebounce) {
-      loadInitialLogs();
-      return;
-    }
-    searchDebounceTimerRef.current = setTimeout(() => {
-      searchDebounceTimerRef.current = null;
-      loadInitialLogs();
-    }, SEARCH_DEBOUNCE_MS);
-    return () => {
-      if (searchDebounceTimerRef.current !== null) {
-        clearTimeout(searchDebounceTimerRef.current);
-        searchDebounceTimerRef.current = null;
-      }
-    };
-  }, [loadInitialLogs, filters.query]);
-
+  const { applyFiltersNow } = buffer;
   const handleApplySavedView = useCallback((newParams: LogFilterParams) => {
     // The filter effect is the only loader, so a saved view fetches once
-    skipSearchDebounceRef.current = true;
-    setFilters(newParams);
-  }, []);
+    applyFiltersNow();
+    setFilters(withHostAppLists(newParams));
+  }, [applyFiltersNow]);
 
-  const sourcesKey = useMemo(() => {
-    const s = filters.sources || (filters.source ? (Array.isArray(filters.source) ? filters.source : [filters.source]) : []);
-    return s.join(',');
-  }, [filters.sources, filters.source]);
+  const handleFilterChange = useCallback((next: LogFilterParams) => setFilters(withHostAppLists(next)), []);
 
-  const appsKey = useMemo(() => {
-    const a = filters.apps || (filters.app_name ? (Array.isArray(filters.app_name) ? filters.app_name : [filters.app_name]) : []);
-    return a.join(',');
-  }, [filters.apps, filters.app_name]);
+  const sourcesKey = activeSources.join(',');
+  const appsKey = activeApps.join(',');
 
   const streamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRetryAttemptRef = useRef<number>(0);
 
   // Connect to SSE stream
+  const eventSourceRef = useRef<EventSource | null>(null);
   useEffect(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -1498,27 +252,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       try {
         const entry: LogEntry = JSON.parse(event.data);
 
-        // Client-Side Query Filtering on Ingest (Issue #2)
+        // Live logs are matched against the search query here; the stream filters only the rest
         const compiledQuery = compiledQueryRef.current;
         if (compiledQuery.lowered && !matchesSearchQuery(entry, compiledQuery)) {
           return;
         }
 
-        // Buffer incoming SSE logs (Issue #1)
-        incomingBufferRef.current.push(entry);
-
-        if (incomingBufferRef.current.length >= 500) {
-          if (flushTimerRef.current !== null) {
-            clearTimeout(flushTimerRef.current);
-            flushTimerRef.current = null;
-          }
-          flushIncomingLogs();
-        } else if (flushTimerRef.current === null) {
-          flushTimerRef.current = setTimeout(() => {
-            flushTimerRef.current = null;
-            flushIncomingLogs();
-          }, BATCH_FLUSH_INTERVAL_MS);
-        }
+        queueLiveLog(entry);
       } catch (e) {
         console.error('Error parsing SSE log event', e);
       }
@@ -1559,15 +299,21 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       }
       es.close();
       eventSourceRef.current = null;
-      if (flushTimerRef.current !== null) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      incomingBufferRef.current = [];
-      heldLiveRowsRef.current = [];
-      heldRowsDroppedRef.current = false;
+      dropPendingLiveLogs();
     };
-  }, [filters.severity_max, filters.to, sourcesKey, appsKey, flushIncomingLogs, streamReconnectNonce]);
+  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropPendingLiveLogs, streamReconnectNonce]);
+
+  const reconnectStream = () => {
+    if (streamRetryTimerRef.current !== null) {
+      clearTimeout(streamRetryTimerRef.current);
+      streamRetryTimerRef.current = null;
+    }
+    streamRetryAttemptRef.current = 0;
+    setStreamReconnectNonce((n) => n + 1);
+  };
+
+  // When the cursor last scrolled the list: reaching the top that way (Home) keeps auto-scroll paused
+  const cursorScrollAtRef = useRef<number>(0);
 
   // Scroll detection to pause auto-scroll when scrolling down, and load more when near bottom
   const handleScroll = () => {
@@ -1576,9 +322,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     const isAtTop = scrollTop <= 5;
 
     // Our own scroll anchoring is not the user scrolling
-    const anchored = anchoredScrollTopRef.current;
-    anchoredScrollTopRef.current = null;
-    if (anchored === null || Math.abs(scrollTop - anchored) > 1) noteScrollActivity();
+    const anchored = buffer.anchoredScrollTopRef.current;
+    buffer.anchoredScrollTopRef.current = null;
+    if (anchored === null || Math.abs(scrollTop - anchored) > 1) buffer.noteScrollActivity();
 
     if (isAtTop) {
       endResumingToTop();
@@ -1587,7 +333,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         setAutoScroll(true);
         setMissedLogsCount(0);
       }
-    } else if (!resumingToTopRef.current) {
+    } else if (!buffer.resumingToTopRef.current) {
       if (autoScroll) {
         isAutoScrollRef.current = false;
         setAutoScroll(false);
@@ -1602,37 +348,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
   };
 
-  const endResumingToTop = () => {
-    resumingToTopRef.current = false;
-    if (resumingToTopTimerRef.current !== null) {
-      clearTimeout(resumingToTopTimerRef.current);
-      resumingToTopTimerRef.current = null;
-    }
-  };
-
-  const resumeAutoScroll = () => {
-    // The smooth scroll up passes through positions that would otherwise pause auto-scroll again, and
-    // a paused batch would then write scrollTop, which stops the scroll short of the top
-    endResumingToTop();
-    resumingToTopRef.current = true;
-    // In case the scroll never reaches the top (the user takes over, or the browser cuts it short)
-    resumingToTopTimerRef.current = setTimeout(endResumingToTop, RESUME_SCROLL_MAX_MS);
-    isAutoScrollRef.current = true;
-    setAutoScroll(true);
-    setMissedLogsCount(0);
-    pendingScrollAdjustmentRef.current = 0;
-    if (parentRef.current) {
-      if (typeof parentRef.current.scrollTo === 'function') {
-        parentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      } else {
-        parentRef.current.scrollTop = 0;
-      }
-    }
-  };
-
   // Virtualizer with fixed row heights (mobile cards or desktop rows)
   const rowVirtualizer = useVirtualizer({
-    count: processedLogs.length,
+    count: logs.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => (isMobile ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT),
     overscan: isMobile ? 12 : 25,
@@ -1653,11 +371,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   // The cursor is outlined only while the keyboard is in use: a key on the list shows it, a mouse
   // press on the list hides it. A mouse user who opens or ticks rows never sees it.
   const [cursorOutlined, setCursorOutlined] = useState<boolean>(false);
-  // When the cursor last scrolled the list: reaching the top that way (Home) keeps auto-scroll paused
-  const cursorScrollAtRef = useRef<number>(0);
   const cursorIndex = useMemo(
-    () => (cursorLogId === null ? -1 : processedLogs.findIndex((l) => l.id === cursorLogId)),
-    [cursorLogId, processedLogs],
+    () => (cursorLogId === null ? -1 : logs.findIndex((l) => l.id === cursorLogId)),
+    [cursorLogId, logs],
   );
 
   // The cursor follows the log open in the detail drawer (also when it moves to the newer or older
@@ -1669,7 +385,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const handleListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     // Only keys pressed on the list itself, not on buttons inside it (such as the empty-state ones)
     if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey) return;
-    const count = processedLogs.length;
+    const count = logs.length;
     if (count === 0) return;
     const rowHeight = isMobile ? MOBILE_LOG_ROW_HEIGHT : DESKTOP_LOG_ROW_HEIGHT;
     const pageRows = Math.max(1, Math.floor(e.currentTarget.clientHeight / rowHeight) - 1);
@@ -1703,12 +419,12 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       case 'Enter':
         if (current === null) return;
         e.preventDefault();
-        setActiveLogDetail(processedLogs[current]);
+        setActiveLogDetail(logs[current]);
         return;
       case ' ':
         if (current === null) return;
         e.preventDefault();
-        toggleSelectLog(processedLogs[current], current, e.shiftKey);
+        selection.toggleSelectLog(logs[current], current, e.shiftKey);
         return;
       default:
         return;
@@ -1718,11 +434,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     // Moving the cursor pauses auto-scroll, as scrolling down does, so live rows arriving above it
     // keep the view (and the cursor row) in place instead of carrying it down the list
     endResumingToTop();
-    if (isAutoScrollRef.current) {
-      isAutoScrollRef.current = false;
-      setAutoScroll(false);
-    }
-    setCursorLogId(processedLogs[index].id);
+    buffer.pauseAutoScroll();
+    setCursorLogId(logs[index].id);
     cursorScrollAtRef.current = performance.now();
     rowVirtualizer.scrollToIndex(index, { align: 'auto' });
   };
@@ -1747,7 +460,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       isAutoScrollRef.current = false;
       loadMoreLogs();
     }
-  }, [focusLogId, logs, isLoadingHistory, hasMoreLogs, isLoadingMore, loadMoreLogs, rowVirtualizer]);
+  }, [focusLogId, logs, isLoadingHistory, hasMoreLogs, isLoadingMore, loadMoreLogs, rowVirtualizer, isAutoScrollRef, setAutoScroll]);
 
   const virtualItems = rowVirtualizer.getVirtualItems();
   const lastVirtualItem = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1] : null;
@@ -1764,265 +477,27 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     ) {
       loadMoreLogs();
     }
-  }, [lastVirtualItemIndex, logs.length, hasMoreLogs, isLoadingHistory, loadMoreLogs]);
-
-  // Merge accumulated sources & apps with aliases (ensuring all discovered items remain selectable)
-  const allAvailableSources = useMemo(() => {
-    const aliasedIps = new Set(Object.keys(mergedAliases || {}));
-    const set = new Set<string>();
-
-    accumulatedSources.forEach((src) => {
-      if (mergedAliases && mergedAliases[src]) {
-        set.add(mergedAliases[src]);
-      } else if (!aliasedIps.has(src)) {
-        set.add(src);
-      }
-    });
-
-    if (mergedAliases) {
-      Object.values(mergedAliases).forEach((alias) => {
-        if (alias && alias.trim()) set.add(alias.trim());
-      });
-    }
-
-    return Array.from(set).sort();
-  }, [accumulatedSources, mergedAliases]);
-
-  const allAvailableApps = useMemo(() => {
-    return Array.from(new Set(accumulatedApps)).sort();
-  }, [accumulatedApps]);
-
-  // Fetch full database facets on mount so all historical hosts and apps are available
-  useEffect(() => {
-    fetchLogFacets()
-      .then((facets) => {
-        const former = facets.former_docker_aliases ?? [];
-        formerDockerAliasesRef.current = former;
-        setFormerDockerAliases(former);
-        dockerAliasesRef.current = buildDockerAliasSet(dockerEndpointsRef.current, former);
-        const dockerAliases = dockerAliasesRef.current;
-        setLogs((prev) => restoreDockerAliases(prev, dockerAliases));
-        setFacetsTruncated(Boolean(facets.truncated));
-        setFacetsLimit(facets.limit);
-        // Only the apps come from stored rows alone: the hosts include configured syslog aliases and
-        // Docker hosts (the Primary Docker host always exists), so they say nothing about stored logs
-        const hasStoredApps = (facets.apps?.length ?? 0) > 0;
-        setDatabaseHasLogs((prev) => prev === true || hasStoredApps);
-        if (facets.sources && facets.sources.length > 0) {
-          setAccumulatedSources((prev) => Array.from(new Set([...prev, ...facets.sources])).sort());
-        }
-        if (facets.apps && facets.apps.length > 0) {
-          setAccumulatedApps((prev) => Array.from(new Set([...prev, ...facets.apps])).sort());
-        }
-        if (facets.host_to_apps) {
-          setHostToAppsMap((prev) => {
-            const next = { ...facets.host_to_apps };
-            Object.entries(prev).forEach(([h, apps]) => {
-              if (!next[h]) next[h] = apps;
-              else next[h] = Array.from(new Set([...next[h], ...apps])).sort();
-            });
-            return next;
-          });
-        }
-        if (facets.app_to_hosts) {
-          setAppToHostsMap((prev) => {
-            const next = { ...facets.app_to_hosts };
-            Object.entries(prev).forEach(([a, hosts]) => {
-              if (!next[a]) next[a] = hosts;
-              else next[a] = Array.from(new Set([...next[a], ...hosts])).sort();
-            });
-            return next;
-          });
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to load database facets', err);
-      });
-  }, []);
-
-  // Remap host/app relations whenever aliases are added or modified
-  useEffect(() => {
-    if (!mergedAliases || Object.keys(mergedAliases).length === 0) return;
-
-    setAccumulatedSources((prev) => {
-      const aliasedIps = new Set(Object.keys(mergedAliases));
-      const set = new Set<string>();
-      let changed = false;
-
-      prev.forEach((s) => {
-        if (mergedAliases[s]) {
-          set.add(mergedAliases[s]);
-          changed = true;
-        } else if (!aliasedIps.has(s)) {
-          set.add(s);
-        } else {
-          changed = true;
-        }
-      });
-
-      Object.values(mergedAliases).forEach((alias) => {
-        if (alias && alias.trim() && !set.has(alias.trim())) {
-          set.add(alias.trim());
-          changed = true;
-        }
-      });
-
-      return changed ? Array.from(set).sort() : prev;
-    });
-
-    setHostToAppsMap((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      Object.entries(mergedAliases).forEach(([ip, alias]) => {
-        if (ip && alias && next[ip]) {
-          const existingForAlias = next[alias] || [];
-          next[alias] = Array.from(new Set([...existingForAlias, ...next[ip]])).sort();
-          delete next[ip];
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-
-    setAppToHostsMap((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      Object.entries(mergedAliases).forEach(([ip, alias]) => {
-        if (ip && alias) {
-          Object.keys(next).forEach((app) => {
-            if (next[app]?.includes(ip)) {
-              next[app] = Array.from(new Set(next[app].map((h) => (h === ip ? alias : h)))).sort();
-              changed = true;
-            }
-          });
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [mergedAliases]);
-
-  const activeSources: string[] = useMemo(() => {
-    if (filters.sources && Array.isArray(filters.sources)) return filters.sources;
-    if (filters.source) {
-      if (Array.isArray(filters.source)) return filters.source;
-      return filters.source.split(',').map((s) => s.trim()).filter(Boolean);
-    }
-    return [];
-  }, [filters.sources, filters.source]);
-
-  const activeApps: string[] = useMemo(() => {
-    if (filters.apps && Array.isArray(filters.apps)) return filters.apps;
-    if (filters.app_name) {
-      if (Array.isArray(filters.app_name)) return filters.app_name;
-      return filters.app_name.split(',').map((a) => a.trim()).filter(Boolean);
-    }
-    return [];
-  }, [filters.apps, filters.app_name]);
+  }, [lastVirtualItemIndex, logs.length, hasMoreLogs, isLoadingHistory, loadMoreLogs, isLoadingMoreRef]);
 
   const toggleQuickSource = (src: string) => {
-    setFilters((prev) => {
-      const current = prev.sources || (prev.source ? (Array.isArray(prev.source) ? prev.source : [prev.source]) : []);
-      const exists = current.includes(src);
-      const next = exists ? current.filter((s) => s !== src) : [...current, src];
-      return {
-        ...prev,
-        sources: next,
-        source: next.length === 1 ? next[0] : (next.length > 1 ? next.join(',') : undefined),
-      };
-    });
+    setFilters((prev) => withHosts(prev, toggleListValue(hostFilterList(prev), src)));
   };
 
   const toggleQuickApp = (app: string) => {
-    setFilters((prev) => {
-      const current = prev.apps || (prev.app_name ? (Array.isArray(prev.app_name) ? prev.app_name : [prev.app_name]) : []);
-      const exists = current.includes(app);
-      const next = exists ? current.filter((a) => a !== app) : [...current, app];
-      return {
-        ...prev,
-        apps: next,
-        app_name: next.length === 1 ? next[0] : (next.length > 1 ? next.join(',') : undefined),
-      };
-    });
+    setFilters((prev) => withApps(prev, toggleListValue(appFilterList(prev), app)));
   };
 
-  // Scope available apps to only those matching the selected host(s) if host(s) are chosen
-  const availableAppsForSelectedHosts = useMemo(() => {
-    if (activeSources.length === 0) {
-      return allAvailableApps;
-    }
-    const set = new Set<string>();
-    activeSources.forEach((src) => {
-      const apps = hostToAppsMap[src];
-      if (apps) {
-        apps.forEach((a) => set.add(a));
-      }
-    });
-    const result = Array.from(set).sort();
-    return result.length > 0 ? result : allAvailableApps;
-  }, [activeSources, allAvailableApps, hostToAppsMap]);
-
-  // Scope available sources to only those hosting the selected app(s) if app(s) are chosen
-  const availableSourcesForSelectedApps = useMemo(() => {
-    if (activeApps.length === 0) {
-      return allAvailableSources;
-    }
-    const set = new Set<string>();
-    activeApps.forEach((app) => {
-      const hosts = appToHostsMap[app];
-      if (hosts) {
-        hosts.forEach((h) => set.add(h));
-      }
-    });
-    const result = Array.from(set).sort();
-    return result.length > 0 ? result : allAvailableSources;
-  }, [activeApps, allAvailableSources, appToHostsMap]);
-
-  // Quick Filter chips are ranked by volume in the loaded buffer. The counts are a snapshot taken
-  // when the filters change (once their results load) and at most every QUICK_FILTER_RERANK_MS while
-  // live, so the chips keep their order as logs stream in.
-  const [chipCounts, setChipCounts] = useState<QuickFilterCounts>({ hosts: {}, apps: {} });
-
-  useEffect(() => {
-    chipRankDirtyRef.current = true;
-  }, [filters]);
-
-  // Hosts are the top level and apps live under them. Host chips are ranked from the unfiltered
-  // buffer and stay where they are while any chip is selected (after a first ranking); hosts the
-  // selected apps rule out are shown disabled. App chips follow the selected hosts: their apps,
-  // ranked by volume in the buffer, which then holds only those hosts' rows. While an app is
-  // selected the buffer holds only that app, so the app ranking is kept as it was.
-  const [appChipCounts, setAppChipCounts] = useState<Record<string, number>>({});
-  const chipSelectionRef = useRef({ hosts: 0, apps: 0 });
-  chipSelectionRef.current = { hosts: activeSources.length, apps: activeApps.length };
-
-  useEffect(() => {
-    const now = Date.now();
-    if (!chipRankDirtyRef.current && now - chipRankedAtRef.current < QUICK_FILTER_RERANK_MS) return;
-    const { hosts: selectedHosts, apps: selectedApps } = chipSelectionRef.current;
-    const firstRanking = chipRankedAtRef.current === 0;
-    chipRankDirtyRef.current = false;
-    chipRankedAtRef.current = now;
-    const counts = countQuickFilterVolumes(logs);
-    if (firstRanking || (selectedHosts === 0 && selectedApps === 0)) setChipCounts(counts);
-    if (firstRanking || selectedApps === 0) setAppChipCounts(counts.apps);
-  }, [logs]);
-
-  const quickHostChips = useMemo(
-    () => rankQuickFilterChips(allAvailableSources, chipCounts.hosts, activeSources),
-    [allAvailableSources, chipCounts.hosts, activeSources],
-  );
-
-  const quickAppChips = useMemo(
-    () =>
-      rankQuickFilterChips(
-        activeSources.length > 0 ? availableAppsForSelectedHosts : allAvailableApps,
-        appChipCounts,
-        activeApps,
-      ),
-    [activeSources.length, availableAppsForSelectedHosts, allAvailableApps, appChipCounts, activeApps],
-  );
-
-  const selectableHostChips = useMemo(() => new Set(availableSourcesForSelectedApps), [availableSourcesForSelectedApps]);
+  const chips = useQuickFilterChips({
+    logs,
+    filters,
+    activeHosts: activeSources,
+    activeApps,
+    allAvailableSources: facets.allAvailableSources,
+    allAvailableApps: facets.allAvailableApps,
+    availableAppsForSelectedHosts: facets.availableAppsForSelectedHosts,
+    availableSourcesForSelectedApps: facets.availableSourcesForSelectedApps,
+    rerankRef: chipRerankRef,
+  });
 
   // Saved views are shared by the search bar (Views menu, mobile drawer) and the pinned chips below
   const savedViews = useSavedViews();
@@ -2031,44 +506,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
   const filtersActive = useMemo(() => hasActiveLogFilters(filters), [filters]);
 
-  // Multi-select across single or multiple hosts with Shift-click range support
-  const toggleSelectLog = useCallback(
-    (log: LogEntry, index: number, shiftKey: boolean) => {
-      const lastIndex = lastSelectedLogIndexRef.current;
-
-      setSelectedLogIds((prev) => {
-        const next = new Set(prev);
-        if (shiftKey && lastIndex !== null && lastIndex !== index) {
-          const start = Math.min(lastIndex, index);
-          const end = Math.max(lastIndex, index);
-          const rangeLogs = logsRef.current.slice(start, end + 1);
-          rangeLogs.forEach((l) => next.add(l.id));
-        } else if (next.has(log.id)) {
-          next.delete(log.id);
-        } else {
-          next.add(log.id);
-        }
-        return next;
-      });
-
-      lastSelectedLogIndexRef.current = index;
-      setLastSelectedLogIndex(index);
-    },
-    [],
-  );
-
-  const selectAllLogs = () => {
-    // Select all logs loaded in the client-side buffer, capped at the 200-log AI analysis ceiling
-    const targetLogs = logs.slice(0, 200);
-    const newSet = new Set(targetLogs.map((l) => l.id));
-    setSelectedLogIds(newSet);
-  };
-
-  const deselectAllLogs = () => {
-    setSelectedLogIds(new Set());
-    setLastSelectedLogIndex(null);
-  };
-
+  const { selectedLogIds } = selection;
   const selectedLogs = useMemo(() => {
     if (selectedLogIds.size === 0) return EMPTY_SELECTED_LOGS;
     return logs.filter((l) => selectedLogIds.has(l.id));
@@ -2081,216 +519,71 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   };
 
   const handleDeleteSelected = async () => {
-    if (selectedLogs.length === 0) return;
-    try {
-      setIsDeletingSelected(true);
-      setDeleteSelectedError(null);
-      const targetIds = Array.from(selectedLogIds);
-      await deleteLogs({ log_ids: targetIds });
-      const targetSet = new Set(targetIds);
-      setLogs((prev) => prev.filter((l) => !targetSet.has(l.id)));
-      setTotalCount((prev) => (prev === null ? prev : Math.max(0, prev - targetSet.size)));
-      setSelectedLogIds(new Set());
-      setLastSelectedLogIndex(null);
-      setShowDeleteSelectedConfirm(false);
-    } catch (err: any) {
-      setDeleteSelectedError(err.message || 'Failed to delete selected logs.');
-    } finally {
-      setIsDeletingSelected(false);
-    }
+    const targetIds = new Set(selectedLogIds);
+    await deleteLogs({ log_ids: Array.from(targetIds) });
+    buffer.removeRows(targetIds);
+    selection.deselectAll();
+    setShowDeleteSelectedConfirm(false);
   };
-
 
   const clearLogsBuffer = () => {
-    fetchRequestIdRef.current += 1;
-    fetchAbortRef.current?.abort();
-    if (flushTimerRef.current !== null) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    incomingBufferRef.current = [];
-    heldLiveRowsRef.current = [];
-    heldRowsDroppedRef.current = false;
-    pendingScrollAdjustmentRef.current = 0;
-    setLogs([]);
-    chipRankDirtyRef.current = true;
-    setSelectedLogIds(new Set());
-    setLastSelectedLogIndex(null);
-    setMissedLogsCount(0);
-    setHasMoreLogs(false);
-    setTotalCount(0);
-    setTotalCapped(false);
+    buffer.clear();
+    chipRerankRef.current = true;
+    selection.deselectAll();
   };
 
+  const { scrollToTopLive } = buffer;
+  const { deselectAll } = selection;
   const handleResetFilters = useCallback(() => {
     setFilters({});
-    setAutoScroll(true);
-    isAutoScrollRef.current = true;
-    setMissedLogsCount(0);
-    pendingScrollAdjustmentRef.current = 0;
-    setSelectedLogIds(new Set());
-    setLastSelectedLogIndex(null);
-    if (parentRef.current) {
-      if (typeof parentRef.current.scrollTo === 'function') {
-        parentRef.current.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
-      } else {
-        parentRef.current.scrollTop = 0;
-      }
-    }
-  }, []);
+    deselectAll();
+    scrollToTopLive('instant');
+  }, [deselectAll, scrollToTopLive]);
 
-  // Quick filter chips and stream controls: a band under the search bar on desktop, and on
-  // phones part of the search bar's second line, next to Filters, to save a row
-  const streamBarContent = (
-    <>
-      {/* Left: Quick Filter Pills */}
-      <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
-        <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-w-full">
-          {/* On phones the Filters button that comes first on the line does the labelling */}
-          {!isMobile && <span className="text-slate-400 font-medium text-[11px] shrink-0">Quick Filters:</span>}
-          {/* Pinned saved views first: a click applies the view, as the Views menu does, and a
-              click on the active view clears its filters again, like a host or app chip */}
-          {pinnedViews.map((view) => {
-            const isActive = activeSavedView?.id === view.id;
-            return (
-              <button
-                key={`view-${view.id}`}
-                type="button"
-                data-testid="quick-filter-view"
-                onClick={() => (isActive ? handleResetFilters() : handleApplySavedView(view.query_params))}
-                aria-pressed={isActive}
-                title={isActive ? `Clear saved view ${view.name}` : `Apply saved view ${view.name}`}
-                className={`flex items-center gap-1 px-2 py-1 md:py-0.5 rounded text-[11px] border transition cursor-pointer shrink-0 ${
-                  isActive
-                    ? 'bg-accent-950 text-accent-300 border-accent-500 font-semibold'
-                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
-                }`}
-              >
-                <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
-                <span className="truncate max-w-[10rem]">{view.name}</span>
-              </button>
-            );
-          })}
-          {quickHostChips.length > 0 && (
-            <span className={`flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ${pinnedViews.length > 0 ? 'ml-1' : ''}`}>
-              <Server className="w-3 h-3" aria-hidden="true" />
-              <span>Hosts</span>
-            </span>
-          )}
-          {quickHostChips.map((src) => {
-            const isSelected = activeSources.includes(src);
-            const isDisabled = !isSelected && !selectableHostChips.has(src);
-            return (
-              <button
-                key={src}
-                data-testid="quick-filter-host"
-                onClick={() => toggleQuickSource(src)}
-                disabled={isDisabled}
-                title={isDisabled ? `No logs from ${src} for the selected app${activeApps.length > 1 ? 's' : ''}` : undefined}
-                className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition shrink-0 ${
-                  isSelected
-                    ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold cursor-pointer'
-                    : isDisabled
-                    ? 'bg-dark-800 text-slate-300 border-dark-700 opacity-40 cursor-not-allowed'
-                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600 cursor-pointer'
-                }`}
-              >
-                {src}
-              </button>
-            );
-          })}
-          {quickAppChips.length > 0 && (
-            <span className="flex items-center gap-1 text-slate-400 text-[10px] font-medium uppercase tracking-wide shrink-0 select-none ml-1">
-              <Box className="w-3 h-3" aria-hidden="true" />
-              <span>Apps</span>
-            </span>
-          )}
-          {quickAppChips.map((app) => {
-            const isSelected = activeApps.includes(app);
-            return (
-              <button
-                key={app}
-                data-testid="quick-filter-app"
-                onClick={() => toggleQuickApp(app)}
-                className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
-                  isSelected
-                    ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
-                    : 'bg-dark-800 text-slate-300 border-dark-700 hover:border-slate-600'
-                }`}
-              >
-                {app}
-              </button>
-            );
-          })}
-        </div>
-        {/* Fade overlay on the right edge of quick filters */}
-        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-dark-900 z-10" />
-      </div>
+  // The logs fetched around one in the drawer join the list (in time order) and become the selection
+  const selectAndAnalyze = (target: LogEntry[]) => {
+    buffer.mergeRows(target);
+    selection.selectOnly(target);
+    onDiagnoseAi(target);
+  };
 
-      {/* Right: Stream State Controls */}
-      <div className="flex items-center gap-2.5 shrink-0 ml-auto bg-dark-900 relative z-20 pl-1">
-        {/* md, not sm: below 768px the table becomes cards, which have no multi-select */}
-        <div data-testid="select-all-group" className="hidden md:flex items-center gap-1.5 border-r border-dark-700 pr-3 mr-1">
-        <button
-          onClick={selectAllLogs}
-          disabled={logs.length === 0}
-          className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-300 border border-dark-700 hover:border-slate-500 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-          title={logs.length > 200 ? 'Select all logs in buffer (capped at 200)' : 'Select all logs in buffer'}
-        >
-          Select All
-        </button>
-        {selectedLogIds.size > 0 && (
-          <button
-            onClick={deselectAllLogs}
-            className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:border-slate-500 hover:text-slate-200 transition cursor-pointer"
-            title="Deselect all selected logs"
-          >
-            Deselect All
-          </button>
-        )}
-      </div>
+  // The drawer's log in the list (newest first): Newer is the row above, Older the row below
+  const detailIndex = activeLogDetail ? logs.findIndex((l) => l.id === activeLogDetail.id) : -1;
 
-      <span className="hidden sm:inline font-mono text-slate-400 text-[11px]">
-        Screen Buffer: <span className="text-slate-200">{logs.length.toLocaleString()}</span> lines
-      </span>
+  const emptyKind: ConsoleEmptyKind | null =
+    isLoadingHistory && logs.length === 0
+      ? 'loading'
+      : logs.length > 0
+      ? null
+      : filtersActive
+      ? 'no-match'
+      : databaseHasLogs === false
+      ? 'first-run'
+      : 'waiting';
 
-      {filters.to ? (
-        <span
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-amber-950/50 text-amber-300 border border-amber-800/70 font-mono select-none"
-          title="A historical end-time (To) is set. Live stream is paused to preserve historical boundaries."
-        >
-          <Clock className="w-3.5 h-3.5 text-amber-400" />
-          <span>{isMobile ? 'History' : 'Historical Range (Stream Paused)'}</span>
-        </span>
-      ) : (
-        <button
-          onClick={() => (autoScroll ? setAutoScroll(false) : resumeAutoScroll())}
-          title={autoScroll ? 'Auto-scroll is on: click to pause' : 'Paused: click to resume auto-scroll'}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border transition ${
-            autoScroll
-              ? 'bg-dark-800 text-emerald-400 border-emerald-900/60 hover:bg-dark-700'
-              : 'bg-amber-950/60 text-amber-300 border-amber-800 hover:bg-amber-900/60'
-          }`}
-        >
-          {autoScroll ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-          {/* Short label on phones, where the bar is narrow */}
-          <span>{autoScroll ? (isMobile ? 'Scroll' : 'Auto-Scroll ON') : 'Paused'}</span>
-        </button>
-      )}
-
-      {/* Left out on phones to leave room for the quick filters */}
-      {!isMobile && (
-        <button
-          onClick={clearLogsBuffer}
-          title="Clear screen buffer (clears browser view only; does not delete logs from disk)"
-          aria-label="Clear screen buffer (clears browser view only; does not delete logs from disk)"
-          className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition cursor-pointer"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      )}
-    </div>
-    </>
+  const streamToolbar = (
+    <StreamToolbar
+      isMobile={isMobile}
+      pinnedViews={pinnedViews}
+      activeSavedView={activeSavedView}
+      onApplySavedView={handleApplySavedView}
+      onResetFilters={handleResetFilters}
+      hostChips={chips.hostChips}
+      appChips={chips.appChips}
+      activeHosts={activeSources}
+      activeApps={activeApps}
+      selectableHosts={chips.selectableHosts}
+      onToggleHost={toggleQuickSource}
+      onToggleApp={toggleQuickApp}
+      bufferSize={logs.length}
+      hasSelection={selectedLogIds.size > 0}
+      onSelectAll={selection.selectAll}
+      onDeselectAll={selection.deselectAll}
+      historicalRange={Boolean(filters.to)}
+      autoScroll={autoScroll}
+      onToggleAutoScroll={() => (autoScroll ? setAutoScroll(false) : buffer.resumeAutoScroll())}
+      onClearBuffer={clearLogsBuffer}
+    />
   );
 
   return (
@@ -2301,27 +594,27 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         <LogSearchBar
           timeZone={serverTimezone || undefined}
           filters={filters}
-          onFilterChange={setFilters}
-          onSearch={() => loadInitialLogs()}
+          onFilterChange={handleFilterChange}
+          onSearch={() => buffer.loadInitialLogs()}
           onReset={handleResetFilters}
-          availableSources={availableSourcesForSelectedApps}
-          availableApps={availableAppsForSelectedHosts}
+          availableSources={facets.availableSourcesForSelectedApps}
+          availableApps={facets.availableAppsForSelectedHosts}
           onApplySavedView={handleApplySavedView}
           savedViews={savedViews}
-          totalCount={totalCount ?? undefined}
-          totalCapped={totalCapped}
-          facetsTruncated={facetsTruncated}
-          facetsLimit={facetsLimit}
-          mobileToolbar={isMobile ? streamBarContent : undefined}
+          totalCount={buffer.totalCount ?? undefined}
+          totalCapped={buffer.totalCapped}
+          facetsTruncated={facets.facetsTruncated}
+          facetsLimit={facets.facetsLimit}
+          mobileToolbar={isMobile ? streamToolbar : undefined}
         />
 
         {/* Stream Controls & Filter Pills Bar (on phones it is part of the search bar) */}
         {!isMobile && (
           <div className="bg-dark-900 px-3 py-1.5 border-b border-dark-700 flex flex-nowrap items-center justify-between gap-2 text-xs select-none relative overflow-hidden">
-            {streamBarContent}
+            {streamToolbar}
           </div>
         )}
-    </div>
+      </div>
 
       {/* Virtualized Table View */}
       <div className="flex-1 relative overflow-hidden flex flex-col">
@@ -2333,9 +626,9 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           >
             <div className="flex items-center justify-center">
               <button
-                onClick={selectedLogIds.size > 0 ? deselectAllLogs : selectAllLogs}
+                onClick={selectedLogIds.size > 0 ? selection.deselectAll : selection.selectAll}
                 disabled={logs.length === 0}
-                title={selectedLogIds.size > 0 ? 'Deselect all rows' : (logs.length > 200 ? 'Select all rows (capped at 200)' : 'Select all rows')}
+                title={selectedLogIds.size > 0 ? 'Deselect all rows' : (logs.length > SELECT_ALL_LIMIT ? `Select all rows (capped at ${SELECT_ALL_LIMIT})` : 'Select all rows')}
                 aria-label={selectedLogIds.size > 0 ? 'Toggle deselect all in table' : 'Toggle select all in table'}
                 className="p-1 hover:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
@@ -2355,10 +648,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           </div>
         )}
 
-        {loadError && (
+        {buffer.loadError && (
           <div role="alert" className="shrink-0 px-3 py-1.5 bg-red-950/60 border-b border-red-800 text-xs text-red-300 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-            <span>{loadError}</span>
+            <span>{buffer.loadError}</span>
           </div>
         )}
 
@@ -2368,14 +661,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             <span>Live stream disconnected</span>
             <button
               type="button"
-              onClick={() => {
-                if (streamRetryTimerRef.current !== null) {
-                  clearTimeout(streamRetryTimerRef.current);
-                  streamRetryTimerRef.current = null;
-                }
-                streamRetryAttemptRef.current = 0;
-                setStreamReconnectNonce((n) => n + 1);
-              }}
+              onClick={reconnectStream}
               className="underline hover:text-white cursor-pointer font-medium"
             >
               Reconnect
@@ -2393,11 +679,11 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           }}
           onTouchEnd={() => {
             isTouchingRef.current = false;
-            noteScrollActivity();
+            buffer.noteScrollActivity();
           }}
           onTouchCancel={() => {
             isTouchingRef.current = false;
-            noteScrollActivity();
+            buffer.noteScrollActivity();
           }}
           onWheel={endResumingToTop}
           onMouseDown={() => {
@@ -2407,70 +693,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           // One Tab stop: the arrow, page, Home and End keys move the row cursor (handleListKeyDown)
           tabIndex={0}
           onKeyDown={handleListKeyDown}
-          role={processedLogs.length > 0 ? 'listbox' : 'region'}
+          role={logs.length > 0 ? 'listbox' : 'region'}
           aria-label="Log list"
-          aria-multiselectable={processedLogs.length > 0 ? true : undefined}
-          aria-activedescendant={cursorRowRendered ? logRowId(processedLogs[cursorIndex].id) : undefined}
+          aria-multiselectable={logs.length > 0 ? true : undefined}
+          aria-activedescendant={cursorRowRendered ? logRowId(logs[cursorIndex].id) : undefined}
           className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
         >
-          {isLoadingHistory && logs.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-slate-400 font-mono">
-              Loading log history...
-            </div>
-          ) : logs.length === 0 && filtersActive ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400 font-mono space-y-3 px-4 text-center">
-              <FilterX className="w-8 h-8 text-dark-600" />
-              <span>No logs match the current filters.</span>
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="px-3 py-1.5 rounded text-xs font-sans font-medium bg-dark-800 text-slate-200 border border-dark-600 hover:border-slate-500 hover:text-white transition cursor-pointer"
-              >
-                Clear filters
-              </button>
-            </div>
-          ) : logs.length === 0 && databaseHasLogs === false ? (
-            <div className="flex items-center justify-center min-h-full p-4">
-              <div className="max-w-lg w-full bg-dark-900 border border-dark-700 rounded-lg p-5 space-y-3 font-sans text-xs text-slate-300 select-text">
-                <div className="flex items-center gap-2">
-                  <Inbox className="w-5 h-5 text-accent-400 shrink-0" />
-                  <h2 className="text-sm font-semibold text-slate-100">No logs yet</h2>
-                </div>
-                <p className="leading-relaxed">
-                  {syslogPort !== undefined
-                    ? `LogShed listens for syslog on port ${syslogPort} (UDP and TCP) inside the container.`
-                    : `LogShed listens for syslog on port ${DEFAULT_SYSLOG_PORT} (UDP and TCP) inside the container by default.`}{' '}
-                  Point your devices at the host port you mapped to it.
-                </p>
-                <div className="flex items-center gap-2 bg-dark-950 border border-dark-700 rounded px-3 py-2">
-                  <code className="flex-1 min-w-0 font-mono text-[11px] text-slate-200 break-all">{onboardingCommand}</code>
-                  <button
-                    type="button"
-                    onClick={() => copyOnboardingCmd(onboardingCommand)}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
-                    title="Copy command"
-                  >
-                    {copiedOnboardingCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedOnboardingCmd ? 'Copied' : 'Copy'}</span>
-                  </button>
-                </div>
-                {onOpenSourcesSettings && (
-                  <button
-                    type="button"
-                    onClick={onOpenSourcesSettings}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-accent-700 hover:bg-accent-600 text-white transition cursor-pointer"
-                  >
-                    Set up Docker hosts
-                  </button>
-                )}
-                <p className="text-slate-400">See Sending Logs in the documentation for device guides.</p>
-              </div>
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400 font-mono space-y-2">
-              <Info className="w-8 h-8 text-dark-600" />
-              <span>Waiting for new logs...</span>
-            </div>
+          {emptyKind !== null ? (
+            <ConsoleEmptyState
+              kind={emptyKind}
+              onResetFilters={handleResetFilters}
+              syslogPort={syslogPort}
+              onOpenSourcesSettings={onOpenSourcesSettings}
+            />
           ) : (
             <div
               style={{
@@ -2479,17 +714,16 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                 position: 'relative',
               }}
             >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const log = processedLogs[virtualRow.index];
+              {virtualItems.map((virtualRow) => {
+                const log = logs[virtualRow.index];
                 if (!log) return null;
-                const isSelected = selectedLogIds.has(log.id);
 
                 return (
                   <LogRow
                     key={virtualRow.key}
                     log={log}
                     index={virtualRow.index}
-                    isSelected={isSelected}
+                    isSelected={selectedLogIds.has(log.id)}
                     isMobile={isMobile}
                     aiEnabled={aiEnabled}
                     isFocused={log.id === focusLogId}
@@ -2502,7 +736,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                       height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
-                    onSelect={toggleSelectLog}
+                    onSelect={selection.toggleSelectLog}
                     onClick={setActiveLogDetail}
                     onDiagnoseAi={onDiagnoseAi}
                   />
@@ -2521,7 +755,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
             <div className="py-2.5 flex items-center justify-center text-slate-400 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
-             - Reached the end of loaded history ({totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
+             - Reached the end of loaded history ({buffer.totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
             </div>
           )}
 
@@ -2548,7 +782,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         {!autoScroll && missedLogsCount > 0 && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 shadow-xl animate-in slide-in-from-bottom-2 w-[92%] sm:w-auto max-w-md flex justify-center">
             <button
-              onClick={resumeAutoScroll}
+              onClick={buffer.resumeAutoScroll}
               className="w-full sm:w-auto bg-accent-700 hover:bg-accent-600 text-white text-xs font-semibold px-4 py-2 rounded-xl sm:rounded-full flex items-center justify-center gap-2 shadow-lg transition"
             >
               <ArrowUp className="w-3.5 h-3.5 animate-bounce shrink-0" />
@@ -2563,75 +797,13 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
       {/* Floating Multi-Select Action Bar */}
       {selectedLogs.length > 0 && (
-        <div className="bg-dark-900 border-t border-dark-700 px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 select-none z-20 shadow-2xl animate-in slide-in-from-bottom">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <span className="text-xs font-semibold text-slate-200 shrink-0">
-              {selectedLogs.length} log{selectedLogs.length === 1 ? '' : 's'} selected
-            </span>
-            {(() => {
-              const uniqueHosts = Array.from(
-                new Set(selectedLogs.map((l) => l.source_alias || l.source_ip || 'unknown'))
-              );
-              if (uniqueHosts.length === 1) {
-                return (
-                  <span className="text-xs text-slate-400 font-mono truncate">
-                    Host: <span className="text-accent-400">{uniqueHosts[0]}</span>
-                  </span>
-                );
-              }
-              return (
-                <span className="text-xs text-slate-400 font-mono truncate">
-                  Hosts:{' '}
-                  <span className="text-accent-400">
-                    {uniqueHosts.length} hosts ({uniqueHosts.slice(0, 3).join(', ')}
-                    {uniqueHosts.length > 3 ? '...' : ''})
-                  </span>
-                </span>
-              );
-            })()}
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {aiEnabled && selectedLogs.length > 200 && (
-              <span className="text-xs text-amber-400 flex items-center gap-1 font-mono">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden sm:inline">Max 200 logs for AI</span>
-              </span>
-            )}
-
-            <button
-              onClick={deselectAllLogs}
-              className="px-2.5 py-1 text-xs text-slate-300 bg-dark-800 hover:text-white hover:bg-dark-700 border border-dark-600 rounded transition cursor-pointer font-medium"
-            >
-              Deselect All
-            </button>
-
-            <button
-              onClick={() => {
-                setDeleteSelectedError(null);
-                setShowDeleteSelectedConfirm(true);
-              }}
-              className="text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer bg-red-600 hover:bg-red-500"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete ({selectedLogs.length})</span>
-            </button>
-
-            {aiEnabled && (
-              <button
-                onClick={handleLaunchAiAnalysis}
-                className={`text-white text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer ${
-                  selectedLogs.length > 200
-                    ? 'bg-amber-600 hover:bg-amber-500'
-                    : 'bg-accent-700 hover:bg-accent-600'
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Run Analysis ({selectedLogs.length})</span>
-              </button>
-            )}
-          </div>
-        </div>
+        <SelectionActionBar
+          selectedLogs={selectedLogs}
+          aiEnabled={aiEnabled}
+          onDeselectAll={selection.deselectAll}
+          onDelete={() => setShowDeleteSelectedConfirm(true)}
+          onAnalyze={handleLaunchAiAnalysis}
+        />
       )}
 
       {/* Log Detail Slide-Over Inspector */}
@@ -2643,56 +815,17 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           timeZone={serverTimezone}
           aiEnabled={aiEnabled}
           // The AI dialog opens on top of the drawer, so closing it shows the same log again
-          onExplainWithAi={(log, ctxLogs) => {
-            const logsToInspect = ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log];
-            setLogs((prevLogs) => {
-              const existingIds = new Set(prevLogs.map((l) => l.id));
-              const fmt = getFormatContext();
-              const missingLogs = logsToInspect
-                .filter((l) => !existingIds.has(l.id))
-                .map((l) =>
-                  prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-                );
-              if (missingLogs.length === 0) return prevLogs;
-              return [...missingLogs, ...prevLogs].sort((a, b) => {
-                const cmp = b.timestamp.localeCompare(a.timestamp);
-                return cmp !== 0 ? cmp : b.id - a.id;
-              });
-            });
-            setSelectedLogIds(new Set(logsToInspect.map((l) => l.id)));
-            onDiagnoseAi(logsToInspect);
-          }}
-          onInspectWithContext={(targetAndCtxLogs) => {
-            setLogs((prevLogs) => {
-              const existingIds = new Set(prevLogs.map((l) => l.id));
-              const fmt = getFormatContext();
-              const missingLogs = targetAndCtxLogs
-                .filter((l) => !existingIds.has(l.id))
-                .map((l) =>
-                  prepareLogEntry(l, mergedAliasesRef.current, fmt.timeZone, dockerAliasesRef.current, fmt.todayKey)
-                );
-              if (missingLogs.length === 0) return prevLogs;
-              return [...missingLogs, ...prevLogs].sort((a, b) => {
-                const cmp = b.timestamp.localeCompare(a.timestamp);
-                return cmp !== 0 ? cmp : b.id - a.id;
-              });
-            });
-            setSelectedLogIds(new Set(targetAndCtxLogs.map((l) => l.id)));
-            onDiagnoseAi(targetAndCtxLogs);
-          }}
+          onExplainWithAi={(log, ctxLogs) => selectAndAnalyze(ctxLogs && ctxLogs.length > 0 ? ctxLogs : [log])}
+          onInspectWithContext={selectAndAnalyze}
           onAddAlias={onAddAlias}
           onEditDockerHost={onEditDockerHost}
           onManageDeletedDockerHost={onManageDeletedDockerHost}
-          dockerEndpoints={dockerEndpoints}
-          formerDockerAliases={formerDockerAliases}
-          isHostAliased={
-            activeLogDetail
-              ? Boolean(
-                  mergedAliases[activeLogDetail.source_ip] ||
-                  (activeLogDetail.source_alias && activeLogDetail.source_alias !== activeLogDetail.source_ip)
-                )
-              : true
-          }
+          dockerEndpoints={sources.dockerEndpoints}
+          formerDockerAliases={sources.formerDockerAliases}
+          isHostAliased={Boolean(
+            sources.aliases[activeLogDetail.source_ip] ||
+            (activeLogDetail.source_alias && activeLogDetail.source_alias !== activeLogDetail.source_ip)
+          )}
           onCreateDropRule={(targetLog) => {
             setActiveLogDetail(null);
             setDropRuleTargetLog(targetLog);
@@ -2708,42 +841,17 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             window.dispatchEvent(new PopStateEvent('popstate'));
           }}
           onDeleteLog={(deletedLog) => {
-            setLogs((prev) => prev.filter((l) => l.id !== deletedLog.id));
-            setTotalCount((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
-            lastSelectedLogIndexRef.current = null;
-            setLastSelectedLogIndex(null);
-            setSelectedLogIds((prev) => {
-              const next = new Set(prev);
-              next.delete(deletedLog.id);
-              return next;
-            });
+            buffer.removeRows(new Set([deletedLog.id]));
+            selection.forget([deletedLog.id]);
           }}
-          // The list is newest first: Newer is the row above (index - 1), Older the row below (index + 1)
           onNavigateNewer={() => {
-            if (!activeLogDetail) return;
-            const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-            if (currIdx > 0) {
-              setActiveLogDetail(processedLogs[currIdx - 1]);
-            }
+            if (detailIndex > 0) setActiveLogDetail(logs[detailIndex - 1]);
           }}
           onNavigateOlder={() => {
-            if (!activeLogDetail) return;
-            const currIdx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-            if (currIdx >= 0 && currIdx < processedLogs.length - 1) {
-              setActiveLogDetail(processedLogs[currIdx + 1]);
-            }
+            if (detailIndex >= 0 && detailIndex < logs.length - 1) setActiveLogDetail(logs[detailIndex + 1]);
           }}
-          hasNewerLog={Boolean(
-            activeLogDetail &&
-            processedLogs.findIndex((l) => l.id === activeLogDetail.id) > 0
-          )}
-          hasOlderLog={Boolean(
-            activeLogDetail &&
-            (() => {
-              const idx = processedLogs.findIndex((l) => l.id === activeLogDetail.id);
-              return idx >= 0 && idx < processedLogs.length - 1;
-            })()
-          )}
+          hasNewerLog={detailIndex > 0}
+          hasOlderLog={detailIndex >= 0 && detailIndex < logs.length - 1}
         />
       )}
 
@@ -2756,60 +864,19 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             initialSource={dropRuleTargetLog.source_alias || dropRuleTargetLog.source_ip}
             initialApp={dropRuleTargetLog.app_name}
             initialMessage={cleanLogMessageForDisplay(dropRuleTargetLog.message)}
-            availableSources={availableSourcesForSelectedApps}
-            availableApps={availableAppsForSelectedHosts}
+            availableSources={facets.availableSourcesForSelectedApps}
+            availableApps={facets.availableAppsForSelectedHosts}
           />
         </React.Suspense>
       )}
 
       {/* Delete Selected Confirmation Modal */}
       {showDeleteSelectedConfirm && (
-        <Modal
-          isOpen={showDeleteSelectedConfirm}
-          onClose={() => !isDeletingSelected && setShowDeleteSelectedConfirm(false)}
-          title="Delete Selected Logs"
-          maxWidth="max-w-md"
-        >
-          <div className="space-y-4 text-xs text-slate-200">
-            <p className="leading-relaxed">
-              Permanently delete <span className="font-mono font-bold text-red-400">{selectedLogs.length}</span> selected log record{selectedLogs.length === 1 ? '' : 's'}? This action cannot be reversed.
-            </p>
-            {deleteSelectedError && (
-              <div className="p-2.5 bg-red-950/60 border border-red-800 rounded text-xs text-red-300 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{deleteSelectedError}</span>
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-dark-800">
-              <button
-                type="button"
-                onClick={() => setShowDeleteSelectedConfirm(false)}
-                disabled={isDeletingSelected}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteSelected}
-                disabled={isDeletingSelected}
-                className="px-4 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
-              >
-                {isDeletingSelected ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Confirm Delete</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </Modal>
+        <DeleteSelectedDialog
+          count={selectedLogs.length}
+          onClose={() => setShowDeleteSelectedConfirm(false)}
+          onDelete={handleDeleteSelected}
+        />
       )}
     </div>
   );

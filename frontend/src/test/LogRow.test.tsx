@@ -1,13 +1,14 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { LogRow, areLogRowPropsEqual, ProcessedLogEntry, LOG_GRID_COLS_WITH_AI, LOG_GRID_COLS_WITHOUT_AI } from '../components/logs/LogRow.tsx';
+import { LogRow, areLogRowPropsEqual, LOG_GRID_COLS_WITH_AI, LOG_GRID_COLS_WITHOUT_AI } from '../components/logs/LogRow.tsx';
 import {
+  ProcessedLogEntry,
   buildDockerAliasSet,
-  matchesSearchQuery,
   prepareLogEntry,
   reapplyAliases,
   restoreDockerAliases,
-} from '../components/logs/LiveLogStream.tsx';
+} from '../utils/logEntry.ts';
+import { matchesSearchQuery } from '../utils/searchQuery.ts';
 
 describe('LogRow Component and Optimization', () => {
   const baseLog: ProcessedLogEntry = {

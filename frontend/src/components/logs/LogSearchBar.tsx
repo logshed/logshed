@@ -12,6 +12,7 @@ import {
   startOfTodayIso,
   timeInputZoneLabel,
 } from '../../utils/formatters.ts';
+import { hostFilterList, appFilterList, withHosts, withApps } from '../../utils/filters.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
 import { SavedViewsState, useSavedViews, findActiveView } from './useSavedViews.ts';
 
@@ -204,25 +205,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsHelpOpen(false);
   }, []);
 
-  // Compute active sources as an array
-  const activeSources: string[] = useMemo(() => {
-    if (filters.sources && Array.isArray(filters.sources)) return filters.sources;
-    if (filters.source) {
-      if (Array.isArray(filters.source)) return filters.source;
-      return filters.source.split(',').map((s) => s.trim()).filter(Boolean);
-    }
-    return [];
-  }, [filters.sources, filters.source]);
-
-  // Compute active apps as an array
-  const activeApps: string[] = useMemo(() => {
-    if (filters.apps && Array.isArray(filters.apps)) return filters.apps;
-    if (filters.app_name) {
-      if (Array.isArray(filters.app_name)) return filters.app_name;
-      return filters.app_name.split(',').map((a) => a.trim()).filter(Boolean);
-    }
-    return [];
-  }, [filters.apps, filters.app_name]);
+  const activeSources = useMemo(() => hostFilterList(filters), [filters]);
+  const activeApps = useMemo(() => appFilterList(filters), [filters]);
 
   const active = activeFilterControls(filters, timePreset);
 
@@ -421,11 +405,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           options={availableSources}
           selected={activeSources}
           onChange={(newSources) => {
-            onFilterChange({
-              ...filters,
-              sources: newSources,
-              source: newSources.length === 1 ? newSources[0] : (newSources.length > 1 ? newSources.join(',') : undefined),
-            });
+            onFilterChange(withHosts(filters, newSources));
           }}
           placeholder="All Hosts"
           note={facetsTruncated ? facetsNote('hosts', facetsLimit) : undefined}
@@ -437,11 +417,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           options={availableApps}
           selected={activeApps}
           onChange={(newApps) => {
-            onFilterChange({
-              ...filters,
-              apps: newApps,
-              app_name: newApps.length === 1 ? newApps[0] : (newApps.length > 1 ? newApps.join(',') : undefined),
-            });
+            onFilterChange(withApps(filters, newApps));
           }}
           placeholder="All Apps"
           note={facetsTruncated ? facetsNote('apps', facetsLimit) : undefined}
@@ -581,11 +557,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               options={availableSources}
               selected={activeSources}
               onChange={(newSources) => {
-                onFilterChange({
-                  ...filters,
-                  sources: newSources,
-                  source: newSources.length === 1 ? newSources[0] : (newSources.length > 1 ? newSources.join(',') : undefined),
-                });
+                onFilterChange(withHosts(filters, newSources));
               }}
               placeholder="All Hosts"
               note={facetsTruncated ? facetsNote('hosts', facetsLimit) : undefined}
@@ -600,11 +572,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               options={availableApps}
               selected={activeApps}
               onChange={(newApps) => {
-                onFilterChange({
-                  ...filters,
-                  apps: newApps,
-                  app_name: newApps.length === 1 ? newApps[0] : (newApps.length > 1 ? newApps.join(',') : undefined),
-                });
+                onFilterChange(withApps(filters, newApps));
               }}
               placeholder="All Apps"
               note={facetsTruncated ? facetsNote('apps', facetsLimit) : undefined}

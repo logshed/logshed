@@ -1,12 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import { matchesSearchQuery, compileSearchQuery } from '../utils/searchQuery.ts';
+import { rankQuickFilterChips, countQuickFilterVolumes } from '../utils/quickFilters.ts';
 import {
-  matchesSearchQuery,
-  compileSearchQuery,
-  rankQuickFilterChips,
-  countQuickFilterVolumes,
+  appFilterList,
   hasActiveLogFilters,
-} from '../components/logs/LiveLogStream.tsx';
-import { LogEntry } from '../types.ts';
+  hostFilterList,
+  renameFilterHosts,
+  toggleListValue,
+  withApps,
+  withHostAppLists,
+  withHosts,
+} from '../utils/filters.ts';
+import { mergeRowsInTimeOrder, prepareLogEntry } from '../utils/logEntry.ts';
+import { diffSources } from '../components/logs/useSourcesConfig.ts';
+import { DockerEndpoint, LogEntry } from '../types.ts';
 
 const sampleLog: LogEntry = {
   id: 101,
@@ -246,5 +253,86 @@ describe('Quick Filter and empty-state helpers', () => {
     expect(hasActiveLogFilters({ app_name: ['a'] })).toBe(true);
     expect(hasActiveLogFilters({ from: '1h' })).toBe(true);
     expect(hasActiveLogFilters({ to: '2026-10-13T12:00:00Z' })).toBe(true);
+  });
+});
+
+describe('Console host and app filter lists', () => {
+  it('reads hosts and apps from the list form, else from the single form', () => {
+    expect(hostFilterList({ sources: ['a', 'b'], source: 'c' })).toEqual(['a', 'b']);
+    expect(hostFilterList({ sources: [], source: 'a, b' })).toEqual(['a', 'b']);
+    expect(hostFilterList({ source: ['a'] })).toEqual(['a']);
+    expect(hostFilterList({})).toEqual([]);
+    expect(appFilterList({ app_name: 'nginx' })).toEqual(['nginx']);
+    expect(appFilterList({ apps: ['x'], app_name: 'y' })).toEqual(['x']);
+  });
+
+  it('turns a saved view in the single form into lists and leaves other filters alone', () => {
+    expect(withHostAppLists({ query: 'disk', source: 'pve1,pve2', app_name: 'kernel' })).toEqual({
+      query: 'disk',
+      sources: ['pve1', 'pve2'],
+      apps: ['kernel'],
+    });
+    expect(withHostAppLists({ severity_max: 3 })).toEqual({ severity_max: 3 });
+    expect(withHostAppLists({ sources: [] })).toEqual({ sources: [] });
+  });
+
+  it('sets hosts or apps and drops the single form, so a cleared filter stays cleared', () => {
+    expect(withHosts({ source: 'a', from: '1h' }, [])).toEqual({ sources: [], from: '1h' });
+    expect(withApps({ app_name: 'x' }, ['y'])).toEqual({ apps: ['y'] });
+    expect(toggleListValue(['a', 'b'], 'a')).toEqual(['b']);
+    expect(toggleListValue(['a'], 'b')).toEqual(['a', 'b']);
+  });
+
+  it('renames selected hosts and returns the same filters when none is renamed', () => {
+    const filters = { sources: ['old', 'other'] };
+    expect(renameFilterHosts(filters, { old: 'new' })).toEqual({ sources: ['new', 'other'] });
+    expect(renameFilterHosts(filters, { gone: 'x' })).toBe(filters);
+  });
+});
+
+describe('mergeRowsInTimeOrder', () => {
+  const row = (id: number, timestamp: string) =>
+    prepareLogEntry({ ...sampleLog, id, timestamp });
+
+  it('adds the missing logs and keeps the list newest first, ties by id', () => {
+    const logs = [row(3, '2026-09-03T14:30:20Z'), row(1, '2026-09-03T14:30:00Z')];
+    const merged = mergeRowsInTimeOrder(
+      logs,
+      [{ ...sampleLog, id: 1, timestamp: '2026-09-03T14:30:00Z' }, { ...sampleLog, id: 2, timestamp: '2026-09-03T14:30:00Z' }],
+      (entries) => entries.map((e) => prepareLogEntry(e)),
+    );
+    expect(merged.map((l) => l.id)).toEqual([3, 2, 1]);
+  });
+
+  it('returns the same list when every log is already in it', () => {
+    const logs = [row(1, '2026-09-03T14:30:00Z')];
+    expect(mergeRowsInTimeOrder(logs, [sampleLog].map((l) => ({ ...l, id: 1 })), (e) => e.map((x) => prepareLogEntry(x)))).toBe(logs);
+  });
+});
+
+describe('diffSources', () => {
+  const endpoint = (id: number, source_alias: string) => ({ id, source_alias }) as DockerEndpoint;
+
+  it('maps renamed and removed aliases and retires the old names', () => {
+    const change = diffSources({ '10.0.0.1': 'nas', '10.0.0.2': 'old-pi' }, { '10.0.0.1': 'storage' }, [], [], []);
+    expect(change.hostReplacements).toEqual({ nas: 'storage', 'old-pi': '10.0.0.2', '10.0.0.1': 'storage' });
+    expect([...change.retiredHosts].sort()).toEqual(['10.0.0.1', 'nas', 'old-pi']);
+  });
+
+  it('renames syslog rows by address and leaves Docker rows to their Docker host', () => {
+    const change = diffSources(
+      { '10.0.0.1': 'nas' },
+      {},
+      [endpoint(1, 'docker'), endpoint(2, 'remote-a')],
+      [endpoint(1, 'unraid'), endpoint(2, 'remote-b')],
+      [],
+    );
+    const syslogRow = prepareLogEntry({ ...sampleLog, source_ip: '10.0.0.1', source_alias: 'nas' });
+    const primaryRow = prepareLogEntry({ ...sampleLog, source_ip: 'docker', source_alias: 'docker' });
+    const remoteRow = prepareLogEntry({ ...sampleLog, source_ip: '10.0.0.1', source_alias: 'remote-a' });
+    expect(change.remapRow(syslogRow).source_alias).toBe('10.0.0.1');
+    expect(change.remapRow(primaryRow).source_alias).toBe('unraid');
+    expect(change.remapRow(remoteRow).source_alias).toBe('remote-b');
+    expect(change.hostReplacements).toMatchObject({ docker: 'unraid', 'remote-a': 'remote-b' });
   });
 });

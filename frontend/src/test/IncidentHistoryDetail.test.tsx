@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { IncidentHistoryDetail } from '../components/alerts/IncidentHistoryDetail.tsx';
 import { AlertHistoryItem } from '../types.ts';
-import { parseFiltersFromUrl } from '../components/logs/LiveLogStream.tsx';
+import { parseFiltersFromUrl } from '../utils/filters.ts';
 import * as settingsApi from '../api/settings.ts';
 
 describe('IncidentHistoryDetail Component', () => {
@@ -156,8 +156,8 @@ describe('IncidentHistoryDetail "Inspect in Console"', () => {
     expect(popstate).toHaveBeenCalled();
     expect(window.location.pathname).toBe('/');
     const filters = parseFiltersFromUrl();
-    expect(filters.source).toBe('nas-01');
-    expect(filters.app_name).toBe('kernel');
+    expect(filters.sources).toEqual(['nas-01']);
+    expect(filters.apps).toEqual(['kernel']);
     expect(filters.from).toBe('2026-10-13T09:59:00.000Z');
     expect(filters.to).toBe('2026-10-13T10:01:00.000Z');
   });

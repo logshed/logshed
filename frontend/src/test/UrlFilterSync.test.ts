@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseFiltersFromUrl, syncFiltersToUrl } from '../components/logs/LiveLogStream.tsx';
+import { parseFiltersFromUrl, syncFiltersToUrl } from '../utils/filters.ts';
 
 describe('URL Filter Deep-Linking and Synchronization', () => {
   beforeEach(() => {
@@ -21,14 +21,11 @@ describe('URL Filter Deep-Linking and Synchronization', () => {
     expect(filters.from).toBe('2026-09-01T00:00:00Z');
   });
 
-  it('parses single app and single source correctly into both array and string fields', () => {
+  it('parses a single app and a single source into one-item lists', () => {
     window.history.replaceState(null, '', '/?app=traefik&source=router');
 
     const filters = parseFiltersFromUrl();
-    expect(filters.apps).toEqual(['traefik']);
-    expect(filters.app_name).toBe('traefik');
-    expect(filters.sources).toEqual(['router']);
-    expect(filters.source).toBe('router');
+    expect(filters).toEqual({ apps: ['traefik'], sources: ['router'] });
   });
 
   it('handles empty or malformed URL search strings gracefully', () => {
