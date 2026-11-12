@@ -895,6 +895,52 @@ class TestNotifierProxyHandling:
                 with pytest.raises(BlockedNotificationDestinationError):
                     socket_mod.getaddrinfo("other.lan", 3128)
 
+    def test_lookup_in_apprise_dns_pool_is_checked_inside_the_guard(self):
+        """Apprise resolves some names in its own thread pool, which does not copy the caller's context itself."""
+        import socket as socket_mod
+        from apprise.utils.http import HTTPPolicy
+        from app.services.notifier import BlockedNotificationDestinationError, _pinned_destination_guard
+
+        resolver = self._resolver({"relay.example.com": "127.0.0.1"})
+        with patch("_socket.getaddrinfo", side_effect=resolver), self._private_targets_off():
+            with _pinned_destination_guard():
+                with pytest.raises(socket_mod.gaierror) as refused:
+                    HTTPPolicy().resolve("relay.example.com", 443)
+            # Outside a send the pool resolves as Apprise wrote it
+            answers = HTTPPolicy().resolve("relay.example.com", 443)
+        assert isinstance(refused.value.__cause__, BlockedNotificationDestinationError)
+        assert answers[0][4][0] == "127.0.0.1"
+
+    def test_loading_fails_when_apprise_has_no_dns_pool_to_wrap(self, monkeypatch):
+        import apprise.utils.http as apprise_http
+        import app.services.notifier as notifier_mod
+
+        monkeypatch.setattr(apprise_http, "_DNS_POOL", None)
+        with pytest.raises(RuntimeError, match="_DNS_POOL"):
+            notifier_mod._carry_context_into_apprise_dns_pool()
+
+    def test_nostr_relay_from_a_relay_list_is_checked_inside_the_guard(self, caplog):
+        """
+        A relay named in a recipient's relay list is resolved in Apprise's DNS pool. A public address
+        passes Apprise's own filter, so LogShed's blocked ports are what stops this one.
+        """
+        import logging
+        import socket as socket_mod
+        from apprise.plugins.nostr.relay import NostrRelay
+        from apprise.utils.socket import AppriseSocketError
+        from app.services.notifier import _BLOCKED_PORTS, _pinned_destination_guard
+
+        blocked_port = sorted(_BLOCKED_PORTS)[0]
+        relay = NostrRelay(f"ws://relay.example.com:{blocked_port}", key=None, public_only=True)
+        resolver = self._resolver({"relay.example.com": _PUBLIC_IP})
+        with patch("_socket.getaddrinfo", side_effect=resolver), \
+                patch.object(socket_mod.socket, "connect", side_effect=AssertionError("connected")) as connect:
+            with caplog.at_level(logging.WARNING, logger="app.services.notifier"), _pinned_destination_guard():
+                with pytest.raises(AppriseSocketError, match="no usable public address"):
+                    relay.connect()
+        assert connect.call_count == 0
+        assert any(f"port {blocked_port} at connect time" in r.getMessage() for r in caplog.records)
+
     def test_no_proxy_destination_keeps_the_connect_time_check(self, monkeypatch, caplog):
         """A destination in NO_PROXY connects directly, so a rebinding answer is still refused."""
         import logging

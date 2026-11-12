@@ -10,7 +10,7 @@ test deliveries, and asynchronous dispatch using asyncio.to_thread.
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 import ipaddress
 import logging
 import re
@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 
 import apprise
+import apprise.utils.http as apprise_http
 
 import requests
 import requests.sessions
@@ -474,9 +475,12 @@ requests.sessions.SessionRedirectMixin.get_redirect_target = _safe_get_redirect_
 # lookup returns, which is the address the client then connects to, is checked against the same
 # blocklist and the lookup fails if any address is blocked. The guard is a context variable, so it
 # also covers the worker threads Apprise sends from: Apprise 2 runs each send in its own thread
-# pool (to enforce a time limit) and copies the caller's context into it. Lookups that start with
-# a fresh context, such as the event loop's resolver threads, are not affected. Apprise runs with
-# async_mode off, so the services of one dispatch are sent one after another.
+# pool (to enforce a time limit) and copies the caller's context into it. Apprise's shared DNS
+# lookup pool (apprise.utils.http, used for Nostr relays taken from a recipient's relay list and
+# for PGP key lookups) does not copy the context, so _ContextCarryingPool below stands in for it.
+# Lookups that start with a fresh context, such as the event loop's resolver threads, are not
+# affected. Apprise runs with async_mode off, so the services of one dispatch are sent one after
+# another.
 
 # (allow_private, proxy_endpoints) inside _pinned_destination_guard, otherwise None
 _dispatch_guard: ContextVar[Optional[tuple[bool, frozenset]]] = ContextVar("logshed_notification_guard", default=None)
@@ -609,6 +613,42 @@ else:
     _system_getaddrinfo = socket.getaddrinfo
 _guarded_getaddrinfo._logshed_system_getaddrinfo = _system_getaddrinfo  # type: ignore[attr-defined]
 socket.getaddrinfo = _guarded_getaddrinfo
+
+
+class _ContextCarryingPool:
+    """
+    Stands in for Apprise's DNS lookup pool: each lookup runs in a copy of the submitting thread's
+    context, so a lookup submitted inside _pinned_destination_guard is checked like any other.
+    """
+
+    _logshed_context_pool = True
+
+    def __init__(self, pool):
+        self._pool = pool
+
+    def submit(self, fn, /, *args, **kwargs):
+        return self._pool.submit(copy_context().run, fn, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._pool, name)
+
+
+def _carry_context_into_apprise_dns_pool() -> None:
+    """Wrap Apprise's DNS lookup pool once; refuse to load if Apprise no longer has it where expected."""
+    pool = getattr(apprise_http, "_DNS_POOL", None)
+    if getattr(pool, "_logshed_context_pool", False):
+        # Module reloaded: the pool is already wrapped
+        return
+    if not callable(getattr(pool, "submit", None)):
+        # Failing here keeps a changed Apprise from sending with lookups the guard cannot see
+        raise RuntimeError(
+            "apprise.utils.http._DNS_POOL was not found, so LogShed cannot apply its connect-time "
+            "address check to Apprise's DNS lookups. Install the Apprise version in backend/requirements.txt."
+        )
+    apprise_http._DNS_POOL = _ContextCarryingPool(pool)
+
+
+_carry_context_into_apprise_dns_pool()
 
 
 @contextmanager
