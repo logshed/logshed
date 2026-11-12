@@ -574,3 +574,38 @@ class TestFormatFtsQueryShortTerms:
         from app.core.utils import escape_fts_tokens
 
         assert escape_fts_tokens('er "timeout') == '"er" "timeout"*'
+
+
+class TestAliasIndex:
+
+    def test_docker_rows_by_address_or_name(self, tmp_path):
+        from app.core.migrations import get_connection, run_migrations
+        from app.core.utils import AliasIndex
+
+        db_file = tmp_path / "idx.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        try:
+            conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('10.0.0.1', ' Tower ', '')")
+            conn.commit()
+            index = AliasIndex.load(conn)
+            assert index.alias_by_ip == {"10.0.0.1": "Tower"}
+            assert index.is_docker("", "docker")
+            assert index.is_docker("docker", "10.0.0.5")
+            assert not index.is_docker("", "10.0.0.5")
+            assert not index.is_docker(None, "10.0.0.1")
+            assert index.expand(["tower"]) == ["10.0.0.1", "Tower", "tower"]
+        finally:
+            conn.close()
+
+    def test_unreadable_aliases_give_an_empty_index(self):
+        import sqlite3
+        from app.core.utils import AliasIndex
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            index = AliasIndex.load(conn)
+        finally:
+            conn.close()
+        assert index.expand(["a,b"]) == ["a", "b"]
+        assert index.docker_aliases == frozenset({"docker"})

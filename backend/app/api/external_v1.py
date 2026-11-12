@@ -26,13 +26,7 @@ from app.core.pipeline import (
     get_ingest_rate,
     get_queue,
 )
-from app.core.utils import (
-    expand_source_aliases,
-    format_severity_label,
-    parse_multi_values,
-    resolve_severity,
-    source_filter_sql,
-)
+from app.core.utils import format_severity_label, resolve_severity
 from app.models import (
     AlertHistoryItem,
     ApiTokenVerifyResponse,
@@ -43,7 +37,6 @@ from app.models import (
     ExternalMaintenanceStatusResponse,
     ExternalLogContextResponse,
     LogCountResponse,
-    LogEntry,
     LogFacetsResponse,
     ExternalLogListResponse,
     PruneResponse,
@@ -63,14 +56,18 @@ from app.services.maintenance_service import (
     get_maintenance_status,
 )
 from app.services.log_query import (
-    INVALID_DATETIME_DETAIL,
-    add_fts_filter,
-    context_source_clause,
+    MAX_API_FILTER_VALUES,
+    InvalidTimeBound,
+    LogFilter,
+    build_where,
+    check_filter_value_counts,
     db_busy_exception,
     execute_with_fts_fallback,
+    fetch_log_context,
+    log_columns,
+    row_to_log_entry,
     run_newest_first,
     run_search_query,
-    to_utc_bound,
 )
 from app.services.storage_metrics import get_cached_storage_metrics
 from app.services.version_service import check_for_updates
@@ -468,124 +465,28 @@ async def trigger_vacuum_v1(
 # Log & Incident Query Endpoints
 # ---------------------------------------------------------------------------
 
-def build_log_where_clause(
-    conn: Any,
-    query: Optional[str] = None,
-    source: Optional[list[str]] = None,
-    app_name: Optional[list[str]] = None,
-    severity_max: Optional[int] = None,
-    from_ts: Optional[str] = None,
-    to_ts: Optional[str] = None,
-) -> tuple[str, dict[str, Any]]:
-    """Build shared WHERE clause and parameter map for log search and count queries."""
-    where_clauses: list[str] = []
-    params: dict[str, Any] = {}
-
-    add_fts_filter(where_clauses, params, query)
-
-    parsed_sources = expand_source_aliases(source, conn=conn)
-    if parsed_sources:
-        src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
-        where_clauses.append(
-            source_filter_sql(src_placeholders)
-        )
-        for i, s in enumerate(parsed_sources):
-            params[f"src_{i}"] = s
-
-    parsed_apps = parse_multi_values(app_name)
-    if parsed_apps:
-        app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
-        where_clauses.append(f"logs.app_name IN ({app_placeholders})")
-        for i, a in enumerate(parsed_apps):
-            params[f"app_{i}"] = a
-
-    if severity_max is not None:
-        where_clauses.append("logs.severity <= :severity_max")
-        params["severity_max"] = severity_max
-
-    # Bounds are compared as strings, so they must use the stored UTC isoformat() layout
-    from_ts = to_utc_bound(from_ts)
-    if from_ts:
-        where_clauses.append("logs.timestamp >= :from_ts")
-        params["from_ts"] = from_ts
-
-    to_ts = to_utc_bound(to_ts)
-    if to_ts:
-        where_clauses.append("logs.timestamp <= :to_ts")
-        params["to_ts"] = to_ts
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-    return where_sql, params
-
-
-_LOG_BASE_COLUMNS = (
-    "logs.id, logs.timestamp, logs.received_at, logs.source_ip, "
-    "logs.source_alias, logs.app_name, logs.facility, logs.severity, logs.message"
-)
-
-
-def _log_columns(include_raw: bool) -> str:
-    """Return the SELECT column list for log rows, selecting the raw packet only when needed."""
-    return f"{_LOG_BASE_COLUMNS}, logs.raw" if include_raw else _LOG_BASE_COLUMNS
-
-
-def _parse_log_filters(
+def _parse_log_filter(
+    query: Optional[str],
+    source: Optional[list[str]],
+    app_name: Optional[list[str]],
     severity_max: Optional[int],
     severity: Optional[str],
     from_: Optional[str],
     to: Optional[str],
-) -> tuple[Optional[int], Optional[str], Optional[str]]:
-    """Resolve named severity and relative/ISO time bounds, raising HTTP 422 on invalid input."""
-    effective_severity_max = severity_max
+) -> LogFilter:
+    """The filter of a log search or count; a named severity wins over severity_max. HTTP 422 on invalid input."""
+    check_filter_value_counts(MAX_API_FILTER_VALUES, source=source, app_name=app_name)
     if severity is not None:
         try:
-            effective_severity_max = resolve_severity(severity)
+            severity_max = resolve_severity(severity)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-
     try:
-        from_ = to_utc_bound(from_) if from_ else from_
-        to = to_utc_bound(to) if to else to
-    except ValueError:
-        raise HTTPException(status_code=422, detail=INVALID_DATETIME_DETAIL)
-
-    return effective_severity_max, from_, to
-
-
-# Each filter value becomes SQL parameters (twice for sources, plus alias expansion), and
-# SQLite rejects statements with more than 32,766 of them, so long lists are refused early.
-MAX_FILTER_VALUES = 50
-
-
-def _check_filter_value_counts(**filters: Optional[list[str]]) -> None:
-    """Raise HTTP 422 when a multi-value filter lists more than MAX_FILTER_VALUES values."""
-    for name, values in filters.items():
-        if len(parse_multi_values(values)) > MAX_FILTER_VALUES:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Too many '{name}' values: at most {MAX_FILTER_VALUES} are allowed.",
-            )
-
-
-def _row_to_log_entry(r: Any, include_raw: bool = True) -> LogEntry:
-    """Map a logs table row to a LogEntry (single mapping point for external log endpoints).
-
-    The raw packet is populated only when include_raw is true; otherwise it is None
-    and omitted from serialized responses. Message and raw are always passed through
-    the redactor because these endpoints serve external clients and AI assistants.
-    """
-    return LogEntry(
-        id=r["id"],
-        timestamp=str(r["timestamp"]),
-        received_at=str(r["received_at"]),
-        source_ip=r["source_ip"],
-        source_alias=r["source_alias"] or r["source_ip"],
-        app_name=r["app_name"] if r["app_name"] is not None else "unknown",
-        facility=r["facility"],
-        severity=r["severity"],
-        message=redact(r["message"]),
-        raw=redact(r["raw"]) if include_raw and r["raw"] is not None else None,
-    )
+        return LogFilter.parse(
+            query=query, sources=source, apps=app_name, severity_max=severity_max, from_=from_, to=to
+        )
+    except InvalidTimeBound as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 _MAX_CURSOR_LENGTH = 200
@@ -637,20 +538,11 @@ async def search_logs_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> ExternalLogListResponse:
     """Search and filter logs (newest first) with keyset pagination via next_cursor."""
-    _check_filter_value_counts(source=source, app_name=app_name)
-    effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
+    log_filter = _parse_log_filter(query, source, app_name, severity_max, severity, from_, to)
     cursor_pos = _decode_log_cursor(cursor) if cursor else None
 
     def _query_db(conn):
-        where_sql, params = build_log_where_clause(
-            conn=conn,
-            query=query,
-            source=source,
-            app_name=app_name,
-            severity_max=effective_severity_max,
-            from_ts=from_,
-            to_ts=to,
-        )
+        where_sql, params = build_where(conn, log_filter)
 
         # Total: capped count of all rows matching the filters (independent of the cursor
         # position), which avoids full table scans on broad queries.
@@ -666,7 +558,7 @@ async def search_logs_v1(
             cursor_params["cursor_ts"], cursor_params["cursor_id"] = cursor_pos
 
         select_sql = f"""
-            SELECT {_log_columns(include_raw)}
+            SELECT {log_columns(include_raw)}
             FROM logs
             {page_where}
             ORDER BY logs.timestamp DESC, logs.id DESC
@@ -685,7 +577,7 @@ async def search_logs_v1(
             if run_total >= _TOTAL_CAP and len(run_rows) > limit:
                 return run_rows[-1]["timestamp"]
             # Too few matches: still complete when the window covers the whole time range
-            return params.get("from_ts")
+            return log_filter.from_ts
 
         total, rows = execute_with_fts_fallback(
             lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], _TOTAL_CAP),
@@ -706,7 +598,7 @@ async def search_logs_v1(
                 has_more = True
                 break
         next_cursor = _encode_log_cursor(str(rows[-1]["timestamp"]), rows[-1]["id"]) if has_more else None
-        logs_list = [_row_to_log_entry(r, include_raw) for r in rows]
+        logs_list = [row_to_log_entry(r, external=True, include_raw=include_raw) for r in rows]
         return logs_list, total, next_cursor
 
     try:
@@ -737,19 +629,10 @@ async def count_logs_v1(
     token: dict[str, Any] = Depends(require_api_token(["logs:read"])),
 ) -> LogCountResponse:
     """Count logs matching filters with optional grouping by severity, app, or source."""
-    _check_filter_value_counts(source=source, app_name=app_name)
-    effective_severity_max, from_, to = _parse_log_filters(severity_max, severity, from_, to)
+    log_filter = _parse_log_filter(query, source, app_name, severity_max, severity, from_, to)
 
     def _count_db(conn):
-        where_sql, params = build_log_where_clause(
-            conn=conn,
-            query=query,
-            source=source,
-            app_name=app_name,
-            severity_max=effective_severity_max,
-            from_ts=from_,
-            to_ts=to,
-        )
+        where_sql, params = build_where(conn, log_filter)
         cursor = conn.cursor()
         valid_group = (group_by or "").lower().strip()
 
@@ -819,7 +702,7 @@ async def count_logs_v1(
         grouped_by=grouped_by_out,
         breakdown=breakdown_out,
         truncated=truncated_out,
-        time_range={"from": from_, "to": to},
+        time_range={"from": log_filter.from_ts, "to": log_filter.to_ts},
     )
 
 
@@ -834,57 +717,15 @@ async def get_log_context_v1(
 ) -> ExternalLogContextResponse:
     """Fetch symmetrical surrounding context logs before and after a specific log entry."""
     def _fetch(conn):
-        cursor = conn.cursor()
-        columns = _log_columns(include_raw)
-        cursor.execute(f"SELECT {columns} FROM logs WHERE id = ?", (log_id,))
-        target_row = cursor.fetchone()
-        if not target_row:
+        found = fetch_log_context(conn, log_id, before=lines, after=lines, same_app=same_app, include_raw=include_raw)
+        if found is None:
             return None, [], []
+        target_row, before_rows, after_rows = found
 
-        source_alias = target_row["source_alias"]
-        app_name = target_row["app_name"]
-        t_time = target_row["timestamp"]
-        t_id = target_row["id"]
+        def _entries(rows):
+            return [row_to_log_entry(r, external=True, include_raw=include_raw) for r in rows]
 
-        # Same host: alias-less rows (source_alias '') are also matched on source_ip.
-        source_clause, source_params = context_source_clause(source_alias, target_row["source_ip"])
-
-        if not same_app:
-            app_clause = ""
-            app_params: tuple = ()
-        elif app_name is None:
-            app_clause = "AND app_name IS NULL "
-            app_params = ()
-        else:
-            app_clause = "AND app_name = ? "
-            app_params = (app_name,)
-
-        # Fetch lines before (chronologically earlier)
-        before_sql = f"""
-            SELECT {columns} FROM logs
-            WHERE {source_clause}{app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
-            ORDER BY timestamp DESC, id DESC
-            LIMIT ?
-        """
-        cursor.execute(before_sql, (*source_params, *app_params, t_time, t_time, t_id, lines))
-        before_rows = cursor.fetchall()
-        before_rows.reverse()
-
-        # Fetch lines after (chronologically later)
-        after_sql = f"""
-            SELECT {columns} FROM logs
-            WHERE {source_clause}{app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
-            ORDER BY timestamp ASC, id ASC
-            LIMIT ?
-        """
-        cursor.execute(after_sql, (*source_params, *app_params, t_time, t_time, t_id, lines))
-        after_rows = cursor.fetchall()
-
-        target_entry = _row_to_log_entry(target_row, include_raw)
-        before_entries = [_row_to_log_entry(r, include_raw) for r in before_rows]
-        after_entries = [_row_to_log_entry(r, include_raw) for r in after_rows]
-
-        return target_entry, before_entries, after_entries
+        return _entries([target_row])[0], _entries(before_rows), _entries(after_rows)
 
     target_entry, before_entries, after_entries = await run_db_query(_fetch)
     if not target_entry:

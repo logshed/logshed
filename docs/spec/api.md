@@ -25,6 +25,8 @@ The web UI never receives a stored secret in clear text. Forms keep, clear or re
 - **New forms** follow the Docker host convention: never return the secret (return `has_<field>` instead), keep it when the field is absent or `null`, clear it on `""` and replace it otherwise. It needs no placeholder string that a real secret could equal.
 
 ## 2. Query Pagination & Evaluation Capping
+`GET /api/logs`, `GET /api/v1/logs`, `GET /api/v1/logs/count`, the MCP log tools and `POST /api/logs/delete` (and its preview) select logs the same way (`LogFilter` and `build_where` in `services/log_query.py`): the same full-text rules, host matching through host aliases (a syslog address never matches Docker container logs, see "Former Docker Aliases" in `database.md`), app, severity and time bounds. A blank `query`, `from` or `to` is no criterion. Only the caps and the page form differ, as listed below.
+
 When searching or listing log records via `GET /api/logs`, the response returns a `LogListResponse` payload containing:
 - `logs`: Array of `LogEntry` records matching query filters.
 - `total`: Total count of matching records up to the evaluation ceiling.
@@ -37,7 +39,7 @@ When searching or listing log records via `GET /api/logs`, the response returns 
 - `since_midnight` or `today`: 00:00 today in the server time zone (`TZ`).
 - `yesterday`: 00:00 on the previous local date in the server time zone.
 
-Midnight is built from the local date, so days with a daylight saving change stay correct. All values are converted to UTC before they are compared with stored timestamps. An unknown value returns `422`.
+Midnight is built from the local date, so days with a daylight saving change stay correct. All values are converted to UTC before they are compared with stored timestamps. An unknown value returns `422` on every route, deletes included.
 
 ### 2.2 Search Terms and Stopped Searches
 `query` on `GET /api/logs`, `GET /api/v1/logs`, `GET /api/v1/logs/count` and the MCP tools uses the same rules (`format_fts_query` in `core/utils.py`):
@@ -61,8 +63,8 @@ Midnight is built from the local date, so days with a daylight saving change sta
 | `GET` | `/api/logs/facets` | Fetch distinct sources, apps, and their mappings. Sources are the hosts found in stored logs plus every configured syslog alias and Docker host alias (so a new host can be picked before it logs); a renamed Docker host's old alias, or the built-in `docker`, is listed only while stored logs still carry it. Each list holds at most 500 entries (alphabetical); `truncated` is `true` when anything was left out, and `limit` gives the cap (500) | None | `LogFacetsResponse` (includes `truncated`, `limit` and `former_docker_aliases`, the aliases of deleted or renamed Docker hosts, which the console uses to keep their old container logs marked as Docker) | `200` |
 | `GET` | `/api/logs/{id}/context` | Fetch surrounding context lines symmetrically around target log (unredacted; includes the combined `logs` list used by the UI) | `lines` (1-100, default 10), `same_app: bool` (default `false`) | `LogContextResponse` (`target_id`, `logs`, `target_log`, `before_logs`, `after_logs`) | `200`, `404` |
 | `DELETE` | `/api/logs/{id}` | Delete a single log record by primary key ID | None | `LogDeleteResponse` (`{"status": "ok", "deleted_count": int, "message": "..."}`) | `200`, `404` |
-| `POST` | `/api/logs/delete` | Batch targeted deletion of logs matching filter criteria or specific IDs (requires at least one criterion or `delete_all: true`; `delete_all` with no criterion deletes the logs stored when the request starts, and keeps logs arriving during it) | `{"log_ids": [...], "query": "...", "sources": [...], "apps": [...], "severity_max": ..., "from": "...", "to": "...", "delete_all": bool}` (at most 20,000 `log_ids` and 500 `sources` and `apps`) | `LogDeleteResponse` (`{"status": "ok", "deleted_count": int, "message": "..."}`) | `200`, `400`, `422` |
-| `POST` | `/api/logs/delete/preview` | Calculate count of logs matching deletion criteria without deleting them | Same payload as `/api/logs/delete` | `LogDeletePreviewResponse` (`{"matched_count": int}`) | `200`, `400`, `422` |
+| `POST` | `/api/logs/delete` | Batch targeted deletion of logs matching filter criteria or specific IDs (requires at least one criterion or `delete_all: true`; `delete_all` with no criterion deletes the logs stored when the request starts, and keeps logs arriving during it) | `{"log_ids": [...], "query": "...", "sources": [...], "apps": [...], "severity_max": ..., "from": "...", "to": "...", "delete_all": bool}` (at most 20,000 `log_ids` and 500 `sources` and `apps`) | `LogDeleteResponse` (`{"status": "ok", "deleted_count": int, "message": "..."}`) | `200`, `400` (no criterion), `422` (invalid values, such as an unreadable `from` or `to`) |
+| `POST` | `/api/logs/delete/preview` | Calculate count of logs matching deletion criteria without deleting them | Same payload as `/api/logs/delete` | `LogDeletePreviewResponse` (`{"matched_count": int}`) | `200`, `400` (no criterion), `422` (invalid values) |
 | **Alert Rules & Incident History** | | | | | |
 | `GET` | `/api/alerts/rules` | List all configured alert rules | None | `list[AlertRuleResponse]` | `200` |
 | `POST` | `/api/alerts/rules` | Create a new alert rule (`rule_type` must be `threshold`, `pattern` or `rate`; any other value returns `422`) | `{"name": "...", "rule_type": "...", "channel_id": ..., "filter_app": "...", "filter_severity": ..., "match_pattern": "...", "threshold_count": 1, "window_seconds": 60, "cooldown_seconds": 300, "ai_enrichment": false, "is_enabled": true}` | `AlertRuleResponse` | `201`, `400`, `422` |

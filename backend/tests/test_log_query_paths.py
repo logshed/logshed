@@ -228,3 +228,18 @@ class TestTheThreePathsAgree:
         bad = await client.get("/api/v1/logs", params={"severity": "loud"}, headers=token_headers)
         assert bad.status_code == 422
 
+
+class TestUnreadableTimeBounds:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("field", ["from", "to"])
+    async def test_every_path_refuses_an_unreadable_time_with_422(self, client, token_headers, field):
+        expected = log_query.INVALID_DATETIME_DETAIL
+        ui = await client.get("/api/logs", params={field: "the day before"})
+        v1 = await client.get("/api/v1/logs", params={field: "the day before"}, headers=token_headers)
+        count = await client.get("/api/v1/logs/count", params={field: "the day before"}, headers=token_headers)
+        preview = await client.post("/api/logs/delete/preview", json={field: "the day before"})
+        delete = await client.post("/api/logs/delete", json={field: "the day before"})
+        for res in (ui, v1, count, preview, delete):
+            assert res.status_code == 422, res.text
+            assert res.json()["detail"] == expected

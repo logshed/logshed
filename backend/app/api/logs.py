@@ -18,28 +18,23 @@ from app.models import (
     LogDeletePreviewResponse,
     LogDeleteRequest,
     LogDeleteResponse,
-    LogEntry,
     LogFacetsResponse,
     LogListResponse,
 )
-from app.core.utils import (
-    expand_source_aliases,
-    load_docker_source_aliases,
-    load_former_docker_aliases,
-    parse_multi_values,
-    source_filter_sql,
-)
+from app.core.utils import AliasIndex, load_former_docker_aliases, parse_multi_values
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
 from app.services.log_query import (
-    INVALID_DATETIME_DETAIL,
-    add_fts_filter,
+    InvalidTimeBound,
+    LogFilter,
+    build_where,
     check_ui_filter_value_counts,
-    context_source_clause,
     db_busy_exception,
     execute_with_fts_fallback,
+    fetch_log_context,
+    log_columns,
+    row_to_log_entry,
     run_newest_first,
     run_search_query,
-    to_utc_bound,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,46 +74,15 @@ async def list_logs(
     """
     check_ui_filter_value_counts(source=source, app_name=app_name)
     try:
-        from_time = to_utc_bound(from_)
-        to_time = to_utc_bound(to)
-    except ValueError:
-        raise HTTPException(status_code=422, detail=INVALID_DATETIME_DETAIL)
+        log_filter = LogFilter.parse(
+            query=query, sources=source, apps=app_name, severity_max=severity_max, from_=from_, to=to
+        )
+    except InvalidTimeBound as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     def _query_db(conn):
-        where_clauses: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-
-        add_fts_filter(where_clauses, params, query)
-
-        parsed_sources = expand_source_aliases(source, conn=conn)
-        if parsed_sources:
-            src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
-            where_clauses.append(
-                source_filter_sql(src_placeholders)
-            )
-            for i, s in enumerate(parsed_sources):
-                params[f"src_{i}"] = s
-
-        parsed_apps = parse_multi_values(app_name)
-        if parsed_apps:
-            app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
-            where_clauses.append(f"logs.app_name IN ({app_placeholders})")
-            for i, a in enumerate(parsed_apps):
-                params[f"app_{i}"] = a
-
-        if severity_max is not None:
-            where_clauses.append("logs.severity <= :severity_max")
-            params["severity_max"] = severity_max
-
-        if from_time:
-            where_clauses.append("logs.timestamp >= :from_time")
-            params["from_time"] = from_time
-
-        if to_time:
-            where_clauses.append("logs.timestamp <= :to_time")
-            params["to_time"] = to_time
-
-        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        where_sql, params = build_where(conn, log_filter)
+        params.update({"limit": limit, "offset": offset})
 
         # Total count query: cap count evaluation to avoid full table scans on broad queries
         count_limit = max(1001, offset + limit + 1)
@@ -126,8 +90,7 @@ async def list_logs(
         count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
         # Log selection query
         select_sql = f"""
-            SELECT logs.id, logs.timestamp, logs.received_at, logs.source_ip, logs.source_alias,
-                   logs.app_name, logs.facility, logs.severity, logs.message, logs.raw
+            SELECT {log_columns()}
             FROM logs
             {where_sql}
             ORDER BY logs.timestamp DESC, logs.id DESC
@@ -147,7 +110,7 @@ async def list_logs(
             if run_total >= count_limit and len(run_rows) >= limit:
                 return run_rows[-1]["timestamp"]
             # Too few matches: still complete when the window covers the whole time range
-            return from_time
+            return log_filter.from_ts
 
         total, rows = execute_with_fts_fallback(
             lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], count_limit),
@@ -156,21 +119,7 @@ async def list_logs(
             empty=(0, []),
         )
 
-        logs = [
-            LogEntry(
-                id=r["id"],
-                timestamp=str(r["timestamp"]),
-                received_at=str(r["received_at"]),
-                source_ip=r["source_ip"],
-                source_alias=r["source_alias"],
-                app_name=r["app_name"],
-                facility=r["facility"],
-                severity=r["severity"],
-                message=r["message"],
-                raw=r["raw"],
-            )
-            for r in rows
-        ]
+        logs = [row_to_log_entry(r) for r in rows]
 
         total_capped = bool(total >= count_limit)
         return logs, total, total_capped
@@ -201,12 +150,9 @@ async def stream_logs(
     Server-Sent Events (SSE) endpoint to stream real-time incoming logs to the browser.
     """
     check_ui_filter_value_counts(source=source, app_name=app_name)
-    parsed_sources = set(
-        await run_db_query(lambda conn: expand_source_aliases(source, conn=conn))
-    )
+    alias_index = await run_db_query(AliasIndex.load)
+    parsed_sources = set(alias_index.expand(source))
     parsed_apps = set(parse_multi_values(app_name))
-
-    docker_aliases = await run_db_query(load_docker_source_aliases)
 
     try:
         queue = await sse_manager.subscribe()
@@ -238,8 +184,7 @@ async def stream_logs(
                         if parsed_sources:
                             entry_alias = (entry.get("source_alias") or "").strip()
                             entry_ip = (entry.get("source_ip") or "").strip()
-                            is_docker_entry = entry_ip == "docker" or entry_alias in docker_aliases
-                            if is_docker_entry:
+                            if alias_index.is_docker(entry_alias, entry_ip):
                                 if entry_alias not in parsed_sources:
                                     continue
                             else:
@@ -416,18 +361,14 @@ async def get_log_facets(
                 for app_name in ip_apps[:FACET_LIMIT + 1]:
                     pairs.append((ip, app_name, ip))
 
-        cursor.execute("SELECT ip, alias FROM host_aliases")
-        alias_rows = cursor.fetchall()
-        aliases_map = {r["ip"]: r["alias"] for r in alias_rows if r["alias"]}
+        alias_index = AliasIndex.load(conn)
+        aliases_map = alias_index.alias_by_ip
 
         sources_set = set()
         apps_set = set(apps_res)
         host_to_apps: dict[str, set[str]] = {}
         app_to_hosts: dict[str, set[str]] = {}
 
-        # Every name that marks a row as Docker output (including the built-in "docker"), used below
-        # only to keep Docker and syslog rows from the same machine apart
-        docker_aliases = load_docker_source_aliases(conn)
         # The aliases Docker hosts use now. Only these are listed as hosts without any logs, so a
         # renamed host's old name (or "docker") stays listed only while logs still carry it.
         configured_docker_aliases = {
@@ -454,7 +395,7 @@ async def get_log_facets(
         for row in sources:
             s = row[0]
             ip = row[1]
-            if (s and s in docker_aliases) or ip == "docker":
+            if alias_index.is_docker(s, ip):
                 canonical = s or "docker"
             else:
                 canonical = (ip and aliases_map.get(ip)) or aliases_map.get(s) or s or ip
@@ -475,7 +416,7 @@ async def get_log_facets(
 
             # Canonical host resolution:
             # Docker logs preserve their Docker endpoint alias without resolving to Syslog IP aliases.
-            if (raw_alias and raw_alias in docker_aliases) or ip == "docker":
+            if alias_index.is_docker(raw_alias, ip):
                 canonical_host = raw_alias or "docker"
             else:
                 canonical_host = aliases_map.get(ip) or aliases_map.get(raw_alias) or raw_alias or ip
@@ -562,66 +503,12 @@ async def get_log_context(
     alias). If same_app=True, restricts to the same app_name.
     """
     def _fetch_context(conn):
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM logs WHERE id = ?", (id,))
-        target_row = cursor.fetchone()
-        if not target_row:
-            return None, []
-
-        source_alias = target_row["source_alias"]
-        app_name = target_row["app_name"]
-        t_time = target_row["timestamp"]
-        t_id = target_row["id"]
         half = max(1, lines // 2)
-        source_clause, source_params = context_source_clause(source_alias, target_row["source_ip"])
-
-        app_clause = "AND app_name = ? " if same_app else ""
-        app_params = (app_name,) if same_app else ()
-
-        # Fetch lines before (chronologically earlier)
-        before_sql = f"""
-            SELECT * FROM logs
-            WHERE {source_clause}{app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
-            ORDER BY timestamp DESC, id DESC
-            LIMIT ?
-        """
-        cursor.execute(
-            before_sql,
-            (*source_params, *app_params, t_time, t_time, t_id, half),
-        )
-        before_rows = cursor.fetchall()
-        before_rows.reverse()  # Chronological order
-
-        # Fetch lines after (chronologically later)
-        after_sql = f"""
-            SELECT * FROM logs
-            WHERE {source_clause}{app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
-            ORDER BY timestamp ASC, id ASC
-            LIMIT ?
-        """
-        cursor.execute(
-            after_sql,
-            (*source_params, *app_params, t_time, t_time, t_id, half),
-        )
-        after_rows = cursor.fetchall()
-
-        all_rows = before_rows + [target_row] + after_rows
-        logs = [
-            LogEntry(
-                id=r["id"],
-                timestamp=str(r["timestamp"]),
-                received_at=str(r["received_at"]),
-                source_ip=r["source_ip"],
-                source_alias=r["source_alias"],
-                app_name=r["app_name"],
-                facility=r["facility"],
-                severity=r["severity"],
-                message=r["message"],
-                raw=r["raw"],
-            )
-            for r in all_rows
-        ]
-        return target_row, logs
+        found = fetch_log_context(conn, id, before=half, after=half, same_app=same_app)
+        if found is None:
+            return None, []
+        target_row, before_rows, after_rows = found
+        return target_row, [row_to_log_entry(r) for r in (*before_rows, target_row, *after_rows)]
 
     target_row, logs = await run_db_query(_fetch_context)
     if not target_row:
@@ -669,6 +556,8 @@ async def delete_logs_batch(
     try:
         result = await execute_delete_logs_async(db_path, request)
         return LogDeleteResponse(**result)
+    except InvalidTimeBound as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -690,6 +579,8 @@ async def preview_delete_logs(
     try:
         matched = await count_matching_logs_async(db_path, request)
         return LogDeletePreviewResponse(matched_count=matched)
+    except InvalidTimeBound as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

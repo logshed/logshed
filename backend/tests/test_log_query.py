@@ -305,3 +305,81 @@ class TestRunSearchQuery:
 
         with pytest.raises(sqlite3.OperationalError, match="locked"):
             await run_search_query(_locked, _Request(False))
+
+
+class TestLogFilter:
+
+    def test_parse_reads_route_values(self):
+        f = log_query.LogFilter.parse(
+            query="  timeout ",
+            sources=["pve1,pve2", "pve1"],
+            apps=["web"],
+            severity_max=3,
+            from_="2026-11-01T01:00:00+01:00",
+            to="",
+        )
+        assert f.query == "  timeout "
+        assert f.sources == ("pve1", "pve2")
+        assert f.apps == ("web",)
+        assert f.from_ts == "2026-11-01T00:00:00+00:00"
+        assert f.to_ts is None
+        assert not f.is_empty
+
+    @pytest.mark.parametrize("values", [{}, {"query": "  "}, {"sources": [" , "]}, {"from_": " "}, {"to": None}, {"log_ids": []}])
+    def test_blank_values_are_no_criterion(self, values):
+        f = log_query.LogFilter.parse(**values)
+        assert f.is_empty
+        assert log_query.build_where(None, f) == ("", {})
+
+    def test_severity_zero_is_a_criterion(self):
+        assert not log_query.LogFilter.parse(severity_max=0).is_empty
+
+    def test_unreadable_bound_raises_with_the_shared_message(self):
+        with pytest.raises(log_query.InvalidTimeBound) as exc:
+            log_query.LogFilter.parse(to="the day before")
+        assert str(exc.value) == log_query.INVALID_DATETIME_DETAIL
+        assert isinstance(exc.value, ValueError)
+
+    def test_build_where_without_a_connection_matches_sources_as_given(self):
+        f = log_query.LogFilter(sources=("pve1",), apps=("web", "db"), log_ids=(4, 5), from_ts="a", to_ts="b")
+        where, params = log_query.build_where(None, f)
+        assert where.startswith("WHERE logs.id IN (:id_0, :id_1) AND ")
+        assert params == {
+            "id_0": 4, "id_1": 5, "src_0": "pve1", "app_0": "web", "app_1": "db", "from_ts": "a", "to_ts": "b",
+        }
+
+    def test_build_where_expands_host_aliases(self, tmp_path):
+        db = tmp_path / "logs.db"
+        run_migrations(db)
+        with open_db(db) as conn:
+            conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES ('10.0.0.1', 'Tower', '')")
+            _, params = log_query.build_where(conn, log_query.LogFilter(sources=("tower",)))
+        assert sorted(v for k, v in params.items() if k.startswith("src_")) == ["10.0.0.1", "Tower", "tower"]
+
+
+class TestRowToLogEntry:
+
+    _ROW = {
+        "id": 7, "timestamp": "2026-11-01T00:00:00+00:00", "received_at": "2026-11-01T00:00:01+00:00",
+        "source_ip": "10.0.0.1", "source_alias": "", "app_name": None, "facility": 1, "severity": 3,
+        "message": "password=hunter2 failed", "raw": "<11>password=hunter2 failed",
+    }
+
+    def test_web_ui_form_is_the_row_as_stored(self):
+        entry = log_query.row_to_log_entry({**self._ROW, "app_name": "web"})
+        assert entry.source_alias == ""
+        assert entry.app_name == "web"
+        assert entry.message == self._ROW["message"]
+        assert entry.raw == self._ROW["raw"]
+
+    def test_external_form_redacts_and_fills_blanks(self):
+        entry = log_query.row_to_log_entry(self._ROW, external=True)
+        assert entry.source_alias == "10.0.0.1"
+        assert entry.app_name == "unknown"
+        assert "hunter2" not in entry.message
+        assert "hunter2" not in entry.raw
+
+    def test_raw_only_when_asked(self):
+        assert log_query.row_to_log_entry({**self._ROW, "app_name": "web"}, include_raw=False).raw is None
+        row = {k: v for k, v in self._ROW.items() if k != "raw"}
+        assert log_query.row_to_log_entry(row, external=True, include_raw=False).raw is None

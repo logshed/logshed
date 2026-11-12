@@ -9,6 +9,7 @@ import json
 import os
 import re
 import zoneinfo
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 
@@ -300,58 +301,85 @@ def load_docker_source_aliases(conn: Any) -> set[str]:
         return {"docker"}
 
 
+@dataclass(frozen=True)
+class AliasIndex:
+    """
+    The host names that log filters, the live stream and the facets read: each configured syslog
+    host alias with its address, and the names that mark a row as Docker output
+    (load_docker_source_aliases). Load it once per request with AliasIndex.load(conn).
+    """
+
+    alias_by_ip: dict[str, str] = field(default_factory=dict)
+    docker_aliases: frozenset[str] = frozenset({"docker"})
+    # Each name or address, exact and folded to lower case, mapped to its alias pair
+    _exact: dict[str, frozenset[str]] = field(default_factory=dict)
+    _folded: dict[str, frozenset[str]] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, conn: Any) -> "AliasIndex":
+        """Read host_aliases and the Docker names; an unreadable host_aliases table gives an empty index."""
+        try:
+            rows = conn.execute("SELECT ip, alias FROM host_aliases").fetchall()
+        except Exception:
+            return cls()
+        alias_by_ip: dict[str, str] = {}
+        exact: dict[str, set[str]] = {}
+        folded: dict[str, set[str]] = {}
+        for row in rows:
+            ip = str(row[0]).strip() if row[0] is not None else ""
+            alias = str(row[1]).strip() if row[1] is not None else ""
+            if ip and alias:
+                alias_by_ip[ip] = alias
+            pair_items = {item for item in (ip, alias) if item}
+            for item in pair_items:
+                folded.setdefault(item.lower(), set()).update(pair_items)
+                exact.setdefault(item, set()).update(pair_items)
+        return cls(
+            alias_by_ip=alias_by_ip,
+            docker_aliases=frozenset(load_docker_source_aliases(conn)),
+            _exact={k: frozenset(v) for k, v in exact.items()},
+            _folded={k: frozenset(v) for k, v in folded.items()},
+        )
+
+    def is_docker(self, source_alias: Optional[str], source_ip: Optional[str]) -> bool:
+        """True when a row with this alias and address is Docker container output."""
+        return source_ip == "docker" or bool(source_alias and source_alias in self.docker_aliases)
+
+    def expand(self, sources: Optional[list[str]]) -> list[str]:
+        """
+        Symmetrically expand source names or IPs using the configured host aliases.
+        For each source, adds its corresponding IP and alias equivalents (bidirectionally and
+        case-insensitively), ensuring queries and deletion filters match both raw IPs and
+        historical alias spellings without requiring costly unindexed SQL functions.
+
+        A source that is exactly a Docker host alias only expands through an exact host alias
+        match, so a syslog alias spelled the same apart from letter case (for the same machine)
+        never pulls that host's syslog logs into a Docker host filter.
+        """
+        parsed = parse_multi_values(sources)
+        if not parsed:
+            return []
+        expanded: set[str] = set(parsed)
+        for item in parsed:
+            matches = self._exact.get(item) if item in self.docker_aliases else self._folded.get(item.lower())
+            if matches:
+                expanded.update(matches)
+        return sorted(expanded)
+
+
 def expand_source_aliases(
     sources: Optional[list[str]],
     conn: Optional[Any] = None,
 ) -> list[str]:
     """
-    Symmetrically expand a list of source names or IPs using configured host aliases.
-    For each source, adds its corresponding IP and alias equivalents (bidirectionally and
-    case-insensitively), ensuring queries and deletion filters match both raw IPs and
-    historical alias spellings without requiring costly unindexed SQL functions.
-
-    A source that is exactly a Docker host alias only expands through an exact host alias
-    match, so a syslog alias spelled the same apart from letter case (for the same machine)
-    never pulls that host's syslog logs into a Docker host filter.
+    AliasIndex.expand with the index read from conn. Without a connection, the parsed sources
+    are returned deduplicated and unexpanded.
     """
-    parsed = parse_multi_values(sources)
-    if not parsed:
-        return []
-
-    # If no database connection is supplied, return parsed inputs deduplicated
     if conn is None:
-        return parsed
-
-    expanded: set[str] = set(parsed)
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT ip, alias FROM host_aliases")
-        rows = cursor.fetchall()
-    except Exception:
-        return sorted(expanded)
-
-    # Build bidirectional lookup maps keyed by lowercase string, and by exact string
-    lookup: dict[str, set[str]] = {}
-    exact_lookup: dict[str, set[str]] = {}
-    for row in rows:
-        ip = str(row[0]).strip() if row[0] is not None else ""
-        alias = str(row[1]).strip() if row[1] is not None else ""
-        if not ip and not alias:
-            continue
-
-        pair_items = {item for item in (ip, alias) if item}
-        for item in pair_items:
-            lookup.setdefault(item.lower(), set()).update(pair_items)
-            exact_lookup.setdefault(item, set()).update(pair_items)
-
-    docker_aliases = load_docker_source_aliases(conn)
-    for item in parsed:
-        matches = exact_lookup.get(item) if item in docker_aliases else lookup.get(item.lower())
-        if matches:
-            expanded.update(matches)
-
-    return sorted(expanded)
+        return parse_multi_values(sources)
+    if not parse_multi_values(sources):
+        return []
+    return AliasIndex.load(conn).expand(sources)
 
 
 # Reserved FTS5 syntax operators

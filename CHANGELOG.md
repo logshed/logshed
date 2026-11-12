@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Storage chart by keyboard**: The 30-day trend chart on the Storage page takes keyboard focus; the arrow keys step through the snapshots and show each one's figures.
 - **ReDoc 3**: The `/redoc` API reference uses ReDoc 3, with a new layout and its usage reports turned off. It is still served by LogShed itself.
 - **Gemini on the stable API**: LogShed sends Gemini requests to Google's stable `v1` API instead of `v1beta`. The model list shows what `v1` offers; a saved model that only `v1beta` offers fails over to your fallback models, so pick another model under AI Provider in Settings if that happens.
+- **One way to select logs**: History search, the REST API, MCP and deletes now read their filters through the same code. A delete or delete preview with an unreadable `from` or `to` returns `422` with the same message as a search (it returned `400`), and a blank `from` or `to` in a delete is ignored as it is in a search, instead of making the delete match nothing.
 
 ### Fixed
 

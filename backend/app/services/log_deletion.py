@@ -15,12 +15,24 @@ from typing import Any, Optional, Union
 
 from app.core.migrations import get_connection
 from app.core.pipeline import wait_for_ingest_write
-from app.core.utils import expand_source_aliases, parse_multi_values, source_filter_sql
 from app.models import LogDeleteRequest
-from app.services.log_query import add_fts_filter, execute_with_fts_fallback, to_utc_bound
+from app.services.log_query import LogFilter, build_where, execute_with_fts_fallback
 from app.services.storage_metrics import note_logs_deleted
 
 logger = logging.getLogger(__name__)
+
+
+def deletion_log_filter(criteria: LogDeleteRequest) -> LogFilter:
+    """The LogFilter of a delete request. Raises InvalidTimeBound for an unreadable from or to."""
+    return LogFilter.parse(
+        query=criteria.query,
+        sources=criteria.sources,
+        apps=criteria.apps,
+        severity_max=criteria.severity_max,
+        from_=criteria.from_,
+        to=criteria.to,
+        log_ids=criteria.log_ids,
+    )
 
 
 def build_deletion_filter(
@@ -28,82 +40,17 @@ def build_deletion_filter(
     conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[str, dict[str, Any]]:
     """
-    Build parameterized WHERE clause and parameter dictionary for log deletion.
-    Guards against unconstrained full-table wipe unless delete_all is explicitly True.
+    Build the parameterized WHERE clause and parameters for a delete request (build_where).
+    Guards against an unconstrained full-table wipe unless delete_all is explicitly True.
 
-    Returns:
-        tuple of (where_sql_clause, params_dict)
     Raises:
-        ValueError: If no criteria are provided and delete_all is False.
+        InvalidTimeBound: an unreadable from or to (a ValueError).
+        ValueError: if no criteria are provided and delete_all is False.
     """
-    where_clauses: list[str] = []
-    params: dict[str, Any] = {}
-
-    has_filter = False
-
-    # 1. Direct log IDs filter
-    if criteria.log_ids:
-        has_filter = True
-        id_placeholders = ", ".join(f":id_{i}" for i in range(len(criteria.log_ids)))
-        where_clauses.append(f"logs.id IN ({id_placeholders})")
-        for i, log_id in enumerate(criteria.log_ids):
-            params[f"id_{i}"] = log_id
-
-    # 2. Source / Host filter (source_alias or source_ip)
-    parsed_sources = expand_source_aliases(criteria.sources, conn=conn)
-    if parsed_sources:
-        has_filter = True
-        src_placeholders = ", ".join(f":src_{i}" for i in range(len(parsed_sources)))
-        where_clauses.append(
-            source_filter_sql(src_placeholders)
-        )
-        for i, s in enumerate(parsed_sources):
-            params[f"src_{i}"] = s
-
-    # 3. Application / Container filter
-    parsed_apps = parse_multi_values(criteria.apps)
-    if parsed_apps:
-        has_filter = True
-        app_placeholders = ", ".join(f":app_{i}" for i in range(len(parsed_apps)))
-        where_clauses.append(f"logs.app_name IN ({app_placeholders})")
-        for i, a in enumerate(parsed_apps):
-            params[f"app_{i}"] = a
-
-    # 4. Severity threshold
-    if criteria.severity_max is not None:
-        has_filter = True
-        where_clauses.append("logs.severity <= :severity_max")
-        params["severity_max"] = criteria.severity_max
-
-    # 5. Datetime bounds (ISO-8601 with any offset, or relative such as '1h'), compared in UTC
-    if criteria.from_:
-        has_filter = True
-        try:
-            from_time = to_utc_bound(criteria.from_)
-        except ValueError:
-            raise ValueError(f"Invalid 'from' datetime format: {criteria.from_}")
-        where_clauses.append("logs.timestamp >= :from_time")
-        params["from_time"] = from_time
-
-    if criteria.to:
-        has_filter = True
-        try:
-            to_time = to_utc_bound(criteria.to)
-        except ValueError:
-            raise ValueError(f"Invalid 'to' datetime format: {criteria.to}")
-        where_clauses.append("logs.timestamp <= :to_time")
-        params["to_time"] = to_time
-
-    # 6. FTS search query
-    if criteria.query and criteria.query.strip():
-        has_filter = True
-        add_fts_filter(where_clauses, params, criteria.query)
-
-    if not has_filter and not criteria.delete_all:
+    log_filter = deletion_log_filter(criteria)
+    if log_filter.is_empty and not criteria.delete_all:
         raise ValueError("Deletion request must specify at least one filter criterion or set delete_all=True.")
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-    return where_sql, params
+    return build_where(conn, log_filter)
 
 
 def count_matching_logs(db_path: Union[str, Path], criteria: LogDeleteRequest) -> int:
@@ -216,14 +163,12 @@ def _delete_everything(conn: sqlite3.Connection, batch_size: int) -> int:
 
 def _deletes_everything(criteria: LogDeleteRequest) -> bool:
     """True when the request deletes all logs (delete_all with no filter). Reads no database."""
-    if not criteria.delete_all or parse_multi_values(criteria.sources):
+    if not criteria.delete_all:
         return False
     try:
-        # Without sources, building the filter looks up no host aliases
-        where_sql, _ = build_deletion_filter(criteria.model_copy(update={"sources": None}))
+        return deletion_log_filter(criteria).is_empty
     except ValueError:
         return False
-    return not where_sql
 
 
 def execute_delete_logs(

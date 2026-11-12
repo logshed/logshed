@@ -1,12 +1,10 @@
 """
-Shared helpers for the three log WHERE-clause builders:
-
-- the web UI list in ``app/api/logs.py``;
-- REST v1 (also used by MCP) in ``app/api/external_v1.py``;
-- scoped deletion in ``app/services/log_deletion.py``.
-
-They keep FTS5 error handling, the FTS indexer wake-up and time-bound conversion
-identical across the three paths without merging the builders themselves.
+The one way to select logs by filter, used by the web UI list (``app/api/logs.py``), REST v1
+and MCP (``app/api/external_v1.py``) and scoped deletion (``app/services/log_deletion.py``):
+``LogFilter`` holds the filter, ``build_where`` turns it into SQL, ``row_to_log_entry`` maps the
+rows and ``fetch_log_context`` reads the lines around one log. The helpers below them keep FTS5
+error handling, the FTS indexer wake-up, newest-first windows and the search time limit the
+same on every path.
 """
 
 import asyncio
@@ -14,16 +12,21 @@ import logging
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from fastapi import HTTPException, Request, status
 
+from app.core.redactor import redact
 from app.core.utils import (
+    AliasIndex,
     escape_fts_tokens,
     format_fts_query,
     parse_multi_values,
     parse_relative_or_iso_time,
+    source_filter_sql,
 )
+from app.models import LogEntry
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +88,207 @@ def to_utc_bound(value: Optional[str]) -> Optional[str]:
         return parse_relative_or_iso_time(value)
     except (TypeError, OverflowError) as exc:
         raise ValueError(str(exc)) from exc
+
+
+class InvalidTimeBound(ValueError):
+    """A from or to bound that is neither ISO-8601 nor a relative duration; its text is INVALID_DATETIME_DETAIL."""
+
+    def __init__(self) -> None:
+        super().__init__(INVALID_DATETIME_DETAIL)
+
+
+@dataclass(frozen=True)
+class LogFilter:
+    """
+    Which logs a search, count or delete selects. Build it with LogFilter.parse, which reads
+    the values as the routes receive them. Every criterion narrows the selection; an empty
+    filter selects every log.
+    """
+
+    query: Optional[str] = None
+    sources: tuple[str, ...] = ()
+    apps: tuple[str, ...] = ()
+    severity_max: Optional[int] = None
+    # Stored UTC layout (to_utc_bound), compared as strings
+    from_ts: Optional[str] = None
+    to_ts: Optional[str] = None
+    log_ids: tuple[int, ...] = ()
+
+    @classmethod
+    def parse(
+        cls,
+        *,
+        query: Optional[str] = None,
+        sources: Optional[list[str]] = None,
+        apps: Optional[list[str]] = None,
+        severity_max: Optional[int] = None,
+        from_: Optional[str] = None,
+        to: Optional[str] = None,
+        log_ids: Optional[list[int]] = None,
+    ) -> "LogFilter":
+        """
+        Read a filter from route values: repeated or comma-separated sources and apps, ISO or
+        relative time bounds. A blank query or bound means no criterion. Raises InvalidTimeBound.
+        """
+        try:
+            from_ts = to_utc_bound(from_)
+            to_ts = to_utc_bound(to)
+        except ValueError:
+            raise InvalidTimeBound() from None
+        return cls(
+            query=query if query and query.strip() else None,
+            sources=tuple(parse_multi_values(sources)),
+            apps=tuple(parse_multi_values(apps)),
+            severity_max=severity_max,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            log_ids=tuple(log_ids or ()),
+        )
+
+    @property
+    def is_empty(self) -> bool:
+        """True when the filter has no criterion, so it selects every log."""
+        return not (
+            self.query or self.sources or self.apps or self.log_ids
+            or self.severity_max is not None or self.from_ts or self.to_ts
+        )
+
+
+def build_where(conn: Optional[sqlite3.Connection], f: LogFilter) -> tuple[str, dict[str, Any]]:
+    """
+    The WHERE clause (empty for an empty filter) and named parameters selecting f's logs. A host
+    name or address matches through the configured host aliases (AliasIndex.expand), read from
+    conn; without a connection, sources match as given.
+    """
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if f.log_ids:
+        id_placeholders = ", ".join(f":id_{i}" for i in range(len(f.log_ids)))
+        where_clauses.append(f"logs.id IN ({id_placeholders})")
+        params.update({f"id_{i}": log_id for i, log_id in enumerate(f.log_ids)})
+
+    add_fts_filter(where_clauses, params, f.query)
+
+    if f.sources:
+        sources = AliasIndex.load(conn).expand(list(f.sources)) if conn is not None else list(f.sources)
+        where_clauses.append(source_filter_sql(", ".join(f":src_{i}" for i in range(len(sources)))))
+        params.update({f"src_{i}": s for i, s in enumerate(sources)})
+
+    if f.apps:
+        app_placeholders = ", ".join(f":app_{i}" for i in range(len(f.apps)))
+        where_clauses.append(f"logs.app_name IN ({app_placeholders})")
+        params.update({f"app_{i}": a for i, a in enumerate(f.apps)})
+
+    if f.severity_max is not None:
+        where_clauses.append("logs.severity <= :severity_max")
+        params["severity_max"] = f.severity_max
+
+    if f.from_ts:
+        where_clauses.append("logs.timestamp >= :from_ts")
+        params["from_ts"] = f.from_ts
+
+    if f.to_ts:
+        where_clauses.append("logs.timestamp <= :to_ts")
+        params["to_ts"] = f.to_ts
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    return where_sql, params
+
+
+LOG_COLUMNS = (
+    "logs.id, logs.timestamp, logs.received_at, logs.source_ip, "
+    "logs.source_alias, logs.app_name, logs.facility, logs.severity, logs.message"
+)
+
+
+def log_columns(include_raw: bool = True) -> str:
+    """The SELECT column list for log rows, with the raw packet only when it is needed."""
+    return f"{LOG_COLUMNS}, logs.raw" if include_raw else LOG_COLUMNS
+
+
+def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = True) -> LogEntry:
+    """
+    Map a logs row to a LogEntry. The web UI gets the row as stored. external is the form REST
+    and MCP return to outside clients and AI assistants: message and raw pass through the
+    redactor, an empty host alias reads as the address and a missing app name as "unknown".
+    raw is None (and left out of REST responses) unless include_raw.
+    """
+    raw = row["raw"] if include_raw else None
+    if not external:
+        return LogEntry(
+            id=row["id"],
+            timestamp=str(row["timestamp"]),
+            received_at=str(row["received_at"]),
+            source_ip=row["source_ip"],
+            source_alias=row["source_alias"],
+            app_name=row["app_name"],
+            facility=row["facility"],
+            severity=row["severity"],
+            message=row["message"],
+            raw=raw,
+        )
+    return LogEntry(
+        id=row["id"],
+        timestamp=str(row["timestamp"]),
+        received_at=str(row["received_at"]),
+        source_ip=row["source_ip"],
+        source_alias=row["source_alias"] or row["source_ip"],
+        app_name=row["app_name"] if row["app_name"] is not None else "unknown",
+        facility=row["facility"],
+        severity=row["severity"],
+        message=redact(row["message"]),
+        raw=redact(raw) if raw is not None else None,
+    )
+
+
+def fetch_log_context(
+    conn: sqlite3.Connection,
+    log_id: int,
+    before: int,
+    after: int,
+    same_app: bool = False,
+    include_raw: bool = True,
+) -> Optional[tuple[Any, list[Any], list[Any]]]:
+    """
+    The rows around one log, from the same host (context_source_clause) and, with same_app, the
+    same app: (target, up to before earlier rows, up to after later rows), each list in time
+    order. None when the log does not exist.
+    """
+    columns = log_columns(include_raw)
+    target = conn.execute(f"SELECT {columns} FROM logs WHERE id = ?", (log_id,)).fetchone()
+    if target is None:
+        return None
+
+    source_clause, source_params = context_source_clause(target["source_alias"], target["source_ip"])
+    if not same_app:
+        app_clause, app_params = "", ()
+    elif target["app_name"] is None:
+        app_clause, app_params = "AND app_name IS NULL ", ()
+    else:
+        app_clause, app_params = "AND app_name = ? ", (target["app_name"],)
+    t_time, t_id = target["timestamp"], target["id"]
+
+    before_rows = conn.execute(
+        f"""
+        SELECT {columns} FROM logs
+        WHERE {source_clause}{app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
+        ORDER BY timestamp DESC, id DESC
+        LIMIT ?
+        """,
+        (*source_params, *app_params, t_time, t_time, t_id, before),
+    ).fetchall()
+    before_rows.reverse()
+    after_rows = conn.execute(
+        f"""
+        SELECT {columns} FROM logs
+        WHERE {source_clause}{app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
+        ORDER BY timestamp ASC, id ASC
+        LIMIT ?
+        """,
+        (*source_params, *app_params, t_time, t_time, t_id, after),
+    ).fetchall()
+    return target, before_rows, after_rows
 
 
 def add_fts_filter(where_clauses: list[str], params: dict[str, Any], query: Optional[str]) -> None:
@@ -256,18 +460,25 @@ def execute_with_fts_fallback(
 # The web UI routes accept as many source or app_name values as the facets lists can hold
 # (the facets cap is 500), so the UI can always send every value it can show. Longer lists
 # are refused early: each value becomes SQL parameters and SQLite rejects statements with
-# more than 32,766 of them. REST v1 and MCP use a stricter cap in ``api/external_v1.py``.
+# more than 32,766 of them. REST v1 and MCP use the stricter MAX_API_FILTER_VALUES (each source
+# becomes parameters twice, plus its alias expansion).
 MAX_UI_FILTER_VALUES = 500
+MAX_API_FILTER_VALUES = 50
+
+
+def check_filter_value_counts(limit: int, **filters: Optional[list[str]]) -> None:
+    """Raise HTTP 422 when a multi-value filter lists more than limit values."""
+    for name, values in filters.items():
+        if len(parse_multi_values(values)) > limit:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Too many '{name}' values: at most {limit} are allowed.",
+            )
 
 
 def check_ui_filter_value_counts(**filters: Optional[list[str]]) -> None:
     """Raise HTTP 422 when a web UI multi-value filter lists more than MAX_UI_FILTER_VALUES values."""
-    for name, values in filters.items():
-        if len(parse_multi_values(values)) > MAX_UI_FILTER_VALUES:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Too many '{name}' values: at most {MAX_UI_FILTER_VALUES} are allowed.",
-            )
+    check_filter_value_counts(MAX_UI_FILTER_VALUES, **filters)
 
 
 def db_busy_exception(exc: BaseException, action: str) -> HTTPException:
