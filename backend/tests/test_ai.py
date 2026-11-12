@@ -4726,3 +4726,94 @@ class TestGeminiRequestsThroughTheRealSdk:
                 await ai_engine.call_gemini(api_key="g-key", model="gemini-3-flash", prompt="p")
         assert ai_engine.is_retryable_for_fallback(excinfo.value)
         assert ai_engine.is_retryable_for_fallback(httpx2.ReadTimeout("read timed out"))
+
+
+class TestModelListingThroughTheRealSdks:
+    """The real anthropic and google-genai clients over a fake transport: the model list request and its pages."""
+
+    @pytest.mark.asyncio
+    async def test_claude_models_are_listed_across_pages(self):
+        import anthropic
+        import httpx2
+
+        requests: list[httpx2.Request] = []
+
+        def model(model_id: str, name: str) -> dict:
+            return {"type": "model", "id": model_id, "display_name": name, "created_at": "2026-01-01T00:00:00Z"}
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            requests.append(request)
+            if "after_id" not in request.url.params:
+                data = [model("claude-sonnet-5-5", "Claude Sonnet 5.5")]
+                return httpx2.Response(200, json={
+                    "data": data, "has_more": True, "first_id": data[0]["id"], "last_id": data[-1]["id"],
+                })
+            data = [model("claude-haiku-4-5", "Claude Haiku 4.5")]
+            return httpx2.Response(200, json={
+                "data": data, "has_more": False, "first_id": data[0]["id"], "last_id": data[-1]["id"],
+            })
+
+        def make_client(**kwargs):
+            return anthropic.AsyncAnthropic(**kwargs, http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)))
+
+        with patch("app.services.ai_engine.AsyncAnthropic", side_effect=make_client):
+            models = await ai_engine.fetch_available_models("anthropic", api_key="ant-key")
+
+        assert [(m["id"], m["name"]) for m in models] == [
+            ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+            ("claude-haiku-4-5", "Claude Haiku 4.5"),
+        ]
+        assert all(m["supports_thinking"] == ai_engine.supports_claude_thinking(m["id"]) for m in models)
+        assert [r.url.path for r in requests] == ["/v1/models", "/v1/models"]
+        assert requests[1].url.params["after_id"] == "claude-sonnet-5-5"
+
+    @pytest.mark.asyncio
+    async def test_gemini_models_are_listed_from_the_v1_api_across_pages(self):
+        import httpx2
+        from google import genai as real_genai
+
+        real_client = real_genai.Client
+        requests: list[httpx2.Request] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            requests.append(request)
+            if "pageToken" not in request.url.params:
+                return httpx2.Response(200, json={
+                    "models": [
+                        {
+                            "name": "models/gemini-3-flash",
+                            "displayName": "Gemini 3 Flash",
+                            "description": "Fast text model",
+                            "supportedGenerationMethods": ["generateContent", "countTokens"],
+                        },
+                        {
+                            "name": "models/gemini-embedding-2",
+                            "displayName": "Gemini Embedding 2",
+                            "supportedGenerationMethods": ["embedContent"],
+                        },
+                    ],
+                    "nextPageToken": "page-2",
+                })
+            return httpx2.Response(200, json={
+                "models": [{
+                    "name": "models/gemini-3-pro-preview",
+                    "displayName": "Gemini 3 Pro Preview",
+                    "supportedGenerationMethods": ["generateContent"],
+                }],
+            })
+
+        transport = httpx2.MockTransport(handler)
+
+        def make_client(**kwargs):
+            options = genai_types.HttpOptions(async_client_args={"transport": transport})
+            return real_client(**kwargs, http_options=options)
+
+        with patch.object(ai_engine.genai, "Client", side_effect=make_client):
+            models = await ai_engine.fetch_available_models("gemini", api_key="g-key")
+
+        assert [(m["id"], m["name"]) for m in models] == [
+            ("gemini-3-pro-preview", "Gemini 3 Pro Preview"),
+            ("gemini-3-flash", "Gemini 3 Flash"),
+        ]
+        assert [r.url.path for r in requests] == ["/v1/models", "/v1/models"]
+        assert requests[1].url.params["pageToken"] == "page-2"
