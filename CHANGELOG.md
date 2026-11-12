@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Python 3.14**: The Docker image runs on Python 3.14 instead of 3.12. Python 3.12 receives security fixes only; 3.14 gets bug fixes until October 2027 and security fixes until October 2030.
+- **MCP clients on the newest protocol**: The MCP server also accepts clients on the 2026-07-28 revision of the protocol, which send each request on its own without a session, and tells clients its LogShed version. Clients on earlier revisions connect as before, and the tools, resources and prompts are unchanged.
 - **Gemini on the stable API**: LogShed sends Gemini requests to Google's stable `v1` API instead of `v1beta`. The model list shows what `v1` offers; a saved model that only `v1beta` offers fails over to your fallback models, so pick another model under AI Provider in Settings if that happens.
 
 ### Fixed

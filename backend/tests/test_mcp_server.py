@@ -1,6 +1,6 @@
 """
 Integration tests for LogShed Model Context Protocol (MCP) server.
-Verifies FastMCP tools, resources, prompts, network endpoints, authentication,
+Verifies MCPServer tools, resources, prompts, network endpoints, authentication,
 scope enforcement, settings toggle, and CLI subcommand.
 """
 
@@ -14,7 +14,7 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from app.core import pipeline as pipeline_mod
 from app.core.api_tokens import api_token_rate_limiter, _last_used_timestamps
@@ -704,7 +704,7 @@ class TestMCPListServicesTruncation:
 
 
 class TestMCPServer:
-    """Tests for in-process FastMCP server tools, resources, and prompts."""
+    """Tests for in-process MCPServer server tools, resources, and prompts."""
 
     @pytest.mark.asyncio
     async def test_mcp_tool_execution(self, tmp_path: Path):
@@ -1739,7 +1739,7 @@ class TestMCPStdio:
             seen["db_path"] = os.environ.get("DB_PATH")
             seen["services"] = asyncio.run(self._tool_manager._tools["list_services"].fn())
 
-        monkeypatch.setattr(FastMCP, "run", fake_run)
+        monkeypatch.setattr(MCPServer, "run", fake_run)
         monkeypatch.setattr(sys, "argv", ["app.cli", "mcp", "--db-path", str(other_db)])
         cli_mod.main()
 
@@ -1755,7 +1755,7 @@ class TestMCPStdio:
         def fake_run(self, transport="stdio", **kwargs):
             seen["services"] = asyncio.run(self._tool_manager._tools["list_services"].fn())
 
-        monkeypatch.setattr(FastMCP, "run", fake_run)
+        monkeypatch.setattr(MCPServer, "run", fake_run)
         monkeypatch.setattr(sys, "argv", ["app.cli", "mcp"])
         cli_mod.main()
         assert os.environ["DB_PATH"] == str(tmp_path / "logs.db")
@@ -2027,3 +2027,58 @@ class TestMCPQuerySyntaxDescriptions:
         server = create_mcp_server(stdio=True)
         desc = server._tool_manager._tools["count_logs"].description
         assert "same syntax as query_logs" in desc
+
+
+class TestMcpSdkClientsOfEachProtocolRevision:
+    """
+    The MCP SDK's own client, over the handshake protocol (initialize, then a session), over the
+    2026-07-28 revision (one self-contained request per call) and with the client choosing: each
+    call sees the caller's token scopes.
+    """
+
+    @staticmethod
+    def _sdk_client(raw_token: str, mode: str):
+        import httpx2
+        from mcp import Client
+        from mcp.client.streamable_http import streamable_http_client
+
+        http = httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=create_app()), base_url="http://testserver", headers=bearer(raw_token)
+        )
+        return Client(streamable_http_client("http://testserver/api/v1/mcp", http_client=http), mode=mode), http
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["legacy", "2026-07-28", "auto"])
+    async def test_tools_resources_and_scopes(self, client: AsyncClient, auth_headers: dict, mode: str):
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sdk, http = self._sdk_client(token["raw"], mode)
+        async with http, sdk:
+            names = {tool.name for tool in (await sdk.list_tools()).tools}
+            assert {"query_logs", "enable_maintenance"} <= names
+
+            allowed = await sdk.call_tool("list_services", {})
+            assert allowed.is_error is False
+
+            refused = await sdk.call_tool("enable_maintenance", {"duration_minutes": 5})
+            assert refused.is_error is True
+            assert "maintenance:write" in refused.content[0].text
+
+            services = await sdk.read_resource("logshed://services")
+            assert "apps" in services.contents[0].text
+
+    @pytest.mark.asyncio
+    async def test_an_internal_failure_names_the_tool_but_not_the_cause(
+        self, client: AsyncClient, auth_headers: dict, monkeypatch
+    ):
+        async def broken_facets(**_kwargs):
+            raise RuntimeError("database file /data/logs.db is locked")
+
+        monkeypatch.setattr("app.mcp.server.get_log_facets", broken_facets)
+        await enable_mcp(client, auth_headers)
+        token = await create_token(client, auth_headers, ["logs:read"])
+        sdk, http = self._sdk_client(token["raw"], "2026-07-28")
+        async with http, sdk:
+            result = await sdk.call_tool("list_services", {})
+        assert result.is_error is True
+        assert result.content[0].text == "Error executing tool list_services"

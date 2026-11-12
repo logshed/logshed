@@ -9,5 +9,5 @@ google-genai==3.2.0
 openai==3.49.0
 anthropic==2.8.0
 apprise==1.13.1
-mcp==1.30.0
+mcp==2.3.0
 regex==2026.11.9

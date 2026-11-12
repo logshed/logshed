@@ -1,7 +1,7 @@
 """
 Built-in Model Context Protocol (MCP) server for LogShed.
 
-Provides FastMCP server implementation exposing tools, resources, and prompts
+Provides the MCP server implementation exposing tools, resources, and prompts
 for AI assistants to inspect telemetry, query logs, examine incident context,
 and manage maintenance windows.
 
@@ -23,8 +23,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Iterator, Optional
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastapi import HTTPException
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError, UnexpectedResourceError, UnexpectedToolError
 from pydantic import ValidationError
 
 from app.api.deps import run_db_query
@@ -44,6 +45,7 @@ from app.services.maintenance_service import (
     disable_maintenance_sessions,
     get_maintenance_status,
 )
+from app.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,61 @@ STDIO_NOTICE = (
 # For in-process callers outside any MCP request (tests and internal helpers); transports never set it.
 _access_override: ContextVar[Optional[McpAccess]] = ContextVar("logshed_mcp_access_override", default=None)
 
+# The caller of the MCP request being handled, set by LogShedMcpServer for the length of one tool call
+# or resource read: an McpAccess, _UNAUTHENTICATED for a request that carries none, or None outside a request.
+_UNAUTHENTICATED = object()
+_request_caller: ContextVar[object] = ContextVar("logshed_mcp_request_caller", default=None)
+
+
+def _caller_of(context: Optional[Context]) -> object:
+    """The verified caller the transport routes stored on the request, as _request_caller holds it."""
+    if context is None:
+        return None
+    try:
+        request_context = context.request_context
+    except ValueError:
+        return None
+    request_scope = getattr(getattr(request_context, "request", None), "scope", None)
+    access = request_scope.get(MCP_ACCESS_SCOPE_KEY) if isinstance(request_scope, dict) else None
+    return access if isinstance(access, McpAccess) else _UNAUTHENTICATED
+
+
+# Failures the handlers raise on purpose, whose message tells the client what to change: a missing
+# scope, a bad argument or a request the REST layer refused. Their text reaches the client; the SDK
+# keeps the text of any other failure from it.
+_CALLER_FACING_ERRORS = (PermissionError, ValueError, HTTPException)
+
+
+class LogShedMcpServer(MCPServer):
+    """
+    MCPServer that makes the caller of each tool call and resource read known to the handler, and
+    passes the handlers' deliberate failures to the client. The SDK hands the request context to these
+    two methods but has no ambient context, and it cannot inject one into a resource without URI
+    parameters, so the handlers read it from _request_caller.
+    """
+
+    async def call_tool(self, name: str, arguments: dict[str, Any], context: Optional[Context] = None) -> Any:
+        reset_token = _request_caller.set(_caller_of(context))
+        try:
+            return await super().call_tool(name, arguments, context)
+        except UnexpectedToolError as exc:
+            if isinstance(exc.__cause__, _CALLER_FACING_ERRORS):
+                raise ToolError(f"Error executing tool {name}: {exc.__cause__}") from exc.__cause__
+            raise
+        finally:
+            _request_caller.reset(reset_token)
+
+    async def read_resource(self, uri: Any, context: Optional[Context] = None) -> Any:
+        reset_token = _request_caller.set(_caller_of(context))
+        try:
+            return await super().read_resource(uri, context)
+        except UnexpectedResourceError as exc:
+            if isinstance(exc.__cause__, _CALLER_FACING_ERRORS):
+                raise ResourceError(f"Error reading resource {uri}: {exc.__cause__}") from exc.__cause__
+            raise
+        finally:
+            _request_caller.reset(reset_token)
+
 
 @contextmanager
 def mcp_access_context(access: McpAccess) -> Iterator[McpAccess]:
@@ -150,16 +207,17 @@ def _needs_raw(include_raw: bool, fields: Optional[list[str]]) -> bool:
     return bool(include_raw or (fields and "raw" in fields))
 
 
-def create_mcp_server(*, stdio: bool = False) -> FastMCP:
+def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
     """
-    Factory creating and configuring the LogShed FastMCP server instance.
+    Factory creating and configuring the LogShed MCP server instance.
     Registers all operational tools, resources, and investigation prompts.
 
     stdio=True builds the server for the local stdio transport (`python -m app.cli mcp`),
     which runs as its own process and has full access.
     """
-    server = FastMCP(
-        name="LogShed",
+    server = LogShedMcpServer(
+        "LogShed",
+        version=APP_VERSION,
         instructions=(
             "LogShed MCP Server. Use this server to inspect homelab system metrics, "
             "search logs using FTS5, retrieve surrounding incident context, "
@@ -167,23 +225,16 @@ def create_mcp_server(*, stdio: bool = False) -> FastMCP:
             f"{UNTRUSTED_LOG_NOTICE} Only start or end maintenance when the user asks for it."
             + (f" {STDIO_NOTICE}" if stdio else "")
         ),
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
 
     def _current_access() -> McpAccess:
         """Resolve the caller of the tool or resource being run (fails closed)."""
         if stdio:
             return LOCAL_MCP_ACCESS
-        try:
-            request_context = server.get_context().request_context
-        except ValueError:
-            request_context = None
-        if request_context is not None:
-            request = getattr(request_context, "request", None)
-            request_scope = getattr(request, "scope", None)
-            access = request_scope.get(MCP_ACCESS_SCOPE_KEY) if isinstance(request_scope, dict) else None
-            if isinstance(access, McpAccess):
-                return access
+        caller = _request_caller.get()
+        if isinstance(caller, McpAccess):
+            return caller
+        if caller is not None:
             raise PermissionError("This MCP request is not authenticated.")
         access = _access_override.get()
         if access is not None:

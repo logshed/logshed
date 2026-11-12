@@ -23,7 +23,7 @@ from uuid import UUID
 
 import anyio
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
@@ -42,7 +42,7 @@ router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 # Scope needed to connect at all; tools and resources check their own scopes on top of this.
 REQUIRED_MCP_SCOPES = ["logs:read"]
 
-_mcp_server: Optional[FastMCP] = None
+_mcp_server: Optional[MCPServer] = None
 _sse_transport: Optional[SseServerTransport] = None
 _session_manager: Optional[StreamableHTTPSessionManager] = None
 _session_manager_task: Optional[asyncio.Task] = None
@@ -100,8 +100,8 @@ class AlreadySentResponse(Response):
         pass
 
 
-def get_mcp_server() -> FastMCP:
-    """Retrieve or initialize the singleton FastMCP server instance."""
+def get_mcp_server() -> MCPServer:
+    """Retrieve or initialize the singleton MCP server instance."""
     global _mcp_server
     if _mcp_server is None:
         _mcp_server = create_mcp_server()
@@ -125,7 +125,7 @@ def get_mcp_session_manager() -> StreamableHTTPSessionManager:
     if _session_manager is None:
         server = get_mcp_server()
         _session_manager = StreamableHTTPSessionManager(
-            app=server._mcp_server,
+            app=server._lowlevel_server,
             event_store=None,
             json_response=False,
             stateless=False,
@@ -584,7 +584,7 @@ async def handle_mcp_sse(
         await _handle_streamable_request(request, request.scope, token_info)
         return AlreadySentResponse()
 
-    # 4. Otherwise connect legacy FastMCP SSE stream, bound to the token that opened it
+    # 4. Otherwise connect the legacy SSE stream, bound to the token that opened it
     server = get_mcp_server()
     sse = get_sse_transport()
     session = _SseSession(token_id=int(token_info["id"]))
@@ -596,10 +596,10 @@ async def handle_mcp_sse(
                 session.cancel_scope = cancel_scope
                 if session.closed:
                     cancel_scope.cancel()
-                await server._mcp_server.run(
+                await server._lowlevel_server.run(
                     streams[0],
                     streams[1],
-                    server._mcp_server.create_initialization_options(),
+                    server._lowlevel_server.create_initialization_options(),
                 )
     finally:
         _forget_sse_session(session)
