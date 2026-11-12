@@ -116,13 +116,15 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!isAuthenticated || titleSetRef.current) return;
     titleSetRef.current = true;
+    // The page's own title is the base, so the demo build keeps "LogShed - DEMO".
+    const baseTitle = document.title || 'LogShed';
 
     fetchVersion()
       .then((data) => {
         if (data.current_version && data.current_version.includes('-')) {
-          document.title = `LogShed [${data.current_version}]`;
+          document.title = `${baseTitle} [${data.current_version}]`;
         } else {
-          document.title = 'LogShed';
+          document.title = baseTitle;
         }
       })
       .catch(() => {

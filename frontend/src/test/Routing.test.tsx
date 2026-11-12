@@ -222,6 +222,10 @@ describe('URL Routing and History API Synchronization', () => {
   });
 
   describe('Dynamic browser title for beta / prerelease builds', () => {
+    beforeEach(() => {
+      document.title = 'LogShed';
+    });
+
     it('sets document.title with version bracketed for prerelease versions', async () => {
       vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
         current_version: '1.2.0-beta.1',
@@ -248,6 +252,28 @@ describe('URL Routing and History API Synchronization', () => {
       await waitFor(() => {
         expect(document.title).toBe('LogShed');
       });
+    });
+  });
+
+  describe('Browser title of the demo page', () => {
+    afterEach(() => {
+      document.title = '';
+    });
+
+    it('keeps the title the page was loaded with', async () => {
+      document.title = 'LogShed - DEMO';
+      vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+        current_version: '1.2.0',
+        latest_version: '1.2.0',
+        update_available: false,
+      });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(systemApi.fetchVersion).toHaveBeenCalled();
+      });
+      expect(document.title).toBe('LogShed - DEMO');
     });
   });
 
