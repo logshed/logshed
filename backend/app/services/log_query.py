@@ -12,13 +12,15 @@ import logging
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from fastapi import HTTPException, Request, status
 
+from app.core.day_files import iso_to_us
 from app.core.redactor import redact
 from app.core.utils import (
+    DOCKER_ALIASES_SQL,
     AliasIndex,
     escape_fts_tokens,
     format_fts_query,
@@ -196,6 +198,68 @@ def build_where(conn: Optional[sqlite3.Connection], f: LogFilter) -> tuple[str, 
     return where_sql, params
 
 
+def expand_sources(conn: sqlite3.Connection, f: LogFilter) -> LogFilter:
+    """f with its host names and addresses expanded through the configured host aliases (as build_where does)."""
+    if not f.sources:
+        return f
+    return replace(f, sources=tuple(AliasIndex.load(conn).expand(list(f.sources))))
+
+
+def docker_aliases(conn: sqlite3.Connection) -> list[str]:
+    """The host names container logs are stored under (DOCKER_ALIASES_SQL), read from logs.db."""
+    return sorted({r[0] for r in conn.execute(DOCKER_ALIASES_SQL).fetchall() if r[0]})
+
+
+def build_day_where(f: LogFilter, docker_names: list[str]) -> tuple[str, dict[str, Any]]:
+    """
+    build_where for a day file: the same selection on its stored forms (integer times, host and
+    app ids). f's sources must be expanded already (expand_sources), and docker_names is
+    docker_aliases(), because a day file cannot read logs.db's tables.
+    """
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if f.log_ids:
+        id_placeholders = ", ".join(f":id_{i}" for i in range(len(f.log_ids)))
+        where_clauses.append(f"logs.id IN ({id_placeholders})")
+        params.update({f"id_{i}": log_id for i, log_id in enumerate(f.log_ids)})
+
+    add_fts_filter(where_clauses, params, f.query)
+
+    if f.sources:
+        source_placeholders = ", ".join(f":src_{i}" for i in range(len(f.sources)))
+        docker_placeholders = ", ".join(f":docker_{i}" for i in range(len(docker_names)))
+        # A host name, or the address of syslog and ingest rows (never Docker rows, which share it)
+        where_clauses.append(
+            f"(logs.host_id IN (SELECT id FROM hosts WHERE name IN ({source_placeholders}))"
+            f" OR (logs.source_ip IN ({source_placeholders})"
+            f" AND logs.host_id NOT IN (SELECT id FROM hosts WHERE name IN ({docker_placeholders}))"
+            " AND logs.source_ip != 'docker'))"
+        )
+        params.update({f"src_{i}": s for i, s in enumerate(f.sources)})
+        params.update({f"docker_{i}": s for i, s in enumerate(docker_names)})
+
+    if f.apps:
+        app_placeholders = ", ".join(f":app_{i}" for i in range(len(f.apps)))
+        where_clauses.append(f"logs.app_id IN (SELECT id FROM apps WHERE name IN ({app_placeholders}))")
+        params.update({f"app_{i}": a for i, a in enumerate(f.apps)})
+
+    if f.severity_max is not None:
+        where_clauses.append("logs.severity <= :severity_max")
+        params["severity_max"] = f.severity_max
+
+    if f.from_ts:
+        where_clauses.append("logs.ts >= :from_ts")
+        params["from_ts"] = iso_to_us(f.from_ts)
+
+    if f.to_ts:
+        where_clauses.append("logs.ts <= :to_ts")
+        params["to_ts"] = iso_to_us(f.to_ts)
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    return where_sql, params
+
+
 LOG_COLUMNS = (
     "logs.id, logs.timestamp, logs.received_at, logs.source_ip, "
     "logs.source_alias, logs.app_name, logs.facility, logs.severity, logs.message"
@@ -262,6 +326,7 @@ def run_newest_first(
     oldest_needed: Callable[[T], Optional[str]],
     matches: Callable[[T], int],
     needed: int,
+    day_file: bool = False,
 ) -> T:
     """
     Run a newest-first search ``run(params)``, matching full-text terms in the newest rows first.
@@ -275,7 +340,8 @@ def run_newest_first(
     every row. ``matches`` is an attempt's capped match count and ``needed`` the count that
     fills a page and the total's cap: windows too small to hold that many at the density just
     seen are skipped, so a rare term goes straight to every row. Queries without a full-text
-    term run once, unchanged.
+    term run once, unchanged. conn is the database whose logs table is searched; day_file says
+    it is a day file (integer times in ts).
     """
     if "fts_term" not in params:
         return run(params)
@@ -297,8 +363,9 @@ def run_newest_first(
                 # window that does not cover the time range fails at once. With no row at or
                 # after the cutoff, the window is accepted, which is still exact: no row outside
                 # it can belong on the page.
+                time_column, cutoff_value = ("ts", iso_to_us(cutoff)) if day_file else ("timestamp", cutoff)
                 outside = conn.execute(
-                    "SELECT EXISTS(SELECT 1 FROM logs WHERE timestamp >= ? AND +id < ?)", (cutoff, min_rowid)
+                    f"SELECT EXISTS(SELECT 1 FROM logs WHERE {time_column} >= ? AND +id < ?)", (cutoff_value, min_rowid)
                 ).fetchone()[0]
                 if not outside:
                     return result

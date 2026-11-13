@@ -28,6 +28,7 @@ from app.core.config import get_db_path
 from app.core.security import SESSION_COOKIE_NAME, verify_session_token
 from app.core.session_epoch import bump_session_epoch, read_session_epoch  # noqa: F401 (used by the auth routes and the CLI)
 from app.core.utils import parse_iso_to_utc_datetime
+from app.services import day_store
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ def close_thread_local_connections() -> None:
             except Exception:
                 pass
         _thread_local.connections.clear()
+    day_store.close_thread_connections()
 
 
 def reset_all_db_connections() -> None:
@@ -146,6 +148,7 @@ def reset_all_db_connections() -> None:
     global _connection_generation
     _connection_generation += 1
     _resolved_db_paths.clear()
+    day_store.forget_connections()
     close_thread_local_connections()
 
 
@@ -177,7 +180,8 @@ async def run_db_query(
         if should_interrupt is not None:
             conn.set_progress_handler(should_interrupt, INTERRUPT_CHECK_INSTRUCTIONS)
         try:
-            with conn:
+            # The day files a search opens stop with it too
+            with day_store.use_interrupt(should_interrupt), conn:
                 return fn(conn)
         finally:
             if should_interrupt is not None:

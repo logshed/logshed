@@ -23,6 +23,7 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 # copies whole tables.
 STORE_MODULES = {
     "core/day_files.py",
+    "services/day_store.py",
     "services/log_store.py",
     "services/log_query.py",
     "services/fts_indexer.py",
@@ -181,11 +182,11 @@ def _window_spy(monkeypatch) -> list[int]:
     attempts: list[int] = []
     real_run = log_store.run_newest_first
 
-    def _counting(conn, run_params, run, oldest_needed, matches, needed):
+    def _counting(conn, run_params, run, oldest_needed, matches, needed, **kwargs):
         def _run(p):
             attempts.append(p["fts_min_rowid"])
             return run(p)
-        return real_run(conn, run_params, _run, oldest_needed, matches, needed)
+        return real_run(conn, run_params, _run, oldest_needed, matches, needed, **kwargs)
 
     monkeypatch.setattr(log_store, "run_newest_first", _counting)
     return attempts

@@ -200,11 +200,11 @@ class TestTheThreePathsAgree:
         attempts: list[int] = []
         real_run = log_store.run_newest_first
 
-        def _counting(conn, run_params, run, oldest_needed, matches, needed):
+        def _counting(conn, run_params, run, oldest_needed, matches, needed, **kwargs):
             def _run(p):
                 attempts.append(p["fts_min_rowid"])
                 return run(p)
-            return real_run(conn, run_params, _run, oldest_needed, matches, needed)
+            return real_run(conn, run_params, _run, oldest_needed, matches, needed, **kwargs)
 
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
         monkeypatch.setattr(log_store, "run_newest_first", _counting)
