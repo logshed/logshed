@@ -5,6 +5,8 @@ import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { isSavedViewNameTaken } from './useSavedViews.ts';
 import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { buttonClass } from '../common/Button.tsx';
+import { CHECKBOX_CLASS, LABEL_CLASS, controlClass } from '../common/Field.tsx';
 
 export const DUPLICATE_VIEW_NAME_MESSAGE = 'A saved view with this name already exists.';
 
@@ -397,7 +399,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
     <Modal isOpen={true} onClose={onClose} title="Rename Saved View" maxWidth="max-w-md">
       <form onSubmit={handleSubmit} className="space-y-4 text-xs">
         <div>
-          <label htmlFor="rename-view-input" className="block text-fg-soft font-medium mb-1">
+          <label htmlFor="rename-view-input" className={LABEL_CLASS}>
             View Name <span className="text-danger-400">*</span>
           </label>
           <input
@@ -409,7 +411,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
             maxLength={NAME_MAX_LENGTH}
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'rename-view-taken' : undefined}
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-1.5 text-fg placeholder-fg-muted focus:outline-hidden focus:border-accent-500"
+            className={controlClass()}
           />
           {isTaken && (
             <p id="rename-view-taken" className="mt-1 text-danger-400 text-[11px]">
@@ -429,14 +431,14 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="px-3 py-1.5 rounded-sm text-fg-muted hover:text-fg hover:bg-raised transition disabled:opacity-50"
+            className={buttonClass('ghost', 'md')}
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!canSave}
-            className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-on-fill font-medium transition disabled:opacity-50"
+            className={buttonClass('primary', 'md')}
           >
             {isSaving ? 'Saving...' : 'Save'}
           </button>
@@ -518,7 +520,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
     >
       <form onSubmit={handleSubmit} className="space-y-4 text-xs">
         <div>
-          <label className="block text-fg-soft font-medium mb-1">
+          <label className={LABEL_CLASS}>
             View Name <span className="text-danger-400">*</span>
           </label>
           <input
@@ -530,7 +532,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             autoFocus
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'save-view-taken' : undefined}
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-1.5 text-fg placeholder-fg-muted focus:outline-hidden focus:border-accent-500"
+            className={controlClass()}
           />
           {isTaken && (
             <p id="save-view-taken" className="mt-1 text-danger-400 text-[11px]">
@@ -545,7 +547,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             id="view-pinned-checkbox"
             checked={isPinned}
             onChange={(e) => setIsPinned(e.target.checked)}
-            className="rounded-sm bg-canvas border-line text-accent-500 focus:ring-accent-500/20"
+            className={CHECKBOX_CLASS}
           />
           <label htmlFor="view-pinned-checkbox" className="text-fg-soft cursor-pointer">
             Pin view for quick access
@@ -587,14 +589,14 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-sm text-fg-muted hover:text-fg hover:bg-raised transition"
+            className={buttonClass('ghost', 'md')}
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSaving || !name.trim() || isTaken}
-            className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-on-fill font-medium transition disabled:opacity-50"
+            className={buttonClass('primary', 'md')}
           >
             {isSaving ? 'Saving...' : 'Save View'}
           </button>

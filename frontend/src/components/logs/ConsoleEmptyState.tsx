@@ -1,6 +1,7 @@
 import React from 'react';
 import { FilterX, Inbox, Info } from 'lucide-react';
 import { CopyButton } from '../common/CopyButton.tsx';
+import { buttonClass } from '../common/Button.tsx';
 
 /** The syslog port LogShed uses when SYSLOG_PORT is not set. */
 export const DEFAULT_SYSLOG_PORT = 1514;
@@ -55,7 +56,7 @@ const FirstRunCard: React.FC<Pick<ConsoleEmptyStateProps, 'syslogPort' | 'onOpen
           <button
             type="button"
             onClick={onOpenSourcesSettings}
-            className="px-3 py-1.5 rounded-sm text-xs font-medium bg-accent-700 hover:bg-accent-600 text-on-fill transition cursor-pointer"
+            className={buttonClass('primary', 'md')}
           >
             Set up Docker hosts
           </button>
@@ -88,7 +89,7 @@ export const ConsoleEmptyState: React.FC<ConsoleEmptyStateProps> = ({
           <button
             type="button"
             onClick={onResetFilters}
-            className="px-3 py-1.5 rounded-sm text-xs font-sans font-medium bg-raised text-fg border border-line-strong hover:border-line-strongest hover:text-fg-max transition cursor-pointer"
+            className={buttonClass('secondary', 'md')}
           >
             Clear filters
           </button>

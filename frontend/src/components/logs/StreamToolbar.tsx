@@ -2,6 +2,7 @@ import React from 'react';
 import { Bookmark, Box, Clock, Pause, Play, Server, Trash2 } from 'lucide-react';
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
+import { buttonClass } from '../common/Button.tsx';
 
 interface StreamToolbarProps {
   isMobile: boolean;
@@ -147,7 +148,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
         <button
           onClick={onSelectAll}
           disabled={bufferSize === 0}
-          className="px-2 py-1 rounded-sm text-xs font-medium bg-raised text-fg-soft border border-line hover:border-line-strongest hover:text-fg-max transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          className={buttonClass('secondary', 'md')}
           title={bufferSize > SELECT_ALL_LIMIT ? `Select all logs in buffer (capped at ${SELECT_ALL_LIMIT})` : 'Select all logs in buffer'}
         >
           Select All
@@ -155,7 +156,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
         {hasSelection && (
           <button
             onClick={onDeselectAll}
-            className="px-2 py-1 rounded-sm text-xs font-medium bg-raised text-fg-muted border border-line hover:border-line-strongest hover:text-fg transition cursor-pointer"
+            className={buttonClass('secondary', 'md')}
             title="Deselect all selected logs"
           >
             Deselect All

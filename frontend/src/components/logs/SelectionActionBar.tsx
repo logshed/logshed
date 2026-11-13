@@ -2,6 +2,7 @@ import React from 'react';
 import { AlertCircle, Sparkles, Trash2 } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
+import { buttonClass } from '../common/Button.tsx';
 
 interface SelectionActionBarProps {
   selectedLogs: LogEntry[];
@@ -53,14 +54,14 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
 
         <button
           onClick={onDeselectAll}
-          className="px-2.5 py-1 text-xs text-fg-soft bg-raised hover:text-fg-max hover:bg-raised-strong border border-line-strong rounded-sm transition cursor-pointer font-medium"
+          className={buttonClass('secondary', 'md')}
         >
           Deselect All
         </button>
 
         <button
           onClick={onDelete}
-          className="text-on-fill text-xs font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-md cursor-pointer bg-danger-600 hover:bg-danger-500"
+          className={buttonClass('danger', 'md')}
         >
           <Trash2 className="w-3.5 h-3.5" />
           <span>Delete ({selectedLogs.length})</span>

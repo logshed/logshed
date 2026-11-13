@@ -15,6 +15,7 @@ import {
 import { hostFilterList, appFilterList, withHosts, withApps } from '../../utils/filters.ts';
 import { SavedViewsMenu, SaveViewModal } from './SavedViewsMenu.tsx';
 import { SavedViewsState, useSavedViews, findActiveView } from './useSavedViews.ts';
+import { buttonClass } from '../common/Button.tsx';
 
 // Time presets are stored as relative values (the backend resolves them at query time), so a saved
 // view or shared link keeps meaning "the last hour" instead of freezing the moment it was made.
@@ -673,7 +674,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                   handleResetFilters();
                   setIsMobileDrawerOpen(false);
                 }}
-                className="px-3 py-2 bg-raised hover:bg-raised-strong text-fg-soft rounded-sm transition font-medium"
+                className={buttonClass('secondary', 'md')}
               >
                 Reset
               </button>

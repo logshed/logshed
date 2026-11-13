@@ -7,6 +7,8 @@ import { SlideOver } from '../common/SlideOver.tsx';
 import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp, formatUtcOffset } from '../../utils/formatters.ts';
 import { getCachedServerTimezone } from '../../api/settings.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
+import { buttonClass } from '../common/Button.tsx';
+import { CHECKBOX_CLASS } from '../common/Field.tsx';
 
 interface LogDetailModalProps {
   log: LogEntry | null;
@@ -249,7 +251,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               type="button"
               onClick={onNavigateNewer}
               disabled={!hasNewerLog}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium bg-raised hover:bg-raised-hover text-fg border border-line hover:border-line-strong transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
+              className={buttonClass('secondary', 'sm')}
               aria-label="Newer log"
               title="Newer log (Up or K)"
             >
@@ -260,7 +262,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               type="button"
               onClick={onNavigateOlder}
               disabled={!hasOlderLog}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium bg-raised hover:bg-raised-hover text-fg border border-line hover:border-line-strong transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
+              className={buttonClass('secondary', 'sm')}
               aria-label="Older log"
               title="Older log (Down or J)"
             >
@@ -293,7 +295,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   onEditDockerHost(matchedDockerEndpoint.id);
                   onClose();
                 }}
-                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} justify-center`}
               >
                 <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                 <span>Edit Docker Host</span>
@@ -308,7 +310,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   });
                   onClose();
                 }}
-                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} justify-center`}
               >
                 <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                 <span>Configure Docker Host</span>
@@ -321,7 +323,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     onAddAlias(log.source_ip);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
+                  className={`${buttonClass('secondary', 'md')} justify-center`}
                 >
                   <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                   <span>Modify Host Alias</span>
@@ -333,7 +335,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     onAddAlias(log.source_ip);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
+                  className={`${buttonClass('secondary', 'md')} justify-center`}
                 >
                   <Plus className="w-3.5 h-3.5 text-accent-400" />
                   <span>Add Host Alias</span>
@@ -344,7 +346,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {onCreateDropRule && (
               <button
                 onClick={() => onCreateDropRule(log)}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} justify-center`}
                 title="Create an ingestion drop rule for similar logs"
               >
                 <FilterX className="w-3.5 h-3.5 text-accent-400" />
@@ -355,7 +357,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {onCreateAlertRule && (
               <button
                 onClick={() => onCreateAlertRule(log)}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} justify-center`}
                 title="Create an alert rule for this app, with this log shown for reference"
               >
                 <BellPlus className="w-3.5 h-3.5 text-accent-400" />
@@ -366,7 +368,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {onDeleteLog && (
               <button
                 onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-raised hover:bg-danger-950 text-fg-soft hover:text-danger-300 border border-line-strong hover:border-danger-800 rounded-sm transition font-medium cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} justify-center`}
                 title="Delete this log record permanently"
               >
                 <Trash2 className="w-3.5 h-3.5 text-danger-400" />
@@ -377,7 +379,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {aiEnabled ? (
               <button
                 onClick={() => onExplainWithAi(log)}
-                className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-700 hover:bg-accent-600 text-on-fill rounded-sm font-medium transition shadow-xs"
+                className={`${buttonClass('primary', 'md')} col-span-2 justify-center`}
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Explain with AI</span>
@@ -387,7 +389,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               <button
                 onClick={() => onExplainWithAi(log)}
                 title={AI_OFF_TITLE}
-                className="col-span-2 flex items-center justify-center gap-1.5 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg-muted hover:text-fg-soft border border-line-strong rounded-sm font-medium transition cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} col-span-2 justify-center`}
               >
                 <Sparkles className="w-3.5 h-3.5 text-fg-subtle" />
                 <span>Explain with AI</span>
@@ -408,7 +410,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                 type="button"
                 onClick={() => setShowDeleteConfirm(false)}
                 disabled={isDeleting}
-                className="px-2.5 py-1 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-sm transition cursor-pointer"
+                className={buttonClass('ghost', 'md')}
               >
                 Cancel
               </button>
@@ -416,7 +418,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={isDeleting}
-                className="px-3 py-1 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-sm transition flex items-center gap-1 cursor-pointer"
+                className={buttonClass('danger', 'md')}
               >
                 {isDeleting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                 <span>Confirm Delete</span>
@@ -531,7 +533,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     type="checkbox"
                     checked={sameAppOnly}
                     onChange={(e) => setSameAppOnly(e.target.checked)}
-                    className="rounded-sm bg-surface border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-3 h-3"
+                    className={CHECKBOX_CLASS}
                   />
                   <span>Same App Only ({log.app_name})</span>
                 </label>
@@ -540,7 +542,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   <button
                     onClick={handleInspectTargetAndContext}
                     title="Add Context to AI Analysis"
-                    className="flex items-center gap-1.5 px-2.5 py-1 bg-accent-700 hover:bg-accent-600 text-on-fill rounded-sm font-medium transition text-[11px] shadow-xs"
+                    className={buttonClass('primary', 'sm')}
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Inspect Target + Context ({targetAndContextLogs.length} logs)</span>
