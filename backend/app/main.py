@@ -63,7 +63,7 @@ from app.core.config import (
 )
 from app.core.loop_lag import get_loop_lag_monitor
 from app.core import backup as db_backup
-from app.core import lifecycle
+from app.core import instance_lock, lifecycle
 from app.core.migrations import (
     DatabaseNewerThanAppError,
     MigrationBackupError,
@@ -755,59 +755,71 @@ async def lifespan(app: FastAPI):
     global _upgrade_task
 
     db_path = get_db_path()
-    logger.info(f"Setting up LogShed database at {db_path}...")
-
+    # Held while LogShed runs, so the restore command cannot replace the database under it
     try:
-        plan, version, marker = await asyncio.to_thread(lifecycle.start_up_plan, db_path, _latest_schema())
-    except sqlite3.Error:
-        # run_migrations reports an unreadable database as it always has
-        plan, version, marker = lifecycle.PLAN_FAST, 0, None
+        lock_fd = await asyncio.to_thread(instance_lock.acquire, db_path, False)
+    except instance_lock.InstanceLockBusy:
+        logger.error(
+            f"A database restore is running on {db_path.parent}, so LogShed does not start. "
+            "Start it again when the restore has finished."
+        )
+        raise
+    try:
+        logger.info(f"Setting up LogShed database at {db_path}...")
 
-    if plan == lifecycle.PLAN_FAST:
         try:
-            await asyncio.to_thread(run_migrations, db_path)
-        except (DatabaseNewerThanAppError, MigrationBackupError) as e:
-            # Nothing has been written; start-up fails and the container exits with this message
-            logger.error(str(e))
-            raise
-        await _start_services(db_path)
+            plan, version, marker = await asyncio.to_thread(lifecycle.start_up_plan, db_path, _latest_schema())
+        except sqlite3.Error:
+            # run_migrations reports an unreadable database as it always has
+            plan, version, marker = lifecycle.PLAN_FAST, 0, None
+
+        if plan == lifecycle.PLAN_FAST:
+            try:
+                await asyncio.to_thread(run_migrations, db_path)
+            except (DatabaseNewerThanAppError, MigrationBackupError) as e:
+                # Nothing has been written; start-up fails and the container exits with this message
+                logger.error(str(e))
+                raise
+            await _start_services(db_path)
+            try:
+                yield
+            finally:
+                await _stop_services(db_path)
+            return
+
+        # The upgrade path: the web server answers (status page, recovery screen) while this runs.
+        # Sign-in and notification channel URLs need the key before anything else.
+        await asyncio.to_thread(get_or_create_master_key)
+        lifecycle.set_retry_handler(lambda skip_backup, marker: _retry_from_recovery(db_path, skip_backup, marker))
+        if plan == lifecycle.PLAN_RECOVERY:
+            logger.error(
+                f"The last database upgrade from schema {marker.get('from_schema')} to {marker.get('target_schema')} failed "
+                f"({marker.get('error')}). LogShed starts in recovery mode and is not receiving logs; open the web UI "
+                "to retry, or go back to the version you ran before."
+            )
+            lifecycle.set_recovery(marker)
+        else:
+            logger.info(
+                f"The database needs an upgrade from schema {version} to {_latest_schema()}. LogShed answers with a status "
+                "page until it is done; do not restart the container."
+            )
+            _begin_upgrade(db_path, version)
         try:
             yield
         finally:
+            lifecycle.cancel_event().set()
+            task, _upgrade_task = _upgrade_task, None
+            if task is not None:
+                # The task stops at the backup's next chunk or before the next step, so this wait is short
+                try:
+                    await task
+                except BaseException:
+                    pass
+            lifecycle.set_retry_handler(None)
+            lifecycle.reset()
             await _stop_services(db_path)
-        return
-
-    # The upgrade path: the web server answers (status page, recovery screen) while this runs.
-    # Sign-in and notification channel URLs need the key before anything else.
-    await asyncio.to_thread(get_or_create_master_key)
-    lifecycle.set_retry_handler(lambda skip_backup, marker: _retry_from_recovery(db_path, skip_backup, marker))
-    if plan == lifecycle.PLAN_RECOVERY:
-        logger.error(
-            f"The last database upgrade from schema {marker.get('from_schema')} to {marker.get('target_schema')} failed "
-            f"({marker.get('error')}). LogShed starts in recovery mode and is not receiving logs; open the web UI "
-            "to retry, or go back to the version you ran before."
-        )
-        lifecycle.set_recovery(marker)
-    else:
-        logger.info(
-            f"The database needs an upgrade from schema {version} to {_latest_schema()}. LogShed answers with a status "
-            "page until it is done; do not restart the container."
-        )
-        _begin_upgrade(db_path, version)
-    try:
-        yield
     finally:
-        lifecycle.cancel_event().set()
-        task, _upgrade_task = _upgrade_task, None
-        if task is not None:
-            # The task stops at the backup's next chunk or before the next step, so this wait is short
-            try:
-                await task
-            except BaseException:
-                pass
-        lifecycle.set_retry_handler(None)
-        lifecycle.reset()
-        await _stop_services(db_path)
+        instance_lock.release(lock_fd)
 
 
 # Content-Security-Policy for the SPA and every other response. The built SPA loads only

@@ -199,6 +199,47 @@ def backup_database(db_path: str | None = None) -> int:
     return 0
 
 
+def restore_database(archive: str, db_path: str | None = None) -> int:
+    """
+    Put a backup archive in place of the database, for a stopped LogShed. The current database is
+    moved aside and kept. Prints what it does; returns the exit status.
+    """
+    from pathlib import Path
+
+    from app.core import backup as db_backup
+    from app.core import restore
+    from app.core.config import get_db_path
+    from app.core.migrations import MIGRATIONS
+
+    path = Path(db_path) if db_path else get_db_path()
+    latest = MIGRATIONS[-1][0]
+    try:
+        source = restore.resolve_archive(archive, path)
+        result = restore.restore_backup(source, path, latest, say=lambda text: print(text, flush=True))
+    except restore.RestoreError as e:
+        print(f"Error: {e} Nothing was changed.", file=sys.stderr)
+        return 1
+    print(f"Restored {result.archive.name} into {path}.")
+    print(f"It is a schema {result.schema_version} database, backed up by LogShed {result.app_version}.")
+    if result.omitted_tables:
+        print(
+            "This backup was made without the logs (before an upgrade that does not change them): it brings back "
+            "the settings, rules and history, and holds no logs."
+        )
+    if result.aside is not None:
+        print(
+            f"The database it replaced is kept as {result.aside} ({db_backup.format_bytes(result.aside_bytes)}). "
+            "Delete it once LogShed runs as you expect."
+        )
+    if result.schema_version < latest:
+        print(
+            f"This image upgrades it to schema {latest} when it starts (backing it up first). To run it as it is, "
+            "start the LogShed version it came from instead."
+        )
+    print("Start LogShed now. Keep .secret_key as it is: stored passwords and keys are read with it.")
+    return 0
+
+
 def run_mcp_stdio(db_path: str | None = None) -> None:
     """
     Run built-in MCP server over stdio transport.
@@ -294,12 +335,29 @@ def main() -> None:
         help="Path to SQLite database (default: DB_PATH, or logs.db in DATA_DIR, as for the web process)",
     )
 
+    # restore subcommand
+    restore_parser = subparsers.add_parser(
+        "restore",
+        help="Put a backup archive in place of the database, with LogShed stopped (the current one is kept aside)",
+    )
+    restore_parser.add_argument(
+        "archive",
+        help="The archive: a path, or the name of one in the backups folder beside the database",
+    )
+    restore_parser.add_argument(
+        "--db-path",
+        default=None,
+        help="Path to SQLite database (default: DB_PATH, or logs.db in DATA_DIR, as for the web process)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mcp":
         run_mcp_stdio(args.db_path)
     elif args.command == "backup":
         sys.exit(backup_database(args.db_path))
+    elif args.command == "restore":
+        sys.exit(restore_database(args.archive, args.db_path))
     elif args.command == "reset-admin":
         password = args.password
         if password:
