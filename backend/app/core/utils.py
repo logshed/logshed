@@ -428,6 +428,10 @@ def escape_fts_tokens(query_str: str) -> str:
     return " ".join(tokens)
 
 
+# A quoted phrase, a column filter (its value may be quoted), a parenthesis or a bare term
+_FTS_TOKEN_PATTERN = re.compile(r'("[^"]*"|\'[^\']*\'|[a-zA-Z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)')
+
+
 def format_fts_query(query_str: str) -> str:
     """
     Format user query for FTS5 search with prefix matching.
@@ -448,14 +452,28 @@ def format_fts_query(query_str: str) -> str:
         return ""
 
     # Special FTS5 query syntax: queries starting with '*' trigger unknown special query errors
-    if q.startswith("*"):
+    if q.startswith("*") or not _fts_brackets_balanced(q):
         return escape_fts_tokens(q)
 
-    # Check for unbalanced double or single quotes
+    formatted_tokens = []
+    for token in _FTS_TOKEN_PATTERN.findall(q):
+        token = token.strip()
+        if not token:
+            continue
+        formatted = _format_fts_token(token)
+        if formatted is None:
+            return escape_fts_tokens(q)
+        formatted_tokens.append(formatted)
+
+    if not _is_valid_fts_sequence(formatted_tokens):
+        return escape_fts_tokens(q)
+    return " ".join(formatted_tokens)
+
+
+def _fts_brackets_balanced(q: str) -> bool:
+    """True when q's double and single quotes pair up and its parentheses nest correctly."""
     if q.count('"') % 2 != 0 or q.count("'") % 2 != 0:
-        return escape_fts_tokens(q)
-
-    # Check for unbalanced or malformed parentheses
+        return False
     depth = 0
     for char in q:
         if char == "(":
@@ -463,117 +481,84 @@ def format_fts_query(query_str: str) -> str:
         elif char == ")":
             depth -= 1
             if depth < 0:
-                return escape_fts_tokens(q)
-    if depth != 0:
-        return escape_fts_tokens(q)
+                return False
+    return depth == 0
 
-    pattern = re.compile(r'("[^"]*"|\'[^\']*\'|[a-zA-Z_]+:(?:"[^"]*"|[^\s()]+)|\(|\)|[^\s()]+)')
-    tokens = pattern.findall(q)
-    if not tokens:
-        return escape_fts_tokens(q)
 
-    formatted_tokens = []
-    for token in tokens:
-        token = token.strip()
-        if not token:
-            continue
+def _format_fts_token(token: str) -> Optional[str]:
+    """
+    One token of a user query in FTS5 syntax, or None when the query must fall back to
+    escaped tokens (an incomplete column filter while the user is still typing).
+    """
+    if token.startswith(('"', "'")) or token in ("(", ")"):
+        return token
+    if token.upper() in _FTS_OPERATORS:
+        return token.upper()
+    if ":" not in token:
+        return _format_fts_term(token)
 
-        if token.startswith(('"', "'")) or token in ("(", ")"):
-            formatted_tokens.append(token)
-            continue
+    col, val = token.split(":", 1)
+    col_lower = col.lower()
+    col_lower = _FTS_COLUMN_ALIASES.get(col_lower, col_lower)
+    if col_lower not in _FTS_ALLOWED_COLUMNS:
+        # Column is not allowlisted - treat as literal token wrapped in quotes
+        clean_token = token.replace('"', '""')
+        if clean_token.endswith("*") and not clean_token.startswith("*"):
+            return f'"{clean_token[:-1]}"*'
+        return _auto_prefix(f'"{clean_token}"', token)
+    if not val or val == "*":
+        # Incomplete column filter while user is typing (e.g. "app_name:" or "app_name:*")
+        return None
+    if val.startswith(('"', "'")):
+        return f"{col_lower}:{val}"
+    return _format_fts_term(val, f"{col_lower}:")
 
-        if token.upper() in _FTS_OPERATORS:
-            formatted_tokens.append(token.upper())
-            continue
 
-        if ":" in token:
-            col, val = token.split(":", 1)
-            col_lower = col.lower()
-            col_lower = _FTS_COLUMN_ALIASES.get(col_lower, col_lower)
-            if col_lower in _FTS_ALLOWED_COLUMNS:
-                if not val or val == "*":
-                    # Incomplete column filter while user is typing (e.g. "app_name:" or "app_name:*")
-                    # Fall back cleanly to escaped token search to prevent FTS5 syntax errors
-                    return escape_fts_tokens(q)
-                if val.startswith(('"', "'")):
-                    formatted_tokens.append(f"{col_lower}:{val}")
-                elif val.startswith("*"):
-                    clean_val = val.replace('"', '""')
-                    formatted_tokens.append(f'{col_lower}:"{clean_val}"*')
-                elif val.endswith("*"):
-                    core = val[:-1]
-                    clean_core = core.replace('"', '""')
-                    if _needs_fts_quoting(clean_core):
-                        formatted_tokens.append(f'{col_lower}:"{clean_core}"*')
-                    else:
-                        formatted_tokens.append(f"{col_lower}:{clean_core}*")
-                else:
-                    clean_val = val.replace('"', '""')
-                    if _needs_fts_quoting(clean_val):
-                        formatted_tokens.append(_auto_prefix(f'{col_lower}:"{clean_val}"', val))
-                    else:
-                        formatted_tokens.append(_auto_prefix(f"{col_lower}:{clean_val}", val))
-                continue
-            else:
-                # Column is not allowlisted - treat as literal token wrapped in quotes
-                clean_token = token.replace('"', '""')
-                if clean_token.endswith("*") and not clean_token.startswith("*"):
-                    formatted_tokens.append(f'"{clean_token[:-1]}"*')
-                else:
-                    formatted_tokens.append(_auto_prefix(f'"{clean_token}"', token))
-                continue
+def _format_fts_term(term: str, column: str = "") -> str:
+    """
+    A bare term (or a column filter's value, after column, such as "app_name:") as an FTS5
+    prefix query: quoted when it has a leading '*' or characters FTS5 splits on, with the
+    search-as-you-type '*' from MIN_AUTO_PREFIX_LENGTH characters on.
+    """
+    if term.startswith("*"):
+        clean = term.replace('"', '""')
+        return f'{column}"{clean}"*'
+    if term.endswith("*"):
+        core = term[:-1].replace('"', '""')
+        return f'{column}"{core}"*' if _needs_fts_quoting(core) else f"{column}{core}*"
+    clean = term.replace('"', '""')
+    if _needs_fts_quoting(clean):
+        return _auto_prefix(f'{column}"{clean}"', term)
+    return _auto_prefix(f"{column}{clean}", term)
 
-        if token.startswith("*"):
-            clean_token = token.replace('"', '""')
-            formatted_tokens.append(f'"{clean_token}"*')
-        elif token.endswith("*"):
-            core = token[:-1]
-            clean_core = core.replace('"', '""')
-            if _needs_fts_quoting(clean_core):
-                formatted_tokens.append(f'"{clean_core}"*')
-            else:
-                formatted_tokens.append(f"{clean_core}*")
-        else:
-            clean_token = token.replace('"', '""')
-            if _needs_fts_quoting(clean_token):
-                formatted_tokens.append(_auto_prefix(f'"{clean_token}"', token))
-            else:
-                formatted_tokens.append(_auto_prefix(clean_token, token))
 
-    if not formatted_tokens:
-        return escape_fts_tokens(q)
-
-    # Validate token sequence for FTS5 syntax correctness
-    non_parens = [t for t in formatted_tokens if t not in ("(", ")")]
+def _is_valid_fts_sequence(tokens: list[str]) -> bool:
+    """
+    True when formatted tokens make a well-formed FTS5 expression: at least one term, no
+    operator at either end, beside another operator or inside a parenthesis edge, no empty
+    parentheses, and an operator between a term and a parenthesised group.
+    """
+    non_parens = [t for t in tokens if t not in ("(", ")")]
     if not non_parens:
-        return escape_fts_tokens(q)
-
-    # First and last non-paren tokens cannot be operators
+        return False
     if non_parens[0] in _FTS_OPERATORS or non_parens[-1] in _FTS_OPERATORS:
-        return escape_fts_tokens(q)
-
-    for i in range(len(formatted_tokens) - 1):
-        t1, t2 = formatted_tokens[i], formatted_tokens[i + 1]
-        # Consecutive operators
+        return False
+    for t1, t2 in zip(tokens, tokens[1:]):
         if t1 in _FTS_OPERATORS and t2 in _FTS_OPERATORS:
-            return escape_fts_tokens(q)
-        # Operator immediately after '('
+            return False
         if t1 == "(" and t2 in _FTS_OPERATORS:
-            return escape_fts_tokens(q)
-        # Operator immediately before ')'
+            return False
         if t1 in _FTS_OPERATORS and t2 == ")":
-            return escape_fts_tokens(q)
-        # Empty parens
+            return False
         if t1 == "(" and t2 == ")":
-            return escape_fts_tokens(q)
+            return False
         # Term directly before '(' without operator
         if t1 not in _FTS_OPERATORS and t1 != "(" and t2 == "(":
-            return escape_fts_tokens(q)
+            return False
         # Term directly after ')' without operator
         if t1 == ")" and t2 not in _FTS_OPERATORS and t2 != ")":
-            return escape_fts_tokens(q)
-
-    return " ".join(formatted_tokens)
+            return False
+    return True
 
 
 SEVERITY_NAME_MAP: dict[str, int] = {
