@@ -165,7 +165,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
 
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto sm:shrink-0">
           {totalDropped > 0 && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-mono whitespace-nowrap">
+            <span className="text-[11px] px-1.5 py-0.5 rounded-sm bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-mono whitespace-nowrap">
               {totalDropped.toLocaleString()} dropped
             </span>
           )}
@@ -299,18 +299,18 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                   <div className="space-y-1.5 min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-medium text-slate-200">{ruleDisplayName}</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
+                      <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
                         {rule.is_regex ? 'Regex' : 'Substring'}
                       </span>
                       {(rule.dropped_count || 0) > 0 && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                        <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
                           {(rule.dropped_count || 0).toLocaleString()} dropped
                         </span>
                       )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                      <span className="break-words min-w-0">
+                      <span className="wrap-break-word min-w-0">
                         {splitPatternList(rule.source_pattern).length > 1 ? 'Hosts' : 'Host'}:{' '}
                         {rule.source_pattern ? (
                           <span className="font-mono text-slate-300">{rule.source_pattern}</span>
@@ -318,7 +318,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                           <span className="text-slate-400 italic">Any</span>
                         )}
                       </span>
-                      <span className="break-words min-w-0">
+                      <span className="wrap-break-word min-w-0">
                         {splitPatternList(rule.app_pattern).length > 1 ? 'Apps' : 'App'}:{' '}
                         {rule.app_pattern ? (
                           <span className="font-mono text-slate-300">{rule.app_pattern}</span>
@@ -370,7 +370,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                     type="button"
                     onClick={() => handleExportSingle(rule)}
                     aria-label={`Export rule ${rule.id}`}
-                    className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                     title="Export rule"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -383,7 +383,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                       setIsModalOpen(true);
                     }}
                     aria-label={`Edit rule ${rule.id}`}
-                    className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                     title="Edit rule"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
@@ -393,7 +393,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                     type="button"
                     onClick={() => setRuleToDelete(rule)}
                     aria-label={`Delete rule ${rule.id}`}
-                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded transition cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded-sm transition cursor-pointer"
                     title="Delete rule"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -426,7 +426,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
           <p className="text-slate-400 leading-relaxed">
             Incoming matching logs will no longer be discarded and will resume being stored in SQLite and indexed by FTS5.
           </p>
-          <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+          <div className="p-2.5 rounded-sm bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
             <div>
               <span className="text-slate-400">Name:</span> {ruleToDelete.name || ruleToDelete.app_pattern || ruleToDelete.source_pattern || 'Drop Rule'}
             </div>

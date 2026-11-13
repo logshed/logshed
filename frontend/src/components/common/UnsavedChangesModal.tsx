@@ -20,7 +20,7 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
   onSave,
   message = 'You have unsaved changes. Closing now will discard those edits.',
   discardLabel = 'Discard Changes',
-  zIndex = 'z-[60]',
+  zIndex = 'z-60',
 }) => {
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
@@ -72,7 +72,7 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
               type="button"
               disabled={isSaving}
               onClick={handleSave}
-              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-xs"
             >
               {isSaving ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />

@@ -1038,7 +1038,7 @@ describe('LogDetailModal "Create Alert Rule"', () => {
 
   // jsdom applies no CSS, so these read the order the Tailwind classes give below and above the sm breakpoint
   const orderOf = (el: Element, phone: boolean): number => {
-    if (!phone && el.classList.contains('sm:order-none')) return 0;
+    if (!phone && el.classList.contains('sm:order-0')) return 0;
     const m = Array.from(el.classList).find((c) => /^order-\d+$/.test(c));
     return m ? Number(m.slice(6)) : 0;
   };

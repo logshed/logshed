@@ -184,7 +184,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
               required
               maxLength={NAME_MAX_LENGTH}
               disabled={editingHost?.id === 1}
-              className={`w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 ${
+              className={`w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 ${
                 editingHost?.id === 1 ? 'opacity-60 cursor-not-allowed' : ''
               }`}
             />
@@ -207,7 +207,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
               onChange={(e) => handleAliasChange(e.target.value)}
               required
               maxLength={HOST_ALIAS_MAX_LENGTH}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
             <p className="text-[11px] text-slate-400 mt-1">
               Label assigned to logs under the Host / IP column (defaults to host name).
@@ -226,7 +226,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
           />
           <p className="text-[11px] text-slate-400 mt-1">
             Supports local socket paths or remote TCP addresses (e.g. tcp://192.168.1.50:2375).
@@ -243,7 +243,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
             placeholder="gluetun, qbittorrent"
             value={excludeContainers}
             onChange={(e) => setExcludeContainers(e.target.value)}
-            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
           />
           <p className="text-[11px] text-slate-400 mt-1">
             Comma-separated list of container names or IDs to exclude from ingestion.
@@ -256,7 +256,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
-              className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+              className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
             />
             <span>Enable container collection</span>
           </label>
@@ -266,7 +266,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
               type="checkbox"
               checked={tlsEnabled}
               onChange={(e) => setTlsEnabled(e.target.checked)}
-              className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+              className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
             />
             <span>Use Mutual TLS (mTLS)</span>
           </label>
@@ -285,7 +285,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
                   type="checkbox"
                   checked={verifyHostname}
                   onChange={(e) => setVerifyHostname(e.target.checked)}
-                  className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                  className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
                 />
                 <span>Verify TLS host name</span>
               </label>
@@ -304,7 +304,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
                 placeholder="-----BEGIN CERTIFICATE-----"
                 value={caCert}
                 onChange={(e) => setCaCert(e.target.value)}
-                className="w-full bg-dark-900 border border-dark-700 rounded p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-500 resize-none"
+                className="w-full bg-dark-900 border border-dark-700 rounded-sm p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-hidden focus:border-accent-500 resize-none"
               />
             </div>
 
@@ -318,7 +318,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
                 placeholder="-----BEGIN CERTIFICATE-----"
                 value={clientCert}
                 onChange={(e) => setClientCert(e.target.value)}
-                className="w-full bg-dark-900 border border-dark-700 rounded p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-500 resize-none"
+                className="w-full bg-dark-900 border border-dark-700 rounded-sm p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-hidden focus:border-accent-500 resize-none"
               />
             </div>
 
@@ -355,7 +355,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
                 }
                 value={clientKey}
                 onChange={(e) => setClientKey(e.target.value)}
-                className="w-full bg-dark-900 border border-dark-700 rounded p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent-500 resize-none disabled:opacity-50"
+                className="w-full bg-dark-900 border border-dark-700 rounded-sm p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-hidden focus:border-accent-500 resize-none disabled:opacity-50"
               />
               <p className="text-[11px] text-slate-400 mt-1">
                 Encrypted at rest in database using application master key. Decrypted to memory only during connection setup.

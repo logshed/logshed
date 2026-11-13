@@ -43,19 +43,19 @@ const FirstRunCard: React.FC<Pick<ConsoleEmptyStateProps, 'syslogPort' | 'onOpen
             : `LogShed listens for syslog on port ${DEFAULT_SYSLOG_PORT} (UDP and TCP) inside the container by default.`}{' '}
           Point your devices at the host port you mapped to it.
         </p>
-        <div className="flex items-center gap-2 bg-dark-950 border border-dark-700 rounded px-3 py-2">
+        <div className="flex items-center gap-2 bg-dark-950 border border-dark-700 rounded-sm px-3 py-2">
           <code className="flex-1 min-w-0 font-mono text-[11px] text-slate-200 break-all">{command}</code>
           <CopyButton
             text={command}
             title="Copy command"
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] shrink-0"
           />
         </div>
         {onOpenSourcesSettings && (
           <button
             type="button"
             onClick={onOpenSourcesSettings}
-            className="px-3 py-1.5 rounded text-xs font-medium bg-accent-700 hover:bg-accent-600 text-white transition cursor-pointer"
+            className="px-3 py-1.5 rounded-sm text-xs font-medium bg-accent-700 hover:bg-accent-600 text-white transition cursor-pointer"
           >
             Set up Docker hosts
           </button>
@@ -88,7 +88,7 @@ export const ConsoleEmptyState: React.FC<ConsoleEmptyStateProps> = ({
           <button
             type="button"
             onClick={onResetFilters}
-            className="px-3 py-1.5 rounded text-xs font-sans font-medium bg-dark-800 text-slate-200 border border-dark-600 hover:border-slate-500 hover:text-white transition cursor-pointer"
+            className="px-3 py-1.5 rounded-sm text-xs font-sans font-medium bg-dark-800 text-slate-200 border border-dark-600 hover:border-slate-500 hover:text-white transition cursor-pointer"
           >
             Clear filters
           </button>

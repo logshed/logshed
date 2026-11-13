@@ -184,7 +184,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           <button
             type="button"
             onClick={openAddModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-700 hover:bg-accent-600 text-white rounded text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-700 hover:bg-accent-600 text-white rounded-sm text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Host Alias</span>
@@ -217,7 +217,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       onClick={() => handleViewLogs(item)}
                       title={`View logs for ${item.alias}`}
                       aria-label={`View logs for ${item.alias}`}
-                      className="inline-flex items-center gap-1 h-8 px-2 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="inline-flex items-center gap-1 h-8 px-2 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                     >
                       <ScrollText className="w-4 h-4" />
                       <span>View logs</span>
@@ -226,7 +226,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       type="button"
                       onClick={() => openEditModal(item)}
                       title="Edit Alias"
-                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -235,7 +235,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       disabled={isDeletingIp === item.ip}
                       onClick={() => setDeleteTargetIp(item.ip)}
                       title="Delete Alias"
-                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -276,7 +276,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     onClick={() => handleViewLogs(item)}
                     title={`View logs for ${item.alias}`}
                     aria-label={`View logs for ${item.alias}`}
-                    className="inline-flex items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-700 rounded transition cursor-pointer whitespace-nowrap"
+                    className="inline-flex items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-700 rounded-sm transition cursor-pointer whitespace-nowrap"
                   >
                     <ScrollText className="w-3.5 h-3.5" />
                     <span>View logs</span>
@@ -285,7 +285,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     type="button"
                     onClick={() => openEditModal(item)}
                     title="Edit Alias"
-                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
+                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded-sm transition cursor-pointer"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
@@ -294,7 +294,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     disabled={isDeletingIp === item.ip}
                     onClick={() => setDeleteTargetIp(item.ip)}
                     title="Delete Alias"
-                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -332,7 +332,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 disabled={Boolean(editingIp)}
                 placeholder="e.g. 192.168.1.50"
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono disabled:opacity-50"
+                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono disabled:opacity-50"
               />
               {editingIp && (
                 <p className="text-[11px] text-slate-400 mt-1">
@@ -351,7 +351,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 onChange={(e) => setAlias(e.target.value)}
                 placeholder="e.g. Proxmox-Node-01"
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
 
@@ -364,7 +364,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="e.g. Main hypervisor in rack 1"
-                className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500"
+                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
               />
             </div>
 
@@ -372,14 +372,14 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
               <button
                 type="button"
                 onClick={handleCancelModal}
-                className="px-3.5 py-1.5 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded text-xs transition cursor-pointer"
+                className="px-3.5 py-1.5 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-sm text-xs transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSaving || !ip.trim() || !alias.trim()}
-                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium px-4 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
+                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium px-4 py-1.5 rounded-sm text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
               >
                 {isSaving ? (
                   <>
@@ -406,7 +406,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           confirmDisabled={isDeletingIp === deleteTargetIp}
           confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
           confirmLabel={isDeletingIp === deleteTargetIp ? 'Deleting...' : 'Delete Alias'}
-          confirmClassName="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          confirmClassName="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <p className="font-semibold text-slate-100 text-xs">
             Remove host alias mapping?
@@ -414,7 +414,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           <p className="text-slate-400 leading-relaxed">
             Incoming logs from this IP address will no longer be assigned a friendly alias.
           </p>
-          <div className="p-2.5 rounded bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+          <div className="p-2.5 rounded-sm bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
             <div>
               <span className="text-slate-400">IP:</span> {deleteTargetIp}
             </div>

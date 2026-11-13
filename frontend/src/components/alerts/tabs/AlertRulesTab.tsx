@@ -82,11 +82,11 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-amber-200">Maintenance Window Active</span>
                 {maintenance.schedule_name ? (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
+                  <span className="px-2 py-0.5 rounded-sm text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
                     {maintenance.schedule_name}
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
+                  <span className="px-2 py-0.5 rounded-sm text-[10px] font-medium bg-amber-900/60 text-amber-300 border border-amber-700/60">
                     On-Demand
                   </span>
                 )}
@@ -229,17 +229,17 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     <div className="space-y-1.5 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium text-slate-200">{rule.name}</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
+                      <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono uppercase bg-dark-800 text-slate-300 border border-dark-650">
                         {rule.rule_type}
                       </span>
                       {rule.ai_enrichment && (
-                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-950/40 text-purple-300 border border-purple-800/50">
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-purple-950/40 text-purple-300 border border-purple-800/50">
                           <Sparkles className="w-2.5 h-2.5" />
                           <span>AI Enriched</span>
                         </span>
                       )}
                       {rule.trigger_count > 0 && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-950/30 text-amber-300 border border-amber-800/40">
+                        <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-amber-950/30 text-amber-300 border border-amber-800/40">
                           Fired {rule.trigger_count}x
                         </span>
                       )}
@@ -307,7 +307,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenTestModal(rule)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                       title="Test Rule"
                       aria-label={`Test rule ${rule.name}`}
                     >
@@ -317,7 +317,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onExportSingle(rule)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                       title="Export rule"
                       aria-label={`Export rule ${rule.name}`}
                     >
@@ -327,7 +327,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenEditModal(rule)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                       title="Edit rule"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
@@ -336,7 +336,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteRule(rule)}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded transition cursor-pointer"
+                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded-sm transition cursor-pointer"
                       title="Delete rule"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

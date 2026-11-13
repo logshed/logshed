@@ -53,7 +53,7 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
 
         <button
           onClick={onDeselectAll}
-          className="px-2.5 py-1 text-xs text-slate-300 bg-dark-800 hover:text-white hover:bg-dark-700 border border-dark-600 rounded transition cursor-pointer font-medium"
+          className="px-2.5 py-1 text-xs text-slate-300 bg-dark-800 hover:text-white hover:bg-dark-700 border border-dark-600 rounded-sm transition cursor-pointer font-medium"
         >
           Deselect All
         </button>

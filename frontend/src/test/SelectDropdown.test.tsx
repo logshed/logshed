@@ -250,7 +250,7 @@ describe('SelectDropdown', () => {
     expect(t.className).not.toContain('bg-dark-950');
     fireEvent.click(t);
     expect(screen.getByRole('option', { name: 'Today' }).className).not.toContain('font-mono');
-    expect(t.className).toContain('!border-accent-500');
+    expect(t.className).toContain('border-accent-500!');
     fireEvent.click(t);
 
     rerender(<SelectDropdown variant="panel" label="Sample Severity" options={OPTIONS} value="all" onChange={vi.fn()} />);

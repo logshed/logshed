@@ -94,7 +94,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
                   name={preset.name}
                   isCustom={preset.is_custom}
                   badge={
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/40 shrink-0">
+                    <span className="px-2 py-0.5 rounded-sm text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/40 shrink-0">
                       {preset.rule_type}
                     </span>
                   }
@@ -106,25 +106,25 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
                   onInstall={() => onInstallPreset(preset)}
                 >
                   {preset.filter_app && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700 font-mono">
                       app: {preset.filter_app}
                     </span>
                   )}
                   {preset.match_pattern && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded text-accent-400 border border-dark-700 font-mono truncate max-w-full">
+                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-accent-400 border border-dark-700 font-mono truncate max-w-full">
                       pattern: {preset.match_pattern}
                     </span>
                   )}
-                  <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
+                  <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700">
                     {preset.rule_type === 'rate'
                       ? `>= ${preset.threshold_count} logs/s in ${preset.window_seconds}s`
                       : `${preset.threshold_count} in ${preset.window_seconds}s`}
                   </span>
-                  <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700">
+                  <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700">
                     cooldown: {preset.cooldown_seconds}s
                   </span>
                   {preset.ai_enrichment && (
-                    <span className="bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded border border-purple-800/40 flex items-center gap-1">
+                    <span className="bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded-sm border border-purple-800/40 flex items-center gap-1">
                       <Sparkles className="w-2.5 h-2.5" />
                       <span>AI Enrichment</span>
                     </span>

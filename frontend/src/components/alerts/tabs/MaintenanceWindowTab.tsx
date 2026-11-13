@@ -132,7 +132,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
             {/* Quick Presets */}
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">{isOnDemandActiveNow ? 'Start a new window' : 'Set end time from now'}</span>
+              <span className="block text-xs font-medium text-slate-400">{isOnDemandActiveNow ? 'Start a new window' : 'Set end time from now'}</span>
               <div className="flex flex-wrap items-center gap-2">
                 {[1, 4, 8, 24].map((hours) => (
                   <button
@@ -149,7 +149,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
             {/* Custom Time */}
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-slate-400">
+              <span className="block text-xs font-medium text-slate-400">
                 Specific End Time <span className="font-mono">({timeInputZoneLabel(serverTimezone)})</span>:
               </span>
               <div className="flex items-center gap-2">
@@ -159,7 +159,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   value={customUntil}
                   onChange={(e) => setCustomUntil(e.target.value)}
                   min={toLocalDatetimeInputString(new Date().toISOString(), serverTimezone)}
-                  className="bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 px-3 py-1.5 focus:border-accent-500 focus:outline-none"
+                  className="bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 px-3 py-1.5 focus:border-accent-500 focus:outline-hidden"
                 />
                 <button
                   type="button"
@@ -211,7 +211,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         onClick={() => onExtendSession(sess.session_id)}
                         title="Move this session's end one hour later"
                         aria-label={`Extend session ${sess.reason || 'On-Demand Session'} by one hour`}
-                        className="px-2.5 py-1 text-xs font-medium bg-amber-950/30 hover:bg-amber-950/50 text-amber-200 hover:text-white border border-amber-800/60 rounded transition cursor-pointer"
+                        className="px-2.5 py-1 text-xs font-medium bg-amber-950/30 hover:bg-amber-950/50 text-amber-200 hover:text-white border border-amber-800/60 rounded-sm transition cursor-pointer"
                       >
                         +1h
                       </button>
@@ -219,7 +219,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         <button
                           type="button"
                           onClick={() => onDisableSession(sess.session_id)}
-                          className="px-2.5 py-1 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-red-400 hover:text-red-300 border border-dark-700 hover:border-dark-600 rounded transition cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-red-400 hover:text-red-300 border border-dark-700 hover:border-dark-600 rounded-sm transition cursor-pointer"
                         >
                           Stop Session
                         </button>
@@ -283,7 +283,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-medium text-slate-200">{sched.name}</span>
                       {sched.is_active && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
                           Active Now
                         </span>
                       )}
@@ -307,7 +307,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   {/* Actions & Status */}
                   <div className="flex items-center gap-2.5 self-start md:self-center shrink-0">
                     {sched.is_active ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
                         Active Now
                       </span>
                     ) : (
@@ -328,7 +328,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenEditScheduleModal(sched)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
                       title="Edit schedule"
                       aria-label={`Edit ${sched.name}`}
                     >
@@ -337,7 +337,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteSchedule(sched)}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded transition cursor-pointer"
+                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-sm transition cursor-pointer"
                       title="Delete schedule"
                       aria-label={`Delete ${sched.name}`}
                     >
@@ -379,7 +379,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               tabIndex={0}
               role="region"
               aria-label="Start maintenance cURL command"
-              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-500"
+              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
             >
               {startSnippet}
             </pre>
@@ -400,7 +400,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               tabIndex={0}
               role="region"
               aria-label="Stop maintenance cURL command"
-              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-500"
+              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
             >
               {stopSnippet}
             </pre>

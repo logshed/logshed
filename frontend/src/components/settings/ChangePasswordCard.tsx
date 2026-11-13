@@ -77,7 +77,7 @@ export const ChangePasswordCard: React.FC = () => {
             value={currentPwd}
             onChange={(e) => setCurrentPwd(e.target.value)}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 
@@ -92,7 +92,7 @@ export const ChangePasswordCard: React.FC = () => {
             onChange={(e) => setNewPwd(e.target.value)}
             minLength={PASSWORD_MIN_LENGTH}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 
@@ -107,7 +107,7 @@ export const ChangePasswordCard: React.FC = () => {
             onChange={(e) => setConfirmPwd(e.target.value)}
             minLength={PASSWORD_MIN_LENGTH}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 

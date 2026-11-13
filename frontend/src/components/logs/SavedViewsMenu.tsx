@@ -215,7 +215,7 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
                               e.stopPropagation();
                               onTogglePin(e, view);
                             }}
-                            className="p-1 hover:text-accent-300 text-slate-400 rounded transition cursor-pointer"
+                            className="p-1 hover:text-accent-300 text-slate-400 rounded-sm transition cursor-pointer"
                             title={view.is_pinned ? 'Unpin view' : 'Pin view'}
                             aria-label={view.is_pinned ? `Unpin view ${view.name}` : `Pin view ${view.name}`}
                           >
@@ -225,7 +225,7 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
                             <button
                               type="button"
                               onClick={(e) => openRename(e, view)}
-                              className="p-1 hover:text-accent-300 text-slate-400 rounded transition cursor-pointer"
+                              className="p-1 hover:text-accent-300 text-slate-400 rounded-sm transition cursor-pointer"
                               title="Rename view"
                               aria-label={`Rename view ${view.name}`}
                             >
@@ -238,7 +238,7 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
                               e.stopPropagation();
                               setViewToDelete(view);
                             }}
-                            className="p-1 hover:text-red-400 text-slate-400 rounded transition cursor-pointer"
+                            className="p-1 hover:text-red-400 text-slate-400 rounded-sm transition cursor-pointer"
                             title="Delete view"
                             aria-label={`Delete view ${view.name}`}
                           >
@@ -275,7 +275,7 @@ export const SavedViewsMenu: React.FC<SavedViewsMenuProps> = ({
         <button
           type="button"
           onClick={onOpenSaveModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-900 hover:bg-dark-800 text-accent-400 border border-dark-700 transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium bg-dark-900 hover:bg-dark-800 text-accent-400 border border-dark-700 transition cursor-pointer"
         >
           <Plus className="w-3 h-3" />
           <span>Save Current</span>
@@ -409,7 +409,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
             maxLength={NAME_MAX_LENGTH}
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'rename-view-taken' : undefined}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-none focus:border-accent-500"
+            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
           />
           {isTaken && (
             <p id="rename-view-taken" className="mt-1 text-red-400 text-[11px]">
@@ -419,7 +419,7 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
         </div>
 
         {error && (
-          <div role="alert" className="text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2 text-[11px]">
+          <div role="alert" className="text-red-400 bg-red-950/30 border border-red-800/40 rounded-sm p-2 text-[11px]">
             {error}
           </div>
         )}
@@ -429,14 +429,14 @@ const RenameViewDialog: React.FC<RenameViewModalProps & { view: SavedView }> = (
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="px-3 py-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition disabled:opacity-50"
+            className="px-3 py-1.5 rounded-sm text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!canSave}
-            className="px-3 py-1.5 rounded bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50"
+            className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save'}
           </button>
@@ -530,7 +530,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             autoFocus
             aria-invalid={isTaken || undefined}
             aria-describedby={isTaken ? 'save-view-taken' : undefined}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-none focus:border-accent-500"
+            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-1.5 text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-accent-500"
           />
           {isTaken && (
             <p id="save-view-taken" className="mt-1 text-red-400 text-[11px]">
@@ -545,7 +545,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
             id="view-pinned-checkbox"
             checked={isPinned}
             onChange={(e) => setIsPinned(e.target.checked)}
-            className="rounded bg-dark-950 border-dark-700 text-accent-500 focus:ring-accent-500/20"
+            className="rounded-sm bg-dark-950 border-dark-700 text-accent-500 focus:ring-accent-500/20"
           />
           <label htmlFor="view-pinned-checkbox" className="text-slate-300 cursor-pointer">
             Pin view for quick access
@@ -553,7 +553,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
         </div>
 
         {/* Active Filter Summary */}
-        <div className="bg-dark-950/60 border border-dark-800 rounded p-2 text-slate-400 space-y-1">
+        <div className="bg-dark-950/60 border border-dark-800 rounded-sm p-2 text-slate-400 space-y-1">
           <div className="font-semibold text-slate-300 text-[11px] mb-1">Active Filters to Save:</div>
           {hasActiveFilters ? (
             <ul className="list-disc list-inside space-y-0.5 text-[11px]">
@@ -578,7 +578,7 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
         </div>
 
         {error && (
-          <div className="text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2 text-[11px]">
+          <div className="text-red-400 bg-red-950/30 border border-red-800/40 rounded-sm p-2 text-[11px]">
             {error}
           </div>
         )}
@@ -587,14 +587,14 @@ export const SaveViewModal: React.FC<SaveViewModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition"
+            className="px-3 py-1.5 rounded-sm text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSaving || !name.trim() || isTaken}
-            className="px-3 py-1.5 rounded bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50"
+            className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save View'}
           </button>

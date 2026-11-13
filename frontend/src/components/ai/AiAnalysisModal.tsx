@@ -523,7 +523,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
           {preview && (
             <div className="flex items-center gap-2 font-mono text-[11px] text-slate-400">
               <span
-                className="px-2 py-0.5 bg-dark-800 rounded border border-dark-700 flex items-center gap-1.5 cursor-help"
+                className="px-2 py-0.5 bg-dark-800 rounded-sm border border-dark-700 flex items-center gap-1.5 cursor-help"
                 title="Estimated prompt/input tokens only (includes system instructions and metadata). Does not include model thinking or response output tokens."
               >
                 <span>~{estimatedTokens.toLocaleString()} tokens</span>
@@ -594,14 +594,14 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     maskedValueCount > 0 ? (
                       <span
                         data-testid="masked-count-badge"
-                        className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-emerald-950/50 text-emerald-400 border-emerald-800 whitespace-nowrap"
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-sm border bg-emerald-950/50 text-emerald-400 border-emerald-800 whitespace-nowrap"
                       >
                         {maskedValueCount === 1 ? '1 value masked' : `${maskedValueCount} values masked`}
                       </span>
                     ) : (
                       <span
                         data-testid="masked-count-badge"
-                        className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-dark-800 text-slate-400 border-dark-700 whitespace-nowrap"
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-sm border bg-dark-800 text-slate-400 border-dark-700 whitespace-nowrap"
                       >
                         No values masked - review before sending
                       </span>
@@ -611,7 +611,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 <div className="flex items-center gap-2.5">
                   {/* View mode toggle pill */}
-                  <div className="flex items-center bg-dark-950 border border-dark-700 rounded p-0.5 text-[10px] font-mono">
+                  <div className="flex items-center bg-dark-950 border border-dark-700 rounded-sm p-0.5 text-[10px] font-mono">
                     <button
                       type="button"
                       onClick={prompt.showAnalysisView}
@@ -660,7 +660,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 value={promptViewMode === 'full' ? fullPromptText : promptText}
                 onChange={handlePromptChange}
                 placeholder={promptViewMode === 'full' ? 'Full LLM prompt envelope...' : 'Redacted prompt...'}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs focus:outline-none focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
               />
 
               {/* Log Redaction Notice */}
@@ -687,11 +687,11 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     Model & Provider Settings
                   </span>
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
-                    <span className="px-1.5 py-0.5 rounded bg-dark-950 border border-dark-700 text-slate-300 truncate max-w-[150px] sm:max-w-[220px]">
+                    <span className="px-1.5 py-0.5 rounded-sm bg-dark-950 border border-dark-700 text-slate-300 truncate max-w-[150px] sm:max-w-[220px]">
                       {model || DEFAULT_AI_MODEL}
                     </span>
                     {fallbackList.length > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded-sm bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px]">
                         {fallbackList.length} fallback{fallbackList.length === 1 ? '' : 's'}
                       </span>
                     ) : (
@@ -700,7 +700,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       </span>
                     )}
                     {!hasApiKeyForProvider && providerNeedsApiKey(provider) && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] flex items-center gap-1">
+                      <span className="px-1.5 py-0.5 rounded-sm bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] flex items-center gap-1">
                         <AlertCircle className="w-3 h-3 text-amber-400" />
                         Key required
                       </span>
@@ -750,7 +750,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     </label>
                     <SelectDropdown
                       variant="panel"
-                      fieldClassName="bg-dark-950 border-dark-700 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                      fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-2.5 py-1.5 font-mono text-slate-200"
                       id={`${fieldId}-provider`}
                       labelledBy={`${fieldId}-provider-label`}
                       label="AI Provider"
@@ -792,7 +792,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     {availableModels.length > 0 && !isCustomModel ? (
                       <SelectDropdown
                         variant="panel"
-                        fieldClassName="bg-dark-950 border-dark-700 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                        fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-2.5 py-1.5 font-mono text-slate-200"
                         id={`${fieldId}-model`}
                         labelledBy={`${fieldId}-model-label`}
                         label="Primary Model"
@@ -818,7 +818,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
                         placeholder={DEFAULT_PROVIDER_MODELS[provider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-                        className="w-full bg-dark-950 border border-dark-700 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono"
+                        className="w-full bg-dark-950 border border-dark-700 rounded-sm px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
                       />
                     )}
                   </div>
@@ -850,7 +850,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 maxLength={MAX_USER_CONTEXT_LENGTH}
                 placeholder="e.g. Occurred immediately following network switch firmware upgrade, or after container image pull..."
                 rows={2}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-sans"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-sans"
               />
             </div>
 
@@ -870,7 +870,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       {streamProgress.message || `Running analysis with ${streamProgress.currentModel || model}...`}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
+                  <div className="flex items-center gap-1.5 font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
                     <Clock className="w-3.5 h-3.5 text-accent-400" />
                     <span>Elapsed: {formatElapsed(elapsedSeconds)}</span>
                   </div>
@@ -882,7 +882,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     {streamProgress.failovers.map((fo, idx) => (
                       <div
                         key={idx}
-                        className="p-2 bg-amber-950/50 border border-amber-800/70 rounded text-[11px] text-amber-200 flex items-start gap-2"
+                        className="p-2 bg-amber-950/50 border border-amber-800/70 rounded-sm text-[11px] text-amber-200 flex items-start gap-2"
                       >
                         <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                         <div>
@@ -980,11 +980,11 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
+                <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
                   <span className="text-slate-400 text-[10px] uppercase font-semibold">Model:</span>
                   <span className="text-accent-400 font-medium min-w-0 break-all">{analysisResult.model_used}</span>
                   {analysisResult.fallback_used && (
-                    <span className="shrink-0 bg-amber-950/80 border border-amber-700 text-amber-300 px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase">
+                    <span className="shrink-0 bg-amber-950/80 border border-amber-700 text-amber-300 px-1.5 py-0.5 rounded-sm text-[9px] font-semibold tracking-wide uppercase">
                       Fallback
                     </span>
                   )}

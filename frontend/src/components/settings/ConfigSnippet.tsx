@@ -57,7 +57,7 @@ export const ConfigSnippet: React.FC<ConfigSnippetProps> = ({ title, subtitle, i
               copiedLabelClassName="text-emerald-400"
             />
           </div>
-          <pre className="p-2.5 bg-dark-900 border border-dark-800 rounded text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
+          <pre className="p-2.5 bg-dark-900 border border-dark-800 rounded-sm text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
             {snippet}
           </pre>
           {note && (

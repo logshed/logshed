@@ -85,7 +85,7 @@ const TokenDialog: React.FC<TokenDialogProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full overflow-hidden outline-none animate-in fade-in zoom-in-95 duration-150 ${panelClassName}`}
+        className={`bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full overflow-hidden outline-hidden animate-in fade-in zoom-in-95 duration-150 ${panelClassName}`}
       >
         {children}
       </div>
@@ -288,7 +288,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
             <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
               Generate secure Bearer tokens for external automation, Home Assistant integrations,
               and AI assistants. All API requests authenticate via HTTP header{' '}
-              <code className="text-accent-400 font-mono text-[11px] bg-dark-950 px-1.5 py-0.5 rounded border border-dark-800">
+              <code className="text-accent-400 font-mono text-[11px] bg-dark-950 px-1.5 py-0.5 rounded-sm border border-dark-800">
                 Authorization: Bearer ls_live_...
               </code>
             </p>
@@ -342,10 +342,10 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold text-slate-100">{token.name}</span>
-                          <span className="font-mono text-[11px] text-slate-300 bg-dark-950 px-1.5 py-0.5 rounded border border-dark-750">
+                          <span className="font-mono text-[11px] text-slate-300 bg-dark-950 px-1.5 py-0.5 rounded-sm border border-dark-750">
                             {token.token_prefix}
                           </span>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
                             {presetName}
                           </span>
                         </div>
@@ -420,7 +420,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           {token.token_prefix}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
                             {presetName}
                           </span>
                         </td>
@@ -441,7 +441,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(token)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-slate-100 hover:bg-dark-800 border border-transparent hover:border-dark-700 rounded transition cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-slate-100 hover:bg-dark-800 border border-transparent hover:border-dark-700 rounded-sm transition cursor-pointer"
                             title="Edit Token"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -450,7 +450,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           <button
                             type="button"
                             onClick={() => { setModalError(null); setTokenToRevoke(token); }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-transparent hover:border-red-900 rounded transition cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-transparent hover:border-red-900 rounded-sm transition cursor-pointer"
                             title="Revoke Token"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -510,7 +510,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   placeholder="e.g. Home Assistant or Claude Desktop"
                   value={newTokenName}
                   onChange={(e) => setNewTokenName(e.target.value)}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500"
+                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
                 />
               </div>
 
@@ -606,7 +606,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   aria-describedby={editScopesChanged && !editNameChanged ? 'edit-token-name-hint' : undefined}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500"
+                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
                 />
                 {editScopesChanged && !editNameChanged && (
                   <p id="edit-token-name-hint" className="mt-1 text-[11px] text-slate-400">

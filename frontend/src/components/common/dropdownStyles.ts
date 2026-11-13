@@ -9,12 +9,12 @@ export function filterTriggerClass(isOpen: boolean, active: boolean): string {
     : active
     ? 'border-accent-600/60 bg-dark-900/90 text-slate-100'
     : 'border-dark-700 hover:border-slate-600 text-slate-300';
-  return `flex items-center gap-1.5 bg-dark-900 border rounded px-2.5 py-1 text-xs cursor-pointer select-none transition focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${state}`;
+  return `flex items-center gap-1.5 bg-dark-900 border rounded-sm px-2.5 py-1 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${state}`;
 }
 
 /** The clear button over a filter trigger: its right edge is the trigger's padding plus the chevron and gap. */
 export const FILTER_CLEAR_BUTTON =
-  'absolute right-7 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 p-0.5 rounded hover:bg-dark-800 transition';
+  'absolute right-7 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 p-0.5 rounded-sm hover:bg-dark-800 transition';
 
 /** Room kept inside the trigger, before the chevron, for the clear button laid over it. */
 export const FILTER_CLEAR_ROOM = 'w-[18px] shrink-0';

@@ -53,14 +53,14 @@ export const LoginForm: React.FC = () => {
         </div>
 
         {noticeMsg && (
-          <div className="mb-4 p-3 bg-emerald-950/60 border border-emerald-800 rounded-lg flex items-start space-x-2 text-xs text-emerald-300">
+          <div className="mb-4 p-3 bg-emerald-950/60 border border-emerald-800 rounded-lg flex items-start gap-x-2 text-xs text-emerald-300">
             <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <span>{noticeMsg}</span>
           </div>
         )}
 
         {(errorMsg || (!noticeMsg && authError)) && (
-          <div className="mb-4 p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start space-x-2 text-xs text-red-300">
+          <div className="mb-4 p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-x-2 text-xs text-red-300">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
             <span>{errorMsg || authError}</span>
           </div>
@@ -80,7 +80,7 @@ export const LoginForm: React.FC = () => {
                 placeholder="Enter password..."
                 required
                 autoFocus
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
             </div>
@@ -89,7 +89,7 @@ export const LoginForm: React.FC = () => {
           <button
             type="submit"
             disabled={isLoading || !password.trim()}
-            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center space-x-2"
+            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center gap-x-2"
           >
             {isLoading ? (
               <span>Authenticating...</span>

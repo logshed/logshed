@@ -460,7 +460,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
         bodyClassName="space-y-4 text-xs text-slate-300"
         footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-dark-800"
         cancelClassName="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer"
-        confirmClassName="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+        confirmClassName="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
       >
         <p className="leading-relaxed">
           The database will be repacked to return unused space to the host filesystem.

@@ -58,7 +58,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
   <>
     {/* Left: Quick Filter Pills */}
     <div className="relative flex-1 min-w-0 flex items-center overflow-hidden">
-      <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-w-full">
+      <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 pr-8 scrollbar-none [&::-webkit-scrollbar]:hidden max-w-full">
         {/* On phones the Filters button that comes first on the line does the labelling */}
         {!isMobile && <span className="text-slate-400 font-medium text-[11px] shrink-0">Quick Filters:</span>}
         {/* Pinned saved views first: a click applies the view, as the Views menu does, and a
@@ -80,7 +80,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
               }`}
             >
               <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
-              <span className="truncate max-w-[10rem]">{view.name}</span>
+              <span className="truncate max-w-40">{view.name}</span>
             </button>
           );
         })}
@@ -137,7 +137,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
         })}
       </div>
       {/* Fade overlay on the right edge of quick filters */}
-      <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-dark-900 z-10" />
+      <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-linear-to-r from-transparent to-dark-900 z-10" />
     </div>
 
     {/* Right: Stream State Controls */}
@@ -147,7 +147,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
         <button
           onClick={onSelectAll}
           disabled={bufferSize === 0}
-          className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-300 border border-dark-700 hover:border-slate-500 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          className="px-2 py-1 rounded-sm text-xs font-medium bg-dark-800 text-slate-300 border border-dark-700 hover:border-slate-500 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           title={bufferSize > SELECT_ALL_LIMIT ? `Select all logs in buffer (capped at ${SELECT_ALL_LIMIT})` : 'Select all logs in buffer'}
         >
           Select All
@@ -155,7 +155,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
         {hasSelection && (
           <button
             onClick={onDeselectAll}
-            className="px-2 py-1 rounded text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:border-slate-500 hover:text-slate-200 transition cursor-pointer"
+            className="px-2 py-1 rounded-sm text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700 hover:border-slate-500 hover:text-slate-200 transition cursor-pointer"
             title="Deselect all selected logs"
           >
             Deselect All
@@ -169,7 +169,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
 
       {historicalRange ? (
         <span
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-amber-950/50 text-amber-300 border border-amber-800/70 font-mono select-none"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium bg-amber-950/50 text-amber-300 border border-amber-800/70 font-mono select-none"
           title="A historical end-time (To) is set. Live stream is paused to preserve historical boundaries."
         >
           <Clock className="w-3.5 h-3.5 text-amber-400" />
@@ -197,7 +197,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
           onClick={onClearBuffer}
           title="Clear screen buffer (clears browser view only; does not delete logs from disk)"
           aria-label="Clear screen buffer (clears browser view only; does not delete logs from disk)"
-          className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded transition cursor-pointer"
+          className="p-1 text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded-sm transition cursor-pointer"
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>

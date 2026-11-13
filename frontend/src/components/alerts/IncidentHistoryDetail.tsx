@@ -214,21 +214,21 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               ({countLabel})
             </span>
             {isDigest ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
                 <Calendar className="w-2.5 h-2.5 text-purple-400 shrink-0" />
                 Daily Digest
               </span>
             ) : isOnDemand ? (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-sans font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
                 On-Demand
               </span>
             ) : isAiAlert ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
                 <Zap className="w-2.5 h-2.5 text-amber-400 shrink-0" />
                 AI Alert
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
                 Alert
               </span>
             )}
@@ -242,19 +242,19 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
         <div className="flex flex-wrap items-center justify-between pt-2.5 border-t border-dark-800 text-[11px] font-mono gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {item.ai_model && (
-              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
+              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
                 <span className="text-slate-400 text-[10px] uppercase font-semibold">Model:</span>
                 <span className="text-accent-400 font-medium">{item.ai_model}</span>
               </div>
             )}
             {channelName && (
-              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
+              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
                 <span className="text-slate-400 text-[10px] uppercase font-semibold">Target:</span>
                 <span className="text-slate-200 font-medium">{channelName}</span>
               </div>
             )}
             {!isOnDemand && !isDigest && (item.source_alias || item.app_name) && (
-              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-slate-300">
+              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
                 <span className="text-slate-400 text-[10px] uppercase font-semibold">Source:</span>
                 <span className="text-slate-200 font-medium">
                   {[item.source_alias, item.app_name].filter(Boolean).join(' • ')}
@@ -278,7 +278,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               href={consoleUrl}
               onClick={(e) => openInConsole(e, consoleUrl)}
               title={`Show logs${item.source_alias ? ` from ${item.source_alias}` : ''} around the time this alert fired`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
             >
               <Radio className="w-3.5 h-3.5 text-accent-400" />
               <span>Inspect in Console</span>
@@ -359,7 +359,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
           </h3>
 
           {isFailed ? (
-            <div className="p-3 bg-red-950/30 border border-red-900/60 rounded text-xs text-red-300 leading-relaxed font-mono whitespace-pre-wrap">
+            <div className="p-3 bg-red-950/30 border border-red-900/60 rounded-sm text-xs text-red-300 leading-relaxed font-mono whitespace-pre-wrap">
               {item.incident_summary}
             </div>
           ) : (
@@ -456,7 +456,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                   text={promptToCopy}
                   label="Copy Prompt"
                   title="Copy prompt"
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
                 />
               </div>
 
@@ -493,7 +493,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               text={item.sample_log || ''}
               label="Copy Log"
               title="Copy triggering log"
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
             />
           </div>
           <pre className="p-3 bg-dark-950 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-48 leading-relaxed selection:bg-accent-900/50">

@@ -44,7 +44,7 @@ export const SlideOver: React.FC<SlideOverProps> = ({
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className={`pointer-events-auto w-screen ${width} bg-dark-900 border-l border-dark-700 shadow-2xl flex flex-col overscroll-contain outline-none animate-in slide-in-from-right duration-200 overflow-x-hidden`}
+            className={`pointer-events-auto w-screen ${width} bg-dark-900 border-l border-dark-700 shadow-2xl flex flex-col overscroll-contain outline-hidden animate-in slide-in-from-right duration-200 overflow-x-hidden`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -59,7 +59,7 @@ export const SlideOver: React.FC<SlideOverProps> = ({
                 {headerActions}
                 <button
                   onClick={onClose}
-                  className="text-slate-400 hover:text-slate-200 hover:bg-dark-800 p-1.5 rounded transition shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
+                  className="text-slate-400 hover:text-slate-200 hover:bg-dark-800 p-1.5 rounded-sm transition shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
                   aria-label="Close panel"
                 >
                   <X className="w-5 h-5 sm:w-4 sm:h-4" />

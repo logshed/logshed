@@ -249,7 +249,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               type="button"
               onClick={onNavigateNewer}
               disabled={!hasNewerLog}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
               aria-label="Newer log"
               title="Newer log (Up or K)"
             >
@@ -260,7 +260,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               type="button"
               onClick={onNavigateOlder}
               disabled={!hasOlderLog}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 hover:border-dark-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed select-none"
               aria-label="Older log"
               title="Older log (Down or J)"
             >
@@ -293,7 +293,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   onEditDockerHost(matchedDockerEndpoint.id);
                   onClose();
                 }}
-                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
               >
                 <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                 <span>Edit Docker Host</span>
@@ -308,7 +308,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   });
                   onClose();
                 }}
-                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
               >
                 <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                 <span>Configure Docker Host</span>
@@ -321,7 +321,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     onAddAlias(log.source_ip);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
                 >
                   <Edit2 className="w-3.5 h-3.5 text-accent-400" />
                   <span>Modify Host Alias</span>
@@ -333,7 +333,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     onAddAlias(log.source_ip);
                     onClose();
                   }}
-                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                  className="flex items-center justify-center gap-1 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5 text-accent-400" />
                   <span>Add Host Alias</span>
@@ -344,7 +344,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {onCreateDropRule && (
               <button
                 onClick={() => onCreateDropRule(log)}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
                 title="Create an ingestion drop rule for similar logs"
               >
                 <FilterX className="w-3.5 h-3.5 text-accent-400" />
@@ -355,7 +355,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {onCreateAlertRule && (
               <button
                 onClick={() => onCreateAlertRule(log)}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded transition font-medium cursor-pointer"
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
                 title="Create an alert rule for this app, with this log shown for reference"
               >
                 <BellPlus className="w-3.5 h-3.5 text-accent-400" />
@@ -366,7 +366,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {onDeleteLog && (
               <button
                 onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
-                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-red-950 text-slate-300 hover:text-red-300 border border-dark-600 hover:border-red-800 rounded transition font-medium cursor-pointer"
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-red-950 text-slate-300 hover:text-red-300 border border-dark-600 hover:border-red-800 rounded-sm transition font-medium cursor-pointer"
                 title="Delete this log record permanently"
               >
                 <Trash2 className="w-3.5 h-3.5 text-red-400" />
@@ -377,7 +377,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {aiEnabled ? (
               <button
                 onClick={() => onExplainWithAi(log)}
-                className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded font-medium transition shadow-xs"
+                className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded-sm font-medium transition shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Explain with AI</span>
@@ -387,7 +387,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               <button
                 onClick={() => onExplainWithAi(log)}
                 title={AI_OFF_TITLE}
-                className="col-span-2 flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-slate-300 border border-dark-600 rounded font-medium transition cursor-pointer"
+                className="col-span-2 flex items-center justify-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-slate-300 border border-dark-600 rounded-sm font-medium transition cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-slate-500" />
                 <span>Explain with AI</span>
@@ -408,7 +408,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                 type="button"
                 onClick={() => setShowDeleteConfirm(false)}
                 disabled={isDeleting}
-                className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded transition cursor-pointer"
+                className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -416,7 +416,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={isDeleting}
-                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded transition flex items-center gap-1 cursor-pointer"
+                className="px-3 py-1 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-sm transition flex items-center gap-1 cursor-pointer"
               >
                 {isDeleting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                 <span>Confirm Delete</span>
@@ -434,8 +434,8 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
 
         {/* Structured Metadata Grid */}
-        <div className="order-1 sm:order-none grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-          <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
+        <div className="order-1 sm:order-0 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="bg-dark-950 p-2.5 rounded-sm border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
               Timestamp {offsetBadge(log.timestamp)}
             </span>
@@ -446,7 +446,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               UTC: {log.timestamp}
             </span>
           </div>
-          <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
+          <div className="bg-dark-950 p-2.5 rounded-sm border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
               Received At {offsetBadge(log.received_at)}
             </span>
@@ -457,11 +457,11 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               UTC: {log.received_at}
             </span>
           </div>
-          <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
+          <div className="bg-dark-950 p-2.5 rounded-sm border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Facility</span>
             <span className="font-mono text-slate-200 text-xs break-all">{log.facility}</span>
           </div>
-          <div className="bg-dark-950 p-2.5 rounded border border-dark-700">
+          <div className="bg-dark-950 p-2.5 rounded-sm border border-dark-700">
             <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Severity Code</span>
             <span className="font-mono text-slate-200 text-xs break-all">{log.severity}</span>
           </div>
@@ -478,7 +478,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               text={cleanedPayload}
               label="Copy Message"
               title="Copy message payload"
-              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
             />
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto">
@@ -501,7 +501,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               text={log.raw ?? ''}
               label="Copy Raw"
               title="Copy raw log record"
-              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
             />
           </div>
           <div className="bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-400 text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto">
@@ -514,7 +514,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
         </div>
 
         {/* Surrounding Context Inspector */}
-        <div className="order-2 sm:order-none pt-2 border-t border-dark-800">
+        <div className="order-2 sm:order-0 pt-2 border-t border-dark-800">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <button
               onClick={() => setShowContext(!showContext)}
@@ -531,7 +531,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                     type="checkbox"
                     checked={sameAppOnly}
                     onChange={(e) => setSameAppOnly(e.target.checked)}
-                    className="rounded bg-dark-900 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-3 h-3"
+                    className="rounded-sm bg-dark-900 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-3 h-3"
                   />
                   <span>Same App Only ({log.app_name})</span>
                 </label>
@@ -540,7 +540,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
                   <button
                     onClick={handleInspectTargetAndContext}
                     title="Add Context to AI Analysis"
-                    className="flex items-center gap-1.5 px-2.5 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded font-medium transition text-[11px] shadow-xs"
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-accent-700 hover:bg-accent-600 text-white rounded-sm font-medium transition text-[11px] shadow-xs"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Inspect Target + Context ({targetAndContextLogs.length} logs)</span>

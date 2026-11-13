@@ -17,7 +17,7 @@ export const AboutCard: React.FC<AboutCardProps> = ({ versionInfo, checkForUpdat
         <span>About LogShed</span>
       </h3>
       {versionInfo && (
-        <span className="font-mono text-xs px-2 py-0.5 rounded bg-dark-950 border border-dark-700 text-slate-300">
+        <span className="font-mono text-xs px-2 py-0.5 rounded-sm bg-dark-950 border border-dark-700 text-slate-300">
           v{versionInfo.current_version}
         </span>
       )}
@@ -34,7 +34,7 @@ export const AboutCard: React.FC<AboutCardProps> = ({ versionInfo, checkForUpdat
                 Container Repository Moved
               </div>
               <p className="text-slate-300 text-xs">
-                This instance is running from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/logshed/logshed</code> to continue receiving future releases.
+                This instance is running from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded-sm text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded-sm text-amber-300">ghcr.io/logshed/logshed</code> to continue receiving future releases.
               </p>
             </div>
           </div>

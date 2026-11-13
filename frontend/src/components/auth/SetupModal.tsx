@@ -46,7 +46,7 @@ export const SetupModal: React.FC = () => {
         </div>
 
         {errorMsg && (
-          <div className="mb-4 p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start space-x-2 text-xs text-red-300">
+          <div className="mb-4 p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-x-2 text-xs text-red-300">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
             <span>{errorMsg}</span>
           </div>
@@ -66,7 +66,7 @@ export const SetupModal: React.FC = () => {
                 minLength={PASSWORD_MIN_LENGTH}
                 required
                 autoFocus
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
             </div>
@@ -84,7 +84,7 @@ export const SetupModal: React.FC = () => {
                 placeholder="Confirm master password..."
                 minLength={PASSWORD_MIN_LENGTH}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+                className="w-full bg-dark-950 border border-dark-700 rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
             </div>
@@ -93,7 +93,7 @@ export const SetupModal: React.FC = () => {
           <button
             type="submit"
             disabled={isLoading || password.length < PASSWORD_MIN_LENGTH || password !== confirmPassword}
-            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center space-x-2"
+            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center gap-x-2"
           >
             {isLoading ? (
               <span>Setting up Account...</span>

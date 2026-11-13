@@ -35,7 +35,7 @@ export const PresetCard: React.FC<PresetCardProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-xs font-semibold text-slate-100 truncate">{name}</span>
           {isCustom && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-800 shrink-0">
+            <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-800 shrink-0">
               Custom
             </span>
           )}

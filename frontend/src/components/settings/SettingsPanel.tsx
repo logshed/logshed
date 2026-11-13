@@ -516,7 +516,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 Configure minimum severity level for LogShed operational diagnostics captured into its database and stream.
               </p>
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-950 border border-dark-800 text-[11px] font-mono text-slate-400 shrink-0 self-start sm:self-auto">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-dark-950 border border-dark-800 text-[11px] font-mono text-slate-400 shrink-0 self-start sm:self-auto">
               <span>Source: <code className="text-accent-400">logshed</code></span>
             </div>
           </div>
@@ -528,7 +528,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </label>
               <SelectDropdown
                 variant="panel"
-                fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
+                fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-200"
                 id="internal-log-level"
                 labelledBy="internal-log-level-label"
                 label="Internal Log Severity Threshold"
@@ -582,7 +582,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 aria-label="Check for new versions"
                 checked={checkForUpdates}
                 onChange={(e) => setCheckForUpdates(e.target.checked)}
-                className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
               />
               <span className="font-medium">Check for new versions</span>
             </label>

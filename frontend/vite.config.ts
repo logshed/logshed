@@ -1,6 +1,7 @@
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
@@ -81,7 +82,7 @@ function precompress(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), copyDocsAssets(), precompress()],
+  plugins: [react(), tailwindcss(), copyDocsAssets(), precompress()],
   build: {
     outDir,
     emptyOutDir: true,

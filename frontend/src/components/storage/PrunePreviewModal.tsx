@@ -130,7 +130,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
               type="button"
               onClick={onDeleteNow}
               disabled={busy}
-              className="px-4 py-1.5 text-xs bg-red-700 hover:bg-red-600 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              className="px-4 py-1.5 text-xs bg-red-700 hover:bg-red-600 text-white font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
             >
               {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
               <span>{mode === 'save' ? 'Save and Delete Now' : 'Delete Now'}</span>

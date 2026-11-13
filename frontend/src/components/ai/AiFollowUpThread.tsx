@@ -205,7 +205,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
         <button
           type="button"
           onClick={loadMessages}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-red-200 hover:bg-red-900/40 transition cursor-pointer shrink-0 min-h-[32px]"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-sm text-[11px] text-red-200 hover:bg-red-900/40 transition cursor-pointer shrink-0 min-h-[32px]"
         >
           <RefreshCw className="w-3 h-3" />
           Retry
@@ -231,7 +231,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
             {turnCount} / {maxTurns} turns
           </span>
           {tokenTally > 0 && (
-            <span className="px-2 py-0.5 rounded border text-slate-300 bg-dark-900 border-dark-700">
+            <span className="px-2 py-0.5 rounded-sm border text-slate-300 bg-dark-900 border-dark-700">
               Tokens: <span className="text-slate-100 font-semibold">{tokenTally.toLocaleString()}</span>
             </span>
           )}
@@ -245,7 +245,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
                 type="button"
                 onClick={handleClear}
                 disabled={isClearing}
-                className="px-2.5 py-1 rounded bg-red-900/60 hover:bg-red-800/70 text-red-100 transition cursor-pointer disabled:opacity-50 min-h-[32px]"
+                className="px-2.5 py-1 rounded-sm bg-red-900/60 hover:bg-red-800/70 text-red-100 transition cursor-pointer disabled:opacity-50 min-h-[32px]"
               >
                 {isClearing ? 'Clearing...' : 'Confirm'}
               </button>
@@ -253,7 +253,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
                 type="button"
                 onClick={() => setConfirmClear(false)}
                 disabled={isClearing}
-                className="px-2.5 py-1 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px]"
+                className="px-2.5 py-1 rounded-sm text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px]"
               >
                 Cancel
               </button>
@@ -262,7 +262,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
             <button
               type="button"
               onClick={() => setConfirmClear(true)}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px]"
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px]"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Clear Thread
@@ -276,12 +276,12 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="max-h-[28rem] overflow-y-auto space-y-3 pr-1"
+          className="max-h-112 overflow-y-auto space-y-3 pr-1"
         >
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className="flex justify-end">
-                <div className="max-w-[85%] px-3 py-2 rounded-lg bg-accent-950/40 border border-accent-800/60 text-slate-100 whitespace-pre-wrap break-words leading-relaxed">
+                <div className="max-w-[85%] px-3 py-2 rounded-lg bg-accent-950/40 border border-accent-800/60 text-slate-100 whitespace-pre-wrap wrap-break-word leading-relaxed">
                   {m.content}
                 </div>
               </div>
@@ -299,7 +299,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
           {pendingQuestion !== null && (
             <>
               <div className="flex justify-end">
-                <div className="max-w-[85%] px-3 py-2 rounded-lg bg-accent-950/40 border border-accent-800/60 text-slate-100 whitespace-pre-wrap break-words leading-relaxed">
+                <div className="max-w-[85%] px-3 py-2 rounded-lg bg-accent-950/40 border border-accent-800/60 text-slate-100 whitespace-pre-wrap wrap-break-word leading-relaxed">
                   {pendingQuestion}
                 </div>
               </div>
@@ -325,7 +325,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
       {sendError && (
         <div className="p-2.5 bg-red-950/30 border border-red-900/60 rounded-lg flex items-start gap-2 text-red-300">
           <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <span className="break-words">{sendError}</span>
+          <span className="wrap-break-word">{sendError}</span>
         </div>
       )}
 
@@ -349,7 +349,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
               rows={2}
               placeholder="Ask a follow-up question about this diagnosis..."
               aria-label="Follow-up question"
-              className="flex-1 min-h-[44px] px-3 py-2 bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-sans resize-y disabled:opacity-60"
+              className="flex-1 min-h-[44px] px-3 py-2 bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-sans resize-y disabled:opacity-60"
             />
             <button
               type="button"

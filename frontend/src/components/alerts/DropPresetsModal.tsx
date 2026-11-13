@@ -64,7 +64,7 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
                   name={preset.name}
                   isCustom={preset.is_custom}
                   badge={
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-800 text-slate-300 border border-dark-700 shrink-0">
+                    <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-dark-800 text-slate-300 border border-dark-700 shrink-0">
                       {preset.is_regex ? 'Regex' : 'Substring'}
                     </span>
                   }
@@ -76,20 +76,20 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
                   onInstall={() => onInstallPreset(preset)}
                 >
                   {preset.app_pattern && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700 font-mono">
                       app: {preset.app_pattern}
                     </span>
                   )}
                   {preset.source_pattern && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700 font-mono">
                       host: {preset.source_pattern}
                     </span>
                   )}
-                  <span className="bg-dark-800 px-2 py-0.5 rounded text-accent-400 border border-dark-700 font-mono truncate max-w-full">
+                  <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-accent-400 border border-dark-700 font-mono truncate max-w-full">
                     pattern: {preset.message_pattern}
                   </span>
                   {preset.severity_threshold != null && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded text-slate-300 border border-dark-700 font-mono">
+                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700 font-mono">
                       {lessSevereLabel(preset.severity_threshold)}
                     </span>
                   )}

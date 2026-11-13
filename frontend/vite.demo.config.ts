@@ -1,6 +1,7 @@
 // Builds the browser demo (demo.html) into dist-demo/, for demo.logshed.dev. See src/demo/.
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,6 +10,7 @@ const outDir = path.resolve(import.meta.dirname, 'dist-demo');
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
     {
       name: 'logshed-demo-index',
       apply: 'build',

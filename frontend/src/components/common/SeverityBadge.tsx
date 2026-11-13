@@ -102,7 +102,7 @@ export const SeverityBadge: React.FC<SeverityBadgeProps> = ({ severity, classNam
       data-testid="severity-badge"
       data-severity={severity}
       title={`${info.label} (Level ${severity})`}
-      className={`inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-medium rounded border uppercase tracking-wider ${info.bgClass} ${info.textClass} ${info.borderClass} ${className}`}
+      className={`inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-medium rounded-sm border uppercase tracking-wider ${info.bgClass} ${info.textClass} ${info.borderClass} ${className}`}
     >
       {info.shortLabel}
     </span>

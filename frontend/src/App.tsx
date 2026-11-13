@@ -239,7 +239,7 @@ export const App: React.FC = () => {
           style={{ transform: `translateY(${Math.min(pullDistance, 45)}px)` }}
           className="fixed top-0 inset-x-0 flex items-center justify-center pointer-events-none z-50 transition-transform duration-75"
         >
-          <div className="bg-dark-900/95 border border-dark-600 rounded-full px-3.5 py-1 text-xs flex items-center gap-1.5 shadow-xl text-slate-200 backdrop-blur-sm">
+          <div className="bg-dark-900/95 border border-dark-600 rounded-full px-3.5 py-1 text-xs flex items-center gap-1.5 shadow-xl text-slate-200 backdrop-blur-xs">
             <RefreshCw
               className={`w-3.5 h-3.5 text-accent-400 ${
                 isRefreshing || hasReachedThreshold ? 'animate-spin' : ''
@@ -271,7 +271,7 @@ export const App: React.FC = () => {
         className={`flex-1 min-h-0 relative ${
           activeTab === 'stream'
             ? 'overflow-hidden flex flex-col'
-            : 'overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]'
+            : 'overflow-y-auto overflow-x-hidden scrollbar-gutter-stable'
         } pb-14 md:pb-0`}
       >
         <h1 className="sr-only">{PAGE_TITLES[activeTab]}</h1>

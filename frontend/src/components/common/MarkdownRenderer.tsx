@@ -16,7 +16,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
         <CopyButton
           text={code}
           title="Copy code"
-          className="flex items-center gap-1 hover:text-slate-200 transition text-[11px] px-1.5 py-0.5 rounded hover:bg-dark-800 cursor-pointer"
+          className="flex items-center gap-1 hover:text-slate-200 transition text-[11px] px-1.5 py-0.5 rounded-sm hover:bg-dark-800 cursor-pointer"
           iconClassName="w-3 h-3"
         />
       </div>
@@ -61,7 +61,7 @@ export function renderInline(text: string): React.ReactNode[] {
       nodes.push(
         <code
           key={tokenKey}
-          className="bg-dark-900 text-accent-300 px-1.5 py-0.5 rounded font-mono text-[11px] border border-dark-700 select-text"
+          className="bg-dark-900 text-accent-300 px-1.5 py-0.5 rounded-sm font-mono text-[11px] border border-dark-700 select-text"
         >
           {codeContent}
         </code>

@@ -232,7 +232,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             </h3>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-dark-800 border border-dark-700 text-slate-400 font-mono whitespace-nowrap">
+            <span className="text-[11px] px-1.5 py-0.5 rounded-sm bg-dark-800 border border-dark-700 text-slate-400 font-mono whitespace-nowrap">
               {channels.length} {channels.length === 1 ? 'target' : 'targets'}
             </span>
           </div>
@@ -242,7 +242,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           <button
             type="button"
             onClick={handleOpenCreateModal}
-            className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:gap-1.5 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer whitespace-nowrap"
+            className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:gap-1.5 rounded-sm bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer whitespace-nowrap"
             title="Configure a new notification target"
           >
             <Plus className="w-3.5 h-3.5 text-accent-400" />
@@ -328,7 +328,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                           type="button"
                           onClick={() => handleRowTest(channel)}
                           disabled={testingChannelId === channel.id}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-accent-400 hover:bg-dark-700 rounded transition cursor-pointer disabled:opacity-50"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-accent-400 hover:bg-dark-700 rounded-sm transition cursor-pointer disabled:opacity-50"
                           title="Send test notification"
                           aria-label={`Test ${channel.name}`}
                         >
@@ -341,7 +341,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(channel)}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded transition cursor-pointer"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded-sm transition cursor-pointer"
                           title="Edit target"
                           aria-label={`Edit ${channel.name}`}
                         >
@@ -350,7 +350,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                         <button
                           type="button"
                           onClick={() => setChannelToDelete(channel)}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded transition cursor-pointer"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded-sm transition cursor-pointer"
                           title="Delete target"
                           aria-label={`Delete ${channel.name}`}
                         >
@@ -404,7 +404,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="e.g. Homelab Discord, Admin Telegram, Gotify Push"
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+              className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
           </div>
 
@@ -445,7 +445,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 setTestResult(null);
               }}
               placeholder="discord://webhook_id/webhook_token or gotify://hostname/token"
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+              className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
             <p className="text-[11px] text-slate-400 mt-1">
               Supports Discord (<code>discord://...</code>), Gotify (<code>gotify://...</code>), Telegram (<code>tgram://...</code>), Ntfy (<code>ntfy://...</code>), Pushover (<code>pover://...</code>), Slack (<code>slack://...</code>), and generic webhooks (<code>https://...</code>).
@@ -458,7 +458,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 type="checkbox"
                 checked={formEnabled}
                 onChange={(e) => setFormEnabled(e.target.checked)}
-                className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
               />
               <span className="font-medium">Channel active (enabled for alerting)</span>
             </label>

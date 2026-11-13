@@ -116,23 +116,16 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         </p>
 
         <div className="space-y-1">
-          <label className="text-slate-300 font-medium">Active Pattern</label>
-          <div className="p-2 bg-dark-800 rounded font-mono text-slate-300 border border-dark-700">
+          <label className="block text-slate-300 font-medium">Active Pattern</label>
+          <div className="p-2 bg-dark-800 rounded-sm font-mono text-slate-300 border border-dark-700">
             {rule?.match_pattern || '(No pattern filter)'}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label htmlFor="test-sample-app" className="text-slate-300 font-medium">Sample App</label>
-            <input
-              id="test-sample-app"
-              type="text"
-              list="test-sample-apps-list"
-              value={testSampleApp}
-              onChange={(e) => setTestSampleApp(e.target.value)}
-              className="w-full bg-dark-800 border border-dark-700 rounded px-2.5 py-1.5 text-slate-200"
-            />
+            <label htmlFor="test-sample-app" className="block text-slate-300 font-medium">Sample App</label>
+            {/* Before the input: space-y-* spaces every child but the last, and a datalist is never shown */}
             {availableApps.length > 0 && (
               <datalist id="test-sample-apps-list">
                 {availableApps.map((app) => (
@@ -140,12 +133,20 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
                 ))}
               </datalist>
             )}
+            <input
+              id="test-sample-app"
+              type="text"
+              list="test-sample-apps-list"
+              value={testSampleApp}
+              onChange={(e) => setTestSampleApp(e.target.value)}
+              className="w-full bg-dark-800 border border-dark-700 rounded-sm px-2.5 py-1.5 text-slate-200"
+            />
           </div>
           <div className="space-y-1">
-            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className="text-slate-300 font-medium">Sample Severity</label>
+            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className="block text-slate-300 font-medium">Sample Severity</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-dark-800 border-dark-700 rounded px-2.5 py-1.5 text-slate-200"
+              fieldClassName="bg-dark-800 border-dark-700 rounded-sm px-2.5 py-1.5 text-slate-200"
               id="test-sample-severity"
               labelledBy="test-sample-severity-label"
               label="Sample Severity"
@@ -157,13 +158,13 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         </div>
 
         <div className="space-y-1">
-          <label htmlFor="test-sample-message" className="text-slate-300 font-medium">Sample Message</label>
+          <label htmlFor="test-sample-message" className="block text-slate-300 font-medium">Sample Message</label>
           <textarea
             id="test-sample-message"
             rows={3}
             value={testSampleMessage}
             onChange={(e) => setTestSampleMessage(e.target.value)}
-            className="w-full bg-dark-800 border border-dark-700 rounded p-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-accent-500"
+            className="w-full bg-dark-800 border border-dark-700 rounded-sm p-2 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
           />
           <p className="text-[11px] text-slate-400">
             Enter a sample log line payload to evaluate pattern matching and IP extraction.

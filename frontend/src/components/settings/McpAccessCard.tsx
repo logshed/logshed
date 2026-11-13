@@ -96,11 +96,11 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
             <Bot className="w-4 h-4 text-accent-500" />
             <span>Model Context Protocol (MCP)</span>
             {enableMcp ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800/80 normal-case tracking-normal">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800/80 normal-case tracking-normal">
                 Active
               </span>
             ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-dark-800 text-slate-400 border border-dark-700 normal-case tracking-normal">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-dark-800 text-slate-400 border border-dark-700 normal-case tracking-normal">
                 Disabled
               </span>
             )}
@@ -122,7 +122,7 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
             checked={enableMcp}
             disabled={isUpdatingMcp}
             onChange={(e) => handleToggleMcp(e.target.checked)}
-            className="w-4 h-4 rounded border-dark-600 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer disabled:opacity-50"
+            className="w-4 h-4 rounded-sm border-dark-600 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer disabled:opacity-50"
           />
         </div>
       </div>
@@ -160,7 +160,7 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
                 type="text"
                 readOnly
                 value={sseUrl}
-                className="flex-1 bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 select-all focus:outline-none focus:border-accent-500"
+                className="flex-1 bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 select-all focus:outline-hidden focus:border-accent-500"
               />
               <CopyButton
                 text={sseUrl}

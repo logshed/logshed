@@ -307,7 +307,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
                   aria-label={`From (${zoneLabel})`}
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
-                  className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono box-border [color-scheme:dark]"
+                  className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
                 />
               </div>
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
@@ -317,7 +317,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
                   aria-label={`To (${zoneLabel})`}
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
-                  className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono box-border [color-scheme:dark]"
+                  className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
                 />
               </div>
             </div>
@@ -336,7 +336,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g. timeout, connection reset, error"
-            className="w-full min-w-0 max-w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono box-border"
+            className="w-full min-w-0 max-w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border"
           />
         </div>
       </div>
@@ -390,7 +390,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             This will permanently delete{' '}
             <span className="font-bold font-mono text-white">{matchedCount.toLocaleString()}</span>{' '}
             logs. This action cannot be reversed. To proceed, type{' '}
-            <span className="font-mono font-bold bg-dark-950 px-1 py-0.5 rounded text-white border border-red-900">
+            <span className="font-mono font-bold bg-dark-950 px-1 py-0.5 rounded-sm text-white border border-red-900">
               DELETE
             </span>{' '}
             below:
@@ -400,7 +400,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="Type DELETE to confirm"
-            className="w-full bg-dark-900 border border-red-700/80 rounded-lg px-3 py-1.5 text-xs text-red-100 placeholder-red-400/50 focus:outline-none focus:border-red-500 font-mono"
+            className="w-full bg-dark-900 border border-red-700/80 rounded-lg px-3 py-1.5 text-xs text-red-100 placeholder-red-400/50 focus:outline-hidden focus:border-red-500 font-mono"
           />
         </div>
       )}
@@ -421,7 +421,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
           type="button"
           onClick={handleDelete}
           disabled={isDeleteDisabled}
-          className="px-4 py-2 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isDeleting ? (
             <>

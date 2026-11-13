@@ -61,7 +61,7 @@ export { type AlertViewTab, pathToAlertSubTab, alertSubTabToPath, parseIncidentI
 const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
   <span
     title={title}
-    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none shrink-0"
+    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none shrink-0"
   >
     <span className={active > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
       {active}
@@ -74,7 +74,7 @@ const SplitCountBadge: React.FC<{ active: number; total: number; title?: string 
 const SimpleCountBadge: React.FC<{ count: number; title?: string }> = ({ count, title }) => (
   <span
     title={title}
-    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none text-slate-400 select-none shrink-0"
+    className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none text-slate-400 select-none shrink-0"
   >
     {count}
   </span>
@@ -489,7 +489,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           <Clock className="w-3.5 h-3.5 shrink-0" />
           <span>Maintenance</span>
           {isMaintenanceActiveNow ? (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
               Active
             </span>
           ) : (

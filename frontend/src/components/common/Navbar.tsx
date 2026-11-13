@@ -178,7 +178,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         className="bg-dark-950 border-b border-dark-700 px-4 py-2 flex items-center justify-between select-none shrink-0 z-30 touch-none"
       >
         {/* Brand & Status Indicator */}
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-x-4">
           <div
             onClick={handleLogoClick}
             onKeyDown={(e) => {
@@ -189,7 +189,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }}
             role="button"
             tabIndex={0}
-            className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-500 rounded"
+            className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500 rounded-sm"
             title="Go to Console View"
           >
             <LogShedLogo className="w-6 h-6 text-accent-600" />
@@ -199,7 +199,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Ingestion & Queue Health */}
           {health && (
-            <div className="flex items-center space-x-2.5 sm:space-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-2.5 sm:pl-4">
+            <div className="flex items-center gap-x-2.5 sm:gap-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-2.5 sm:pl-4">
               {health.status !== 'ok' ? (
                 <span
                   role="img"
@@ -250,12 +250,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Desktop Center Navigation Tabs (hidden on mobile) */}
         {!isMobile && (
-          <nav className="flex items-center space-x-1 bg-dark-900 p-1 rounded-lg border border-dark-700">
+          <nav className="flex items-center gap-x-1 bg-dark-900 p-1 rounded-lg border border-dark-700">
             <button
               onClick={() => onTabChange('stream')}
-              className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
+              className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'stream'
-                  ? 'bg-dark-700 text-slate-100 shadow-sm'
+                  ? 'bg-dark-700 text-slate-100 shadow-xs'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
               }`}
             >
@@ -265,9 +265,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => onTabChange('rules')}
-              className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
+              className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'rules'
-                  ? 'bg-dark-700 text-slate-100 shadow-sm'
+                  ? 'bg-dark-700 text-slate-100 shadow-xs'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
               }`}
             >
@@ -277,9 +277,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => onTabChange('storage')}
-              className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
+              className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'storage'
-                  ? 'bg-dark-700 text-slate-100 shadow-sm'
+                  ? 'bg-dark-700 text-slate-100 shadow-xs'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
               }`}
             >
@@ -289,9 +289,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => onTabChange('settings')}
-              className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
+              className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'settings'
-                  ? 'bg-dark-700 text-slate-100 shadow-sm'
+                  ? 'bg-dark-700 text-slate-100 shadow-xs'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
               }`}
             >
@@ -302,13 +302,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
 
         {/* Right Controls */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-x-2">
           {versionInfo?.update_available && versionInfo?.check_enabled !== false && (
             <a
               href="https://github.com/logshed/logshed/releases"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium text-amber-400 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/60 rounded transition cursor-pointer"
+              className="flex items-center gap-x-1 px-2 py-0.5 text-xs font-medium text-amber-400 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/60 rounded-sm transition cursor-pointer"
               title={`App update available: v${versionInfo.latest_version}`}
             >
               <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -318,7 +318,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={logout}
             title="Sign Out"
-            className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-red-300 hover:bg-red-950/30 rounded border border-transparent hover:border-red-900 transition"
+            className="flex items-center gap-x-1 px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-red-300 hover:bg-red-950/30 rounded-sm border border-transparent hover:border-red-900 transition"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Logout</span>
@@ -329,13 +329,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Repository Migration Warning Banner */}
       {versionInfo?.repo_deprecated && !migrationBannerDismissed && (
         <div className="bg-amber-950/90 border-b border-amber-800 text-amber-200 px-4 py-2 text-xs flex items-center justify-between select-none shrink-0 z-20">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-x-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              <strong>Repository Moved:</strong> You are running an image from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded text-amber-300">ghcr.io/logshed/logshed</code> to receive future updates.
+              <strong>Repository Moved:</strong> You are running an image from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded-sm text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded-sm text-amber-300">ghcr.io/logshed/logshed</code> to receive future updates.
             </span>
           </div>
-          <div className="flex items-center space-x-3 ml-4 shrink-0">
+          <div className="flex items-center gap-x-3 ml-4 shrink-0">
             <a
               href="https://github.com/logshed/logshed/releases"
               target="_blank"
@@ -359,7 +359,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Maintenance Window Amber Banner */}
       {maintenance?.active && maintenance.until && (
         <div className="bg-amber-950/80 border-b border-amber-800/80 text-amber-200 px-4 py-1.5 text-xs flex items-center justify-between select-none shrink-0 z-20">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-x-2">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>
               {getMaintenanceBannerText(maintenance, serverTimezone)}

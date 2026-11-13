@@ -68,7 +68,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
           <button
             type="button"
             onClick={onClearAllHistory}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-900/30 rounded border border-red-800/40 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-900/30 rounded-sm border border-red-800/40 transition cursor-pointer"
           >
             <Trash2 className="w-3 h-3" />
             <span>Clear All</span>
@@ -113,27 +113,27 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                 <div className="flex items-center justify-between text-xs gap-2">
                   <div className="flex items-center gap-1.5 truncate">
                     {isMaintenance ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
                         <Wrench className="w-2.5 h-2.5 shrink-0" />
                         Maintenance
                       </span>
                     ) : isDigest ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
                         <Calendar className="w-2.5 h-2.5 shrink-0" />
                         Daily Digest
                       </span>
                     ) : isOnDemand ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60 shrink-0">
                         <Brain className="w-2.5 h-2.5 shrink-0" />
                         On-Demand
                       </span>
                     ) : isAiAlert ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
                         <Zap className="w-2.5 h-2.5 shrink-0" />
                         AI Alert
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
                         <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                         Alert
                       </span>
@@ -159,11 +159,11 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                 <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
                   <div className="flex items-center gap-2">
                     {item.ai_model && (
-                      <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono truncate max-w-[140px]">
+                      <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded-sm text-[10px] text-slate-300 font-mono truncate max-w-[140px]">
                         {item.ai_model}
                       </span>
                     )}
-                    <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded text-[10px] text-slate-300 font-mono">
+                    <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded-sm text-[10px] text-slate-300 font-mono">
                       {isMaintenance
                         ? maintenanceTypeLabel(item.maintenance_type)
                         : <>{item.trigger_count} {isDigest ? 'logs' : isOnDemand ? `log${item.trigger_count === 1 ? '' : 's'}` : `event${item.trigger_count === 1 ? '' : 's'}`}</>}
@@ -173,14 +173,14 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onSelectHistoryItem(item)}
-                      className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded transition cursor-pointer"
+                      className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded-sm transition cursor-pointer"
                     >
                       View
                     </button>
                     <button
                       type="button"
                       onClick={() => onDeleteHistoryItem(item)}
-                      className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded transition cursor-pointer"
+                      className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded-sm transition cursor-pointer"
                       title="Delete history record"
                       aria-label={`Delete record ${item.id}`}
                     >
@@ -230,27 +230,27 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                 </div>
                 <div>
                   {isMaintenance ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
                       <Wrench className="w-2.5 h-2.5 shrink-0" />
                       Maintenance
                     </span>
                   ) : isDigest ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60">
                       <Calendar className="w-2.5 h-2.5 shrink-0" />
                       Daily Digest
                     </span>
                   ) : isOnDemand ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-accent-400 bg-accent-950/60 border border-accent-800/60">
                       <Brain className="w-2.5 h-2.5 shrink-0" />
                       On-Demand
                     </span>
                   ) : isAiAlert ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60">
                       <Zap className="w-2.5 h-2.5 shrink-0" />
                       AI Alert
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650">
                       <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                       Alert
                     </span>
@@ -269,7 +269,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                   <button
                     type="button"
                     onClick={() => onSelectHistoryItem(item)}
-                    className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded transition cursor-pointer"
+                    className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded-sm transition cursor-pointer"
                     title="View details"
                   >
                     View
@@ -277,7 +277,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                   <button
                     type="button"
                     onClick={() => onDeleteHistoryItem(item)}
-                    className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded border border-transparent hover:border-red-900/50 transition cursor-pointer"
+                    className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded-sm border border-transparent hover:border-red-900/50 transition cursor-pointer"
                     title="Delete history record"
                     aria-label={`Delete record ${item.id}`}
                   >
@@ -301,7 +301,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               type="button"
               disabled={offset <= 0}
               onClick={() => onPageChange(Math.max(0, offset - limit))}
-              className="p-1.5 rounded bg-dark-800 hover:bg-dark-750 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="p-1.5 rounded-sm bg-dark-800 hover:bg-dark-750 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               title="Previous page"
               aria-label="Previous page"
             >
@@ -314,7 +314,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               type="button"
               disabled={offset + limit >= historyTotal}
               onClick={() => onPageChange(offset + limit)}
-              className="p-1.5 rounded bg-dark-800 hover:bg-dark-750 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="p-1.5 rounded-sm bg-dark-800 hover:bg-dark-750 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               title="Next page"
               aria-label="Next page"
             >

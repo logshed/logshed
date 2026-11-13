@@ -41,10 +41,10 @@ const ScopeCheckbox: React.FC<ScopeCheckboxProps> = ({ id, label, description, c
       }}
       onChange={(e) => onChange(e.target.checked)}
       aria-describedby={description ? `${id}-desc` : undefined}
-      className="mt-0.5 shrink-0 rounded border-dark-600 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
+      className="mt-0.5 shrink-0 rounded-sm border-dark-600 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
     />
     <div className="min-w-0">
-      <label htmlFor={id} className="text-xs text-slate-200 cursor-pointer break-words">
+      <label htmlFor={id} className="text-xs text-slate-200 cursor-pointer wrap-break-word">
         {label}
       </label>
       {description && (
@@ -182,7 +182,7 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
             ) : (
               <p className="text-slate-400">
                 Saved as:{' '}
-                <code data-testid={`${idPrefix}-saved-scopes`} className="font-mono text-slate-200 break-words">
+                <code data-testid={`${idPrefix}-saved-scopes`} className="font-mono text-slate-200 wrap-break-word">
                   {savedScopes.join(', ')}
                 </code>
               </p>

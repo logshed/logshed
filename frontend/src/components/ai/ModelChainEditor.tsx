@@ -19,7 +19,7 @@ const SIZES = {
   },
   compact: {
     wrapper: 'space-y-1.5',
-    empty: 'p-2 bg-dark-950 border border-dark-800 rounded text-[11px] text-slate-400 font-mono',
+    empty: 'p-2 bg-dark-950 border border-dark-800 rounded-sm text-[11px] text-slate-400 font-mono',
     list: 'space-y-1 max-h-36 overflow-y-auto',
     row: 'p-1.5',
     rowButton: 'p-0.5',
@@ -107,15 +107,15 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
             return (
               <div
                 key={idx}
-                className={`flex items-center justify-between ${s.row} bg-dark-950 border border-dark-800 rounded text-xs font-mono`}
+                className={`flex items-center justify-between ${s.row} bg-dark-950 border border-dark-800 rounded-sm text-xs font-mono`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold shrink-0">
+                  <span className="px-1.5 py-0.5 rounded-sm bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold shrink-0">
                     {`${getOrdinalSuffix(idx + 1)} Fallback`}
                   </span>
                   <span className="text-slate-200 font-medium truncate">{fb}</span>
                   {isThinking && (
-                    <span className="px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] shrink-0">
+                    <span className="px-1 py-0.2 rounded-sm bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] shrink-0">
                       Reasoning
                     </span>
                   )}
@@ -162,7 +162,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
             <div className="flex-1 min-w-0">
               <SelectDropdown
                 variant="panel"
-                fieldClassName={`bg-dark-950 border-dark-700 rounded ${s.field} font-mono text-slate-200`}
+                fieldClassName={`bg-dark-950 border-dark-700 rounded-sm ${s.field} font-mono text-slate-200`}
                 label="Add Fallback Model"
                 options={[
                   { value: '', label: '-- Add Fallback Model --' },
@@ -187,7 +187,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                 add(selectedToAdd);
                 setSelectedToAdd('');
               }}
-              className={`shrink-0 ${s.addButton} bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
+              className={`shrink-0 ${s.addButton} bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-sm text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>
@@ -200,7 +200,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
               placeholder="Enter custom model ID"
-              className={`flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded ${s.field} text-xs text-slate-200 focus:outline-none focus:border-accent-500 font-mono`}
+              className={`flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded-sm ${s.field} text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono`}
             />
             <button
               type="button"
@@ -210,7 +210,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                 setCustomInput('');
                 setShowCustomInput(false);
               }}
-              className={`shrink-0 ${s.addButton} bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
+              className={`shrink-0 ${s.addButton} bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-sm text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>

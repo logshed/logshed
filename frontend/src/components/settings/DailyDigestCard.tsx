@@ -109,7 +109,7 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
           type="button"
           onClick={handleSendDigestNow}
           disabled={isSendingDigest || isSavingSettings}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
           title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
         >
           <Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />
@@ -126,7 +126,7 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
               checked={digestEnabled}
               disabled={isSavingSettings}
               onChange={(e) => onDigestEnabledChange(e.target.checked)}
-              className="rounded bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer mt-0.5 disabled:opacity-50"
+              className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer mt-0.5 disabled:opacity-50"
             />
             <div>
               <span className="font-medium">Enable 24-hour daily digest rollup</span>
@@ -147,7 +147,7 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
             </label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-dark-900 border-dark-700 rounded px-3 py-2 text-slate-200"
+              fieldClassName="bg-dark-900 border-dark-700 rounded-sm px-3 py-2 text-slate-200"
               id="digest-target-channel"
               labelledBy="digest-target-channel-label"
               label="Target Channel"
@@ -193,7 +193,7 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
                 }
                 setScheduleTimeError(null);
               }}
-              className={`w-full bg-dark-900 border rounded px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none disabled:opacity-50 font-mono ${
+              className={`w-full bg-dark-900 border rounded px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-hidden disabled:opacity-50 font-mono ${
                 scheduleTimeError
                   ? 'border-red-500 focus:border-red-400'
                   : 'border-dark-700 focus:border-accent-500'

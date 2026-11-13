@@ -82,7 +82,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
             Fernet encryption secures API keys against exposure in database exports, disk clones, and backups.
           </p>
         </div>
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/60 border border-emerald-800 text-[11px] font-mono text-emerald-400 shrink-0 self-start sm:self-auto">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-emerald-950/60 border border-emerald-800 text-[11px] font-mono text-emerald-400 shrink-0 self-start sm:self-auto">
           <Lock className="w-3 h-3 text-emerald-400" />
           <span>Keys encrypted at rest</span>
         </div>
@@ -101,7 +101,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               loadModels(aiProvider);
             }
           }}
-          className="mt-0.5 w-4 h-4 rounded border-dark-700 bg-dark-900 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
+          className="mt-0.5 w-4 h-4 rounded-sm border-dark-700 bg-dark-900 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
         />
         <div className="flex-1">
           <label htmlFor="ai-enabled-checkbox" className="text-xs font-semibold text-slate-200 cursor-pointer select-none">
@@ -131,7 +131,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
           </label>
           <SelectDropdown
             variant="panel"
-            fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
+            fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-200"
             id="ai-provider"
             labelledBy="ai-provider-label"
             label="AI Provider"
@@ -156,7 +156,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               }
             }}
             placeholder={hasApiKeyForProvider ? `Enter new API key or leave ${MASKED_SECRET} to preserve` : 'Enter API key'}
-            className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 
@@ -169,7 +169,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               <div className="sm:w-56 shrink-0">
                 <SelectDropdown
                   variant="panel"
-                  fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-200"
+                  fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-200"
                   label="Base URL preset"
                   options={BASE_URL_PRESET_OPTIONS}
                   value={matchBaseUrlPreset(aiBaseUrl)}
@@ -185,7 +185,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
                 value={aiBaseUrl}
                 onChange={(e) => setAiBaseUrl(e.target.value)}
                 placeholder="http://host.docker.internal:11434/v1"
-                className="w-full min-w-0 bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+                className="w-full min-w-0 bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
@@ -249,7 +249,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
             type="button"
             onClick={handleRefreshModels}
             disabled={isLoadingModels}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 transition cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-dark-800 hover:bg-dark-750 border border-dark-700 text-xs text-slate-300 transition cursor-pointer disabled:opacity-50"
             title="Query provider API for active models"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-accent-400 ${isLoadingModels ? 'animate-spin' : ''}`} />
@@ -287,7 +287,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
           {availableModels.length > 0 && !isCustomModel ? (
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-100"
+              fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-100"
               id="ai-model"
               labelledBy="ai-model-label"
               label="Default Primary Model"
@@ -311,7 +311,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               value={aiModel}
               onChange={(e) => handlePrimaryModelChange(e.target.value)}
               placeholder={DEFAULT_PROVIDER_MODELS[aiProvider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-              className="w-full bg-dark-950 border border-dark-700 rounded px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono"
+              className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
             />
           )}
 
@@ -360,7 +360,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
             onChange={(e) => setAiSystemPrompt(e.target.value)}
             rows={7}
             placeholder="Enter system instructions..."
-            className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 font-mono leading-relaxed resize-y"
+            className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono leading-relaxed resize-y"
           />
         </div>
       </div>

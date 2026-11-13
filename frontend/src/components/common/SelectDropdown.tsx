@@ -35,7 +35,7 @@ export interface SelectDropdownProps {
 }
 
 /** The panel's look without fieldClassName: the Console filter drawer's fields. */
-const DEFAULT_FIELD = 'bg-dark-950 border-dark-700 rounded px-3 py-2 font-mono text-slate-400';
+const DEFAULT_FIELD = 'bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-400';
 
 /** The tallest the list grows before it scrolls (Tailwind's max-h-72). */
 const LIST_MAX_HEIGHT = 288;
@@ -258,13 +258,13 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
 
   // The open and active states mark the border with !important, over the field's own border colour
   const triggerClass = isPanel
-    ? `w-full flex items-center justify-between gap-2 border text-xs select-none transition focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${fieldClassName} ${
+    ? `w-full flex items-center justify-between gap-2 border text-xs select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${fieldClassName} ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
       } ${
         isOpen
-          ? '!border-accent-500 ring-1 ring-accent-500/20'
+          ? 'border-accent-500! ring-1 ring-accent-500/20'
           : active
-          ? '!border-accent-600/60 !text-accent-300 font-medium'
+          ? 'border-accent-600/60! text-accent-300! font-medium'
           : ''
       }`
     : `${filterTriggerClass(isOpen, active)}${disabled ? ' opacity-50 cursor-not-allowed' : ''}`;
@@ -284,7 +284,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       onClick={onClear}
       className={
         isPanel
-          ? 'text-slate-500 hover:text-slate-200 rounded hover:bg-dark-800 transition cursor-pointer shrink-0 p-1.5'
+          ? 'text-slate-500 hover:text-slate-200 rounded-sm hover:bg-dark-800 transition cursor-pointer shrink-0 p-1.5'
           : FILTER_CLEAR_BUTTON
       }
       title={clearLabel}
@@ -313,7 +313,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         }`}
       >
         {/* A long row (an AI model name) wraps in the panel's fixed width rather than running past it */}
-        <span className={isPanel ? 'min-w-0 break-words' : 'whitespace-nowrap'}>{option.label}</span>
+        <span className={isPanel ? 'min-w-0 wrap-break-word' : 'whitespace-nowrap'}>{option.label}</span>
         <Check aria-hidden="true" className={`w-3 h-3 shrink-0 ${isChosen ? 'text-accent-400' : 'invisible'}`} />
       </li>
     );
@@ -342,7 +342,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-40 bg-transparent" onClick={closeOnBackdrop} />
       <ul
         {...listProps}
-        className={`absolute left-0 ${placeAbove ? 'bottom-full mb-1' : 'top-full mt-1'} min-w-full w-max max-h-72 overflow-y-auto z-50 outline-none ${POPOVER_PANEL}`}
+        className={`absolute left-0 ${placeAbove ? 'bottom-full mb-1' : 'top-full mt-1'} min-w-full w-max max-h-72 overflow-y-auto z-50 outline-hidden ${POPOVER_PANEL}`}
       >
         {rows}
       </ul>
@@ -351,7 +351,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
 
   const panelList = isOpen && isPanel && (
     <>
-      <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-[9998] bg-transparent" onClick={closeOnBackdrop} />
+      <div data-testid="select-dropdown-backdrop" className="fixed inset-0 z-9998 bg-transparent" onClick={closeOnBackdrop} />
       <ul
         {...listProps}
         style={{
@@ -362,7 +362,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
           width: panelPlacement?.width,
           maxHeight: panelPlacement?.maxHeight ?? LIST_MAX_HEIGHT,
         }}
-        className={`overflow-y-auto z-[9999] outline-none ${POPOVER_PANEL}`}
+        className={`overflow-y-auto z-9999 outline-hidden ${POPOVER_PANEL}`}
       >
         {rows}
       </ul>

@@ -9,7 +9,7 @@ export interface RuleOrderControlsProps {
 }
 
 const MOVE_BUTTON_CLASS =
-  'w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed';
+  'w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded-sm text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed';
 
 /** The move up and down buttons around the drag handle at the start of a rule row. */
 export const RuleOrderControls: React.FC<RuleOrderControlsProps> = ({ ruleId, index, count, onMove }) => (

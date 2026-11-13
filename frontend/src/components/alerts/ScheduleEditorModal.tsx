@@ -60,7 +60,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
             value={scheduleFormName}
             onChange={(e) => setScheduleFormName(e.target.value)}
             placeholder="e.g. Weekly Server Maintenance"
-            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
           />
         </div>
 
@@ -132,7 +132,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Day of the Month"
               value={scheduleFormDayOfMonth}
               onChange={(e) => setScheduleFormDayOfMonth(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
             />
           </div>
         )}
@@ -147,7 +147,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Start Time"
               value={scheduleFormStartTime}
               onChange={(e) => setScheduleFormStartTime(e.target.value)}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
             />
           </div>
           <div>
@@ -160,7 +160,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Duration in minutes"
               value={scheduleFormDuration}
               onChange={(e) => setScheduleFormDuration(Number(e.target.value))}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-none"
+              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
             />
           </div>
         </div>
@@ -191,7 +191,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
             id="schedule-enabled-check"
             checked={scheduleFormEnabled}
             onChange={(e) => setScheduleFormEnabled(e.target.checked)}
-            className="rounded border-dark-700 bg-dark-950 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900"
+            className="rounded-sm border-dark-700 bg-dark-950 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900"
           />
           <label htmlFor="schedule-enabled-check" className="text-slate-300 select-none cursor-pointer">
             Enable this maintenance schedule

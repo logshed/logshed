@@ -249,7 +249,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
               onDiagnoseAi([log]);
             }}
             title="Explain with AI"
-            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded transition cursor-pointer"
+            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded-sm transition cursor-pointer"
           >
             <Sparkles className="w-3 h-3" />
           </div>
