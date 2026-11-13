@@ -29,6 +29,8 @@ import { ModelChainEditor } from './ModelChainEditor.tsx';
 import { parseFallbackModels, promoteFirstFallback } from '../../utils/modelChain.ts';
 import { usePromptPreview } from './usePromptPreview.ts';
 import { TokenUsage } from './TokenUsage.tsx';
+import { buttonClass } from '../common/Button.tsx';
+import { LABEL_CLASS, controlClass } from '../common/Field.tsx';
 
 // Same limit as AI_USER_CONTEXT_MAX_CHARS in backend/app/models.py
 export const MAX_USER_CONTEXT_LENGTH = AI_USER_CONTEXT_MAX_LENGTH;
@@ -660,7 +662,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 value={promptViewMode === 'full' ? fullPromptText : promptText}
                 onChange={handlePromptChange}
                 placeholder={promptViewMode === 'full' ? 'Full LLM prompt envelope...' : 'Redacted prompt...'}
-                className="w-full bg-canvas border border-line rounded-lg p-3 font-mono text-fg text-xs focus:outline-hidden focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
+                className={`${controlClass({ mono: true })} resize-y`}
               />
 
               {/* Log Redaction Notice */}
@@ -745,7 +747,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label id={`${fieldId}-provider-label`} htmlFor={`${fieldId}-provider`} className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
+                    <label id={`${fieldId}-provider-label`} htmlFor={`${fieldId}-provider`} className={LABEL_CLASS}>
                       AI Provider
                     </label>
                     <SelectDropdown
@@ -818,7 +820,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
                         placeholder={DEFAULT_PROVIDER_MODELS[provider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-                        className="w-full bg-canvas border border-line rounded-sm px-2.5 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono"
+                        className={controlClass({ mono: true })}
                       />
                     )}
                   </div>
@@ -841,7 +843,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
             {/* Free-text user context input */}
             <div>
-              <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
+              <label className={LABEL_CLASS}>
                 Optional Situational Context
               </label>
               <textarea
@@ -850,7 +852,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 maxLength={MAX_USER_CONTEXT_LENGTH}
                 placeholder="e.g. Occurred immediately following network switch firmware upgrade, or after container image pull..."
                 rows={2}
-                className="w-full bg-canvas border border-line rounded-lg p-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-sans"
+                className={controlClass()}
               />
             </div>
 
@@ -945,7 +947,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               <button
                 onClick={handleRunAnalysis}
                 disabled={isDiagnosing || isAiUnavailable}
-                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
+                className={buttonClass('primary', 'md')}
               >
                 {isDiagnosing ? (
                   <>

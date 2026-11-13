@@ -5,6 +5,8 @@ import { clearConversationThread, fetchConversationMessages, sendAiFollowUp } fr
 import { MarkdownRenderer } from '../common/MarkdownRenderer.tsx';
 import { LoadingSpinner } from '../common/LoadingSpinner.tsx';
 import { AI_FOLLOW_UP_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { buttonClass } from '../common/Button.tsx';
+import { controlClass } from '../common/Field.tsx';
 
 const DEFAULT_MAX_TURNS = 10;
 const STICK_TO_BOTTOM_THRESHOLD_PX = 40;
@@ -245,7 +247,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
                 type="button"
                 onClick={handleClear}
                 disabled={isClearing}
-                className="px-2.5 py-1 rounded-sm bg-danger-900/60 hover:bg-danger-800/70 text-danger-100 transition cursor-pointer disabled:opacity-50 min-h-[32px]"
+                className={`${buttonClass('danger-soft', 'md')} min-h-[32px]`}
               >
                 {isClearing ? 'Clearing...' : 'Confirm'}
               </button>
@@ -253,7 +255,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
                 type="button"
                 onClick={() => setConfirmClear(false)}
                 disabled={isClearing}
-                className="px-2.5 py-1 rounded-sm text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer min-h-[32px]"
+                className={`${buttonClass('ghost', 'md')} min-h-[32px]`}
               >
                 Cancel
               </button>
@@ -262,7 +264,7 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
             <button
               type="button"
               onClick={() => setConfirmClear(true)}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer min-h-[32px]"
+              className={`${buttonClass('ghost', 'md')} min-h-[32px]`}
             >
               <Trash2 className="w-3.5 h-3.5" />
               Clear Thread
@@ -349,13 +351,13 @@ export const AiFollowUpThread: React.FC<AiFollowUpThreadProps> = ({ auditId, pro
               rows={2}
               placeholder="Ask a follow-up question about this diagnosis..."
               aria-label="Follow-up question"
-              className="flex-1 min-h-[44px] px-3 py-2 bg-canvas border border-line rounded-lg text-xs text-fg placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-sans resize-y disabled:opacity-60"
+              className={`${controlClass()} flex-1 min-h-[44px] resize-y`}
             />
             <button
               type="button"
               onClick={handleSend}
               disabled={isSending || !draft.trim()}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-3 rounded-lg bg-accent-700 hover:bg-accent-600 text-on-fill font-medium transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+              className={`${buttonClass('primary', 'md')} justify-center min-h-[44px] min-w-[44px] touch-manipulation`}
               title="Send (Ctrl+Enter or Cmd+Enter)"
             >
               {isSending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
