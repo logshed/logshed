@@ -223,10 +223,11 @@ def delete(
 ) -> int:
     """
     Delete the logs log_filter selects (it must not be empty), committing each batch and
-    calling between_batches after each one, so a waiting ingest write can go first. When the
-    filter names logs by id, those logs are deleted. Returns how many went.
+    calling between_batches after each one, so a waiting ingest write can go first. Logs
+    named by id are deleted only when they also match the filter's other criteria: the same
+    logs count_matching counts. Returns how many went.
     """
-    if log_filter.log_ids:
+    if log_filter.log_ids and log_filter == LogFilter(log_ids=log_filter.log_ids):
         return _delete_ids(conn, log_filter.log_ids, between_batches)
 
     where_sql, params = build_where(conn, log_filter)

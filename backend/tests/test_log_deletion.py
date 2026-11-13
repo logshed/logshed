@@ -425,6 +425,27 @@ async def test_delete_logs_combined_criteria(client: AsyncClient, auth_cookie: d
     assert remaining_pve1[0]["app_name"] == "sshd"
 
 
+@pytest.mark.asyncio
+async def test_delete_by_ids_with_filters_deletes_only_what_the_preview_counted(client: AsyncClient, auth_cookie: dict):
+    """Listed ids that do not match the other filters are kept, as the preview leaves them out of its count."""
+    client.cookies = auth_cookie
+    _seed_test_logs(get_db_path())
+    every = (await client.get("/api/logs")).json()["logs"]
+    nginx = [log["id"] for log in every if log["app_name"] == "nginx"]
+    other = [log["id"] for log in every if log["app_name"] != "nginx"]
+    request = {"log_ids": [nginx[0], other[0]], "apps": ["nginx"]}
+
+    preview = await client.post("/api/logs/delete/preview", json=request)
+    assert preview.json()["matched_count"] == 1
+
+    deleted = await client.post("/api/logs/delete", json=request)
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted_count"] == 1
+    remaining = {log["id"] for log in (await client.get("/api/logs")).json()["logs"]}
+    assert nginx[0] not in remaining
+    assert other[0] in remaining
+
+
 # ===================================================================
 # 4. Preview Endpoint
 # ===================================================================
