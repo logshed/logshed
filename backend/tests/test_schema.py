@@ -6,6 +6,8 @@ import datetime
 import logging
 from pathlib import Path
 import sqlite3
+from unittest import mock
+
 import pytest
 
 import app.core.migrations as migrations_mod
@@ -18,6 +20,8 @@ from app.core.migrations import (
     run_migrations,
 )
 from tests.db_helpers import open_db
+
+LATEST = MIGRATIONS[-1][0]
 
 # Indexes that duplicate another index (a UNIQUE autoindex or the leading columns of a composite index)
 REDUNDANT_INDEXES = (
@@ -47,7 +51,7 @@ class TestSchemaIntegrity:
         conn = get_connection(db_path)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == 3
+        assert version == LATEST
 
     def test_wal_mode_enabled(self, db_path: Path):
         """WAL journal mode and performance pragmas should be active."""
@@ -372,34 +376,34 @@ class TestMigrationRunner:
         conn = get_connection(p)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == 3
+        assert version == LATEST
 
     def test_sequential_future_migration_execution(self, tmp_path: Path, monkeypatch):
         """Sequential runner executes newly added migrations in ascending order."""
         p = tmp_path / "future_mig.db"
         run_migrations(p)
 
-        # Confirm v3
+        # Confirm the newest schema
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
         conn.close()
 
-        # Simulate adding a future migration v4
-        migration_v4_ran = False
+        # Simulate adding the next release's migration
+        next_ran = False
 
-        def mock_migrate_v4(conn: sqlite3.Connection) -> None:
-            nonlocal migration_v4_ran
-            migration_v4_ran = True
+        def mock_migrate_next(conn: sqlite3.Connection) -> None:
+            nonlocal next_ran
+            next_ran = True
             conn.execute("CREATE TABLE future_test (id INTEGER PRIMARY KEY);")
 
-        extended_migrations = list(MIGRATIONS) + [(4, mock_migrate_v4)]
+        extended_migrations = list(MIGRATIONS) + [(LATEST + 1, mock_migrate_next)]
         monkeypatch.setattr("app.core.migrations.MIGRATIONS", extended_migrations)
 
         run_migrations(p)
-        assert migration_v4_ran is True
+        assert next_ran is True
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 4
+        assert get_user_version(conn) == LATEST + 1
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "future_test" in tables
         conn.close()
@@ -434,7 +438,7 @@ class TestMigrationRunner:
         run_migrations(p)
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
         triggers = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()}
         assert "logs_ai" not in triggers
         assert "logs_ad" in triggers
@@ -496,7 +500,7 @@ class TestMigrationRunner:
         run_migrations(p)
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
 
         # Verify display_order column and backfill display_order = id
         drop_rows = conn.execute("SELECT id, display_order FROM drop_rules ORDER BY id ASC").fetchall()
@@ -562,7 +566,7 @@ class TestMigrationRunner:
         run_migrations(p)
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
         cur = conn.cursor()
         cur.execute("SELECT value FROM system_settings WHERE key = 'server_name'")
         assert cur.fetchone()[0] == "Production-Node-01"
@@ -625,7 +629,7 @@ class TestMigrationRunner:
 
         # Verify docker_endpoints and primary Docker host now exist
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
         cur = conn.execute("SELECT id, name, url, enabled FROM docker_endpoints WHERE id = 1;")
         row = cur.fetchone()
         assert row is not None
@@ -638,7 +642,7 @@ class TestMigrationRunner:
     def test_migration_v3_pre_release_adds_conversation_table(self, tmp_path: Path):
         """A pre-release v3 database without ai_conversation_messages gains the table and index on startup."""
         p = tmp_path / "v3_no_conversations.db"
-        run_migrations(p)
+        _make_v3(p)
         conn = get_connection(p)
         conn.execute("DROP TABLE ai_conversation_messages;")
         conn.commit()
@@ -647,7 +651,7 @@ class TestMigrationRunner:
         run_migrations(p)
 
         conn = get_connection(p)
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
         conn.close()
@@ -673,6 +677,12 @@ def _schema_snapshot(path: Path) -> tuple:
 
 def _object_names(path: Path) -> set:
     return {(t, n) for t, n, _tbl, _sql in _schema_snapshot(path)[1]}
+
+
+def _make_v3(path: Path) -> None:
+    """A database built by the real migrations up to schema 3 (the 1.3.x schema)."""
+    with mock.patch.object(migrations_mod, "MIGRATIONS", MIGRATIONS[:3]):
+        run_migrations(path)
 
 
 def _migrate_to(path: Path, version: int, monkeypatch) -> None:
@@ -711,7 +721,7 @@ def _assert_rules_ordered_and_indexed(path: Path) -> None:
 
 def _make_beta_v3_db(path: Path, drop_order: tuple, alert_order: tuple) -> None:
     """A v3 database as an interrupted or earlier 1.3.0 build could leave it."""
-    run_migrations(path)
+    _make_v3(path)
     conn = get_connection(path)
     conn.execute("DROP INDEX idx_drop_rules_order")
     conn.execute("DROP INDEX idx_alert_rules_order")
@@ -758,7 +768,7 @@ class TestMigrationAtomicity:
 
         monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS)
         run_migrations(p)
-        assert _schema_snapshot(p)[0] == 3
+        assert _schema_snapshot(p)[0] == LATEST
         if failing_version == 3:
             _assert_rules_ordered_and_indexed(p)
 
@@ -870,7 +880,7 @@ class TestRepairV3:
         if origin == "from_v2":
             _migrate_to(p, 2, monkeypatch)
         elif origin == "beta_v3_without_column":
-            run_migrations(p)
+            _make_v3(p)
             conn = get_connection(p)
             conn.execute("ALTER TABLE docker_endpoints DROP COLUMN verify_hostname")
             conn.commit()
@@ -903,7 +913,7 @@ class TestRepairV3:
             conn.commit()
             conn.close()
         elif origin == "beta_v3_without_column":
-            run_migrations(p)
+            _make_v3(p)
             conn = get_connection(p)
             conn.execute("ALTER TABLE alert_history DROP COLUMN sample_log_id")
             conn.commit()
@@ -1359,7 +1369,7 @@ class TestSavedViewNameDedupe:
     def test_repair_v3_renames_duplicates_and_second_run_changes_nothing(self, tmp_path: Path, caplog):
         """A v3 database from a 1.3.0 development build is cleaned up on start; the next start is a no-op."""
         p = tmp_path / "beta_views.db"
-        run_migrations(p)
+        _make_v3(p)
         conn = get_connection(p)
         conn.execute("DROP INDEX idx_saved_views_name_nocase")
         conn.commit()
@@ -1382,7 +1392,7 @@ class TestSavedViewNameDedupe:
     def test_names_that_clash_only_after_trimming_are_renamed_with_the_index_present(self, tmp_path: Path):
         """The repair also works when the unique index already exists and two names differ only by spaces."""
         p = tmp_path / "trim_clash.db"
-        run_migrations(p)
+        _make_v3(p)
         _insert_saved_views(p, [(1, " Disk "), (2, "disk")])
 
         run_migrations(p)

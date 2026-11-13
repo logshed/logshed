@@ -18,6 +18,9 @@ from app.core import instance_lock, lifecycle
 from app.core import restore as restore_mod
 from app.core.migrations import MIGRATIONS, get_connection, get_user_version, run_migrations
 
+LATEST = MIGRATIONS[-1][0]
+NEXT = LATEST + 1
+
 DiskUsage = collections.namedtuple("DiskUsage", "total used free")
 GiB = 1024**3
 
@@ -94,18 +97,18 @@ def test_restore_puts_the_backup_in_place_and_keeps_the_old_database(db, capsys)
     assert _leftovers(db) == []
     assert archive.exists()
     out = capsys.readouterr().out
-    assert f"Restored {archive.name}" in out and "schema 3" in out
+    assert f"Restored {archive.name}" in out and f"schema {LATEST}" in out
     assert f"kept as {aside}" in out and "Delete it once" in out
 
 
-def test_restore_of_a_v4_archive(db, monkeypatch):
-    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(4, lambda c: c.execute("CREATE TABLE v4_marker (id INTEGER)"))])
+def test_restore_of_an_archive_from_the_next_schema_while_it_is_known(db, monkeypatch):
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(NEXT, lambda c: c.execute("CREATE TABLE next_marker (id INTEGER)"))])
     run_migrations(db, backup=False)
-    _set(db, "marker", "v4 backup")
+    _set(db, "marker", "next backup")
     archive = _backup(db)
     _set(db, "marker", "changed")
     assert cli.restore_database(str(archive), str(db)) == 0
-    assert _schema(db) == 4 and _get(db, "marker") == "v4 backup"
+    assert _schema(db) == NEXT and _get(db, "marker") == "next backup"
 
 
 def test_an_older_schema_is_restored_and_upgraded_at_the_next_start(db, tmp_path, monkeypatch, capsys):
@@ -117,21 +120,21 @@ def test_an_older_schema_is_restored_and_upgraded_at_the_next_start(db, tmp_path
     archive = _backup(old, 2)
     assert cli.restore_database(str(archive), str(db)) == 0
     assert _schema(db) == 2
-    assert "upgrades it to schema 3 when it starts" in capsys.readouterr().out
+    assert f"upgrades it to schema {LATEST} when it starts" in capsys.readouterr().out
 
 
 def test_a_newer_schema_is_refused(db, monkeypatch, capsys):
-    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(4, lambda c: None)])
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(NEXT, lambda c: None)])
     newer = db.with_name("newer.db")
     run_migrations(newer)
-    archive = db_backup.create_backup(newer, kind="manual-v4", schema_version=4).path
+    archive = db_backup.create_backup(newer, kind=f"manual-v{NEXT}", schema_version=NEXT).path
     monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS)
     before = db.read_bytes()
 
     assert cli.restore_database(str(archive), str(db)) == 1
 
     err = capsys.readouterr().err
-    assert "schema 4 database, made by a newer LogShed" in err and "Nothing was changed." in err
+    assert f"schema {NEXT} database, made by a newer LogShed" in err and "Nothing was changed." in err
     assert db.read_bytes() == before and _leftovers(db) == []
     assert not [p for p in db.parent.iterdir() if "before-restore" in p.name]
 
@@ -259,7 +262,7 @@ def test_restore_into_an_empty_folder(db, tmp_path, capsys):
     target = tmp_path / "fresh" / "logs.db"
     target.parent.mkdir()
     assert cli.restore_database(str(archive), str(target)) == 0
-    assert _schema(target) == 3
+    assert _schema(target) == LATEST
     assert "kept as" not in capsys.readouterr().out
 
 
@@ -270,7 +273,7 @@ def test_a_backup_without_logs_says_so(db, capsys):
             "VALUES ('2026-11-01T00:00:00+00:00', '2026-11-01T00:00:00+00:00', '10.0.0.1', 'nas', 'app', 1, 6, 'm', 'r')"
         )
         conn.commit()
-    archive = db_backup.create_backup(db, kind="pre-v3-to-v4", schema_version=3, target_schema=4,
+    archive = db_backup.create_backup(db, kind=f"pre-v{LATEST}-to-v{NEXT}", schema_version=LATEST, target_schema=NEXT,
                                       method=db_backup.METHOD_WITHOUT_LOGS).path
     assert cli.restore_database(str(archive), str(db)) == 0
     assert "made without the logs" in capsys.readouterr().out

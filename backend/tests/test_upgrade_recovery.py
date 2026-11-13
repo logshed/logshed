@@ -33,6 +33,8 @@ from app.version import APP_VERSION
 
 DiskUsage = collections.namedtuple("DiskUsage", "total used free")
 GiB = 1024**3
+LATEST = MIGRATIONS[-1][0]
+NEXT = LATEST + 1
 CSRF = {"X-Requested-With": "XMLHttpRequest"}
 
 
@@ -65,17 +67,17 @@ def env(tmp_path: Path, monkeypatch, free_syslog_port):
     reset_crypto_cache()
 
 
-def _with_v4(monkeypatch, step) -> None:
-    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(4, step)])
+def _with_next_step(monkeypatch, step) -> None:
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(NEXT, step)])
 
 
-def _create_v4(conn) -> None:
-    conn.execute("CREATE TABLE v4_marker (id INTEGER PRIMARY KEY)")
+def _create_next(conn) -> None:
+    conn.execute("CREATE TABLE next_marker (id INTEGER PRIMARY KEY)")
 
 
-def _failing_v4(conn) -> None:
-    conn.execute("CREATE TABLE v4_marker (id INTEGER PRIMARY KEY)")
-    raise RuntimeError("v4 step failed on purpose")
+def _failing_next(conn) -> None:
+    conn.execute("CREATE TABLE next_marker (id INTEGER PRIMARY KEY)")
+    raise RuntimeError("next step failed on purpose")
 
 
 def _schema(db: Path) -> int:
@@ -123,18 +125,18 @@ async def test_new_install_and_current_database_take_the_fast_path(env):
 async def test_upgrade_serves_the_status_page_and_503_until_ready(env, monkeypatch):
     gate = threading.Event()
 
-    def slow_v4(conn):
+    def slow_next(conn):
         assert gate.wait(5)
-        _create_v4(conn)
+        _create_next(conn)
 
-    _with_v4(monkeypatch, slow_v4)
+    _with_next_step(monkeypatch, slow_next)
     async with _running() as client:
         await _wait_for(lambda: lifecycle.snapshot().get("stage") == "migrate")
 
         page = await client.get("/storage", headers={"Accept": "text/html"})
         assert page.status_code == 503
         assert "LogShed is upgrading its database" in page.text
-        assert "from schema 3 to 4" in page.text and "Do not restart" in page.text
+        assert f"from schema {LATEST} to {NEXT}" in page.text and "Do not restart" in page.text
         assert '<meta http-equiv="refresh" content="3">' in page.text
         assert "<script" not in page.text
         assert page.headers["Retry-After"] == "5" and page.headers["Cache-Control"] == "no-store"
@@ -149,15 +151,15 @@ async def test_upgrade_serves_the_status_page_and_503_until_ready(env, monkeypat
         body = health.json()
         assert body["status"] == "upgrading"
         assert body["upgrade"]["stage"] == "migrate"
-        assert (body["upgrade"]["from_schema"], body["upgrade"]["target_schema"]) == (3, 4)
+        assert (body["upgrade"]["from_schema"], body["upgrade"]["target_schema"]) == (LATEST, NEXT)
         env.started.assert_not_called()
 
         gate.set()
         await _wait_for(lifecycle.is_ready)
         env.started.assert_awaited_once()
         assert (await client.get("/api/health")).json()["status"] == "ok"
-    assert _schema(env.db) == 4
-    assert [n.startswith("logshed-backup-pre-v3-to-v4-") for n in _archives(env.folder)] == [True]
+    assert _schema(env.db) == NEXT
+    assert [n.startswith(f"logshed-backup-pre-v{LATEST}-to-v{NEXT}-") for n in _archives(env.folder)] == [True]
 
 
 async def test_status_page_shows_backup_progress():
@@ -168,25 +170,25 @@ async def test_status_page_shows_backup_progress():
 
 
 async def test_failed_step_enters_recovery_with_marker_and_one_notification(env, monkeypatch):
-    _with_v4(monkeypatch, _failing_v4)
+    _with_next_step(monkeypatch, _failing_next)
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
         marker = json.loads(lifecycle.marker_path(env.db).read_text())
         archives = _archives(env.folder)
         assert len(archives) == 1
         assert marker["app_version"] == APP_VERSION
-        assert (marker["from_schema"], marker["target_schema"], marker["current_schema"]) == (3, 4, 3)
+        assert (marker["from_schema"], marker["target_schema"], marker["current_schema"]) == (LATEST, NEXT, LATEST)
         assert marker["stage"] == "migration" and marker["backup_filename"] == archives[0]
-        assert "v4 step failed on purpose" in marker["error"]
+        assert "next step failed on purpose" in marker["error"]
         assert marker["failed_at"]
         # The step's transaction rolled back
-        assert _schema(env.db) == 3 and not _has_table(env.db, "v4_marker")
+        assert _schema(env.db) == LATEST and not _has_table(env.db, "next_marker")
         env.started.assert_not_called()
 
         env.send.assert_awaited_once()
         title, body = env.send.await_args.args[:2]
         assert title == "LogShed upgrade stopped"
-        assert "from schema 3 to 4" in body and "unchanged at schema 3" in body
+        assert f"from schema {LATEST} to {NEXT}" in body and f"unchanged at schema {LATEST}" in body
 
         # Anyone sees the state, never the error
         health = (await client.get("/api/health")).json()
@@ -220,7 +222,7 @@ async def test_failed_step_enters_recovery_with_marker_and_one_notification(env,
 
 
 async def test_recovery_actions_need_a_session_and_the_csrf_header(env, monkeypatch):
-    _with_v4(monkeypatch, _failing_v4)
+    _with_next_step(monkeypatch, _failing_next)
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
         for path in ("/api/system/recovery/retry", "/api/system/recovery/skip-backup"):
@@ -234,13 +236,13 @@ async def test_recovery_actions_need_a_session_and_the_csrf_header(env, monkeypa
 async def test_retry_reuses_the_backup_of_the_failed_run(env, monkeypatch):
     attempts = []
 
-    def flaky_v4(conn):
+    def flaky_next(conn):
         attempts.append(1)
         if len(attempts) == 1:
             raise RuntimeError("first try fails")
-        _create_v4(conn)
+        _create_next(conn)
 
-    _with_v4(monkeypatch, flaky_v4)
+    _with_next_step(monkeypatch, flaky_next)
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
         archives = _archives(env.folder)
@@ -252,49 +254,49 @@ async def test_retry_reuses_the_backup_of_the_failed_run(env, monkeypatch):
         # A click once the upgrade has finished is refused
         assert (await client.post("/api/system/recovery/retry", headers=CSRF)).status_code == 409
     assert _archives(env.folder) == archives
-    assert _schema(env.db) == 4
+    assert _schema(env.db) == NEXT
     assert not lifecycle.marker_path(env.db).exists()
 
 
 async def test_retry_backs_up_again_when_the_failed_run_moved_the_schema(env, tmp_path, monkeypatch):
-    # A database at v2: the run reaches v3, then v4 fails, so the v2 backup no longer matches
+    # A database at v2: the run reaches the latest schema, then the next step fails, so the v2 backup no longer matches
     env.db.unlink()
     monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS[:2])
     run_migrations(env.db)
     attempts = []
 
-    def flaky_v4(conn):
+    def flaky_next(conn):
         attempts.append(1)
         if len(attempts) == 1:
             raise RuntimeError("first try fails")
-        _create_v4(conn)
+        _create_next(conn)
 
-    _with_v4(monkeypatch, flaky_v4)
+    _with_next_step(monkeypatch, flaky_next)
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
         marker = lifecycle.recovery_marker()
-        assert (marker["from_schema"], marker["current_schema"]) == (2, 3)
+        assert (marker["from_schema"], marker["current_schema"]) == (2, LATEST)
         _signed_in(client)
         assert (await client.post("/api/system/recovery/retry", headers=CSRF)).status_code == 200
         await _wait_for(lifecycle.is_ready)
     title, body = env.send.await_args.args[:2]
-    assert "now at schema 3" in body and "restore the backup" in body and "unchanged" not in body
+    assert f"now at schema {LATEST}" in body and "restore the backup" in body and "unchanged" not in body
     names = _archives(env.folder)
     assert len(names) == 2
-    assert any(n.startswith("logshed-backup-pre-v2-to-v4-") for n in names)
-    assert any(n.startswith("logshed-backup-pre-v3-to-v4-") for n in names)
-    assert _schema(env.db) == 4
+    assert any(n.startswith(f"logshed-backup-pre-v2-to-v{NEXT}-") for n in names)
+    assert any(n.startswith(f"logshed-backup-pre-v{LATEST}-to-v{NEXT}-") for n in names)
+    assert _schema(env.db) == NEXT
 
 
 async def test_no_room_for_the_backup_stops_in_recovery_and_skip_backup_upgrades(env, monkeypatch, caplog):
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     monkeypatch.setattr(db_backup.shutil, "disk_usage", lambda p: DiskUsage(50 * GiB, 50 * GiB, 0))
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
         marker = lifecycle.recovery_marker()
         assert marker["stage"] == "backup" and marker["backup_filename"] is None
         assert "Not enough free space" in marker["error"]
-        assert _schema(env.db) == 3 and _archives(env.folder) == []
+        assert _schema(env.db) == LATEST and _archives(env.folder) == []
         env.send.assert_awaited_once()
         _signed_in(client)
         details = (await client.get("/api/system/recovery")).json()
@@ -304,23 +306,23 @@ async def test_no_room_for_the_backup_stops_in_recovery_and_skip_backup_upgrades
         assert (await client.post("/api/system/recovery/skip-backup", headers=CSRF)).status_code == 200
         await _wait_for(lifecycle.is_ready)
         env.started.assert_awaited_once()
-    assert _schema(env.db) == 4 and _archives(env.folder) == []
+    assert _schema(env.db) == NEXT and _archives(env.folder) == []
     assert not lifecycle.marker_path(env.db).exists()
 
 
 def _write_marker(db: Path, **fields) -> None:
-    marker = {"app_version": APP_VERSION, "from_schema": 3, "target_schema": 4, "current_schema": 3,
+    marker = {"app_version": APP_VERSION, "from_schema": LATEST, "target_schema": NEXT, "current_schema": LATEST,
               "failed_at": "2026-11-13T00:00:00+00:00", "stage": "migration", "backup_filename": None, "error": "old"}
     marker.update(fields)
     lifecycle.marker_path(db).write_text(json.dumps(marker))
 
 
 async def test_a_marker_from_another_version_is_removed_and_the_upgrade_runs(env, monkeypatch):
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     _write_marker(env.db, app_version="1.3.9")
     async with _running():
         await _wait_for(lifecycle.is_ready)
-    assert _schema(env.db) == 4
+    assert _schema(env.db) == NEXT
     assert not lifecycle.marker_path(env.db).exists()
     env.send.assert_not_called()
 
@@ -341,7 +343,7 @@ async def test_stopping_during_the_backup_leaves_no_partial_file_and_no_marker(e
             [(f"message {i} " * 20, "raw") for i in range(2000)],
         )
         conn.commit()
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     monkeypatch.setattr(db_backup, "CHUNK_BYTES", 4096)
     reached = threading.Event()
 
@@ -355,7 +357,7 @@ async def test_stopping_during_the_backup_leaves_no_partial_file_and_no_marker(e
         await _wait_for(reached.is_set)
     assert list(env.folder.glob("*")) == []
     assert not lifecycle.marker_path(env.db).exists()
-    assert _schema(env.db) == 3
+    assert _schema(env.db) == LATEST
     env.started.assert_not_called()
     env.send.assert_not_called()
     assert lifecycle.is_ready() and not lifecycle.cancel_event().is_set()
@@ -367,9 +369,9 @@ def test_stored_setting_off_upgrades_without_a_backup(env, monkeypatch):
     with closing(sqlite3.connect(env.db)) as conn:
         conn.execute("INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('backup_before_migration', '0', datetime('now'), 0)")
         conn.commit()
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     run_migrations(env.db)
-    assert _schema(env.db) == 4 and _archives(env.folder) == []
+    assert _schema(env.db) == NEXT and _archives(env.folder) == []
 
 
 @pytest.mark.parametrize("env_value, stored, expected", [("true", "0", 1), ("false", "1", 0), ("", "0", 0), ("", None, 1)])
@@ -379,7 +381,7 @@ def test_the_variable_wins_over_the_stored_setting(env, monkeypatch, env_value, 
         with closing(sqlite3.connect(env.db)) as conn:
             conn.execute("INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('backup_before_migration', ?, datetime('now'), 0)", (stored,))
             conn.commit()
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     run_migrations(env.db)
     assert len(_archives(env.folder)) == expected
 
@@ -400,7 +402,7 @@ async def test_settings_show_and_store_the_backup_setting(env, monkeypatch):
 def test_the_log_says_why_no_backup_was_made(env, monkeypatch, caplog):
     import logging
 
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     with caplog.at_level(logging.INFO, logger="app.core.migrations"):
         run_migrations(env.db, backup=False)
     assert "without a new backup, as asked" in caplog.text
@@ -408,7 +410,7 @@ def test_the_log_says_why_no_backup_was_made(env, monkeypatch, caplog):
 
 
 async def test_a_failed_service_start_after_the_upgrade_stops_logshed(env, monkeypatch):
-    _with_v4(monkeypatch, _create_v4)
+    _with_next_step(monkeypatch, _create_next)
     env.started.side_effect = RuntimeError("could not create the presets folder")
     kills = []
     monkeypatch.setattr(main_mod.os, "kill", lambda pid, sig: kills.append(sig))
@@ -419,7 +421,7 @@ async def test_a_failed_service_start_after_the_upgrade_stops_logshed(env, monke
 
 
 async def test_recovery_works_when_the_marker_cannot_be_written(env, monkeypatch):
-    _with_v4(monkeypatch, _failing_v4)
+    _with_next_step(monkeypatch, _failing_next)
 
     def unwritable(*args):
         raise PermissionError(13, "Permission denied")
@@ -434,7 +436,7 @@ async def test_recovery_works_when_the_marker_cannot_be_written(env, monkeypatch
 
 
 async def test_recovery_lets_through_only_what_the_screen_needs(env, monkeypatch):
-    _with_v4(monkeypatch, _failing_v4)
+    _with_next_step(monkeypatch, _failing_next)
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
         _signed_in(client)
@@ -451,10 +453,10 @@ async def test_recovery_lets_through_only_what_the_screen_needs(env, monkeypatch
 
 
 async def test_the_space_figure_counts_what_the_pending_steps_need(env, monkeypatch):
-    _with_v4(monkeypatch, _failing_v4)
+    _with_next_step(monkeypatch, _failing_next)
     monkeypatch.setattr(db_backup.shutil, "disk_usage", lambda p: DiskUsage(50 * GiB, 50 * GiB, 0))
     monkeypatch.setattr(
-        migrations_mod, "MIGRATION_NEEDS", {4: migrations_mod.MigrationNeeds(extra_space=lambda size: 7 * GiB)}
+        migrations_mod, "MIGRATION_NEEDS", {NEXT: migrations_mod.MigrationNeeds(extra_space=lambda size: 7 * GiB)}
     )
     async with _running() as client:
         await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)

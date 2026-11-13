@@ -17,7 +17,7 @@ from app.api import backups as backups_api
 from app.core import backup as db_backup
 from app.core import lifecycle
 from app.core import pipeline as pipeline_mod
-from app.core.migrations import run_migrations
+from app.core.migrations import MIGRATIONS, run_migrations
 from app.core.security import SESSION_COOKIE_NAME, create_session_token, get_or_create_master_key, reset_crypto_cache
 from app.main import create_app
 from app.services.operation_guard import operation_guard
@@ -126,7 +126,7 @@ async def test_create_backup_now_makes_an_archive_while_logs_are_written(env, cl
         stop.set()
         thread.join()
     assert job["state"] == "done", job
-    assert job["filename"].startswith("logshed-backup-manual-v3-") and job["size_bytes"] > 0
+    assert job["filename"].startswith(f"logshed-backup-manual-v{MIGRATIONS[-1][0]}-") and job["size_bytes"] > 0
     assert written
     archive = db_backup.backups_dir(env) / job["filename"]
     with tarfile.open(archive, "r:gz") as tar:

@@ -416,10 +416,10 @@ class TestAuthentication:
         """Tokens without iss='logshed' or with invalid iss are rejected."""
         import json
         import time
-        from app.core.security import get_fernet
+        from app.core.security import get_session_fernet
 
         now = int(time.time())
-        fernet = get_fernet()
+        fernet = get_session_fernet()
 
         # Token with valid iss
         valid_payload = {"user_id": 1, "iat": now, "exp": now + 3600, "iss": "logshed"}

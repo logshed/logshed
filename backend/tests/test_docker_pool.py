@@ -9,7 +9,7 @@ import pytest
 
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.docker_pool import DockerCollectorPool
-from app.core.migrations import run_migrations
+from app.core.migrations import MIGRATIONS, run_migrations
 from app.core.pipeline import KeyedMultilineAssembler
 from tests.db_helpers import open_db
 
@@ -286,7 +286,8 @@ class TestDockerTlsHostnameVerification:
 
     def test_migration_repair_adds_verify_hostname_once(self, tmp_path: Path):
         db = tmp_path / "beta.db"
-        run_migrations(db)
+        with patch("app.core.migrations.MIGRATIONS", MIGRATIONS[:3]):
+            run_migrations(db)
         # Simulate a 1.3.0 beta database created before the column existed
         with open_db(db) as conn:
             conn.execute("ALTER TABLE docker_endpoints DROP COLUMN verify_hostname")

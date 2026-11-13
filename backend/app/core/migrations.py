@@ -598,10 +598,54 @@ VALUES ('server_name', 'LogShed', datetime('now'), 0);
     dedupe_saved_view_names(conn)
 
 
+# Where secrets are stored encrypted: (table, key column, value column, extra condition)
+_ENCRYPTED_VALUES = (
+    ("system_settings", "key", "value", "is_encrypted = 1"),
+    ("notification_channels", "id", "url", None),
+    ("docker_endpoints", "id", "client_key", None),
+)
+
+
+def _reencrypt_stored_secrets(conn: sqlite3.Connection) -> None:
+    """
+    Re-encrypt every stored secret under the stored-secrets key (it was under the single pre-1.4.0
+    key). A value no key can read was already unusable before the upgrade: it is left as it is, and
+    named in a warning, rather than stopping the upgrade.
+    """
+    from app.core.security import reencrypt_legacy_secret
+
+    moved = 0
+    for table, id_col, value_col, condition in _ENCRYPTED_VALUES:
+        where = f"{value_col} IS NOT NULL AND {value_col} != ''" + (f" AND {condition}" if condition else "")
+        rows = conn.execute(f"SELECT {id_col}, {value_col} FROM {table} WHERE {where};").fetchall()
+        for row_id, value in rows:
+            new_value = reencrypt_legacy_secret(value)
+            if new_value is None:
+                logger.warning(
+                    f"Could not read the stored secret {table}.{value_col} for {id_col} {row_id!r} with the "
+                    "encryption key; it was left as it is. Enter it again in the web interface."
+                )
+            elif new_value != value:
+                conn.execute(f"UPDATE {table} SET {value_col} = ? WHERE {id_col} = ?;", (new_value, row_id))
+                moved += 1
+    if moved:
+        logger.info(f"Re-encrypted {moved} stored secrets under the new stored-secrets key.")
+
+
+def migrate_v4(conn: sqlite3.Connection) -> None:
+    """
+    Execute Migration 4 (LogShed 1.4.0): stored secrets move to their own key, derived from the
+    master key apart from the session key.
+    """
+    logger.info("Running migration v4...")
+    _reencrypt_stored_secrets(conn)
+
+
 MIGRATIONS = [
     (1, migrate_v1),
     (2, migrate_v2),
     (3, migrate_v3),
+    (4, migrate_v4),
 ]
 
 
@@ -689,7 +733,7 @@ REDUNDANT_INDEXES = (
 
 def repair_v3(conn: sqlite3.Connection) -> None:
     """
-    Idempotent repair of a v3 database, run on every start. It fixes databases left
+    Idempotent repair of a v3 database, run on every start at schema 3 and once before a later step. It fixes databases left
     incomplete by earlier 1.3.0 builds, whose migrations were not atomic:
     - re-run migrate_v3 when its tables are missing (pre-release databases);
     - add docker_endpoints.verify_hostname (on by default, including existing endpoints);
@@ -841,8 +885,9 @@ def run_migrations(
 
     Opens the database, enables WAL mode pragmas, and runs all pending migrations
     in order based on the current PRAGMA user_version. Each migration and its
-    user_version bump commit together in one transaction, then repair_v3 runs in
-    its own transaction.
+    user_version bump commit together in one transaction. A database at schema 3 is
+    repaired (repair_v3, its own transaction) before any later step, or at the end
+    when 3 is the newest.
 
     A database whose user_version is above the newest migration was upgraded by a newer
     LogShed: it is closed without any change and DatabaseNewerThanAppError is raised.
@@ -889,12 +934,17 @@ def run_migrations(
                 )
         run.stage = "migrate"
 
+        repaired_v3 = False
         for target_version, migration_func in MIGRATIONS:
             if current_version >= target_version:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
                 continue
             if cancel is not None and cancel.is_set():
                 raise MigrationCancelled()
+            # Later steps build on a whole v3 schema, so a v3 database is repaired before it moves on
+            if current_version == 3 and not repaired_v3:
+                _run_in_transaction(conn, repair_v3)
+                repaired_v3 = True
             if progress:
                 progress("migrate", pending.index(target_version), len(pending))
             logger.info(f"Migrating from {current_version} to {target_version}")
@@ -917,7 +967,7 @@ def run_migrations(
             progress("migrate", len(pending), len(pending))
 
         # Ensure schema integrity for v3 databases (pre-release and interrupted v1.3.0 upgrades)
-        if current_version == 3:
+        if current_version == 3 and not repaired_v3:
             _run_in_transaction(conn, repair_v3)
     finally:
         conn.close()

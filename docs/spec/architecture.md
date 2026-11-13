@@ -39,7 +39,7 @@ The following environment variables are supplied at container start and are stri
 - `PORT` - Web/API HTTP port (defaults to `8080`).
 - `SYSLOG_PORT` - Syslog listening port for UDP and TCP (defaults to `1514`).
 - `DATA_DIR` - Mount path for persistent SQLite database, master key, and presets (defaults to `/data`).
-- `LOGSHED_SECRET_KEY` - Optional 32-byte URL-safe base64 key for encrypting runtime settings at rest; if unset, auto-generated at `/data/.secret_key`.
+- `LOGSHED_SECRET_KEY` - Optional master key (a 32-byte URL-safe base64 key, or a passphrase, which goes through scrypt) from which the session and stored-secrets keys are derived; if unset, auto-generated at `/data/.secret_key`.
 - `DOCKER_HOST` - Docker endpoint socket or proxy address (defaults to `unix:///var/run/docker.sock`).
 - `DOCKER_ADDITIONAL_HOSTS` - JSON array of remote Docker host endpoints to pre-seed on container boot.
 - `MAX_RETENTION_DAYS` - Ceiling in days for the log retention slider in the UI (defaults to `30`, minimum `1`). While it is set it is also saved as the retention at startup and the slider is fixed to it; removing it keeps the saved value.

@@ -68,6 +68,15 @@ def fast_password_hasher():
     security._password_hasher = original
 
 
+@pytest.fixture(autouse=True, scope="session")
+def fast_passphrase_kdf():
+    """Use a minimal scrypt cost in tests; production cost takes 128 MiB and about half a second per key."""
+    original = security.SCRYPT_N
+    security.SCRYPT_N = 2**4
+    yield original
+    security.SCRYPT_N = original
+
+
 @pytest.fixture(autouse=True)
 def reset_drop_filter_counts():
     """Clear drops counted in memory by the process-wide drop filter, so a test that drops logs without a

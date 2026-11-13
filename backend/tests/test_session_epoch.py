@@ -18,7 +18,7 @@ from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
-    get_fernet,
+    get_session_fernet,
     get_or_create_master_key,
     reset_crypto_cache,
 )
@@ -180,7 +180,7 @@ class TestTokenEpochClaim:
     def _token(self, **claims) -> str:
         now = time.time()
         payload = {"user_id": 1, "iat": now, "exp": now + 3600, "iss": "logshed", **claims}
-        return get_fernet().encrypt(json.dumps(payload).encode("utf-8")).decode("utf-8")
+        return get_session_fernet().encrypt(json.dumps(payload).encode("utf-8")).decode("utf-8")
 
     @pytest.mark.asyncio
     async def test_a_token_without_an_epoch_counts_as_epoch_zero(self, browsers):

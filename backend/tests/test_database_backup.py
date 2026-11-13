@@ -29,6 +29,8 @@ from app.core.migrations import (
 
 DiskUsage = collections.namedtuple("DiskUsage", "total used free")
 GiB = 1024**3
+LATEST = MIGRATIONS[-1][0]
+NEXT = LATEST + 1
 
 
 def _migrate_to(path: Path, version: int, monkeypatch) -> None:
@@ -90,14 +92,14 @@ def _no_tmp(db_path: Path) -> bool:
     return not folder.exists() or not list(folder.glob("*.tmp"))
 
 
-def _with_v4(monkeypatch, needs: MigrationNeeds | None = None, func=None) -> None:
-    """Add a harmless v4 step, as the next release's migration would be."""
+def _with_next_step(monkeypatch, needs: MigrationNeeds | None = None, func=None) -> None:
+    """Add a harmless step after the latest, as the next release's migration would be."""
 
-    def migrate_v4(conn):
-        conn.execute("CREATE TABLE IF NOT EXISTS v4_marker (id INTEGER PRIMARY KEY)")
+    def migrate_next(conn):
+        conn.execute("CREATE TABLE IF NOT EXISTS next_marker (id INTEGER PRIMARY KEY)")
 
-    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(4, func or migrate_v4)])
-    monkeypatch.setattr(migrations_mod, "MIGRATION_NEEDS", {4: needs} if needs else {})
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(NEXT, func or migrate_next)])
+    monkeypatch.setattr(migrations_mod, "MIGRATION_NEEDS", {NEXT: needs} if needs else {})
 
 
 @pytest.fixture
@@ -141,29 +143,29 @@ def test_upgrade_from_v2_makes_one_full_archive(db, monkeypatch, caplog):
 
     archives = _archives(db)
     assert len(archives) == 1
-    assert db_backup.ARCHIVE_NAME_RE.match(archives[0].name)["kind"] == "pre-v2-to-v3"
+    assert db_backup.ARCHIVE_NAME_RE.match(archives[0].name)["kind"] == f"pre-v2-to-v{LATEST}"
     assert archives[0].stat().st_mode & 0o777 == 0o640
     manifest, restored = _extract(archives[0], db.parent / "x")
     assert manifest["format"] == 1
     assert manifest["kind"] == "pre-migration"
-    assert (manifest["schema_version"], manifest["target_schema"]) == (2, 3)
+    assert (manifest["schema_version"], manifest["target_schema"]) == (2, LATEST)
     assert manifest["files"] == [{"name": "logs.db", "role": "main", "size_bytes": restored.stat().st_size}]
     assert _integrity(restored) == "ok"
     assert _schema_version(restored) == 2
     assert _counts(restored) == before
-    assert _schema_version(db) == 3
+    assert _schema_version(db) == LATEST
     assert _no_tmp(db)
 
 
 def test_upgrade_from_v3_backs_up_once_before_all_steps(db, monkeypatch):
     run_migrations(db)
     _add_logs(db, 10)
-    _with_v4(monkeypatch)
+    _with_next_step(monkeypatch)
     run_migrations(db)
     archives = _archives(db)
-    assert [db_backup.ARCHIVE_NAME_RE.match(a.name)["kind"] for a in archives] == ["pre-v3-to-v4"]
+    assert [db_backup.ARCHIVE_NAME_RE.match(a.name)["kind"] for a in archives] == [f"pre-v{LATEST}-to-v{NEXT}"]
     _, restored = _extract(archives[0], db.parent / "x")
-    assert _schema_version(restored) == 3
+    assert _schema_version(restored) == LATEST
     assert _counts(restored)["logs"] == 10
 
 
@@ -172,7 +174,7 @@ def test_step_that_keeps_log_rows_gets_a_backup_without_logs(db, monkeypatch):
     _add_logs(db, 30)
     _add_settings_rows(db)
     before = _counts(db)
-    _with_v4(monkeypatch, MigrationNeeds(backup_without_logs=True))
+    _with_next_step(monkeypatch, MigrationNeeds(backup_without_logs=True))
 
     run_migrations(db)
 
@@ -186,19 +188,19 @@ def test_step_that_keeps_log_rows_gets_a_backup_without_logs(db, monkeypatch):
         t: n for t, n in before.items() if not t.startswith("logs")
     }
     with closing(sqlite3.connect(restored)) as conn:
-        assert get_user_version(conn) == 3
+        assert get_user_version(conn) == LATEST
         # Ids carry on after the old ones, so the full-text indexer's position stays valid
         assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'logs'").fetchone()[0] == 30
         conn.execute("INSERT INTO logs_fts(logs_fts) VALUES ('integrity-check')")
         with closing(sqlite3.connect(db)) as src:
             source = {r for r in src.execute("SELECT type, name FROM sqlite_master")}
-        assert {r for r in conn.execute("SELECT type, name FROM sqlite_master")} == source - {("table", "v4_marker")}
+        assert {r for r in conn.execute("SELECT type, name FROM sqlite_master")} == source - {("table", "next_marker")}
 
 
 def test_backup_without_logs_needs_every_pending_step_to_allow_it(db, monkeypatch):
     _migrate_to(db, 2, monkeypatch)
     _add_logs(db, 5)
-    _with_v4(monkeypatch, MigrationNeeds(backup_without_logs=True))
+    _with_next_step(monkeypatch, MigrationNeeds(backup_without_logs=True))
     run_migrations(db)
     (archive,) = _archives(db)
     manifest, restored = _extract(archive, db.parent / "x")
@@ -211,7 +213,7 @@ def test_auto_backup_off_makes_none(db, monkeypatch, value):
     _migrate_to(db, 2, monkeypatch)
     monkeypatch.setenv("AUTO_BACKUP_ON_MIGRATION", value)
     run_migrations(db)
-    assert _schema_version(db) == 3
+    assert _schema_version(db) == LATEST
     assert not db_backup.backups_dir(db).exists()
 
 
@@ -263,16 +265,16 @@ def test_disk_full_while_writing_removes_the_partial_file(db, monkeypatch, roomy
 
     monkeypatch.setattr(db_backup, "_write_archive", real_write)
     run_migrations(db)
-    assert _schema_version(db) == 3
+    assert _schema_version(db) == LATEST
 
 
 def test_migration_extra_space_is_kept_free(db, monkeypatch):
     run_migrations(db)
-    _with_v4(monkeypatch, MigrationNeeds(extra_space=lambda size: 40 * GiB))
+    _with_next_step(monkeypatch, MigrationNeeds(extra_space=lambda size: 40 * GiB))
     monkeypatch.setattr(db_backup.shutil, "disk_usage", lambda p: DiskUsage(100 * GiB, 70 * GiB, 30 * GiB))
     with pytest.raises(MigrationBackupError):
         run_migrations(db)
-    assert _schema_version(db) == 3
+    assert _schema_version(db) == LATEST
 
 
 def test_floor_is_ten_percent_between_2_and_20_gib():
@@ -371,7 +373,7 @@ def test_backup_command_while_another_connection_inserts(db, monkeypatch, roomy_
     (archive,) = _archives(db)
     assert f"Backup written: {archive}" in out
     assert "Deleted automatically after" in out
-    assert db_backup.ARCHIVE_NAME_RE.match(archive.name)["kind"] == "manual-v3"
+    assert db_backup.ARCHIVE_NAME_RE.match(archive.name)["kind"] == f"manual-v{LATEST}"
     manifest, restored = _extract(archive, db.parent / "x")
     assert manifest["kind"] == "manual" and manifest["target_schema"] is None
     assert _integrity(restored) == "ok"

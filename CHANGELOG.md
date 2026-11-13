@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Source installs** need Python 3.14. The Docker image already has it.
 - **Health checks during an upgrade.** While LogShed backs up and upgrades its database, and after an upgrade that stopped, `/api/health` answers `200` with `"status": "upgrading"` or `"status": "migration_failed"`, so Docker's health check and tools such as autoheal do not restart the container part way through a backup. An uptime monitor that checks only the status code shows LogShed as up during that time: check the `status` field to see it. The image's health check now allows 60 seconds for start-up instead of 15.
 - **No logs received during a database upgrade.** The syslog listener and the Docker collector start once the upgrade is done, so senders see refused connections (TCP) or lose messages (UDP) for that time; most syslog senders retry over TCP. A large database takes a few minutes. The web interface shows the progress meanwhile.
+- **Everyone signs in again once.** Session cookies and stored secrets now use separate keys, so the first start of 1.4.0 signs out every browser. The upgrade also re-encrypts the stored AI keys, notification URLs and Docker TLS keys under the new key; your `.secret_key` file or `LOGSHED_SECRET_KEY` stays as it is and is still what reads them, so keep it as before. 1.3.x cannot read the re-encrypted values: going back is a restore of the backup made before the upgrade, which holds them as they were.
 - **Browsers**: The web interface needs Chrome or Edge 111, Safari 16.4 (both from 2023) or Firefox 128 (2024) or later. Older browsers, such as Safari on iOS 15, may not work.
 
 ### Added
@@ -49,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- **Separate keys, and a slow derivation for passphrases**: One key used to encrypt both the session cookies and the stored secrets (AI keys, notification URLs, Docker TLS keys), and a `LOGSHED_SECRET_KEY` passphrase was turned into that key with a single SHA-256, which is fast to guess. LogShed now derives a separate key for each job from your master key, and a passphrase goes through scrypt (128 MiB for about half a second, once at start-up). A generated key, including the automatic `.secret_key`, is used as before with no extra cost.
 - **Signing out signs out everywhere**: Signing out, changing the password and `reset-admin` now end every session in every browser at once. Until now, signing out only removed the cookie from that browser, so a copied cookie kept working for up to 7 days, and an open live Console stream kept sending logs after a password change. An open stream now closes within 15 seconds.
 
 ## [1.3.1] - 2026-11-12

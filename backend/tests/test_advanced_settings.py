@@ -23,7 +23,7 @@ from app.core.config import (
     resolve_setting,
     resolve_all_system_settings,
 )
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import MIGRATIONS, get_connection, run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
     SESSION_COOKIE_NAME,
@@ -253,6 +253,14 @@ class TestThinkingLevelSetting:
         return dict(rows)
 
     @staticmethod
+    def _v3_database(tmp_path: Path) -> Path:
+        """A 1.3.x (schema 3) database: only those can hold a thinking budget, which 1.3.1 replaced."""
+        db_file = tmp_path / "v3.db"
+        with patch("app.core.migrations.MIGRATIONS", MIGRATIONS[:3]):
+            run_migrations(db_file)
+        return db_file
+
+    @staticmethod
     def _store(db_file: Path, **values: str) -> None:
         conn = get_connection(db_file)
         try:
@@ -267,7 +275,7 @@ class TestThinkingLevelSetting:
 
     @pytest.mark.parametrize("budget, level", [("0", "off"), ("1024", "low"), ("4096", "medium"), ("24576", "high")])
     def test_the_upgrade_turns_a_stored_budget_into_a_level_once(self, tmp_path: Path, caplog, budget, level):
-        db_file = tmp_path / "logs.db"
+        db_file = self._v3_database(tmp_path)
         self._store(db_file, ai_thinking_budget=budget)
         with caplog.at_level(logging.INFO, logger="app.core.migrations"):
             run_migrations(db_file)
@@ -279,13 +287,13 @@ class TestThinkingLevelSetting:
         assert self._stored(db_file) == {"ai_thinking_level": "high"}
 
     def test_the_upgrade_keeps_a_saved_level(self, tmp_path: Path):
-        db_file = tmp_path / "logs.db"
+        db_file = self._v3_database(tmp_path)
         self._store(db_file, ai_thinking_budget="16000", ai_thinking_level="off")
         run_migrations(db_file)
         assert self._stored(db_file) == {"ai_thinking_level": "off"}
 
     def test_the_upgrade_drops_an_unreadable_budget(self, tmp_path: Path, caplog):
-        db_file = tmp_path / "logs.db"
+        db_file = self._v3_database(tmp_path)
         self._store(db_file, ai_thinking_budget="lots")
         with caplog.at_level(logging.WARNING, logger="app.core.migrations"):
             run_migrations(db_file)
