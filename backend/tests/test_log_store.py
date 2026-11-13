@@ -19,8 +19,10 @@ from tests.db_helpers import open_db, store_logs
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
 # Modules allowed to name the logs tables in SQL: the store, its SQL helpers (the filter builder
-# and the full-text indexer), the schema migrations and the backup, which copies whole tables.
+# and the full-text indexer), the day-file layout, the schema migrations and the backup, which
+# copies whole tables.
 STORE_MODULES = {
+    "core/day_files.py",
     "services/log_store.py",
     "services/log_query.py",
     "services/fts_indexer.py",

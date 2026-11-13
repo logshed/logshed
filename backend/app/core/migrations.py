@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from app.core import backup as db_backup
+from app.core import day_files
 from app.core.config import (
     is_auto_backup_on_migration_overridden,
     parse_bool,
@@ -632,13 +633,79 @@ def _reencrypt_stored_secrets(conn: sqlite3.Connection) -> None:
         logger.info(f"Re-encrypted {moved} stored secrets under the new stored-secrets key.")
 
 
+LOG_CATALOGUE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS log_files (
+    day TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    layout INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    row_count INTEGER NOT NULL,
+    min_id INTEGER,
+    max_id INTEGER,
+    min_ts INTEGER,
+    max_ts INTEGER,
+    size_bytes INTEGER,
+    sealed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS log_file_counts (
+    day TEXT NOT NULL REFERENCES log_files(day) ON DELETE CASCADE,
+    hour INTEGER NOT NULL,
+    host TEXT NOT NULL,
+    app TEXT NOT NULL,
+    severity INTEGER NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (day, hour, host, app, severity)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS log_id_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    next_id INTEGER NOT NULL
+);
+"""
+
+
+def _stored_time_us(value: Optional[str]) -> Optional[int]:
+    """A legacy timestamp in microseconds, or None when it is missing or unreadable."""
+    if not value:
+        return None
+    try:
+        return day_files.iso_to_us(str(value))
+    except (ValueError, OverflowError):
+        return None
+
+
+def _register_legacy_logs(conn: sqlite3.Connection) -> None:
+    """
+    List the logs table every earlier version wrote as the 'legacy' entry of the day-file
+    catalogue, and start the log id counter after its highest id. Every figure comes from the
+    primary key or the timestamp index, so this is quick whatever the size of the table; the
+    rows themselves are not touched.
+    """
+    count = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+    min_id, max_id = conn.execute("SELECT MIN(id), MAX(id) FROM logs").fetchone()
+    min_ts = conn.execute("SELECT MIN(timestamp) FROM logs").fetchone()[0]
+    max_ts = conn.execute("SELECT MAX(timestamp) FROM logs").fetchone()[0]
+    conn.execute(
+        "INSERT INTO log_files (day, file_name, layout, state, row_count, min_id, max_id, min_ts, max_ts) "
+        "VALUES (?, ?, 0, 'legacy', ?, ?, ?, ?, ?);",
+        (day_files.LEGACY_DAY, "logs.db", count, min_id, max_id, _stored_time_us(min_ts), _stored_time_us(max_ts)),
+    )
+    sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'logs';").fetchone()
+    next_id = max(sequence[0] if sequence else 0, max_id or 0) + 1
+    conn.execute("INSERT INTO log_id_state (id, next_id) VALUES (1, ?);", (next_id,))
+
+
 def migrate_v4(conn: sqlite3.Connection) -> None:
     """
-    Execute Migration 4 (LogShed 1.4.0): stored secrets move to their own key, derived from the
-    master key apart from the session key.
+    Execute Migration 4 (LogShed 1.4.0):
+    - stored secrets move to their own key, derived from the master key apart from the session key;
+    - new logs go to one file per UTC day: the catalogue of day files and the log id counter
+      are added, and the logs table so far is listed as the legacy entry. No day file is made
+      and no log row is touched: the first write after start-up makes the day's file.
     """
     logger.info("Running migration v4...")
     _reencrypt_stored_secrets(conn)
+    _run_script(conn, LOG_CATALOGUE_SCHEMA)
+    _register_legacy_logs(conn)
 
 
 MIGRATIONS = [
@@ -667,8 +734,14 @@ class MigrationNeeds:
     backup_without_logs: bool = False
 
 
+# Room v4 writes beyond the database: three small catalogue tables and the re-encrypted secrets
+_V4_EXTRA_SPACE = 16 * 1024**2
+
 # Steps not listed need nothing beyond the default (a full backup, no extra space).
-MIGRATION_NEEDS: dict[int, MigrationNeeds] = {}
+# v4 changes no log row (new logs go to day files), so its backup leaves the logs out.
+MIGRATION_NEEDS: dict[int, MigrationNeeds] = {
+    4: MigrationNeeds(extra_space=lambda db_size: _V4_EXTRA_SPACE, backup_without_logs=True),
+}
 
 
 @dataclass

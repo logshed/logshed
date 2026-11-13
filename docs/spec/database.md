@@ -361,15 +361,72 @@ Migration v3 constitutes the complete schema upgrade from LogShed v1.2.0 to v1.3
 
 ### 2.3a Schema Migration v4 (LogShed 1.4.0)
 
-One step for the whole 1.4.0 release: later 1.4.0 changes add to it until 1.4.0 ships. So far it changes no table:
+One step for the whole 1.4.0 release: later 1.4.0 changes add to it until 1.4.0 ships. Its backup leaves the logs out (`MIGRATION_NEEDS[4]`: `backup_without_logs`, 16 MiB `extra_space`), because it changes no log row; an install coming from 1.2.x also runs v3 and so gets a full backup.
 - **Stored secrets re-encrypted:** every stored secret moves from the single pre-1.4.0 key to the stored-secrets key ([security.md](security.md), section 7): `system_settings.value` where `is_encrypted = 1`, `notification_channels.url` and `docker_endpoints.client_key` (empty values are skipped). A value already under the new key is left as it is. A value neither key reads was already unusable: it is left as it is and a `WARNING` names its table, column and row (never the value). The rewrite runs inside the step's transaction, so a failure part way leaves every value and `user_version` as they were; it runs after the backup before the upgrade, which therefore holds the old values. A new database has nothing to re-encrypt and does not read the key.
 
+- **The day-file catalogue:** new logs are stored in one file per UTC day (section 2.3c). v4 adds the catalogue to `logs.db` and lists the `logs` table every earlier version wrote as its `legacy` entry, without touching its rows or making a day file:
+  ```sql
+  CREATE TABLE log_files (
+      day TEXT PRIMARY KEY,          -- 'YYYY-MM-DD' (UTC), or 'legacy' for the logs table in logs.db
+      file_name TEXT NOT NULL,       -- 'logs-2026-11-12-UTC.db', or 'logs.db' for legacy
+      layout INTEGER NOT NULL,       -- the file's layout version (0 = the legacy table)
+      state TEXT NOT NULL,           -- 'open', 'sealed', 'legacy' or 'deleting'
+      row_count INTEGER NOT NULL,
+      min_id INTEGER, max_id INTEGER,
+      min_ts INTEGER, max_ts INTEGER, -- the logs' own times, UTC microseconds
+      size_bytes INTEGER,
+      sealed_at TEXT
+  );
+  CREATE TABLE log_file_counts (     -- per sealed file: logs per hour x host x app x severity
+      day TEXT NOT NULL REFERENCES log_files(day) ON DELETE CASCADE,
+      hour INTEGER NOT NULL, host TEXT NOT NULL, app TEXT NOT NULL, severity INTEGER NOT NULL,
+      count INTEGER NOT NULL,
+      PRIMARY KEY (day, hour, host, app, severity)
+  ) WITHOUT ROWID;
+  CREATE TABLE log_id_state (id INTEGER PRIMARY KEY CHECK (id = 1), next_id INTEGER NOT NULL);
+  ```
+  The legacy entry's row count, id range and time range come from the primary key and `idx_logs_time_sev`, so the step is quick at any size (a timestamp that cannot be read leaves the time range empty). `log_id_state.next_id` starts after the highest id the legacy table ever gave (`sqlite_sequence`, or `MAX(id)` if higher), so log ids keep increasing across the upgrade.
+
 ### 2.3b The Log Store ([`backend/app/services/log_store.py`](../../backend/app/services/log_store.py))
-Every read and write of stored logs goes through the log store, so the way logs are stored can change without touching the modules that use them. No other module runs SQL against `logs` or `logs_fts`; `test_only_the_store_runs_sql_on_logs` (`backend/tests/test_log_store.py`) fails if one does. The exceptions are the store's own helpers (`services/log_query.py` turns a `LogFilter` into SQL and runs full-text searches newest first; `services/fts_indexer.py` keeps `logs_fts` up to date), the schema migrations and the backup, which copies whole tables.
+Every read and write of stored logs goes through the log store, so the way logs are stored can change without touching the modules that use them. No other module runs SQL against `logs` or `logs_fts`; `test_only_the_store_runs_sql_on_logs` (`backend/tests/test_log_store.py`) fails if one does. The exceptions are the store's own helpers (`services/log_query.py` turns a `LogFilter` into SQL and runs full-text searches newest first; `services/fts_indexer.py` keeps `logs_fts` up to date; `core/day_files.py` defines the day-file layout), the schema migrations and the backup, which copies whole tables.
 - **Functions:** writing (`insert_rows`, `insert_row`), renaming hosts and Docker apps on stored logs (`relabel_host`, `relabel_docker_app`), deleting (`delete`, `delete_everything`, `prune`, `count_prunable`), searching and reading (`search`, `count`, `count_matching`, `get_many`, `context`), the host and app names seen for the facets (`seen_names`), and figures for the dashboard, the daily digest and the Storage page (`error_figures`, `digest_figures`, `max_id`, `count_rows`).
 - **Connections:** each function takes a connection to `logs.db` and runs on the calling thread, inside `run_db_query`, `run_search_query` or `asyncio.to_thread` as before. Functions that return rows need `sqlite3.Row` rows, as `run_db_query` connections have.
 - **Rows:** mappings with the stored column names (`id`, `timestamp`, `received_at`, `source_ip`, `source_alias`, `app_name`, `facility`, `severity`, `message` and, when asked for, `raw`), with times as UTC ISO strings. `row_to_log_entry` (`services/log_query.py`) turns them into API responses.
 - **Long writes** (relabels, deletes, prunes) commit in batches. Deletes and prunes take a `between_batches` callback, which their callers set to `wait_for_ingest_write` so ingestion is not held up.
+
+### 2.3c Day Files ([`backend/app/core/day_files.py`](../../backend/app/core/day_files.py))
+Logs received on UTC day `D` are stored in `logs-D-UTC.db` beside `logs.db` (beside `DB_PATH`'s file when that is set), with its own `-wal` and `-shm` while open. The day comes from `received_at` (the server's clock), never from the device's `timestamp`, and is a UTC day so that no file is 23 or 25 hours long and a change of `TZ` renames nothing. `logs.db` keeps everything else, the catalogue (section 2.3a) and, after an upgrade from 1.3.x, the legacy `logs` table until retention empties it. A day file is readable alone: its lookup tables travel with it.
+
+Each file's `PRAGMA user_version` is its layout version (1 in 1.4.0); a file in a newer layout is refused (`DayFileNewerThanAppError`). Layout 1:
+```sql
+CREATE TABLE hosts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+CREATE TABLE apps (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+CREATE TABLE logs (
+    id INTEGER PRIMARY KEY,          -- the global log id, given by the writer (no AUTOINCREMENT)
+    ts INTEGER NOT NULL,             -- the log's own time, UTC microseconds (was timestamp)
+    received_us INTEGER NOT NULL,    -- when LogShed received it, UTC microseconds (was received_at)
+    source_ip TEXT NOT NULL,
+    host_id INTEGER NOT NULL,        -- hosts.id; the name was source_alias ('' when the address has no alias)
+    app_id INTEGER NOT NULL,         -- apps.id; the name was app_name
+    source_kind INTEGER NOT NULL,    -- 1 syslog, 2 Docker, 3 HTTP ingest, 4 LogShed itself
+    reported_host_id INTEGER,        -- reserved: the host name a syslog sender claimed
+    facility INTEGER NOT NULL DEFAULT 1,
+    severity INTEGER NOT NULL DEFAULT 6,
+    message TEXT NOT NULL,
+    raw TEXT,                        -- by raw_kind: 0 NULL (raw is message), 1 the prefix (raw is raw || message), 2 the whole line
+    raw_kind INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_logs_time_sev ON logs(ts DESC, severity);
+CREATE INDEX idx_logs_app_time ON logs(app_id, ts DESC);
+CREATE INDEX idx_logs_host_time ON logs(host_id, ts DESC);
+CREATE INDEX idx_logs_ip_app_host ON logs(source_ip, app_id, host_id);
+CREATE VIRTUAL TABLE logs_fts USING fts5(app_name, source_alias, message, content='', contentless_delete=1);
+CREATE TABLE fts_index_state (id INTEGER PRIMARY KEY CHECK (id = 1), last_indexed_id INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+```
+- **Stored forms.** Times are kept as integers and given back as `datetime.isoformat()` in UTC (`iso_sql` builds the same string in SQL, also for times before 1970). Host and app names become ids into the file's own tables, which never reuse an id. `raw` keeps only what `message` does not already hold, and is rebuilt byte for byte (`RAW_SQL`). A day file is about 55% of the size the same logs took in the legacy table (`.plans` storage design, measured in batch C).
+- **Indexes.** Four instead of the legacy table's five: time, app, host, and (address, app, host), which serves the host filter's address branch, relabels by address and the host and app lists (one index seek per distinct triple).
+- **Full-text index.** Contentless (`content=''`), so it keeps no copy of the text and needs no triggers: the indexer adds each row with its text, and deletes remove rows by id (`contentless_delete=1`, SQLite 3.43 or later). The column names stay `app_name` and `source_alias`, so the search syntax (`host:`, `app:`) is unchanged.
+- **What the store returns does not change:** ISO times, names and the whole `raw`, with the legacy column names.
 
 ### 2.4 Asynchronous FTS5 Indexing Model & Worker Architecture
 - **Supervised Background Task:** `FTSIndexWorker` ([`backend/app/services/fts_indexer.py`](../../backend/app/services/fts_indexer.py)) runs as a supervised task under `_supervise_worker` in [`backend/app/main.py`](../../backend/app/main.py). Worker failures are isolated, logged, and restarted with exponential backoff.
@@ -447,7 +504,7 @@ Compact Database (`execute_vacuum` in `services/retention.py`) pauses ingest wri
 
 **Before a migration.** When `0 < user_version < latest` (after the newer-database check), `run_migrations` makes one backup before the whole run of pending steps (for example v2 to v4 gives one archive), unless backups before upgrades are off: `AUTO_BACKUP_ON_MIGRATION` when set, otherwise the `backup_before_migration` row in `system_settings` (`"0"` is off; absent is on), read from the database being migrated. A fresh database (`user_version` 0) and `repair_v3` alone make none. If the backup cannot be made (too little space, or `OSError` or `sqlite3.Error` while writing), the partial file is deleted, one `WARNING` names the figures, and `MigrationBackupError` is raised before any step runs: the web process enters recovery mode ([architecture.md](architecture.md), "Start-up States"), and the `seed-logs` command prints it and exits 1. `reset-admin` migrates only a new database (`user_version` 0) and refuses a newer one; on an existing database it sets the password at the schema it is at, so it works in recovery mode and never runs an upgrade beside the web process. `run_migrations` also takes `progress(stage, done, total)` (`backup` in bytes, `migrate` in steps), a `MigrationRun` it fills with `from_version`, `target_version`, `current_version`, `stage` and `backup_path`, and a `cancel` event (`BackupCancelled` from the backup, `MigrationCancelled` before a step).
 
-**Steps declare their needs** in `MIGRATION_NEEDS` (version to `MigrationNeeds`): `extra_space(db_size)`, bytes the step writes itself, which the backup leaves free; and `backup_without_logs`, set on a step that changes no log rows and whose way back is a restore without logs. The backup leaves the log tables out only when every pending step sets it; v1 to v3 do not, so an install jumping from 1.2.x gets a full backup.
+**Steps declare their needs** in `MIGRATION_NEEDS` (version to `MigrationNeeds`): `extra_space(db_size)`, bytes the step writes itself, which the backup leaves free; and `backup_without_logs`, set on a step that changes no log rows and whose way back is a restore without logs. The backup leaves the log tables out only when every pending step sets it; v4 does, v1 to v3 do not, so an install jumping from 1.2.x gets a full backup.
 
 **Archive.** `backups/` beside the database file. Name `logshed-backup-<kind>-<UTC YYYYMMDD>T<HHMMSS>Z[-<n>].tar.gz`, where `<kind>` is `pre-v<from>-to-v<to>` or `manual-v<schema>` and `-2`, `-3` avoid a name already taken. A gzip (level 1) tar with the database under its own name, then `manifest.json`: `{"format": 1, "app_version", "created_at", "kind": "pre-migration" | "manual", "schema_version", "target_schema" (null for manual), "files": [{"name": "logs.db", "role": "main", "size_bytes", "omitted_tables"?}]}`. `"format": 1` is a contract for restore code. `.secret_key` is never included. Written as `<name>.tmp`, `chmod 0640`, then renamed; a `backups/` folder LogShed creates gets mode `0750` (set outright, because `docker exec` runs with umask 0).
 
