@@ -48,6 +48,21 @@ describe('ApiTokensTab Component', () => {
     expect(screen.getByText('Active Tokens (0)')).toBeInTheDocument();
   });
 
+  it('draws the key icons with the ring at the bottom left and the teeth at the top right', async () => {
+    vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue([]);
+
+    const { container } = render(<ApiTokensTab />);
+    await screen.findByText('No API tokens generated yet');
+
+    const keys = container.querySelectorAll('svg.lucide-key');
+    expect(keys.length).toBeGreaterThanOrEqual(2);
+    for (const key of keys) {
+      const ring = key.querySelector('circle');
+      expect(ring?.getAttribute('cx')).toBe('7.5');
+      expect(ring?.getAttribute('cy')).toBe('15.5');
+    }
+  });
+
   it('renders active token table with formatted items', async () => {
     vi.spyOn(tokensApi, 'fetchApiTokens').mockResolvedValue(mockTokens);
 

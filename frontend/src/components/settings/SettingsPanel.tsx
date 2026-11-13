@@ -7,8 +7,8 @@ import {
   ArrowUpCircle,
   Server,
   Shield,
-  Key,
 } from 'lucide-react';
+import { Key } from '../common/icons.ts';
 import { VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
 import { fetchVersion } from '../../api/system.ts';

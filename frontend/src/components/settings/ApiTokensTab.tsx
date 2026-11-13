@@ -1,7 +1,6 @@
 import React, { useEffect, useId, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Key,
   Plus,
   Trash2,
   Check,
@@ -10,6 +9,7 @@ import {
   X,
   Edit2,
 } from 'lucide-react';
+import { Key } from '../common/icons.ts';
 import { ApiToken, ApiTokenCreateRequest, ApiTokenUpdateRequest, SystemSettings } from '../../types.ts';
 import { fetchApiTokens, createApiToken, revokeApiToken, updateApiToken } from '../../api/tokens.ts';
 import { formatDate } from '../../utils/formatters.ts';

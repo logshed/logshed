@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **AI analysis with older Claude models**: In 1.3.0 and 1.3.1, with Thinking set to Off, an analysis or follow-up on Claude Sonnet 4.6, Opus 4.6 or a model up to Claude 4.5 failed with "Anthropic endpoint error: ... unexpected keyword argument 'temperature'", and so did Claude 3.5 models at any thinking level. They work again, at the model's default temperature, since Anthropic no longer accepts a lower one.
 - **Unknown AI providers refused**: Saving settings with an AI provider LogShed does not support (through the API; the web interface only offers supported ones) was accepted and stored, and AI analysis then failed with "Unsupported AI provider". The save is now refused with `422` and the list of supported providers, and nothing is stored. Model names are not checked: any model, including one on your own server, can still be entered.
 - **Drop rule errors stay on screen**: On Rules > Drop Rules, an error that came less than three seconds after a success message (for example a failed status change just after a delete) disappeared when the success message's timer ran out. Errors now stay until you close them or another message replaces them.
+- **Key icon the right way round**: The key icon (on the API & MCP Access tab, its token cards and the MCP card) is drawn as it was before 1.4.0, with the ring at the bottom left; a library update had mirrored it.
 
 ## [1.3.1] - 2026-11-12
 

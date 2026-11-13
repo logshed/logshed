@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, Bot, Key, Shield } from 'lucide-react';
+import { AlertCircle, Bot, Shield } from 'lucide-react';
+import { Key } from '../common/icons.ts';
 import { updateSettings } from '../../api/settings.ts';
 import { SystemSettings } from '../../types.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
