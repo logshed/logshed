@@ -51,7 +51,7 @@ describe('SelectDropdown', () => {
 
   it('shows an unset value in the dimmer text of the Host and App dropdowns, and a set one in the accent', () => {
     render(<Harness />);
-    expect(trigger().querySelector('[id$="-value"]')!.className).toContain('text-slate-400');
+    expect(trigger().querySelector('[id$="-value"]')!.className).toContain('text-fg-muted');
     fireEvent.click(trigger());
     fireEvent.click(screen.getByRole('option', { name: 'Last 1h' }));
     expect(trigger().querySelector('[id$="-value"]')!.className).toContain('text-accent-300');
@@ -243,18 +243,18 @@ describe('SelectDropdown', () => {
 
   it('takes the look of the form it sits in, and its rows take the field font', () => {
     const { rerender } = render(
-      <SelectDropdown variant="panel" label="Sample Severity" options={OPTIONS} value="all" onChange={vi.fn()} fieldClassName="bg-dark-900 border-dark-800 px-2 py-1" />
+      <SelectDropdown variant="panel" label="Sample Severity" options={OPTIONS} value="all" onChange={vi.fn()} fieldClassName="bg-surface border-line-subtle px-2 py-1" />
     );
     const t = screen.getByRole('button', { name: /^Sample Severity / });
-    expect(t.className).toContain('bg-dark-900 border-dark-800 px-2 py-1');
-    expect(t.className).not.toContain('bg-dark-950');
+    expect(t.className).toContain('bg-surface border-line-subtle px-2 py-1');
+    expect(t.className).not.toContain('bg-canvas');
     fireEvent.click(t);
     expect(screen.getByRole('option', { name: 'Today' }).className).not.toContain('font-mono');
     expect(t.className).toContain('border-accent-500!');
     fireEvent.click(t);
 
     rerender(<SelectDropdown variant="panel" label="Sample Severity" options={OPTIONS} value="all" onChange={vi.fn()} />);
-    expect(t.className).toContain('bg-dark-950');
+    expect(t.className).toContain('bg-canvas');
     fireEvent.click(t);
     expect(screen.getByRole('option', { name: 'Today' }).className).toContain('font-mono');
   });

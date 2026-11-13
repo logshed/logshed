@@ -29,13 +29,13 @@ export const PresetCard: React.FC<PresetCardProps> = ({
   isInstalling,
   onInstall,
 }) => (
-  <div className="bg-dark-950/70 border border-dark-750 hover:border-dark-650 rounded-xl p-4 flex flex-col justify-between space-y-3 transition">
+  <div className="bg-canvas/70 border border-line-muted hover:border-line-hover rounded-xl p-4 flex flex-col justify-between space-y-3 transition">
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-semibold text-slate-100 truncate">{name}</span>
+          <span className="text-xs font-semibold text-fg-strong truncate">{name}</span>
           {isCustom && (
-            <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-800 shrink-0">
+            <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-info-950/60 text-info-300 border border-info-800 shrink-0">
               Custom
             </span>
           )}
@@ -43,15 +43,15 @@ export const PresetCard: React.FC<PresetCardProps> = ({
         {badge}
       </div>
 
-      <p className="text-xs text-slate-400 leading-relaxed">{description}</p>
+      <p className="text-xs text-fg-muted leading-relaxed">{description}</p>
 
-      <div className="pt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-400">{children}</div>
+      <div className="pt-1 flex flex-wrap gap-1.5 text-[11px] text-fg-muted">{children}</div>
     </div>
 
-    <div className="pt-3 border-t border-dark-800 flex items-center justify-between gap-2">
-      <span className="text-[11px] text-slate-400">
+    <div className="pt-3 border-t border-line-subtle flex items-center justify-between gap-2">
+      <span className="text-[11px] text-fg-muted">
         {alreadyInstalled ? (
-          <span className="flex items-center gap-1 text-emerald-400">
+          <span className="flex items-center gap-1 text-success-400">
             <CheckCircle2 className="w-3 h-3 shrink-0" />
             <span>{installedText}</span>
           </span>

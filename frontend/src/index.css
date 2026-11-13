@@ -18,25 +18,117 @@
   --text-2xl--line-height: 2rem;
   --text-3xl--line-height: 2.25rem;
   --text-4xl--line-height: 2.5rem;
+}
 
-  --color-dark-500: #475569;
-  --color-dark-600: #334155;
-  --color-dark-700: #1e293b;
-  --color-dark-800: #141d30;
-  --color-dark-850: #101726;
-  --color-dark-900: #0b0f19;
-  --color-dark-950: #070a10;
+@theme static {
+  /* Colour roles. Utilities use them by name (bg-surface, text-fg-muted, border-line, bg-danger-950/60),
+     never Tailwind's stock palette, which is switched off here. Values are the dark theme; a theme is
+     one set of these variables (see docs/spec/frontend.md, "Colour roles"). */
+  --color-*: initial;
 
+  /* Backgrounds, darkest first */
+  --color-canvas: #070a10;
+  --color-surface: #0b0f19;
+  --color-surface-hover: #101726;
+  --color-raised: #141d30;
+  --color-raised-hover: #192336;
+  --color-raised-strong: #1e293b;
+  --color-raised-max: #334155;
+  --color-backdrop: #000000;
+
+  /* Borders and dividers, faintest first */
+  --color-line-subtle: #141d30;
+  --color-line-muted: #192336;
+  --color-line: #1e293b;
+  --color-line-hover: #293548;
+  --color-line-strong: #334155;
+  --color-line-stronger: #475569;
+  --color-line-strongest: #64748b;
+
+  /* Text, brightest first. on-fill is text on a filled accent, danger or success button. */
+  --color-fg-max: #ffffff;
+  --color-fg-bright: #f8fafc;
+  --color-fg-strong: #f1f5f9;
+  --color-fg: #e2e8f0;
+  --color-fg-soft: #cbd5e1;
+  --color-fg-muted: #94a3b8;
+  --color-fg-subtle: #64748b;
+  --color-fg-faint: #475569;
+  --color-on-fill: #ffffff;
+  --color-on-warning: #070a10;
+
+  /* Neutral scale for neutral badges and markers (severity Info and Debug, slider ticks) */
+  --color-neutral-50: #f8fafc;
+  --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+  --color-neutral-800: #1e293b;
+  --color-neutral-900: #0f172a;
+
+  /* Accent (links, focus, primary buttons). Backgrounds behind white text use 700: 5.9:1
+     (600 gives 4.1:1, below the 4.5:1 WCAG AA asks). */
+  --color-accent-100: #e0f2fe;
   --color-accent-200: #bae6fd;
   --color-accent-300: #7dd3fc;
   --color-accent-400: #38bdf8;
   --color-accent-500: #0ea5e9;
   --color-accent-600: #0284c7;
-  /* Backgrounds behind white text: 5.9:1 (600 gives 4.1:1, below the 4.5:1 WCAG AA asks) */
   --color-accent-700: #0369a1;
   --color-accent-800: #075985;
   --color-accent-900: #0c4a6e;
   --color-accent-950: #082f49;
+
+  /* Errors, deletes and severe logs */
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+  --color-danger-900: #7f1d1d;
+  --color-danger-950: #450a0a;
+
+  /* Warnings, maintenance and unsaved changes */
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+  --color-warning-950: #451a03;
+
+  /* Success, connected and enabled */
+  --color-success-300: #6ee7b7;
+  --color-success-400: #34d399;
+  --color-success-500: #10b981;
+  --color-success-800: #065f46;
+  --color-success-900: #064e3b;
+  --color-success-950: #022c22;
+
+  /* Notices and neutral information */
+  --color-info-300: #93c5fd;
+  --color-info-800: #1e40af;
+  --color-info-950: #172554;
+
+  /* AI analysis, daily digests and preset categories */
+  --color-highlight-300: #d8b4fe;
+  --color-highlight-400: #c084fc;
+  --color-highlight-800: #6b21a8;
+  --color-highlight-950: #3b0764;
+
+  /* Secondary markers (reasoning models, the stored-logs figure) */
+  --color-marker-300: #a5b4fc;
+  --color-marker-400: #818cf8;
+  --color-marker-500: #6366f1;
 }
 
 /* Element defaults sit in the base layer, so a utility class on the same element wins, as in
@@ -56,8 +148,8 @@
 
   body {
     margin: 0;
-    background-color: #070a10;
-    color: #e2e8f0;
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -65,7 +157,7 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: #9ca3af;
+    color: var(--color-fg-muted);
   }
 }
 
@@ -76,16 +168,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #0b0f19;
+  background: var(--color-surface);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: var(--color-raised-strong);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: var(--color-raised-max);
 }
 
 /* Prevent horizontal layout shifts when vertical scrollbars appear or disappear */
@@ -102,7 +194,7 @@ main {
   }
 
   .log-row:hover {
-    background-color: rgba(30, 41, 59, 0.4);
+    background-color: color-mix(in srgb, var(--color-raised-strong) 40%, transparent);
   }
 }
 

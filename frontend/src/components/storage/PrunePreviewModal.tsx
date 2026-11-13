@@ -75,7 +75,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
       title={title}
       maxWidth="max-w-md"
     >
-      <div className="space-y-4 text-xs text-slate-300">
+      <div className="space-y-4 text-xs text-fg-soft">
         {nothingToDelete ? (
           <p className="leading-relaxed">
             Nothing is older than the {days}-day retention period, so there is nothing to purge right now.
@@ -88,28 +88,28 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
                 : `The following older than ${cutoffText} (${days}-day retention) will be permanently deleted:`}
             </p>
             <ul
-              className="space-y-1.5 bg-dark-950 border border-dark-800 rounded-lg p-3 text-[11px]"
+              className="space-y-1.5 bg-canvas border border-line-subtle rounded-lg p-3 text-[11px]"
               data-testid="prune-preview-list"
             >
               {rows.map((r) => (
                 <li key={r.label} className="flex items-center justify-between gap-3">
-                  <span className="text-slate-400">{r.label}</span>
-                  <span className="text-slate-100 font-mono">{formatCount(r.count)}</span>
+                  <span className="text-fg-muted">{r.label}</span>
+                  <span className="text-fg-strong font-mono">{formatCount(r.count)}</span>
                 </li>
               ))}
             </ul>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
+            <p className="text-[11px] text-fg-muted leading-relaxed">
               Counts are taken right now and may differ slightly when the deletion runs.
             </p>
           </>
         )}
 
-        <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-dark-800">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-line-subtle">
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
+            className="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
           >
             {nothingToDelete && mode === 'purge' ? 'Close' : 'Cancel'}
           </button>
@@ -119,7 +119,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
               onClick={onDeleteLater}
               disabled={busy}
               title={`Saves the new retention. The next daily cleanup runs ${describeNextCleanup(preview.next_cleanup_at)}.`}
-              className="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              className="px-3 py-1.5 text-xs bg-raised hover:bg-raised-strong text-fg border border-line-strong font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Delete at Next Daily Cleanup</span>
@@ -130,7 +130,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
               type="button"
               onClick={onDeleteNow}
               disabled={busy}
-              className="px-4 py-1.5 text-xs bg-red-700 hover:bg-red-600 text-white font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              className="px-4 py-1.5 text-xs bg-danger-700 hover:bg-danger-600 text-on-fill font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
             >
               {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
               <span>{mode === 'save' ? 'Save and Delete Now' : 'Delete Now'}</span>
@@ -139,7 +139,7 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
         </div>
 
         {mode === 'save' && !nothingToDelete && (
-          <p className="text-[11px] text-slate-400 leading-relaxed">
+          <p className="text-[11px] text-fg-muted leading-relaxed">
             The next daily cleanup runs {describeNextCleanup(preview.next_cleanup_at)}.
           </p>
         )}

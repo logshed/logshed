@@ -61,20 +61,20 @@ export { type AlertViewTab, pathToAlertSubTab, alertSubTabToPath, parseIncidentI
 const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
   <span
     title={title}
-    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none select-none shrink-0"
+    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-surface/90 border border-line leading-none select-none shrink-0"
   >
-    <span className={active > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
+    <span className={active > 0 ? 'text-success-400 font-semibold' : 'text-fg-muted'}>
       {active}
     </span>
-    <span className="text-slate-600">/</span>
-    <span className="text-slate-400">{total}</span>
+    <span className="text-fg-faint">/</span>
+    <span className="text-fg-muted">{total}</span>
   </span>
 );
 
 const SimpleCountBadge: React.FC<{ count: number; title?: string }> = ({ count, title }) => (
   <span
     title={title}
-    className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-dark-900/90 border border-dark-700 leading-none text-slate-400 select-none shrink-0"
+    className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-mono bg-surface/90 border border-line leading-none text-fg-muted select-none shrink-0"
   >
     {count}
   </span>
@@ -391,11 +391,11 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     <div className="w-full max-w-5xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8 min-w-0">
       {/* Header */}
       <div>
-        <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+        <h2 className="text-base font-bold text-fg-strong flex items-center gap-2">
           <ShieldAlert className="w-5 h-5 text-accent-500" />
           <span>Rules & History</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <p className="text-xs text-fg-muted mt-0.5">
           Configure real-time threshold and pattern alert rules, manage ingestion drop rules, deploy 1-click quick rules, and review past incidents and analyses.
         </p>
       </div>
@@ -405,8 +405,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         <div
           className={`flex items-center justify-between px-4 py-2.5 rounded-lg text-xs border ${
             feedbackMsg.isError
-              ? 'bg-red-950/40 border-red-800/60 text-red-300'
-              : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+              ? 'bg-danger-950/40 border-danger-800/60 text-danger-300'
+              : 'bg-success-950/40 border-success-800/60 text-success-300'
           }`}
         >
           <div className="flex items-center gap-2">
@@ -415,7 +415,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           </div>
           <button
             onClick={() => setFeedbackMsg(null)}
-            className="text-slate-400 hover:text-slate-200 cursor-pointer ml-4"
+            className="text-fg-muted hover:text-fg cursor-pointer ml-4"
           >
             &times;
           </button>
@@ -423,14 +423,14 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       )}
 
       {/* Section Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-dark-700 pb-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-2">
         <button
           type="button"
           onClick={() => handleSubTabChange('rules')}
           className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'rules'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <Bell className="w-3.5 h-3.5 shrink-0" />
@@ -447,8 +447,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onClick={() => handleSubTabChange('drop-rules')}
           className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'drop-rules'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <FilterX className="w-3.5 h-3.5 shrink-0" />
@@ -465,8 +465,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onClick={() => handleSubTabChange('history')}
           className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'history'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <History className="w-3.5 h-3.5 shrink-0" />
@@ -482,14 +482,14 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           onClick={() => handleSubTabChange('maintenance')}
           className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'maintenance'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <Clock className="w-3.5 h-3.5 shrink-0" />
           <span>Maintenance</span>
           {isMaintenanceActiveNow ? (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-semibold bg-warning-500/20 text-warning-300 border border-warning-500/40 animate-pulse">
               Active
             </span>
           ) : (
@@ -595,8 +595,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         onConfirm={handleConfirmDeleteRule}
         confirmLabel="Delete Rule"
       >
-        <p className="text-slate-300 leading-relaxed">
-          Are you sure you want to delete alert rule <strong className="text-white">"{ruleToDelete?.name}"</strong>?
+        <p className="text-fg-soft leading-relaxed">
+          Are you sure you want to delete alert rule <strong className="text-fg-max">"{ruleToDelete?.name}"</strong>?
         </p>
       </ConfirmDialog>
 
@@ -646,10 +646,10 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         confirmLabel="Clear All History"
       >
         <div className="flex items-start gap-3">
-          <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+          <div className="p-2 rounded-lg bg-danger-500/10 border border-danger-500/20 text-danger-400 shrink-0">
             <AlertTriangle className="w-5 h-5" />
           </div>
-          <p className="text-slate-300 leading-relaxed">
+          <p className="text-fg-soft leading-relaxed">
             Are you sure you want to permanently clear all alert and analysis history records? This action cannot be undone.
           </p>
         </div>
@@ -667,8 +667,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         }}
         confirmLabel="Delete Record"
       >
-        <p className="text-slate-300 leading-relaxed">
-          Are you sure you want to delete this incident record for rule <strong className="text-white">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-slate-200">{formatLocalTimestamp(historyItemToDelete?.triggered_at, true, serverTimezone)}</span>? This action cannot be undone.
+        <p className="text-fg-soft leading-relaxed">
+          Are you sure you want to delete this incident record for rule <strong className="text-fg-max">"{historyItemToDelete?.rule_name}"</strong> from <span className="font-mono text-fg">{formatLocalTimestamp(historyItemToDelete?.triggered_at, true, serverTimezone)}</span>? This action cannot be undone.
         </p>
       </ConfirmDialog>
 
@@ -684,8 +684,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         }}
         confirmLabel="Delete Schedule"
       >
-        <p className="text-slate-300 leading-relaxed">
-          Are you sure you want to delete maintenance schedule <strong className="text-white">"{scheduleToDelete?.name}"</strong>?
+        <p className="text-fg-soft leading-relaxed">
+          Are you sure you want to delete maintenance schedule <strong className="text-fg-max">"{scheduleToDelete?.name}"</strong>?
         </p>
       </ConfirmDialog>
 
@@ -699,9 +699,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           maint.clearAllSessions();
         }}
         confirmLabel="Clear All Sessions"
-        confirmClassName="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
+        confirmClassName="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-on-fill bg-danger-600 hover:bg-danger-500 transition cursor-pointer"
       >
-        <p className="text-slate-300 leading-relaxed">
+        <p className="text-fg-soft leading-relaxed">
           Are you sure you want to terminate all active on-demand and API maintenance sessions? Alert notifications will immediately resume.
         </p>
       </ConfirmDialog>

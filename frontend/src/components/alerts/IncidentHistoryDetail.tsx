@@ -159,31 +159,31 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
     return (
       <div className="space-y-4 font-sans text-xs" data-testid="maintenance-detail">
-        <div className="bg-dark-950 p-4 rounded-lg border border-dark-700 space-y-3">
+        <div className="bg-canvas p-4 rounded-lg border border-line space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Wrench className="w-4 h-4 text-sky-400 shrink-0" />
-            <span className="font-semibold text-slate-100 font-mono text-xs">{MAINTENANCE_RULE_NAME}</span>
+            <Wrench className="w-4 h-4 text-accent-400 shrink-0" />
+            <span className="font-semibold text-fg-strong font-mono text-xs">{MAINTENANCE_RULE_NAME}</span>
             <span
               className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 ${
                 inProgress
-                  ? 'text-emerald-300 bg-emerald-950/60 border-emerald-800/60'
-                  : 'text-slate-300 bg-dark-800 border-dark-650'
+                  ? 'text-success-300 bg-success-950/60 border-success-800/60'
+                  : 'text-fg-soft bg-raised border-line-hover'
               }`}
             >
               {maintenanceEndLabel(item)}
             </span>
           </div>
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 pt-2.5 border-t border-dark-800 text-[11px] font-mono">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 pt-2.5 border-t border-line-subtle text-[11px] font-mono">
             {rows.map((row) => (
               <div key={row.label} className="flex items-center justify-between gap-3">
-                <dt className="text-slate-400 text-[10px] uppercase font-semibold">{row.label}</dt>
-                <dd className="text-slate-200 text-right break-all">{row.value}</dd>
+                <dt className="text-fg-muted text-[10px] uppercase font-semibold">{row.label}</dt>
+                <dd className="text-fg text-right break-all">{row.value}</dd>
               </div>
             ))}
           </dl>
         </div>
         {!isDropMode && (
-          <p className="text-slate-400 text-[11px]">
+          <p className="text-fg-muted text-[11px]">
             Logs were stored normally during this window. Only alert notifications were silenced.
           </p>
         )}
@@ -194,28 +194,28 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
   return (
     <div className="space-y-4 font-sans text-xs">
       {/* Header Info Card */}
-      <div className="bg-dark-950 p-4 rounded-lg border border-dark-700 space-y-3">
+      <div className="bg-canvas p-4 rounded-lg border border-line space-y-3">
         {/* Row 1: Target / Title, Type Badge & Timestamp */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {isDigest ? (
-              <Calendar className="w-4 h-4 text-purple-400 shrink-0" />
+              <Calendar className="w-4 h-4 text-highlight-400 shrink-0" />
             ) : isOnDemand ? (
               <Brain className="w-4 h-4 text-accent-400 shrink-0" />
             ) : isAiAlert ? (
-              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+              <Zap className="w-4 h-4 text-warning-400 shrink-0" />
             ) : (
-              <Bell className="w-4 h-4 text-slate-400 shrink-0" />
+              <Bell className="w-4 h-4 text-fg-muted shrink-0" />
             )}
-            <span className="font-semibold text-slate-100 font-mono text-xs truncate">
+            <span className="font-semibold text-fg-strong font-mono text-xs truncate">
               {displayTarget}
             </span>
-            <span className="text-slate-400 text-[11px] shrink-0 font-mono">
+            <span className="text-fg-muted text-[11px] shrink-0 font-mono">
               ({countLabel})
             </span>
             {isDigest ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
-                <Calendar className="w-2.5 h-2.5 text-purple-400 shrink-0" />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-highlight-400 bg-highlight-950/60 border border-highlight-800/60 shrink-0">
+                <Calendar className="w-2.5 h-2.5 text-highlight-400 shrink-0" />
                 Daily Digest
               </span>
             ) : isOnDemand ? (
@@ -223,40 +223,40 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                 On-Demand
               </span>
             ) : isAiAlert ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
-                <Zap className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-warning-400 bg-warning-950/60 border border-warning-800/60 shrink-0">
+                <Zap className="w-2.5 h-2.5 text-warning-400 shrink-0" />
                 AI Alert
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-sans font-medium text-fg-soft bg-raised border border-line-hover shrink-0">
                 Alert
               </span>
             )}
           </div>
-          <span className="font-mono text-[11px] text-slate-400 shrink-0">
+          <span className="font-mono text-[11px] text-fg-muted shrink-0">
             {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
           </span>
         </div>
 
         {/* Row 2: Secondary Context / Channel / Status */}
-        <div className="flex flex-wrap items-center justify-between pt-2.5 border-t border-dark-800 text-[11px] font-mono gap-2">
+        <div className="flex flex-wrap items-center justify-between pt-2.5 border-t border-line-subtle text-[11px] font-mono gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {item.ai_model && (
-              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
-                <span className="text-slate-400 text-[10px] uppercase font-semibold">Model:</span>
+              <div className="flex items-center gap-1.5 bg-surface border border-line px-2 py-0.5 rounded-sm text-fg-soft">
+                <span className="text-fg-muted text-[10px] uppercase font-semibold">Model:</span>
                 <span className="text-accent-400 font-medium">{item.ai_model}</span>
               </div>
             )}
             {channelName && (
-              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
-                <span className="text-slate-400 text-[10px] uppercase font-semibold">Target:</span>
-                <span className="text-slate-200 font-medium">{channelName}</span>
+              <div className="flex items-center gap-1.5 bg-surface border border-line px-2 py-0.5 rounded-sm text-fg-soft">
+                <span className="text-fg-muted text-[10px] uppercase font-semibold">Target:</span>
+                <span className="text-fg font-medium">{channelName}</span>
               </div>
             )}
             {!isOnDemand && !isDigest && (item.source_alias || item.app_name) && (
-              <div className="flex items-center gap-1.5 bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
-                <span className="text-slate-400 text-[10px] uppercase font-semibold">Source:</span>
-                <span className="text-slate-200 font-medium">
+              <div className="flex items-center gap-1.5 bg-surface border border-line px-2 py-0.5 rounded-sm text-fg-soft">
+                <span className="text-fg-muted text-[10px] uppercase font-semibold">Source:</span>
+                <span className="text-fg font-medium">
                   {[item.source_alias, item.app_name].filter(Boolean).join(' • ')}
                 </span>
               </div>
@@ -273,12 +273,12 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
         {/* Row: Open the Console around this alert (host-wide, or the same app only) */}
         {consoleUrl && (
-          <div className="flex flex-wrap items-center gap-3 pt-2.5 border-t border-dark-800 text-[11px]">
+          <div className="flex flex-wrap items-center gap-3 pt-2.5 border-t border-line-subtle text-[11px]">
             <a
               href={consoleUrl}
               onClick={(e) => openInConsole(e, consoleUrl)}
               title={`Show logs${item.source_alias ? ` from ${item.source_alias}` : ''} around the time this alert fired`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-sm transition font-medium cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-sm transition font-medium cursor-pointer"
             >
               <Radio className="w-3.5 h-3.5 text-accent-400" />
               <span>Inspect in Console</span>
@@ -298,11 +298,11 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
         {/* Row 3: Token Breakdown Pills (when available) */}
         {item.tokens_used !== undefined && item.tokens_used !== null && item.tokens_used > 0 && (
-          <div className="flex flex-wrap items-center justify-between pt-2 border-t border-dark-800 text-[11px] font-mono gap-2">
-            <span className="text-slate-400 text-[10px] uppercase font-semibold">Tokens:</span>
+          <div className="flex flex-wrap items-center justify-between pt-2 border-t border-line-subtle text-[11px] font-mono gap-2">
+            <span className="text-fg-muted text-[10px] uppercase font-semibold">Tokens:</span>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-slate-300">
-                Total: <span className="text-slate-100 font-semibold">{item.tokens_used.toLocaleString()}</span>
+              <span className="text-fg-soft">
+                Total: <span className="text-fg-strong font-semibold">{item.tokens_used.toLocaleString()}</span>
               </span>
               <TokenUsage tokensIn={item.tokens_in} tokensOut={item.tokens_out} tokensThoughts={item.tokens_thoughts} />
             </div>
@@ -312,11 +312,11 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
       {/* Operator Context Banner */}
       {cleanUserContext && (
-        <div className="bg-dark-900 border border-dark-700 p-3 rounded-lg text-xs space-y-1">
-          <div className="font-semibold text-slate-300 uppercase tracking-wider text-[10px]">
+        <div className="bg-surface border border-line p-3 rounded-lg text-xs space-y-1">
+          <div className="font-semibold text-fg-soft uppercase tracking-wider text-[10px]">
             Operator Context:
           </div>
-          <div className="text-slate-200 leading-relaxed font-sans">
+          <div className="text-fg leading-relaxed font-sans">
             {cleanUserContext}
           </div>
         </div>
@@ -324,8 +324,8 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
       {/* Advisory Notice Banner for AI Analyses */}
       {item.ai_enrichment && (
-        <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-lg flex items-start gap-2 text-amber-200/90 text-xs leading-relaxed">
-          <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-warning-950/30 border border-warning-800/50 rounded-lg flex items-start gap-2 text-warning-200/90 text-xs leading-relaxed">
+          <Info className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
           <span>
             AI root-cause analyses and remediation commands are advisory only. Always verify proposed commands and configurations before executing on systems. API calls consume tokens billed to your provider.
           </span>
@@ -334,20 +334,20 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
       {/* Rendered Full Diagnosis / Incident Summary Card */}
       {item.incident_summary && (
-        <div className="bg-dark-950 p-4 rounded-lg border border-dark-700">
+        <div className="bg-canvas p-4 rounded-lg border border-line">
           <h3
             className={`text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5 ${
-              isFailed ? 'text-red-400' : 'text-accent-400'
+              isFailed ? 'text-danger-400' : 'text-accent-400'
             }`}
           >
             {isFailed ? (
               <>
-                <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                <AlertCircle className="w-3.5 h-3.5 text-danger-400" />
                 Failure Details
               </>
             ) : isDigest ? (
               <>
-                <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                <Calendar className="w-3.5 h-3.5 text-highlight-400" />
                 Daily Digest Rollup Report
               </>
             ) : (
@@ -359,7 +359,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
           </h3>
 
           {isFailed ? (
-            <div className="p-3 bg-red-950/30 border border-red-900/60 rounded-sm text-xs text-red-300 leading-relaxed font-mono whitespace-pre-wrap">
+            <div className="p-3 bg-danger-950/30 border border-danger-900/60 rounded-sm text-xs text-danger-300 leading-relaxed font-mono whitespace-pre-wrap">
               {item.incident_summary}
             </div>
           ) : (
@@ -370,31 +370,31 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
       {/* Expandable Follow-up Discussion (messages load on first expand) */}
       {canFollowUp && (
-        <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
+        <div className="border border-line rounded-lg overflow-hidden bg-canvas">
           <button
             type="button"
             onClick={toggleFollowUp}
             aria-expanded={showFollowUp}
-            className="w-full flex items-center justify-between p-3 bg-dark-900 hover:bg-dark-850 transition text-left cursor-pointer"
+            className="w-full flex items-center justify-between p-3 bg-surface hover:bg-surface-hover transition text-left cursor-pointer"
           >
             <div className="flex items-center gap-2">
               {showFollowUp ? (
-                <ChevronDown className="w-4 h-4 text-slate-400" />
+                <ChevronDown className="w-4 h-4 text-fg-muted" />
               ) : (
-                <ChevronRight className="w-4 h-4 text-slate-400" />
+                <ChevronRight className="w-4 h-4 text-fg-muted" />
               )}
-              <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+              <MessageSquare className="w-3.5 h-3.5 text-accent-400" />
+              <span className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider">
                 Follow-up Discussion
               </span>
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">
+            <span className="text-[11px] text-fg-muted font-mono">
               {showFollowUp ? 'Hide' : 'Expand'}
             </span>
           </button>
 
           {followUpOpened && (
-            <div className={`border-t border-dark-700 p-3 ${showFollowUp ? '' : 'hidden'}`}>
+            <div className={`border-t border-line p-3 ${showFollowUp ? '' : 'hidden'}`}>
               <AiFollowUpThread auditId={item.ai_audit_id!} />
             </div>
           )}
@@ -403,38 +403,38 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
       {/* Expandable Prompt & Redacted Logs Card */}
       {item.prompt_sent && (
-        <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
+        <div className="border border-line rounded-lg overflow-hidden bg-canvas">
           <button
             type="button"
             onClick={() => setShowPromptDetails(!showPromptDetails)}
-            className="w-full flex items-center justify-between p-3 bg-dark-900 hover:bg-dark-850 transition text-left cursor-pointer"
+            className="w-full flex items-center justify-between p-3 bg-surface hover:bg-surface-hover transition text-left cursor-pointer"
           >
             <div className="flex items-center gap-2">
               {showPromptDetails ? (
-                <ChevronDown className="w-4 h-4 text-slate-400" />
+                <ChevronDown className="w-4 h-4 text-fg-muted" />
               ) : (
-                <ChevronRight className="w-4 h-4 text-slate-400" />
+                <ChevronRight className="w-4 h-4 text-fg-muted" />
               )}
-              <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider">
                 View Submitted Logs & Prompt
               </span>
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">
+            <span className="text-[11px] text-fg-muted font-mono">
               {showPromptDetails ? 'Hide' : 'Expand'}
             </span>
           </button>
 
           {showPromptDetails && (
-            <div className="border-t border-dark-700 bg-dark-950">
-              <div className="p-2.5 px-3 bg-dark-900/60 border-b border-dark-800 flex items-center justify-between gap-2">
-                <div className="inline-flex rounded-md p-0.5 bg-dark-950 border border-dark-700 text-[11px]">
+            <div className="border-t border-line bg-canvas">
+              <div className="p-2.5 px-3 bg-surface/60 border-b border-line-subtle flex items-center justify-between gap-2">
+                <div className="inline-flex rounded-md p-0.5 bg-canvas border border-line text-[11px]">
                   <button
                     type="button"
                     onClick={() => setPromptViewMode('analysis')}
                     className={`px-2 py-0.5 rounded transition cursor-pointer ${
                       promptViewMode === 'analysis'
-                        ? 'bg-accent-700 text-white font-medium'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-accent-700 text-on-fill font-medium'
+                        : 'text-fg-muted hover:text-fg'
                     }`}
                   >
                     Analysis Prompt
@@ -444,8 +444,8 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                     onClick={() => setPromptViewMode('full')}
                     className={`px-2 py-0.5 rounded transition cursor-pointer ${
                       promptViewMode === 'full'
-                        ? 'bg-accent-700 text-white font-medium'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-accent-700 text-on-fill font-medium'
+                        : 'text-fg-muted hover:text-fg'
                     }`}
                   >
                     Full LLM Prompt
@@ -456,11 +456,11 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                   text={promptToCopy}
                   label="Copy Prompt"
                   title="Copy prompt"
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
                 />
               </div>
 
-              <pre className="p-3 bg-dark-950 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-60 leading-relaxed selection:bg-accent-900/50">
+              <pre className="p-3 bg-canvas font-mono text-[11px] text-fg-soft overflow-x-auto whitespace-pre-wrap max-h-60 leading-relaxed selection:bg-accent-900/50">
                 {promptViewMode === 'full'
                   ? buildFullEnvelope(item.system_prompt || DEFAULT_SYSTEM_PROMPT, item.prompt_sent)
                   : item.prompt_sent}
@@ -472,10 +472,10 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
 
       {/* Triggering Log Snippet Card */}
       {!isDigest && item.sample_log && (
-        <div className="border border-dark-700 rounded-lg overflow-hidden bg-dark-950">
-          <div className="flex items-center justify-between p-2.5 px-3 bg-dark-900 border-b border-dark-700 gap-2">
+        <div className="border border-line rounded-lg overflow-hidden bg-canvas">
+          <div className="flex items-center justify-between p-2.5 px-3 bg-surface border-b border-line gap-2">
             <div className="flex items-center gap-3 min-w-0">
-              <h3 className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+              <h3 className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider">
                 Triggering Log Snippet
               </h3>
               {consoleUrl && (
@@ -493,10 +493,10 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               text={item.sample_log || ''}
               label="Copy Log"
               title="Copy triggering log"
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-dark-750"
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
             />
           </div>
-          <pre className="p-3 bg-dark-950 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-48 leading-relaxed selection:bg-accent-900/50">
+          <pre className="p-3 bg-canvas font-mono text-[11px] text-fg-soft overflow-x-auto whitespace-pre-wrap max-h-48 leading-relaxed selection:bg-accent-900/50">
             {item.sample_log}
           </pre>
         </div>

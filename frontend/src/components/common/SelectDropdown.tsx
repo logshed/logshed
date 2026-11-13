@@ -35,7 +35,7 @@ export interface SelectDropdownProps {
 }
 
 /** The panel's look without fieldClassName: the Console filter drawer's fields. */
-const DEFAULT_FIELD = 'bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-400';
+const DEFAULT_FIELD = 'bg-canvas border-line rounded-sm px-3 py-2 font-mono text-fg-muted';
 
 /** The tallest the list grows before it scrolls (Tailwind's max-h-72). */
 const LIST_MAX_HEIGHT = 288;
@@ -272,7 +272,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   const chevron = (
     <ChevronDown
       aria-hidden="true"
-      className={`${isPanel ? 'w-3.5 h-3.5' : 'w-3 h-3'} text-slate-400 shrink-0 transition-transform duration-150 ${
+      className={`${isPanel ? 'w-3.5 h-3.5' : 'w-3 h-3'} text-fg-muted shrink-0 transition-transform duration-150 ${
         isOpen ? 'rotate-180 text-accent-400' : ''
       }`}
     />
@@ -284,7 +284,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       onClick={onClear}
       className={
         isPanel
-          ? 'text-slate-500 hover:text-slate-200 rounded-sm hover:bg-dark-800 transition cursor-pointer shrink-0 p-1.5'
+          ? 'text-fg-subtle hover:text-fg rounded-sm hover:bg-raised transition cursor-pointer shrink-0 p-1.5'
           : FILTER_CLEAR_BUTTON
       }
       title={clearLabel}
@@ -308,8 +308,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         onMouseMove={() => setActiveIndex(index)}
         className={`flex items-center justify-between gap-3 cursor-pointer select-none ${rowFont} ${
           isPanel ? 'px-3 py-2 text-xs' : 'px-2.5 py-1 text-[11px]'
-        } ${isActive ? 'bg-dark-800 ring-1 ring-inset ring-accent-500/60' : ''} ${
-          isChosen ? 'text-accent-200 font-medium' : isActive ? 'text-slate-100' : 'text-slate-300'
+        } ${isActive ? 'bg-raised ring-1 ring-inset ring-accent-500/60' : ''} ${
+          isChosen ? 'text-accent-200 font-medium' : isActive ? 'text-fg-strong' : 'text-fg-soft'
         }`}
       >
         {/* A long row (an AI model name) wraps in the panel's fixed width rather than running past it */}
@@ -393,10 +393,10 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         </>
       ) : (
         <>
-          <span id={labelId} className="text-slate-400 font-medium text-[11px]">{label}:</span>
+          <span id={labelId} className="text-fg-muted font-medium text-[11px]">{label}:</span>
           <span
             id={valueId}
-            className={`font-mono text-[11px] whitespace-nowrap ${active ? 'text-accent-300 font-medium' : 'text-slate-400'}`}
+            className={`font-mono text-[11px] whitespace-nowrap ${active ? 'text-accent-300 font-medium' : 'text-fg-muted'}`}
           >
             {selectedLabel}
           </span>
@@ -409,7 +409,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
 
   if (isPanel) {
     return (
-      <div data-active={active} className={`flex items-center gap-2 ${active ? 'text-slate-100' : ''}`}>
+      <div data-active={active} className={`flex items-center gap-2 ${active ? 'text-fg-strong' : ''}`}>
         <div className="relative flex-1 min-w-0">
           {trigger}
           {panelList}

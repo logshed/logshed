@@ -8,20 +8,20 @@ const LOOKS = {
   // A question in plain text, with a divider above the buttons
   plain: {
     body: 'space-y-4 text-xs',
-    footer: 'pt-3 border-t border-dark-700 flex justify-end gap-2',
+    footer: 'pt-3 border-t border-line flex justify-end gap-2',
     cancel:
-      'px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer',
+      'px-3.5 py-1.5 rounded-lg text-xs font-medium text-fg-soft hover:text-fg-max bg-raised transition cursor-pointer',
     confirm:
-      'px-3.5 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-500 transition cursor-pointer',
+      'px-3.5 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-danger-600 hover:bg-danger-500 transition cursor-pointer',
   },
   // The question and details inside a red warning box
   notice: {
     body: 'space-y-4 text-xs font-sans',
     footer: 'flex items-center justify-end gap-2 pt-2',
     cancel:
-      'px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-600 rounded-lg transition cursor-pointer',
+      'px-3 py-1.5 text-xs bg-raised hover:bg-raised-strong text-fg-soft border border-line-strong rounded-lg transition cursor-pointer',
     confirm:
-      'flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow-sm transition cursor-pointer',
+      'flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-lg shadow-sm transition cursor-pointer',
   },
 } as const;
 
@@ -75,8 +75,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     <Modal isOpen={isOpen} onClose={onClose ?? onCancel} title={title} maxWidth={maxWidth}>
       <div className={bodyClassName ?? styles.body}>
         {look === 'notice' ? (
-          <div className="flex items-start gap-3 p-3 bg-red-950/30 border border-red-800/60 rounded-lg text-slate-200">
-            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-3 p-3 bg-danger-950/30 border border-danger-800/60 rounded-lg text-fg">
+            <AlertTriangle className="w-5 h-5 text-danger-400 shrink-0 mt-0.5" />
             <div className={noticeClassName}>{children}</div>
           </div>
         ) : (

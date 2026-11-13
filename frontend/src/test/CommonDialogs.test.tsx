@@ -84,7 +84,7 @@ describe('ConfirmDialog', () => {
       </ConfirmDialog>
     );
     const box = screen.getByText('Delete this view?').parentElement!.parentElement!;
-    expect(box.className).toContain('bg-red-950/30');
+    expect(box.className).toContain('bg-danger-950/30');
     const confirm = screen.getByRole('button', { name: 'Delete View' });
     expect(confirm.firstElementChild).toBe(screen.getByTestId('confirm-icon'));
     expect(confirm.querySelector('span')).toHaveTextContent('Delete View');
@@ -120,7 +120,7 @@ describe('CopyButton', () => {
     const copySpy = vi.spyOn(clipboardModule, 'copyToClipboard').mockResolvedValue(true);
     const beforeCopy = vi.fn();
     let value = '';
-    render(<CopyButton text={() => value} beforeCopy={beforeCopy} copiedLabelClassName="text-emerald-400" />);
+    render(<CopyButton text={() => value} beforeCopy={beforeCopy} copiedLabelClassName="text-success-400" />);
     const button = screen.getByRole('button', { name: 'Copy' });
 
     await act(async () => {
@@ -135,7 +135,7 @@ describe('CopyButton', () => {
     });
     expect(beforeCopy).toHaveBeenCalledTimes(1);
     expect(copySpy).toHaveBeenCalledWith('token');
-    expect(screen.getByText('Copied')).toHaveClass('text-emerald-400');
+    expect(screen.getByText('Copied')).toHaveClass('text-success-400');
   });
 
   it('keeps showing Copy when the copy fails', async () => {

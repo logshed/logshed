@@ -52,7 +52,7 @@ export const StoragePanel: React.FC = () => {
 
   if (isLoading && !storageMetrics) {
     return (
-      <div className="p-8 text-center text-slate-400 font-mono text-xs flex items-center justify-center gap-2">
+      <div className="p-8 text-center text-fg-muted font-mono text-xs flex items-center justify-center gap-2">
         <RefreshCw className="w-4 h-4 animate-spin text-accent-500" />
         <span>Loading storage metrics and retention configuration...</span>
       </div>
@@ -63,18 +63,18 @@ export const StoragePanel: React.FC = () => {
     <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8">
       {/* Header */}
       <div>
-        <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+        <h2 className="text-base font-bold text-fg-strong flex items-center gap-2">
           <Database className="w-5 h-5 text-accent-500" />
           <span>Storage & Retention</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <p className="text-xs text-fg-muted mt-0.5">
           Monitor SQLite database growth and configure log retention policies.
         </p>
       </div>
 
       {errorMsg && (
-        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           <span>{errorMsg}</span>
         </div>
       )}

@@ -8,19 +8,19 @@ interface CodeBlockProps {
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
   return (
-    <div className="my-2 rounded-lg border border-dark-700 bg-dark-900 overflow-hidden shadow-xs">
-      <div className="flex items-center justify-between px-3 py-1 bg-dark-950 border-b border-dark-800 text-[11px] font-mono text-slate-400">
-        <span className="uppercase tracking-wider text-[10px] font-semibold text-slate-400">
+    <div className="my-2 rounded-lg border border-line bg-surface overflow-hidden shadow-xs">
+      <div className="flex items-center justify-between px-3 py-1 bg-canvas border-b border-line-subtle text-[11px] font-mono text-fg-muted">
+        <span className="uppercase tracking-wider text-[10px] font-semibold text-fg-muted">
           {language || 'code'}
         </span>
         <CopyButton
           text={code}
           title="Copy code"
-          className="flex items-center gap-1 hover:text-slate-200 transition text-[11px] px-1.5 py-0.5 rounded-sm hover:bg-dark-800 cursor-pointer"
+          className="flex items-center gap-1 hover:text-fg transition text-[11px] px-1.5 py-0.5 rounded-sm hover:bg-raised cursor-pointer"
           iconClassName="w-3 h-3"
         />
       </div>
-      <pre className="p-3 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed select-text">
+      <pre className="p-3 overflow-x-auto text-xs font-mono text-fg leading-relaxed select-text">
         <code>{code}</code>
       </pre>
     </div>
@@ -61,7 +61,7 @@ export function renderInline(text: string): React.ReactNode[] {
       nodes.push(
         <code
           key={tokenKey}
-          className="bg-dark-900 text-accent-300 px-1.5 py-0.5 rounded-sm font-mono text-[11px] border border-dark-700 select-text"
+          className="bg-surface text-accent-300 px-1.5 py-0.5 rounded-sm font-mono text-[11px] border border-line select-text"
         >
           {codeContent}
         </code>
@@ -72,7 +72,7 @@ export function renderInline(text: string): React.ReactNode[] {
     ) {
       const boldContent = matchedToken.slice(2, -2);
       nodes.push(
-        <strong key={tokenKey} className="font-semibold text-slate-100">
+        <strong key={tokenKey} className="font-semibold text-fg-strong">
           {renderInline(boldContent)}
         </strong>
       );
@@ -82,7 +82,7 @@ export function renderInline(text: string): React.ReactNode[] {
     ) {
       const italicContent = matchedToken.slice(1, -1);
       nodes.push(
-        <em key={tokenKey} className="italic text-slate-300">
+        <em key={tokenKey} className="italic text-fg-soft">
           {renderInline(italicContent)}
         </em>
       );
@@ -397,10 +397,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
       case 'heading': {
         const headingClass =
           block.level === 1
-            ? 'text-sm font-bold text-slate-100 mt-3 mb-1.5'
+            ? 'text-sm font-bold text-fg-strong mt-3 mb-1.5'
             : block.level === 2
-            ? 'text-xs font-bold text-slate-100 mt-2.5 mb-1'
-            : 'text-[11px] font-semibold text-slate-200 mt-2 mb-1 uppercase tracking-wider';
+            ? 'text-xs font-bold text-fg-strong mt-2.5 mb-1'
+            : 'text-[11px] font-semibold text-fg mt-2 mb-1 uppercase tracking-wider';
         return (
           <div key={`heading-${index}`} className={headingClass}>
             {renderInline(block.text)}
@@ -413,10 +413,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
           <div key={`ol-${index}`} className="space-y-2.5 my-2">
             {block.items.map((item, itemIdx) => (
               <div key={`item-${itemIdx}`} className="flex items-start gap-2.5">
-                <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-dark-800 border border-dark-700 text-accent-400 font-mono text-[11px] font-semibold mt-0.5">
+                <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-raised border border-line text-accent-400 font-mono text-[11px] font-semibold mt-0.5">
                   {item.num}
                 </span>
-                <div className="flex-1 min-w-0 text-slate-200 text-xs leading-relaxed space-y-1">
+                <div className="flex-1 min-w-0 text-fg text-xs leading-relaxed space-y-1">
                   {item.blocks.map((subBlock, subIdx) => renderBlock(subBlock, subIdx))}
                 </div>
               </div>
@@ -430,7 +430,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
             {block.items.map((item, itemIdx) => (
               <div key={`uitem-${itemIdx}`} className="flex items-start gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-accent-400 shrink-0 mt-1.5" />
-                <div className="flex-1 min-w-0 text-slate-200 text-xs leading-relaxed space-y-1">
+                <div className="flex-1 min-w-0 text-fg text-xs leading-relaxed space-y-1">
                   {item.blocks.map((subBlock, subIdx) => renderBlock(subBlock, subIdx))}
                 </div>
               </div>
@@ -440,7 +440,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
       case 'paragraph':
         return (
-          <p key={`para-${index}`} className="text-slate-200 text-xs leading-relaxed my-1">
+          <p key={`para-${index}`} className="text-fg text-xs leading-relaxed my-1">
             {block.lines.map((pLine, lineIdx) => (
               <React.Fragment key={lineIdx}>
                 {lineIdx > 0 && ' '}

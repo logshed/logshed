@@ -12,9 +12,9 @@ import { formatBytes } from '../../utils/formatters.ts';
 export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
   if (!metrics) {
     return (
-      <div className="bg-dark-900 border border-dark-700 rounded-xl p-4 animate-pulse">
-        <div className="h-4 bg-dark-800 rounded-sm w-1/3 mb-4"></div>
-        <div className="h-8 bg-dark-800 rounded-sm w-full"></div>
+      <div className="bg-surface border border-line rounded-xl p-4 animate-pulse">
+        <div className="h-4 bg-raised rounded-sm w-1/3 mb-4"></div>
+        <div className="h-8 bg-raised rounded-sm w-full"></div>
       </div>
     );
   }
@@ -32,68 +32,68 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
       : 0);
 
   return (
-    <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-md">
+    <div className="bg-surface border border-line rounded-xl p-5 shadow-md">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
           <Database className="w-4 h-4 text-accent-500" />
           <span>Current Storage Footprint</span>
         </h3>
-        <span className="font-mono text-[11px] text-slate-400">Mount: /data</span>
+        <span className="font-mono text-[11px] text-fg-muted">Mount: /data</span>
       </div>
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-        <div className="bg-dark-950 p-3 rounded-lg border border-dark-800">
-          <span className="text-[11px] text-slate-400 font-medium block mb-1 flex items-center gap-1.5">
+        <div className="bg-canvas p-3 rounded-lg border border-line-subtle">
+          <span className="text-[11px] text-fg-muted font-medium block mb-1 flex items-center gap-1.5">
             <Database className="w-3.5 h-3.5 text-accent-400" />
             Database Size
           </span>
-          <span className="text-lg font-bold font-mono text-slate-100" data-testid="db-size-display">
+          <span className="text-lg font-bold font-mono text-fg-strong" data-testid="db-size-display">
             {formatBytes(metrics.db_size_bytes)}
           </span>
-          <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">logs.db + WAL + SHM</span>
+          <span className="text-[11px] text-fg-muted block mt-0.5 font-mono">logs.db + WAL + SHM</span>
         </div>
 
-        <div className="bg-dark-950 p-3 rounded-lg border border-dark-800">
-          <span className="text-[11px] text-slate-400 font-medium block mb-1 flex items-center gap-1.5">
-            <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+        <div className="bg-canvas p-3 rounded-lg border border-line-subtle">
+          <span className="text-[11px] text-fg-muted font-medium block mb-1 flex items-center gap-1.5">
+            <HardDrive className="w-3.5 h-3.5 text-success-400" />
             Disk Free Space
           </span>
-          <span className="text-lg font-bold font-mono text-slate-100" data-testid="disk-free-display">
+          <span className="text-lg font-bold font-mono text-fg-strong" data-testid="disk-free-display">
             {formatBytes(metrics.disk_free_bytes)}
           </span>
-          <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">
+          <span className="text-[11px] text-fg-muted block mt-0.5 font-mono">
             of {formatBytes(metrics.disk_total_bytes)} total
           </span>
         </div>
 
-        <div className="bg-dark-950 p-3 rounded-lg border border-dark-800">
-          <span className="text-[11px] text-slate-400 font-medium block mb-1 flex items-center gap-1.5">
-            <FileText className="w-3.5 h-3.5 text-indigo-400" />
+        <div className="bg-canvas p-3 rounded-lg border border-line-subtle">
+          <span className="text-[11px] text-fg-muted font-medium block mb-1 flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-marker-400" />
             Total Logs Stored
           </span>
-          <span className="text-lg font-bold font-mono text-slate-100">
+          <span className="text-lg font-bold font-mono text-fg-strong">
             {totalLogs.toLocaleString()}
           </span>
-          <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">Indexed in FTS5</span>
+          <span className="text-[11px] text-fg-muted block mt-0.5 font-mono">Indexed in FTS5</span>
         </div>
       </div>
 
       {/* Disk Usage Progress Bar */}
       <div>
-        <div className="flex justify-between text-xs font-mono text-slate-400 mb-1.5">
+        <div className="flex justify-between text-xs font-mono text-fg-muted mb-1.5">
           <span>Mount Capacity Used ({usedPercent}%)</span>
           <span>{formatBytes(diskUsedBytes)} / {formatBytes(metrics.disk_total_bytes)}</span>
         </div>
-        <div className="w-full h-2.5 bg-dark-950 rounded-full overflow-hidden border border-dark-700">
+        <div className="w-full h-2.5 bg-canvas rounded-full overflow-hidden border border-line">
           <div
             data-testid="disk-usage-bar"
             style={{ width: `${usedPercent}%` }}
             className={`h-full transition-all duration-500 ${
               usedPercent > 90
-                ? 'bg-red-500'
+                ? 'bg-danger-500'
                 : usedPercent > 75
-                ? 'bg-amber-500'
+                ? 'bg-warning-500'
                 : 'bg-accent-500'
             }`}
           />

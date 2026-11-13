@@ -175,7 +175,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Top Fixed Header */}
       <header
         {...(isMobile && pullTouchHandlers ? pullTouchHandlers : {})}
-        className="bg-dark-950 border-b border-dark-700 px-4 py-2 flex items-center justify-between select-none shrink-0 z-30 touch-none"
+        className="bg-canvas border-b border-line px-4 py-2 flex items-center justify-between select-none shrink-0 z-30 touch-none"
       >
         {/* Brand & Status Indicator */}
         <div className="flex items-center gap-x-4">
@@ -194,19 +194,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <LogShedLogo className="w-6 h-6 text-accent-600" />
             {/* The logshed.dev wordmark; 1px lower than centre looks centred next to the icon */}
-            <span className="relative top-px font-bold tracking-[-0.02em] text-[1.05rem] leading-6 text-slate-50">LogShed</span>
+            <span className="relative top-px font-bold tracking-[-0.02em] text-[1.05rem] leading-6 text-fg-bright">LogShed</span>
           </div>
 
           {/* Ingestion & Queue Health */}
           {health && (
-            <div className="flex items-center gap-x-2.5 sm:gap-x-3 text-xs font-mono text-slate-400 border-l border-dark-700 pl-2.5 sm:pl-4">
+            <div className="flex items-center gap-x-2.5 sm:gap-x-3 text-xs font-mono text-fg-muted border-l border-line pl-2.5 sm:pl-4">
               {health.status !== 'ok' ? (
                 <span
                   role="img"
                   aria-label="Health degraded"
                   title="Health check degraded or unreachable"
                   data-testid="health-degraded"
-                  className="inline-block w-2 h-2 rounded-full bg-amber-400"
+                  className="inline-block w-2 h-2 rounded-full bg-warning-400"
                 />
               ) : nearLimit && (
                 <span
@@ -214,17 +214,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   aria-label="Near processing limit"
                   title={getNearLimitTooltip(nearLimit)}
                   data-testid="health-near-limit"
-                  className="inline-block w-2 h-2 rounded-full bg-amber-400"
+                  className="inline-block w-2 h-2 rounded-full bg-warning-400"
                 />
               )}
               <span title={getRateTooltip(health)} className="text-[11px] sm:text-xs">
                 <span className="hidden sm:inline">Rate:{' '}</span>
-                <span className="text-slate-200">
+                <span className="text-fg">
                   {(health.ingest_rate ?? 0).toFixed(1)} logs/s
                 </span>
               </span>
               <span title="Queue Depth" className="hidden sm:inline">
-                Queue: <span className="text-slate-200">{health.queue_depth ?? 0}</span>
+                Queue: <span className="text-fg">{health.queue_depth ?? 0}</span>
               </span>
               {(health.dropped_logs ?? 0) > 0 && (
                 <span
@@ -232,7 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="text-[11px] sm:text-xs whitespace-nowrap"
                   data-testid="queue-lost"
                 >
-                  Lost: <span className="text-amber-400 font-bold">{health.dropped_logs}</span>
+                  Lost: <span className="text-warning-400 font-bold">{health.dropped_logs}</span>
                 </span>
               )}
               {typeof health.udp_receive_errors === 'number' && health.udp_receive_errors > 0 && (
@@ -241,7 +241,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="text-[11px] sm:text-xs whitespace-nowrap"
                   data-testid="udp-lost"
                 >
-                  UDP lost: <span className="text-amber-400 font-bold">{health.udp_receive_errors}</span>
+                  UDP lost: <span className="text-warning-400 font-bold">{health.udp_receive_errors}</span>
                 </span>
               )}
             </div>
@@ -250,13 +250,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Desktop Center Navigation Tabs (hidden on mobile) */}
         {!isMobile && (
-          <nav className="flex items-center gap-x-1 bg-dark-900 p-1 rounded-lg border border-dark-700">
+          <nav className="flex items-center gap-x-1 bg-surface p-1 rounded-lg border border-line">
             <button
               onClick={() => onTabChange('stream')}
               className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'stream'
-                  ? 'bg-dark-700 text-slate-100 shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
+                  ? 'bg-raised-strong text-fg-strong shadow-xs'
+                  : 'text-fg-muted hover:text-fg hover:bg-raised'
               }`}
             >
               <Radio className="w-3.5 h-3.5" />
@@ -267,8 +267,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onTabChange('rules')}
               className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'rules'
-                  ? 'bg-dark-700 text-slate-100 shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
+                  ? 'bg-raised-strong text-fg-strong shadow-xs'
+                  : 'text-fg-muted hover:text-fg hover:bg-raised'
               }`}
             >
               <Bell className="w-3.5 h-3.5" />
@@ -279,8 +279,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onTabChange('storage')}
               className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'storage'
-                  ? 'bg-dark-700 text-slate-100 shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
+                  ? 'bg-raised-strong text-fg-strong shadow-xs'
+                  : 'text-fg-muted hover:text-fg hover:bg-raised'
               }`}
             >
               <Database className="w-3.5 h-3.5" />
@@ -291,8 +291,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onTabChange('settings')}
               className={`flex items-center gap-x-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
                 activeTab === 'settings'
-                  ? 'bg-dark-700 text-slate-100 shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'
+                  ? 'bg-raised-strong text-fg-strong shadow-xs'
+                  : 'text-fg-muted hover:text-fg hover:bg-raised'
               }`}
             >
               <Settings className="w-3.5 h-3.5" />
@@ -308,17 +308,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               href="https://github.com/logshed/logshed/releases"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-x-1 px-2 py-0.5 text-xs font-medium text-amber-400 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/60 rounded-sm transition cursor-pointer"
+              className="flex items-center gap-x-1 px-2 py-0.5 text-xs font-medium text-warning-400 bg-warning-950/40 hover:bg-warning-900/50 border border-warning-800/60 rounded-sm transition cursor-pointer"
               title={`App update available: v${versionInfo.latest_version}`}
             >
-              <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <ArrowUpCircle className="w-3.5 h-3.5 text-warning-400 shrink-0" />
               <span>App update available</span>
             </a>
           )}
           <button
             onClick={logout}
             title="Sign Out"
-            className="flex items-center gap-x-1 px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-red-300 hover:bg-red-950/30 rounded-sm border border-transparent hover:border-red-900 transition"
+            className="flex items-center gap-x-1 px-2.5 py-1 text-xs font-medium text-fg-muted hover:text-danger-300 hover:bg-danger-950/30 rounded-sm border border-transparent hover:border-danger-900 transition"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Logout</span>
@@ -328,11 +328,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Repository Migration Warning Banner */}
       {versionInfo?.repo_deprecated && !migrationBannerDismissed && (
-        <div className="bg-amber-950/90 border-b border-amber-800 text-amber-200 px-4 py-2 text-xs flex items-center justify-between select-none shrink-0 z-20">
+        <div className="bg-warning-950/90 border-b border-warning-800 text-warning-200 px-4 py-2 text-xs flex items-center justify-between select-none shrink-0 z-20">
           <div className="flex items-center gap-x-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-warning-400 shrink-0" />
             <span>
-              <strong>Repository Moved:</strong> You are running an image from <code className="font-mono bg-dark-950 px-1 py-0.5 rounded-sm text-amber-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-dark-950 px-1 py-0.5 rounded-sm text-amber-300">ghcr.io/logshed/logshed</code> to receive future updates.
+              <strong>Repository Moved:</strong> You are running an image from <code className="font-mono bg-canvas px-1 py-0.5 rounded-sm text-warning-300">ghcr.io/benhornertech/logshed</code>. Please update your Docker Compose or Unraid template to <code className="font-mono bg-canvas px-1 py-0.5 rounded-sm text-warning-300">ghcr.io/logshed/logshed</code> to receive future updates.
             </span>
           </div>
           <div className="flex items-center gap-x-3 ml-4 shrink-0">
@@ -340,7 +340,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               href="https://github.com/logshed/logshed/releases"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-amber-300 hover:text-white underline font-medium text-xs inline-flex items-center gap-1 cursor-pointer"
+              className="text-warning-300 hover:text-fg-max underline font-medium text-xs inline-flex items-center gap-1 cursor-pointer"
             >
               <span>Release Notes</span>
               <ExternalLink className="w-3 h-3" />
@@ -348,7 +348,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => setMigrationBannerDismissed(true)}
-              className="text-amber-400 hover:text-amber-200 cursor-pointer font-medium text-xs"
+              className="text-warning-400 hover:text-warning-200 cursor-pointer font-medium text-xs"
             >
               Dismiss
             </button>
@@ -358,9 +358,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Maintenance Window Amber Banner */}
       {maintenance?.active && maintenance.until && (
-        <div className="bg-amber-950/80 border-b border-amber-800/80 text-amber-200 px-4 py-1.5 text-xs flex items-center justify-between select-none shrink-0 z-20">
+        <div className="bg-warning-950/80 border-b border-warning-800/80 text-warning-200 px-4 py-1.5 text-xs flex items-center justify-between select-none shrink-0 z-20">
           <div className="flex items-center gap-x-2">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <AlertTriangle className="w-3.5 h-3.5 text-warning-400 shrink-0" />
             <span>
               {getMaintenanceBannerText(maintenance, serverTimezone)}
             </span>
@@ -376,7 +376,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }
               window.dispatchEvent(new PopStateEvent('popstate'));
             }}
-            className="text-amber-300 hover:text-white underline cursor-pointer font-medium text-xs ml-4"
+            className="text-warning-300 hover:text-fg-max underline cursor-pointer font-medium text-xs ml-4"
           >
             {maintenance.on_demand_until || (maintenance.sessions?.length ?? 0) > 0 ? 'Manage' : 'Scheduled window'}
           </a>
@@ -387,14 +387,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       {isMobile && (
         <nav
           aria-label="Mobile navigation"
-          className="grid grid-cols-4 fixed bottom-0 inset-x-0 bg-dark-950/95 backdrop-blur-md border-t border-dark-700 z-40 px-1 py-1 select-none"
+          className="grid grid-cols-4 fixed bottom-0 inset-x-0 bg-canvas/95 backdrop-blur-md border-t border-line z-40 px-1 py-1 select-none"
         >
           <button
             onClick={() => onTabChange('stream')}
             className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
               activeTab === 'stream'
-                ? 'text-accent-400 font-semibold bg-dark-800/80'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-accent-400 font-semibold bg-raised/80'
+                : 'text-fg-muted hover:text-fg'
             }`}
           >
             <Radio className="w-4 h-4 mb-0.5" />
@@ -405,8 +405,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => onTabChange('rules')}
             className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
               activeTab === 'rules'
-                ? 'text-accent-400 font-semibold bg-dark-800/80'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-accent-400 font-semibold bg-raised/80'
+                : 'text-fg-muted hover:text-fg'
             }`}
           >
             <Bell className="w-4 h-4 mb-0.5" />
@@ -417,8 +417,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => onTabChange('storage')}
             className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
               activeTab === 'storage'
-                ? 'text-accent-400 font-semibold bg-dark-800/80'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-accent-400 font-semibold bg-raised/80'
+                : 'text-fg-muted hover:text-fg'
             }`}
           >
             <Database className="w-4 h-4 mb-0.5" />
@@ -429,8 +429,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => onTabChange('settings')}
             className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
               activeTab === 'settings'
-                ? 'text-accent-400 font-semibold bg-dark-800/80'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-accent-400 font-semibold bg-raised/80'
+                : 'text-fg-muted hover:text-fg'
             }`}
           >
             <Settings className="w-4 h-4 mb-0.5" />

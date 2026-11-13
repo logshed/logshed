@@ -44,8 +44,8 @@ export const ChangePasswordCard: React.FC = () => {
   };
 
   return (
-    <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-      <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+      <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
         <Lock className="w-4 h-4 text-accent-500" />
         <span>Change Admin Password</span>
       </h3>
@@ -53,14 +53,14 @@ export const ChangePasswordCard: React.FC = () => {
       {pwdMsg && (
         <div
           className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${pwdMsg.isError
-              ? 'bg-red-950/60 border-red-800 text-red-300'
-              : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+              ? 'bg-danger-950/60 border-danger-800 text-danger-300'
+              : 'bg-success-950/60 border-success-800 text-success-300'
             }`}
         >
           {pwdMsg.isError ? (
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           ) : (
-            <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <Check className="w-4 h-4 text-success-400 shrink-0 mt-0.5" />
           )}
           <span>{pwdMsg.text}</span>
         </div>
@@ -68,7 +68,7 @@ export const ChangePasswordCard: React.FC = () => {
 
       <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
         <div>
-          <label htmlFor="current-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+          <label htmlFor="current-password" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
             Current Password
           </label>
           <input
@@ -77,12 +77,12 @@ export const ChangePasswordCard: React.FC = () => {
             value={currentPwd}
             onChange={(e) => setCurrentPwd(e.target.value)}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 
         <div>
-          <label htmlFor="new-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+          <label htmlFor="new-password" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
             New Password (min {PASSWORD_MIN_LENGTH} chars)
           </label>
           <input
@@ -92,12 +92,12 @@ export const ChangePasswordCard: React.FC = () => {
             onChange={(e) => setNewPwd(e.target.value)}
             minLength={PASSWORD_MIN_LENGTH}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 
         <div>
-          <label htmlFor="confirm-password" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+          <label htmlFor="confirm-password" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
             Confirm New Password
           </label>
           <input
@@ -107,7 +107,7 @@ export const ChangePasswordCard: React.FC = () => {
             onChange={(e) => setConfirmPwd(e.target.value)}
             minLength={PASSWORD_MIN_LENGTH}
             required
-            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
           />
         </div>
 
@@ -115,7 +115,7 @@ export const ChangePasswordCard: React.FC = () => {
           <button
             type="submit"
             disabled={isChangingPwd || !currentPwd || newPwd.length < PASSWORD_MIN_LENGTH || newPwd !== confirmPwd}
-            className="w-full sm:w-auto justify-center bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-dark-600 font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
+            className="w-full sm:w-auto justify-center bg-raised hover:bg-raised-strong disabled:opacity-50 text-fg border border-line-strong font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
           >
             <Lock className="w-3.5 h-3.5" />
             <span>{isChangingPwd ? 'Updating...' : 'Update Password'}</span>

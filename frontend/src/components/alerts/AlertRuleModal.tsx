@@ -272,7 +272,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
     >
       <form onSubmit={handleSaveRule} className="space-y-4 text-xs">
         {formError && (
-          <div className="p-2.5 bg-red-950/40 border border-red-800/60 rounded-sm text-red-300">
+          <div className="p-2.5 bg-danger-950/40 border border-danger-800/60 rounded-sm text-danger-300">
             {formError}
           </div>
         )}
@@ -280,7 +280,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         {/* Rule Name & Doc Link */}
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <label htmlFor={`${fieldId}-rule-name`} className="text-slate-300 font-medium">Rule Name</label>
+            <label htmlFor={`${fieldId}-rule-name`} className="text-fg-soft font-medium">Rule Name</label>
             <a
               href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#alert-rules"
               target="_blank"
@@ -299,17 +299,17 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             onChange={(e) => setFormName(e.target.value)}
             placeholder="e.g. Critical Auth Failure Spike"
             required
-            className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500"
+            className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg text-xs focus:outline-hidden focus:border-accent-500"
           />
         </div>
 
         {/* Rule Type & Target Channel */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label id={`${fieldId}-rule-type-label`} htmlFor={`${fieldId}-rule-type`} className="block text-slate-300 font-medium">Rule Type</label>
+            <label id={`${fieldId}-rule-type-label`} htmlFor={`${fieldId}-rule-type`} className="block text-fg-soft font-medium">Rule Type</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="h-[38px] bg-dark-800 border-dark-700 rounded-lg px-3 text-slate-200"
+              fieldClassName="h-[38px] bg-raised border-line rounded-lg px-3 text-fg"
               id={`${fieldId}-rule-type`}
               labelledBy={`${fieldId}-rule-type-label`}
               label="Rule Type"
@@ -320,10 +320,10 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label id={`${fieldId}-target-channel-label`} htmlFor={`${fieldId}-target-channel`} className="block text-slate-300 font-medium">Target Channel</label>
+            <label id={`${fieldId}-target-channel-label`} htmlFor={`${fieldId}-target-channel`} className="block text-fg-soft font-medium">Target Channel</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="h-[38px] bg-dark-800 border-dark-700 rounded-lg px-3 text-slate-200"
+              fieldClassName="h-[38px] bg-raised border-line rounded-lg px-3 text-fg"
               id={`${fieldId}-target-channel`}
               labelledBy={`${fieldId}-target-channel-label`}
               label="Target Channel"
@@ -339,13 +339,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Rate Spike options placed directly below Rule Type */}
         {formRuleType === 'rate' && (
-          <div className="p-3 bg-dark-850/60 rounded-lg border border-dark-800 space-y-2">
-            <div className="text-[11px] font-medium text-white">
+          <div className="p-3 bg-surface-hover/60 rounded-lg border border-line-subtle space-y-2">
+            <div className="text-[11px] font-medium text-fg-max">
               Rate Spike Settings (Ingestion Volume)
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor={`${fieldId}-rate-threshold`} className="block text-slate-300 font-medium">Rate Threshold (logs / second)</label>
+                <label htmlFor={`${fieldId}-rate-threshold`} className="block text-fg-soft font-medium">Rate Threshold (logs / second)</label>
                 <input
                   id={`${fieldId}-rate-threshold`}
                   type="number"
@@ -357,13 +357,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                       e.target.value === '' ? '' : Math.max(1, Number(e.target.value))
                     )
                   }
-                  className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-400">Average logs per second to trigger alert.</p>
+                <p className="text-[11px] text-fg-muted">Average logs per second to trigger alert.</p>
               </div>
 
               <div className="space-y-1">
-                <label htmlFor={`${fieldId}-rate-window`} className="block text-slate-300 font-medium">Measurement Window (seconds)</label>
+                <label htmlFor={`${fieldId}-rate-window`} className="block text-fg-soft font-medium">Measurement Window (seconds)</label>
                 <input
                   id={`${fieldId}-rate-window`}
                   type="number"
@@ -375,12 +375,12 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                       e.target.value === '' ? '' : Math.max(1, Number(e.target.value))
                     )
                   }
-                  className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-400">Sustained duration window (e.g. 30s).</p>
+                <p className="text-[11px] text-fg-muted">Sustained duration window (e.g. 30s).</p>
               </div>
             </div>
-            <p className="text-[11px] text-slate-400 pt-1">
+            <p className="text-[11px] text-fg-muted pt-1">
               Triggers when incoming volume exceeds the specified rate over the window. Identifies top culprit services and message patterns.
             </p>
           </div>
@@ -388,13 +388,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Threshold options placed directly below Rule Type */}
         {formRuleType === 'threshold' && (
-          <div className="p-3 bg-dark-850/60 rounded-lg border border-dark-800 space-y-2">
-            <div className="text-[11px] font-medium text-white">
+          <div className="p-3 bg-surface-hover/60 rounded-lg border border-line-subtle space-y-2">
+            <div className="text-[11px] font-medium text-fg-max">
               Threshold Settings (Sliding Window)
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor={`${fieldId}-threshold-count`} className="block text-slate-300 font-medium">Threshold Count</label>
+                <label htmlFor={`${fieldId}-threshold-count`} className="block text-fg-soft font-medium">Threshold Count</label>
                 <input
                   id={`${fieldId}-threshold-count`}
                   type="number"
@@ -406,13 +406,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                       e.target.value === '' ? '' : Math.max(1, Number(e.target.value))
                     )
                   }
-                  className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-400">Number of events to trigger alert.</p>
+                <p className="text-[11px] text-fg-muted">Number of events to trigger alert.</p>
               </div>
 
               <div className="space-y-1">
-                <label htmlFor={`${fieldId}-window`} className="block text-slate-300 font-medium">Window Duration (seconds)</label>
+                <label htmlFor={`${fieldId}-window`} className="block text-fg-soft font-medium">Window Duration (seconds)</label>
                 <input
                   id={`${fieldId}-window`}
                   type="number"
@@ -424,9 +424,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                       e.target.value === '' ? '' : Math.max(1, Number(e.target.value))
                     )
                   }
-                  className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+                  className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg text-xs focus:outline-hidden focus:border-accent-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-400">Sliding time window duration.</p>
+                <p className="text-[11px] text-fg-muted">Sliding time window duration.</p>
               </div>
             </div>
           </div>
@@ -435,7 +435,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         {/* App Filter (Multi-Select) & Severity Filter */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label className="block text-slate-300 font-medium">App Filter (Optional)</label>
+            <label className="block text-fg-soft font-medium">App Filter (Optional)</label>
             <MultiSelectDropdown
               label="Application"
               placeholder="All applications"
@@ -448,10 +448,10 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label id={`${fieldId}-severity-label`} htmlFor={`${fieldId}-severity`} className="block text-slate-300 font-medium">Severity Filter (Optional)</label>
+            <label id={`${fieldId}-severity-label`} htmlFor={`${fieldId}-severity`} className="block text-fg-soft font-medium">Severity Filter (Optional)</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="h-[38px] bg-dark-800 border-dark-700 rounded-lg px-3 text-slate-200"
+              fieldClassName="h-[38px] bg-raised border-line rounded-lg px-3 text-fg"
               id={`${fieldId}-severity`}
               labelledBy={`${fieldId}-severity-label`}
               label="Severity Filter (Optional)"
@@ -459,7 +459,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               value={String(formFilterSeverity)}
               onChange={(v) => setFormFilterSeverity(v === '' ? '' : Number(v))}
             />
-            <span className="text-[11px] text-slate-400 block">
+            <span className="text-[11px] text-fg-muted block">
               Only logs at this level or more severe are checked.
             </span>
           </div>
@@ -467,21 +467,21 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Match Pattern */}
         <div className="space-y-1">
-          <label htmlFor={`${fieldId}-pattern`} className="block text-slate-300 font-medium">Match Pattern (Regex or Substring)</label>
+          <label htmlFor={`${fieldId}-pattern`} className="block text-fg-soft font-medium">Match Pattern (Regex or Substring)</label>
           <input
             id={`${fieldId}-pattern`}
             type="text"
             value={formMatchPattern}
             onChange={(e) => setFormMatchPattern(e.target.value)}
             placeholder="e.g. Failed password|authentication failure"
-            className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono text-xs"
+            className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg focus:outline-hidden focus:border-accent-500 font-mono text-xs"
           />
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-fg-muted">
             Matches against log message text using regular expression search or case-insensitive keyword search.
           </p>
           {referenceMessage && (
             <p
-              className="text-[11px] text-slate-400 font-mono truncate select-text"
+              className="text-[11px] text-fg-muted font-mono truncate select-text"
               title={referenceMessage}
               data-testid="alert-rule-log-reference"
             >
@@ -492,7 +492,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Cooldown */}
         <div className="space-y-1">
-          <label htmlFor={`${fieldId}-cooldown`} className="block text-slate-300 font-medium">Cooldown Flap Dampening (seconds)</label>
+          <label htmlFor={`${fieldId}-cooldown`} className="block text-fg-soft font-medium">Cooldown Flap Dampening (seconds)</label>
           <input
             id={`${fieldId}-cooldown`}
             type="number"
@@ -504,9 +504,9 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                 e.target.value === '' ? '' : Math.max(0, Number(e.target.value))
               )
             }
-            className="w-full h-[38px] bg-dark-800 border border-dark-700 rounded-lg px-3 text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 font-mono"
+            className="w-full h-[38px] bg-raised border border-line rounded-lg px-3 text-fg text-xs focus:outline-hidden focus:border-accent-500 font-mono"
           />
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-fg-muted">
             Minimum duration to suppress repeat notifications after an alert fires.
           </p>
         </div>
@@ -519,19 +519,19 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               checked={formAiEnrichment}
               disabled={isEnrichmentDisabled}
               onChange={(e) => setFormAiEnrichment(e.target.checked)}
-              className="rounded-sm border-dark-700 bg-dark-800 text-accent-500 focus:ring-0 disabled:cursor-not-allowed"
+              className="rounded-sm border-line bg-raised text-accent-500 focus:ring-0 disabled:cursor-not-allowed"
             />
-            <span className="text-slate-200 font-medium flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            <span className="text-fg font-medium flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-highlight-400" />
               <span>AI Root-Cause Incident Enrichment</span>
             </span>
           </label>
-          <p className="text-[11px] text-slate-400 pl-6">
+          <p className="text-[11px] text-fg-muted pl-6">
             When an alert fires, redact triggering logs and query the configured LLM to append root cause and remediation insights.
           </p>
 
           {isEnrichmentDisabled && (
-            <div className="ml-6 p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-300 font-mono">
+            <div className="ml-6 p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning-300 font-mono">
               <span>AI enrichment requires an active AI provider. Configure an AI provider in Settings to enable enrichment.</span>
               <button
                 type="button"
@@ -545,7 +545,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           )}
 
           {!isAiConfigured && ruleToEdit?.ai_enrichment && (
-            <div className="ml-6 p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-300 font-mono">
+            <div className="ml-6 p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning-300 font-mono">
               <span>AI provider is disabled or not configured. This rule will not be enriched until an AI provider is enabled in Settings.</span>
               <button
                 type="button"
@@ -563,24 +563,24 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               type="checkbox"
               checked={formIsEnabled}
               onChange={(e) => setFormIsEnabled(e.target.checked)}
-              className="rounded-sm border-dark-700 bg-dark-800 text-accent-500 focus:ring-0"
+              className="rounded-sm border-line bg-raised text-accent-500 focus:ring-0"
             />
-            <span className="text-slate-200 font-medium">Enable Alert Rule</span>
+            <span className="text-fg font-medium">Enable Alert Rule</span>
           </label>
         </div>
 
-        <div className="pt-4 border-t border-dark-700 flex justify-end gap-2">
+        <div className="pt-4 border-t border-line flex justify-end gap-2">
           <button
             type="button"
             onClick={handleCloseAttempt}
-            className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 transition cursor-pointer"
+            className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-fg-soft hover:text-fg-max bg-raised hover:bg-raised-hover transition cursor-pointer"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            className="px-4 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
           >
             {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
             <span>{ruleToEdit ? 'Update Rule' : 'Create Rule'}</span>

@@ -38,17 +38,17 @@ export const DeleteSelectedDialog: React.FC<DeleteSelectedDialogProps> = ({ coun
       confirmDisabled={isDeleting}
       confirmIcon={isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
       confirmLabel={isDeleting ? 'Deleting...' : 'Confirm Delete'}
-      bodyClassName="space-y-4 text-xs text-slate-200"
-      footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-dark-800"
-      cancelClassName="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
-      confirmClassName="px-4 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-sm shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+      bodyClassName="space-y-4 text-xs text-fg"
+      footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-line-subtle"
+      cancelClassName="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-sm transition cursor-pointer"
+      confirmClassName="px-4 py-1.5 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-sm shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
     >
       <p className="leading-relaxed">
-        Permanently delete <span className="font-mono font-bold text-red-400">{count}</span> selected log record{count === 1 ? '' : 's'}? This action cannot be reversed.
+        Permanently delete <span className="font-mono font-bold text-danger-400">{count}</span> selected log record{count === 1 ? '' : 's'}? This action cannot be reversed.
       </p>
       {error && (
-        <div className="p-2.5 bg-red-950/60 border border-red-800 rounded-sm text-xs text-red-300 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+        <div className="p-2.5 bg-danger-950/60 border border-danger-800 rounded-sm text-xs text-danger-300 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
           <span>{error}</span>
         </div>
       )}

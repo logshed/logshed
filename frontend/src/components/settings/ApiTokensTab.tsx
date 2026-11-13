@@ -71,7 +71,7 @@ const TokenDialog: React.FC<TokenDialogProps> = ({
   onClose,
   closeOnEscape = true,
   testId,
-  overlayClassName = 'bg-dark-950/80',
+  overlayClassName = 'bg-canvas/80',
   panelClassName = '',
   children,
 }) => {
@@ -85,7 +85,7 @@ const TokenDialog: React.FC<TokenDialogProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`bg-dark-900 border border-dark-700 rounded-xl shadow-2xl w-full overflow-hidden outline-hidden animate-in fade-in zoom-in-95 duration-150 ${panelClassName}`}
+        className={`bg-surface border border-line rounded-xl shadow-2xl w-full overflow-hidden outline-hidden animate-in fade-in zoom-in-95 duration-150 ${panelClassName}`}
       >
         {children}
       </div>
@@ -278,17 +278,17 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Header Card */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+      <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
               <Key className="w-4 h-4 text-accent-500" />
               <span>External API Access</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+            <p className="text-xs text-fg-muted mt-1 max-w-2xl leading-relaxed">
               Generate secure Bearer tokens for external automation, Home Assistant integrations,
               and AI assistants. All API requests authenticate via HTTP header{' '}
-              <code className="text-accent-400 font-mono text-[11px] bg-dark-950 px-1.5 py-0.5 rounded-sm border border-dark-800">
+              <code className="text-accent-400 font-mono text-[11px] bg-canvas px-1.5 py-0.5 rounded-sm border border-line-subtle">
                 Authorization: Bearer ls_live_...
               </code>
             </p>
@@ -296,7 +296,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           <button
             type="button"
             onClick={handleOpenGenerateModal}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-white rounded-lg transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" />
             <span>Generate Token</span>
@@ -304,36 +304,36 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
         </div>
 
         {errorMsg && (
-          <div className="mt-4 p-3 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+          <div className="mt-4 p-3 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
       </section>
 
       {/* Token List Table */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-        <div className="px-5 py-3.5 border-b border-dark-700 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      <section className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+        <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider">
             Active Tokens ({tokens.length})
           </h3>
         </div>
 
         {isLoading ? (
-          <div className="p-8 text-center text-xs text-slate-400 font-mono">
+          <div className="p-8 text-center text-xs text-fg-muted font-mono">
             Loading tokens...
           </div>
         ) : tokens.length === 0 ? (
           <div className="p-8 text-center space-y-2">
-            <Key className="w-8 h-8 text-slate-600 mx-auto" />
-            <p className="text-xs font-medium text-slate-300">No API tokens generated yet</p>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            <Key className="w-8 h-8 text-fg-faint mx-auto" />
+            <p className="text-xs font-medium text-fg-soft">No API tokens generated yet</p>
+            <p className="text-xs text-fg-muted max-w-sm mx-auto">
               Create a token to allow Home Assistant, backup runners, or AI agents to access LogShed.
             </p>
           </div>
         ) : isMobile ? (
           /* Mobile Card View */
-            <div className="block md:hidden divide-y divide-dark-800">
+            <div className="block md:hidden divide-y divide-line-subtle">
               {tokens.map((token) => {
                 const presetName = getPresetName(token.scopes);
                 return (
@@ -341,11 +341,11 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-semibold text-slate-100">{token.name}</span>
-                          <span className="font-mono text-[11px] text-slate-300 bg-dark-950 px-1.5 py-0.5 rounded-sm border border-dark-750">
+                          <span className="text-xs font-semibold text-fg-strong">{token.name}</span>
+                          <span className="font-mono text-[11px] text-fg-soft bg-canvas px-1.5 py-0.5 rounded-sm border border-line-muted">
                             {token.token_prefix}
                           </span>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium whitespace-nowrap bg-raised text-accent-300 border border-line">
                             {presetName}
                           </span>
                         </div>
@@ -354,7 +354,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(token)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-slate-100 hover:bg-dark-800 border border-dark-700 rounded-lg transition cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-fg-soft hover:text-fg-strong hover:bg-raised border border-line rounded-lg transition cursor-pointer"
                           title="Edit Token"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
@@ -363,7 +363,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                         <button
                           type="button"
                           onClick={() => { setModalError(null); setTokenToRevoke(token); }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-dark-700 hover:border-red-900 rounded-lg transition cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-danger-400 hover:text-danger-300 hover:bg-danger-950/40 border border-line hover:border-danger-900 rounded-lg transition cursor-pointer"
                           title="Revoke Token"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -372,19 +372,19 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
                       <span>
-                        Created: <span className="text-slate-300">{formatDate(token.created_at, serverTimezone)}</span>
+                        Created: <span className="text-fg-soft">{formatDate(token.created_at, serverTimezone)}</span>
                       </span>
                       <span>
                         Expires:{' '}
-                        <span className="text-slate-300">
+                        <span className="text-fg-soft">
                           {token.expires_at ? formatDate(token.expires_at, serverTimezone) : 'Never'}
                         </span>
                       </span>
                       <span>
                         Last Used:{' '}
-                        <span className="text-slate-300">
+                        <span className="text-fg-soft">
                           {token.last_used_at ? formatDate(token.last_used_at, serverTimezone) : 'Never'}
                         </span>
                       </span>
@@ -398,7 +398,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-dark-700/60 bg-dark-950/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <tr className="border-b border-line/60 bg-canvas/40 text-[11px] font-semibold text-fg-muted uppercase tracking-wider">
                     <th className="py-2.5 px-4">Name</th>
                     <th className="py-2.5 px-4 font-mono">Identifier</th>
                     <th className="py-2.5 px-4">Scopes</th>
@@ -408,40 +408,40 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                     <th className="py-2.5 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-dark-800 text-slate-200">
+                <tbody className="divide-y divide-line-subtle text-fg">
                   {tokens.map((token) => {
                     const presetName = getPresetName(token.scopes);
                     return (
-                      <tr key={`desktop-${token.id}`} className="hover:bg-dark-800/40 transition">
-                        <td className="py-3 px-4 font-medium text-slate-100">
+                      <tr key={`desktop-${token.id}`} className="hover:bg-raised/40 transition">
+                        <td className="py-3 px-4 font-medium text-fg-strong">
                           {token.name}
                         </td>
-                        <td className="py-3 px-4 font-mono text-[11px] text-slate-300">
+                        <td className="py-3 px-4 font-mono text-[11px] text-fg-soft">
                           {token.token_prefix}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-medium whitespace-nowrap bg-dark-800 text-accent-300 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-medium whitespace-nowrap bg-raised text-accent-300 border border-line">
                             {presetName}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-slate-400">
+                        <td className="py-3 px-4 text-fg-muted">
                           {formatDate(token.created_at, serverTimezone)}
                         </td>
-                        <td className="py-3 px-4 text-slate-400">
+                        <td className="py-3 px-4 text-fg-muted">
                           {token.expires_at ? formatDate(token.expires_at, serverTimezone) : (
-                            <span className="text-slate-400">Never</span>
+                            <span className="text-fg-muted">Never</span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-slate-400">
+                        <td className="py-3 px-4 text-fg-muted">
                           {token.last_used_at ? formatDate(token.last_used_at, serverTimezone) : (
-                            <span className="text-slate-400">Never</span>
+                            <span className="text-fg-muted">Never</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-right whitespace-nowrap">
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(token)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-slate-100 hover:bg-dark-800 border border-transparent hover:border-dark-700 rounded-sm transition cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-fg-soft hover:text-fg-strong hover:bg-raised border border-transparent hover:border-line rounded-sm transition cursor-pointer"
                             title="Edit Token"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -450,7 +450,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           <button
                             type="button"
                             onClick={() => { setModalError(null); setTokenToRevoke(token); }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-transparent hover:border-red-900 rounded-sm transition cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-danger-400 hover:text-danger-300 hover:bg-danger-950/40 border border-transparent hover:border-danger-900 rounded-sm transition cursor-pointer"
                             title="Revoke Token"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -477,30 +477,30 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           onClose={() => setIsGenerateModalOpen(false)}
           panelClassName="max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain"
         >
-            <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-              <h2 id={`${dialogIdBase}-generate`} className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <div className="shrink-0 px-5 py-4 border-b border-line flex items-center justify-between">
+              <h2 id={`${dialogIdBase}-generate`} className="text-sm font-semibold text-fg-strong flex items-center gap-2">
                 <Key className="w-4 h-4 text-accent-500" />
                 <span>Generate API Token</span>
               </h2>
               <button
                 type="button"
                 onClick={() => setIsGenerateModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                className="text-fg-muted hover:text-fg p-1 rounded-md transition"
                 aria-label="Close dialog"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             {modalError && (
-              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
                 <span>{modalError}</span>
               </div>
             )}
 
             <form onSubmit={handleGenerateSubmit} className="p-5 space-y-4 overflow-y-auto">
               <div>
-                <label htmlFor="token-name" className="block text-xs font-medium text-slate-300 mb-1">
+                <label htmlFor="token-name" className="block text-xs font-medium text-fg-soft mb-1">
                   Token Name
                 </label>
                 <input
@@ -510,7 +510,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   placeholder="e.g. Home Assistant or Claude Desktop"
                   value={newTokenName}
                   onChange={(e) => setNewTokenName(e.target.value)}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+                  className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500"
                 />
               </div>
 
@@ -523,12 +523,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               />
 
               <div>
-                <label id="token-expiry-label" htmlFor="token-expiry" className="block text-xs font-medium text-slate-300 mb-1">
+                <label id="token-expiry-label" htmlFor="token-expiry" className="block text-xs font-medium text-fg-soft mb-1">
                   Expiration
                 </label>
                 <SelectDropdown
                   variant="panel"
-                  fieldClassName="bg-dark-950 border-dark-700 rounded-lg px-3 py-2 text-slate-200"
+                  fieldClassName="bg-canvas border-line rounded-lg px-3 py-2 text-fg"
                   id="token-expiry"
                   labelledBy="token-expiry-label"
                   label="Expiration"
@@ -542,14 +542,14 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsGenerateModalOpen(false)}
-                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg transition cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg-soft rounded-lg transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || !newTokenName.trim() || newTokenScopes.length === 0}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill rounded-lg transition cursor-pointer"
                 >
                   {isSubmitting ? 'Generating...' : 'Create Token'}
                 </button>
@@ -566,36 +566,36 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           onClose={() => setTokenToEdit(null)}
           panelClassName="max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain"
         >
-            <div className="shrink-0 px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-              <h2 id={`${dialogIdBase}-edit`} className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <div className="shrink-0 px-5 py-4 border-b border-line flex items-center justify-between">
+              <h2 id={`${dialogIdBase}-edit`} className="text-sm font-semibold text-fg-strong flex items-center gap-2">
                 <Edit2 className="w-4 h-4 text-accent-500" />
                 <span>Edit API token</span>
               </h2>
               <button
                 type="button"
                 onClick={() => setTokenToEdit(null)}
-                className="text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                className="text-fg-muted hover:text-fg p-1 rounded-md transition"
                 aria-label="Close dialog"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             {modalError && (
-              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
                 <span>{modalError}</span>
               </div>
             )}
 
             <form onSubmit={handleEditSubmit} className="p-5 space-y-4 overflow-y-auto">
-              <p className="text-[11px] text-slate-400 leading-relaxed">
+              <p className="text-[11px] text-fg-muted leading-relaxed">
                 Changes take effect straight away. The token string{' '}
-                <code className="font-mono text-slate-300">{tokenToEdit.token_prefix}</code> stays the same, so
+                <code className="font-mono text-fg-soft">{tokenToEdit.token_prefix}</code> stays the same, so
                 clients need no update.
               </p>
 
               <div>
-                <label htmlFor="edit-token-name" className="block text-xs font-medium text-slate-300 mb-1">
+                <label htmlFor="edit-token-name" className="block text-xs font-medium text-fg-soft mb-1">
                   Name
                 </label>
                 <input
@@ -606,10 +606,10 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   aria-describedby={editScopesChanged && !editNameChanged ? 'edit-token-name-hint' : undefined}
-                  className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+                  className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500"
                 />
                 {editScopesChanged && !editNameChanged && (
-                  <p id="edit-token-name-hint" className="mt-1 text-[11px] text-slate-400">
+                  <p id="edit-token-name-hint" className="mt-1 text-[11px] text-fg-muted">
                     The name still says '{tokenToEdit.name}'. Rename it if it no longer fits.
                   </p>
                 )}
@@ -629,13 +629,13 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                   role="status"
                   className={`p-3 rounded-lg border text-xs flex items-start gap-2 leading-relaxed ${
                     editGainsFullAccess || editGainsAssistantMaintenance
-                      ? 'bg-red-950/50 border-red-800 text-red-200'
-                      : 'bg-amber-950/30 border-amber-800/60 text-amber-200'
+                      ? 'bg-danger-950/50 border-danger-800 text-danger-200'
+                      : 'bg-warning-950/30 border-warning-800/60 text-warning-200'
                   }`}
                 >
                   <AlertTriangle
                     className={`w-4 h-4 shrink-0 mt-0.5 ${
-                      editGainsFullAccess || editGainsAssistantMaintenance ? 'text-red-400' : 'text-amber-400'
+                      editGainsFullAccess || editGainsAssistantMaintenance ? 'text-danger-400' : 'text-warning-400'
                     }`}
                   />
                   <div className="space-y-1">
@@ -663,14 +663,14 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <button
                   type="button"
                   onClick={() => setTokenToEdit(null)}
-                  className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg transition cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg-soft rounded-lg transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!canSaveEdit}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white rounded-lg transition cursor-pointer"
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill rounded-lg transition cursor-pointer"
                 >
                   {isSavingEdit ? 'Saving...' : 'Save'}
                 </button>
@@ -687,18 +687,18 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           onClose={() => setCreatedRawToken(null)}
           // The token cannot be shown again, so only Done or the close button end this dialog
           closeOnEscape={false}
-          overlayClassName="bg-dark-950/85"
+          overlayClassName="bg-canvas/85"
           panelClassName="max-w-md"
         >
-            <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-              <h2 id={`${dialogIdBase}-created`} className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-400" />
+            <div className="px-5 py-4 border-b border-line flex items-center justify-between">
+              <h2 id={`${dialogIdBase}-created`} className="text-sm font-semibold text-success-400 flex items-center gap-2">
+                <Check className="w-4 h-4 text-success-400" />
                 <span>Token Generated</span>
               </h2>
               <button
                 type="button"
                 onClick={() => setCreatedRawToken(null)}
-                className="text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                className="text-fg-muted hover:text-fg p-1 rounded-md transition"
                 aria-label="Close dialog"
               >
                 <X className="w-4 h-4" />
@@ -706,18 +706,18 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
             </div>
 
             <div className="p-5 space-y-4">
-              <div className="p-3 bg-amber-950/30 border border-amber-800/60 rounded-lg text-xs text-amber-200 space-y-1">
-                <div className="font-semibold flex items-center gap-1.5 text-amber-300">
+              <div className="p-3 bg-warning-950/30 border border-warning-800/60 rounded-lg text-xs text-warning-200 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5 text-warning-300">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>Important Security Notice</span>
                 </div>
-                <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                <p className="text-[11px] text-warning-200/90 leading-relaxed">
                   Copy this token now. It cannot be recovered once this dialog closes.
                 </p>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-fg-muted uppercase tracking-wider mb-1">
                   Bearer Token
                 </label>
                 <div className="flex items-center gap-2">
@@ -726,12 +726,12 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                     type="text"
                     readOnly
                     value={createdRawToken}
-                    className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-100 select-all"
+                    className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs font-mono text-fg-strong select-all"
                   />
                   <CopyButton
                     text={createdRawToken}
-                    className="px-3 py-2 text-xs font-semibold bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-lg transition flex items-center gap-1.5 shrink-0 cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750"
-                    copiedLabelClassName="text-emerald-400"
+                    className="px-3 py-2 text-xs font-semibold bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-lg transition flex items-center gap-1.5 shrink-0 cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
+                    copiedLabelClassName="text-success-400"
                     beforeCopy={selectRawToken}
                   />
                 </div>
@@ -741,7 +741,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 <button
                   type="button"
                   onClick={() => setCreatedRawToken(null)}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-white rounded-lg transition cursor-pointer"
+                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition cursor-pointer"
                 >
                   Done
                 </button>
@@ -759,27 +759,27 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           panelClassName="max-w-sm"
         >
             <div className="p-5 space-y-3">
-              <h2 id={`${dialogIdBase}-revoke`} className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                <Trash2 className="w-4 h-4 text-red-400" />
+              <h2 id={`${dialogIdBase}-revoke`} className="text-sm font-semibold text-fg-strong flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-danger-400" />
                 <span>Revoke Token</span>
               </h2>
-              <p className="text-xs text-slate-300 leading-relaxed">
+              <p className="text-xs text-fg-soft leading-relaxed">
                 Are you sure you want to revoke{' '}
-                <strong className="text-white">{tokenToRevoke.name}</strong>? Any service using this
+                <strong className="text-fg-max">{tokenToRevoke.name}</strong>? Any service using this
                 token will immediately fail authentication with HTTP 401 errors.
               </p>
             </div>
             {modalError && (
-              <div role="alert" className="mx-5 mb-4 p-2.5 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <div role="alert" className="mx-5 mb-4 p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
                 <span>{modalError}</span>
               </div>
             )}
-            <div className="px-5 py-3.5 bg-dark-950/50 border-t border-dark-800 flex justify-end gap-2">
+            <div className="px-5 py-3.5 bg-canvas/50 border-t border-line-subtle flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setTokenToRevoke(null)}
-                className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg transition cursor-pointer"
+                className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg-soft rounded-lg transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -787,7 +787,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                 type="button"
                 disabled={isRevoking}
                 onClick={handleConfirmRevoke}
-                className="px-3.5 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-500 text-white rounded-lg transition cursor-pointer disabled:opacity-50"
+                className="px-3.5 py-1.5 text-xs font-semibold bg-danger-600 hover:bg-danger-500 text-on-fill rounded-lg transition cursor-pointer disabled:opacity-50"
               >
                 {isRevoking ? 'Revoking...' : 'Yes, Revoke'}
               </button>

@@ -89,30 +89,30 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
   );
 
   return (
-    <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-dark-800">
+    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-line-subtle">
         <div>
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
             <Bot className="w-4 h-4 text-accent-500" />
             <span>Model Context Protocol (MCP)</span>
             {enableMcp ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800/80 normal-case tracking-normal">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-success-950/80 text-success-400 border border-success-800/80 normal-case tracking-normal">
                 Active
               </span>
             ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-dark-800 text-slate-400 border border-dark-700 normal-case tracking-normal">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-raised text-fg-muted border border-line normal-case tracking-normal">
                 Disabled
               </span>
             )}
           </h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+          <p className="text-xs text-fg-muted mt-1 max-w-2xl leading-relaxed">
             Expose LogShed tools and telemetry to AI assistants such as Claude Desktop, Cursor, and Windsurf
             via standard MCP protocol.
           </p>
         </div>
 
         <div className="flex items-center gap-3 shrink-0 self-start sm:self-center">
-          <label htmlFor="enable-mcp" className="text-xs text-slate-300 font-medium cursor-pointer">
+          <label htmlFor="enable-mcp" className="text-xs text-fg-soft font-medium cursor-pointer">
             Enable Model Context Protocol
           </label>
           <input
@@ -122,23 +122,23 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
             checked={enableMcp}
             disabled={isUpdatingMcp}
             onChange={(e) => handleToggleMcp(e.target.checked)}
-            className="w-4 h-4 rounded-sm border-dark-600 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer disabled:opacity-50"
+            className="w-4 h-4 rounded-sm border-line-strong bg-raised text-accent-600 focus:ring-accent-500 focus:ring-offset-surface cursor-pointer disabled:opacity-50"
           />
         </div>
       </div>
 
       {mcpErrorMsg && (
-        <div className="p-3 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+        <div className="p-3 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
           <span>{mcpErrorMsg}</span>
         </div>
       )}
 
       {enableMcp && (
-        <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl flex items-start gap-2.5 text-amber-200/90 text-xs leading-relaxed">
-          <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-warning-950/30 border border-warning-800/40 rounded-xl flex items-start gap-2.5 text-warning-200/90 text-xs leading-relaxed">
+          <Shield className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
           <span>
-            <strong className="font-semibold text-amber-300">Automated AI Redaction Notice:</strong> Log events and alert diagnoses returned to MCP clients are passed to the connected AI assistant, and through it to its provider, without prior review. Automated credential scrubbing operates on a best-effort basis and may not catch every sensitive token or secret. Ensure the logs your assistant can query do not contain unredacted secrets.
+            <strong className="font-semibold text-warning-300">Automated AI Redaction Notice:</strong> Log events and alert diagnoses returned to MCP clients are passed to the connected AI assistant, and through it to its provider, without prior review. Automated credential scrubbing operates on a best-effort basis and may not catch every sensitive token or secret. Ensure the logs your assistant can query do not contain unredacted secrets.
           </span>
         </div>
       )}
@@ -148,10 +148,10 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
           {/* SSE Endpoint Field */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-300">
+              <label className="text-xs font-semibold text-fg-soft">
                 SSE Endpoint URL
               </label>
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-fg-muted">
                 Network SSE Transport
               </span>
             </div>
@@ -160,21 +160,21 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
                 type="text"
                 readOnly
                 value={sseUrl}
-                className="flex-1 bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 select-all focus:outline-hidden focus:border-accent-500"
+                className="flex-1 bg-canvas border border-line rounded-lg px-3 py-2 text-xs font-mono text-fg select-all focus:outline-hidden focus:border-accent-500"
               />
               <CopyButton
                 text={sseUrl}
                 title="Copy SSE URL"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-dark-800 hover:bg-dark-700 border border-dark-600 rounded-lg transition cursor-pointer shrink-0"
-                copiedLabelClassName="text-emerald-400"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-fg bg-raised hover:bg-raised-strong border border-line-strong rounded-lg transition cursor-pointer shrink-0"
+                copiedLabelClassName="text-success-400"
               />
             </div>
           </div>
 
           {/* Quick helper for token */}
-          <div className="p-3 bg-dark-950 border border-dark-800 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div className="text-slate-400">
-              <span className="text-slate-300 font-medium">Authentication: </span>
+          <div className="p-3 bg-canvas border border-line-subtle rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="text-fg-muted">
+              <span className="text-fg-soft font-medium">Authentication: </span>
               Every network MCP client needs a Bearer token with at least{' '}
               <code className="text-accent-400 font-mono text-[11px]">logs:read</code>. The{' '}
               <span className="text-accent-400 font-mono text-[11px]">AI Assistant / MCP (Read Only)</span>{' '}
@@ -187,7 +187,7 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
             <button
               type="button"
               onClick={onGenerateToken}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-700 rounded-lg transition cursor-pointer shrink-0 self-start sm:self-auto"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg border border-line rounded-lg transition cursor-pointer shrink-0 self-start sm:self-auto"
             >
               <Key className="w-3.5 h-3.5 text-accent-500" />
               <span>Generate API Token</span>
@@ -196,7 +196,7 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
 
           {/* Configuration Snippets */}
           <div className="space-y-3 pt-1">
-            <div className="text-xs font-medium text-slate-300">
+            <div className="text-xs font-medium text-fg-soft">
               Client Configuration Examples:
             </div>
 
@@ -204,16 +204,16 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
             <ConfigSnippet
               title="Claude Desktop"
               subtitle="(Remote via mcp-proxy)"
-              instruction={<>Add to <code className="text-slate-300 font-mono">claude_desktop_config.json</code> on your local workstation:</>}
+              instruction={<>Add to <code className="text-fg-soft font-mono">claude_desktop_config.json</code> on your local workstation:</>}
               snippet={claudeProxyConfigSnippet}
-              note={<>Note: Requires <code className="text-slate-400 font-mono">mcp-proxy</code> installed locally (Python package: <code className="text-slate-400 font-mono">uv tool install mcp-proxy</code> or <code className="text-slate-400 font-mono">pipx install mcp-proxy</code>; the npm package of the same name will not work).</>}
+              note={<>Note: Requires <code className="text-fg-muted font-mono">mcp-proxy</code> installed locally (Python package: <code className="text-fg-muted font-mono">uv tool install mcp-proxy</code> or <code className="text-fg-muted font-mono">pipx install mcp-proxy</code>; the npm package of the same name will not work).</>}
             />
 
             {/* 2. Cursor / Windsurf / Antigravity Remote SSE */}
             <ConfigSnippet
               title="Cursor / Windsurf / Antigravity"
               subtitle="(Remote SSE / Streamable HTTP)"
-              instruction={<>Add to <code className="text-slate-300 font-mono">.cursor/mcp.json</code> or your client settings:</>}
+              instruction={<>Add to <code className="text-fg-soft font-mono">.cursor/mcp.json</code> or your client settings:</>}
               snippet={cursorConfigSnippet}
             />
 
@@ -221,13 +221,13 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
             <ConfigSnippet
               title="Claude Desktop"
               subtitle="(Local Docker Stdio)"
-              instruction={<>Add to <code className="text-slate-300 font-mono">claude_desktop_config.json</code> when Docker runs locally:</>}
+              instruction={<>Add to <code className="text-fg-soft font-mono">claude_desktop_config.json</code> when Docker runs locally:</>}
               snippet={claudeDockerConfigSnippet}
             />
           </div>
         </div>
       ) : (
-        <div className="p-4 bg-dark-950 border border-dark-800 rounded-lg text-xs text-slate-400 text-center">
+        <div className="p-4 bg-canvas border border-line-subtle rounded-lg text-xs text-fg-muted text-center">
           MCP server is currently disabled. Toggle the switch above to activate MCP endpoints and view client configuration instructions.
         </div>
       )}

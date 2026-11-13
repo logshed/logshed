@@ -68,12 +68,12 @@ function formatTrendTooltip(ms: number): string {
 export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history }) => {
   if (!history || history.length === 0) {
     return (
-      <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-md">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+      <div className="bg-surface border border-line rounded-xl p-5 shadow-md">
+        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider mb-4 flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-accent-500" />
           <span>30-Day Storage & Volume Trend</span>
         </h3>
-        <div className="h-48 flex items-center justify-center text-slate-400 font-mono text-xs">
+        <div className="h-48 flex items-center justify-center text-fg-muted font-mono text-xs">
           No historical storage metrics recorded yet. Metrics are sampled hourly.
         </div>
       </div>
@@ -99,13 +99,13 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
   const domain = maxTime > minTime ? [minTime, maxTime] : [minTime - HOUR_MS / 2, maxTime + HOUR_MS / 2];
 
   return (
-    <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-md">
+    <div className="bg-surface border border-line rounded-xl p-5 shadow-md">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-accent-500" />
           <span>30-Day Storage & Volume Trend</span>
         </h3>
-        <span className="text-[11px] font-mono text-slate-400">Hourly Snapshots</span>
+        <span className="text-[11px] font-mono text-fg-muted">Hourly Snapshots</span>
       </div>
 
       <div className="h-56 w-full" data-testid="storage-trend-chart">
@@ -113,11 +113,11 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
           <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="dbSizeGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
-                <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.0} />
+                <stop offset="5%" stopColor="var(--color-accent-500)" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="var(--color-accent-500)" stopOpacity={0.0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" />
             <XAxis
               dataKey="time"
               type="number"
@@ -125,11 +125,11 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
               domain={domain}
               ticks={ticks}
               tickFormatter={(val: number) => formatTrendTick(val, stepHours)}
-              stroke="#64748b"
+              stroke="var(--color-fg-subtle)"
               tick={{ fontSize: 10 }}
             />
             <YAxis
-              stroke="#64748b"
+              stroke="var(--color-fg-subtle)"
               tick={{ fontSize: 10 }}
               width={70}
               tickFormatter={(val: number) => (val >= 10 ? Math.round(val).toLocaleString() : String(val))}
@@ -137,8 +137,8 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#0b0f19',
-                borderColor: '#334155',
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-line-strong)',
                 borderRadius: '8px',
                 fontSize: '11px',
                 fontFamily: 'monospace',
@@ -158,7 +158,7 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
             <Area
               type="monotone"
               dataKey="dbMb"
-              stroke="#0ea5e9"
+              stroke="var(--color-accent-500)"
               strokeWidth={2}
               fillOpacity={1}
               fill="url(#dbSizeGrad)"

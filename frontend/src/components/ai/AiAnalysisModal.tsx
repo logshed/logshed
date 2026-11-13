@@ -502,47 +502,47 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
     >
       <div ref={contentRef} className="space-y-4 text-xs font-sans scroll-mt-4">
         {/* Host & Target Scope Header */}
-        <div className="p-3 bg-dark-950 rounded-lg border border-dark-700 flex flex-wrap items-center justify-between gap-2">
+        <div className="p-3 bg-canvas rounded-lg border border-line flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Shield className={`w-4 h-4 ${selectedLogs.length > 200 ? 'text-amber-400' : 'text-emerald-400'}`} />
-            <span className="font-semibold text-slate-200">
+            <Shield className={`w-4 h-4 ${selectedLogs.length > 200 ? 'text-warning-400' : 'text-success-400'}`} />
+            <span className="font-semibold text-fg">
               {selectedLogs.length} Log{selectedLogs.length === 1 ? '' : 's'} Selected
             </span>
             {selectedLogs.length > 200 && (
-              <span className="text-[11px] text-amber-400 font-mono">
+              <span className="text-[11px] text-warning-400 font-mono">
                 (Max 200 logs allowed)
               </span>
             )}
             {preview && (
-              <span className="text-slate-400 font-mono">
+              <span className="text-fg-muted font-mono">
                 ({preview.source_alias} • {preview.app_name})
               </span>
             )}
           </div>
 
           {preview && (
-            <div className="flex items-center gap-2 font-mono text-[11px] text-slate-400">
+            <div className="flex items-center gap-2 font-mono text-[11px] text-fg-muted">
               <span
-                className="px-2 py-0.5 bg-dark-800 rounded-sm border border-dark-700 flex items-center gap-1.5 cursor-help"
+                className="px-2 py-0.5 bg-raised rounded-sm border border-line flex items-center gap-1.5 cursor-help"
                 title="Estimated prompt/input tokens only (includes system instructions and metadata). Does not include model thinking or response output tokens."
               >
                 <span>~{estimatedTokens.toLocaleString()} tokens</span>
-                <Info className="w-3.5 h-3.5 text-slate-400 hover:text-slate-200 transition" />
+                <Info className="w-3.5 h-3.5 text-fg-muted hover:text-fg transition" />
               </span>
             </div>
           )}
         </div>
 
         {previewError && (
-          <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-red-300">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+          <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-danger-300">
+            <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
             <span>{previewError}</span>
           </div>
         )}
 
         {/* Loading state for preview */}
         {isLoadingPreview && (
-          <div className="p-6 text-center text-slate-400 font-mono flex items-center justify-center gap-2">
+          <div className="p-6 text-center text-fg-muted font-mono flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-accent-400" />
             <span>Scrubbing sensitive tokens & generating AI preview...</span>
           </div>
@@ -552,14 +552,14 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
           <div className="space-y-3">
             {/* AI Disabled / Unconfigured Advisory Banner */}
             {isAiUnavailable && (
-              <div className="p-3.5 bg-amber-950/40 border border-amber-800/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200 shadow-xs">
+              <div className="p-3.5 bg-warning-950/40 border border-warning-800/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-warning-200 shadow-xs">
                 <div className="flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <AlertCircle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-semibold text-amber-200">
+                    <p className="font-semibold text-warning-200">
                       {isAiDisabled ? 'AI Provider Disabled' : 'AI Provider Not Configured'}
                     </p>
-                    <p className="text-amber-300/80 text-[11px] mt-0.5">
+                    <p className="text-warning-300/80 text-[11px] mt-0.5">
                       {isAiDisabled
                         ? 'AI features are disabled in system configuration. Enable an AI provider in Settings to inspect logs.'
                         : 'An API key is required to query models. Configure your AI provider in Settings to inspect logs.'}
@@ -569,7 +569,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 <button
                   type="button"
                   onClick={handleGoToSettings}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dark-900 hover:bg-dark-850 border border-amber-800/60 rounded-lg text-xs font-medium text-amber-200 hover:text-white transition cursor-pointer shrink-0 self-start sm:self-auto"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface hover:bg-surface-hover border border-warning-800/60 rounded-lg text-xs font-medium text-warning-200 hover:text-fg-max transition cursor-pointer shrink-0 self-start sm:self-auto"
                 >
                   <span>Configure in Settings</span>
                   <ExternalLink className="w-3.5 h-3.5 text-accent-400" />
@@ -581,8 +581,8 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             <div>
               <div className="flex flex-wrap items-center justify-between mb-1.5 gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1">
-                    <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-1">
+                    <Shield className="w-3.5 h-3.5 text-success-400" />
                     <span>Prompt (Editable)</span>
                   </span>
                   {isModified && (
@@ -594,14 +594,14 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     maskedValueCount > 0 ? (
                       <span
                         data-testid="masked-count-badge"
-                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-sm border bg-emerald-950/50 text-emerald-400 border-emerald-800 whitespace-nowrap"
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-sm border bg-success-950/50 text-success-400 border-success-800 whitespace-nowrap"
                       >
                         {maskedValueCount === 1 ? '1 value masked' : `${maskedValueCount} values masked`}
                       </span>
                     ) : (
                       <span
                         data-testid="masked-count-badge"
-                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-sm border bg-dark-800 text-slate-400 border-dark-700 whitespace-nowrap"
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-sm border bg-raised text-fg-muted border-line whitespace-nowrap"
                       >
                         No values masked - review before sending
                       </span>
@@ -611,14 +611,14 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 <div className="flex items-center gap-2.5">
                   {/* View mode toggle pill */}
-                  <div className="flex items-center bg-dark-950 border border-dark-700 rounded-sm p-0.5 text-[10px] font-mono">
+                  <div className="flex items-center bg-canvas border border-line rounded-sm p-0.5 text-[10px] font-mono">
                     <button
                       type="button"
                       onClick={prompt.showAnalysisView}
                       className={`px-2 py-0.5 rounded transition cursor-pointer ${
                         promptViewMode === 'analysis'
-                          ? 'bg-accent-700 text-white font-medium shadow-xs'
-                          : 'text-slate-400 hover:text-slate-200'
+                          ? 'bg-accent-700 text-on-fill font-medium shadow-xs'
+                          : 'text-fg-muted hover:text-fg'
                       }`}
                     >
                       Analysis Prompt
@@ -628,8 +628,8 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                       onClick={prompt.showFullView}
                       className={`px-2 py-0.5 rounded transition cursor-pointer ${
                         promptViewMode === 'full'
-                          ? 'bg-accent-700 text-white font-medium shadow-xs'
-                          : 'text-slate-400 hover:text-slate-200'
+                          ? 'bg-accent-700 text-on-fill font-medium shadow-xs'
+                          : 'text-fg-muted hover:text-fg'
                       }`}
                     >
                       Full LLM Prompt
@@ -640,7 +640,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     <button
                       type="button"
                       onClick={handleResetPrompt}
-                      className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                      className="flex items-center gap-1 text-[11px] text-warning-400 hover:text-warning-300 transition cursor-pointer"
                       title="Reset prompt to original generated text"
                       aria-label="Reset prompt to default"
                     >
@@ -660,62 +660,62 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 value={promptViewMode === 'full' ? fullPromptText : promptText}
                 onChange={handlePromptChange}
                 placeholder={promptViewMode === 'full' ? 'Full LLM prompt envelope...' : 'Redacted prompt...'}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-3 font-mono text-slate-200 text-xs focus:outline-hidden focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
+                className="w-full bg-canvas border border-line rounded-lg p-3 font-mono text-fg text-xs focus:outline-hidden focus:border-accent-500 leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden"
               />
 
               {/* Log Redaction Notice */}
-              <div className="mt-2 p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg flex items-start gap-2 text-amber-200/90 text-[11px] leading-relaxed">
-                <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="mt-2 p-2.5 bg-warning-950/30 border border-warning-800/40 rounded-lg flex items-start gap-2 text-warning-200/90 text-[11px] leading-relaxed">
+                <Shield className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong className="font-semibold text-amber-300">Redaction Notice:</strong> Best-effort masking: common API keys, passwords and tokens are replaced with [REDACTED], but pattern matching cannot catch every secret, and IP addresses and host names are not masked. Review and edit the prompt before sending. You are responsible for what you send to external AI providers.
+                  <strong className="font-semibold text-warning-300">Redaction Notice:</strong> Best-effort masking: common API keys, passwords and tokens are replaced with [REDACTED], but pattern matching cannot catch every secret, and IP addresses and host names are not masked. Review and edit the prompt before sending. You are responsible for what you send to external AI providers.
                 </span>
               </div>
             </div>
 
             {/* Collapsible Provider & Model Configuration Section */}
-            <div className="border border-dark-700/80 rounded-lg bg-dark-900/60 overflow-hidden transition-colors">
+            <div className="border border-line/80 rounded-lg bg-surface/60 overflow-hidden transition-colors">
               <button
                 type="button"
                 onClick={() => setIsAiSettingsOpen(!isAiSettingsOpen)}
-                className="w-full p-2.5 flex flex-wrap items-center justify-between gap-2 hover:bg-dark-800/60 transition cursor-pointer text-left select-none"
+                className="w-full p-2.5 flex flex-wrap items-center justify-between gap-2 hover:bg-raised/60 transition cursor-pointer text-left select-none"
                 aria-expanded={isAiSettingsOpen}
                 aria-controls="ai-model-settings-content"
               >
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                   <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400 shrink-0" />
-                  <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                  <span className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider">
                     Model & Provider Settings
                   </span>
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
-                    <span className="px-1.5 py-0.5 rounded-sm bg-dark-950 border border-dark-700 text-slate-300 truncate max-w-[150px] sm:max-w-[220px]">
+                    <span className="px-1.5 py-0.5 rounded-sm bg-canvas border border-line text-fg-soft truncate max-w-[150px] sm:max-w-[220px]">
                       {model || DEFAULT_AI_MODEL}
                     </span>
                     {fallbackList.length > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded-sm bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded-sm bg-warning-500/10 text-warning-300 border border-warning-500/20 text-[10px]">
                         {fallbackList.length} fallback{fallbackList.length === 1 ? '' : 's'}
                       </span>
                     ) : (
-                      <span className="hidden sm:inline text-[11px] text-slate-400">
+                      <span className="hidden sm:inline text-[11px] text-fg-muted">
                         no fallbacks
                       </span>
                     )}
                     {!hasApiKeyForProvider && providerNeedsApiKey(provider) && (
-                      <span className="px-1.5 py-0.5 rounded-sm bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 text-amber-400" />
+                      <span className="px-1.5 py-0.5 rounded-sm bg-warning-500/20 text-warning-300 border border-warning-500/40 text-[10px] flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 text-warning-400" />
                         Key required
                       </span>
                     )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-mono shrink-0 ml-auto">
-                  <span className="text-[10px] text-slate-400 hover:text-slate-200">
+                <div className="flex items-center gap-1.5 text-fg-muted text-[11px] font-mono shrink-0 ml-auto">
+                  <span className="text-[10px] text-fg-muted hover:text-fg">
                     {isAiSettingsOpen ? 'Hide' : 'Configure'}
                   </span>
                   {isAiSettingsOpen ? (
-                    <ChevronUp className="w-4 h-4 text-slate-400" />
+                    <ChevronUp className="w-4 h-4 text-fg-muted" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                    <ChevronDown className="w-4 h-4 text-fg-muted" />
                   )}
                 </div>
               </button>
@@ -723,12 +723,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               {/* Collapsible Content */}
               <div
                 id="ai-model-settings-content"
-                className={isAiSettingsOpen ? 'p-3 pt-2.5 space-y-3 border-t border-dark-800' : 'hidden'}
+                className={isAiSettingsOpen ? 'p-3 pt-2.5 space-y-3 border-t border-line-subtle' : 'hidden'}
               >
                 {/* Missing API Key Warning */}
                 {!hasApiKeyForProvider && providerNeedsApiKey(provider) && (
-                  <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-lg flex items-start gap-2 text-amber-300 text-xs font-mono">
-                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex items-start gap-2 text-warning-300 text-xs font-mono">
+                    <AlertCircle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
                     <span>
                       No API key configured for {getAiProvider(provider)?.label ?? 'your endpoint'}. Please configure your API key in Settings to load models and run AI analysis.
                     </span>
@@ -737,20 +737,20 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 {/* Models Loading Error Notice */}
                 {modelsError && (hasApiKeyForProvider || !providerNeedsApiKey(provider)) && (
-                  <div className="p-2.5 bg-red-950/40 border border-red-800/60 rounded-lg flex items-start gap-2 text-red-300 text-xs font-mono">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <div className="p-2.5 bg-danger-950/40 border border-danger-800/60 rounded-lg flex items-start gap-2 text-danger-300 text-xs font-mono">
+                    <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
                     <span>{modelsError}</span>
                   </div>
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label id={`${fieldId}-provider-label`} htmlFor={`${fieldId}-provider`} className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                    <label id={`${fieldId}-provider-label`} htmlFor={`${fieldId}-provider`} className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                       AI Provider
                     </label>
                     <SelectDropdown
                       variant="panel"
-                      fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-2.5 py-1.5 font-mono text-slate-200"
+                      fieldClassName="bg-canvas border-line rounded-sm px-2.5 py-1.5 font-mono text-fg"
                       id={`${fieldId}-provider`}
                       labelledBy={`${fieldId}-provider-label`}
                       label="AI Provider"
@@ -762,7 +762,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label id={`${fieldId}-model-label`} htmlFor={`${fieldId}-model`} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase">
+                      <label id={`${fieldId}-model-label`} htmlFor={`${fieldId}-model`} className="flex items-center gap-1.5 text-[11px] font-semibold text-fg-muted uppercase">
                         <span>Primary Model</span>
                         {isLoadingModels && (
                           <RefreshCw className="w-3 h-3 text-accent-400 animate-spin" />
@@ -792,7 +792,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     {availableModels.length > 0 && !isCustomModel ? (
                       <SelectDropdown
                         variant="panel"
-                        fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-2.5 py-1.5 font-mono text-slate-200"
+                        fieldClassName="bg-canvas border-line rounded-sm px-2.5 py-1.5 font-mono text-fg"
                         id={`${fieldId}-model`}
                         labelledBy={`${fieldId}-model-label`}
                         label="Primary Model"
@@ -818,7 +818,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                         value={model}
                         onChange={(e) => handlePrimaryModelChange(e.target.value)}
                         placeholder={DEFAULT_PROVIDER_MODELS[provider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-                        className="w-full bg-dark-950 border border-dark-700 rounded-sm px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono"
+                        className="w-full bg-canvas border border-line rounded-sm px-2.5 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono"
                       />
                     )}
                   </div>
@@ -841,7 +841,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
             {/* Free-text user context input */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Optional Situational Context
               </label>
               <textarea
@@ -850,27 +850,27 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 maxLength={MAX_USER_CONTEXT_LENGTH}
                 placeholder="e.g. Occurred immediately following network switch firmware upgrade, or after container image pull..."
                 rows={2}
-                className="w-full bg-dark-950 border border-dark-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-sans"
+                className="w-full bg-canvas border border-line rounded-lg p-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-sans"
               />
             </div>
 
             {analysisError && (
-              <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg text-red-300">
+              <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg text-danger-300">
                 {analysisError}
               </div>
             )}
 
             {/* In-Flight Live Progress & Failover Pipeline Card */}
             {isDiagnosing && (
-              <div className="p-3.5 bg-dark-950 border border-accent-800/60 rounded-lg space-y-2.5 animate-in fade-in">
+              <div className="p-3.5 bg-canvas border border-accent-800/60 rounded-lg space-y-2.5 animate-in fade-in">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <RefreshCw className="w-4 h-4 text-accent-400 animate-spin" />
-                    <span className="font-semibold text-slate-200 text-xs">
+                    <span className="font-semibold text-fg text-xs">
                       {streamProgress.message || `Running analysis with ${streamProgress.currentModel || model}...`}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
+                  <div className="flex items-center gap-1.5 font-mono text-[11px] bg-surface border border-line px-2 py-0.5 rounded-sm text-fg-soft">
                     <Clock className="w-3.5 h-3.5 text-accent-400" />
                     <span>Elapsed: {formatElapsed(elapsedSeconds)}</span>
                   </div>
@@ -882,12 +882,12 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     {streamProgress.failovers.map((fo, idx) => (
                       <div
                         key={idx}
-                        className="p-2 bg-amber-950/50 border border-amber-800/70 rounded-sm text-[11px] text-amber-200 flex items-start gap-2"
+                        className="p-2 bg-warning-950/50 border border-warning-800/70 rounded-sm text-[11px] text-warning-200 flex items-start gap-2"
                       >
-                        <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                        <AlertCircle className="w-3.5 h-3.5 text-warning-400 shrink-0 mt-0.5" />
                         <div>
-                          <span className="font-semibold text-amber-300">Failover Active:</span>{' '}
-                          Model <span className="font-mono text-amber-100">{fo.failedModel}</span> encountered an overload or timeout error. Failing over to <span className="font-mono text-amber-100">{fo.nextModel}</span>...
+                          <span className="font-semibold text-warning-300">Failover Active:</span>{' '}
+                          Model <span className="font-mono text-warning-100">{fo.failedModel}</span> encountered an overload or timeout error. Failing over to <span className="font-mono text-warning-100">{fo.nextModel}</span>...
                         </div>
                       </div>
                     ))}
@@ -896,14 +896,14 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
                 {/* Live Chain Status Pills */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono">
-                  <span className="text-slate-400 uppercase font-semibold">Chain Status:</span>
+                  <span className="text-fg-muted uppercase font-semibold">Chain Status:</span>
                   <span
                     className={`px-2 py-0.5 rounded border ${
                       streamProgress.failovers.some((f) => f.failedModel === model)
-                        ? 'bg-amber-950/60 border-amber-800 text-amber-400 line-through'
+                        ? 'bg-warning-950/60 border-warning-800 text-warning-400 line-through'
                         : streamProgress.currentModel === model
                         ? 'bg-accent-950/80 border-accent-600 text-accent-300 animate-pulse'
-                        : 'bg-dark-900 border-dark-700 text-slate-400'
+                        : 'bg-surface border-line text-fg-muted'
                     }`}
                   >
                     {model}
@@ -914,14 +914,14 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                     .filter(Boolean)
                     .map((fb, idx) => (
                       <React.Fragment key={idx}>
-                        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
+                        <ArrowRight className="w-3 h-3 text-fg-faint shrink-0" />
                         <span
                           className={`px-2 py-0.5 rounded border ${
                             streamProgress.failovers.some((f) => f.failedModel === fb)
-                              ? 'bg-amber-950/60 border-amber-800 text-amber-400 line-through'
+                              ? 'bg-warning-950/60 border-warning-800 text-warning-400 line-through'
                               : streamProgress.currentModel === fb
-                              ? 'bg-amber-950/80 border-amber-600 text-amber-300 animate-pulse'
-                              : 'bg-dark-900 border-dark-700 text-slate-400'
+                              ? 'bg-warning-950/80 border-warning-600 text-warning-300 animate-pulse'
+                              : 'bg-surface border-line text-fg-muted'
                           }`}
                         >
                           {fb}
@@ -933,8 +933,8 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             )}
 
             {/* AI Advisory Disclaimer */}
-            <div className="p-3 bg-dark-950/80 border border-dark-700/80 rounded-lg flex items-start gap-2.5 text-slate-400 text-[11px] leading-relaxed">
-              <AlertCircle className="w-4 h-4 text-amber-400/90 shrink-0 mt-0.5" />
+            <div className="p-3 bg-canvas/80 border border-line/80 rounded-lg flex items-start gap-2.5 text-fg-muted text-[11px] leading-relaxed">
+              <AlertCircle className="w-4 h-4 text-warning-400/90 shrink-0 mt-0.5" />
               <span>
                 AI root-cause analyses and remediation commands are advisory only. Always verify proposed commands and configurations before executing on systems. API calls consume tokens billed to your provider.
               </span>
@@ -945,7 +945,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               <button
                 onClick={handleRunAnalysis}
                 disabled={isDiagnosing || isAiUnavailable}
-                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
+                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill font-medium px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition shadow-md cursor-pointer disabled:cursor-not-allowed"
               >
                 {isDiagnosing ? (
                   <>
@@ -967,33 +967,33 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         {analysisResult && (
           <div className="space-y-4 animate-in fade-in">
             {/* Header info - 2-row layout */}
-            <div className="bg-dark-950 p-3 rounded-lg border border-dark-700 space-y-2">
+            <div className="bg-canvas p-3 rounded-lg border border-line space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="font-semibold text-slate-200">
+                  <Shield className="w-4 h-4 text-success-400 shrink-0" />
+                  <span className="font-semibold text-fg">
                     {selectedLogs.length} Log{selectedLogs.length === 1 ? '' : 's'} Inspected
                   </span>
                   {preview && (
-                    <span className="text-slate-400 font-mono text-[11px]">
+                    <span className="text-fg-muted font-mono text-[11px]">
                       ({preview.source_alias} • {preview.app_name})
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded-sm text-slate-300">
-                  <span className="text-slate-400 text-[10px] uppercase font-semibold">Model:</span>
+                <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] bg-surface border border-line px-2 py-0.5 rounded-sm text-fg-soft">
+                  <span className="text-fg-muted text-[10px] uppercase font-semibold">Model:</span>
                   <span className="text-accent-400 font-medium min-w-0 break-all">{analysisResult.model_used}</span>
                   {analysisResult.fallback_used && (
-                    <span className="shrink-0 bg-amber-950/80 border border-amber-700 text-amber-300 px-1.5 py-0.5 rounded-sm text-[9px] font-semibold tracking-wide uppercase">
+                    <span className="shrink-0 bg-warning-950/80 border border-warning-700 text-warning-300 px-1.5 py-0.5 rounded-sm text-[9px] font-semibold tracking-wide uppercase">
                       Fallback
                     </span>
                   )}
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between pt-1.5 border-t border-dark-800 text-[11px] font-mono text-slate-400 gap-2">
+              <div className="flex flex-wrap items-center justify-between pt-1.5 border-t border-line-subtle text-[11px] font-mono text-fg-muted gap-2">
                 <span>
-                  Total Tokens: <span className="text-slate-100 font-semibold">{analysisResult.tokens_used.toLocaleString()}</span>
+                  Total Tokens: <span className="text-fg-strong font-semibold">{analysisResult.tokens_used.toLocaleString()}</span>
                 </span>
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
                   <TokenUsage
@@ -1007,19 +1007,19 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
             {/* Fallback notification banner if failover occurred */}
             {analysisResult.fallback_used && (
-              <div className="p-3 bg-amber-950/40 border border-amber-800/70 rounded-lg flex items-start gap-2.5 text-amber-200 text-xs leading-relaxed">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="p-3 bg-warning-950/40 border border-warning-800/70 rounded-lg flex items-start gap-2.5 text-warning-200 text-xs leading-relaxed">
+                <AlertCircle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <div className="font-semibold text-amber-300">
+                  <div className="font-semibold text-warning-300">
                     Model Failover Active
                   </div>
-                  <div className="text-[11px] text-amber-200/90">
-                    The primary model could not answer (for example a timeout, an overload or a refusal). The diagnosis comes from fallback model <strong className="font-mono text-amber-100">{analysisResult.model_used}</strong>.
+                  <div className="text-[11px] text-warning-200/90">
+                    The primary model could not answer (for example a timeout, an overload or a refusal). The diagnosis comes from fallback model <strong className="font-mono text-warning-100">{analysisResult.model_used}</strong>.
                   </div>
                   {analysisResult.fallback_attempts && analysisResult.fallback_attempts.length > 0 && (
                     <div className="pt-1 space-y-0.5">
                       {analysisResult.fallback_attempts.map((att, idx) => (
-                        <div key={idx} className="font-mono text-[10px] text-amber-300/80">
+                        <div key={idx} className="font-mono text-[10px] text-warning-300/80">
                           - {att}
                         </div>
                       ))}
@@ -1030,7 +1030,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             )}
 
             {/* Summary */}
-            <div className="bg-dark-950 p-3 rounded-lg border border-dark-700">
+            <div className="bg-canvas p-3 rounded-lg border border-line">
               <h3 className="text-[11px] font-semibold text-accent-400 uppercase tracking-wider mb-1">
                 Summary
               </h3>
@@ -1038,16 +1038,16 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             </div>
 
             {/* Root Cause */}
-            <div className="bg-dark-950 p-3 rounded-lg border border-dark-700">
-              <h3 className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider mb-1">
+            <div className="bg-canvas p-3 rounded-lg border border-line">
+              <h3 className="text-[11px] font-semibold text-warning-400 uppercase tracking-wider mb-1">
                 Root Cause Analysis
               </h3>
               <MarkdownRenderer content={analysisResult.root_cause} />
             </div>
 
             {/* Actionable Remediation */}
-            <div className="bg-dark-950 p-3 rounded-lg border border-dark-700">
-              <h3 className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider mb-1">
+            <div className="bg-canvas p-3 rounded-lg border border-line">
+              <h3 className="text-[11px] font-semibold text-success-400 uppercase tracking-wider mb-1">
                 Actionable Remediation
               </h3>
               <MarkdownRenderer content={analysisResult.remediation} />
@@ -1055,8 +1055,8 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
             {/* Follow-up Discussion */}
             {analysisResult.audit_id != null && (
-              <div className="bg-dark-900/60 p-3 rounded-lg border border-dark-700">
-                <h3 className="text-[11px] font-semibold text-sky-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <div className="bg-surface/60 p-3 rounded-lg border border-line">
+                <h3 className="text-[11px] font-semibold text-accent-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5" />
                   Follow-up Discussion
                 </h3>
@@ -1071,8 +1071,8 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             )}
 
             {/* AI Advisory Disclaimer */}
-            <div className="p-3 bg-dark-950/80 border border-dark-700/80 rounded-lg flex items-start gap-2.5 text-slate-400 text-[11px] leading-relaxed">
-              <AlertCircle className="w-4 h-4 text-amber-400/90 shrink-0 mt-0.5" />
+            <div className="p-3 bg-canvas/80 border border-line/80 rounded-lg flex items-start gap-2.5 text-fg-muted text-[11px] leading-relaxed">
+              <AlertCircle className="w-4 h-4 text-warning-400/90 shrink-0 mt-0.5" />
               <span>
                 AI root-cause analyses and remediation commands are advisory only. Always verify proposed commands and configurations before executing on systems. API calls consume tokens billed to your provider.
               </span>
@@ -1085,7 +1085,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 onClick={() => setAnalysisResult(null)}
                 disabled={isFollowUpSending}
                 title={isFollowUpSending ? 'Wait for the follow-up reply to finish' : undefined}
-                className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-slate-400"
+                className="text-xs text-fg-muted hover:text-fg underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-fg-muted"
               >
                 Back to Preview & Edit
               </button>
@@ -1093,7 +1093,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3.5 py-2 text-xs bg-dark-700 hover:bg-dark-600 text-slate-200 rounded-lg transition cursor-pointer"
+                className="px-3.5 py-2 text-xs bg-raised-strong hover:bg-raised-max text-fg rounded-lg transition cursor-pointer"
               >
                 Close
               </button>

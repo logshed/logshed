@@ -79,13 +79,13 @@ export interface PresetCategoryFilterProps {
 /** The category field shown above the preset cards. */
 export const PresetCategoryFilter: React.FC<PresetCategoryFilterProps> = ({ idPrefix, value, options, onChange }) => (
   <div className="flex items-center gap-2 shrink-0">
-    <label id={`${idPrefix}-category-label`} htmlFor={`${idPrefix}-category`} className="text-xs text-slate-400 w-24 sm:w-auto">
+    <label id={`${idPrefix}-category-label`} htmlFor={`${idPrefix}-category`} className="text-xs text-fg-muted w-24 sm:w-auto">
       Category:
     </label>
     <div className="w-52">
       <SelectDropdown
         variant="panel"
-        fieldClassName="bg-dark-800 border-dark-700 rounded-lg px-2.5 py-1.5 text-slate-200"
+        fieldClassName="bg-raised border-line rounded-lg px-2.5 py-1.5 text-fg"
         id={`${idPrefix}-category`}
         labelledBy={`${idPrefix}-category-label`}
         label="Category"

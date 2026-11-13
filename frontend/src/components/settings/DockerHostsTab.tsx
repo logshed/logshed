@@ -184,15 +184,15 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Unified Docker Host Endpoints Card */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-md">
-        <div className="p-3.5 sm:p-5 border-b border-dark-700 space-y-4">
+      <section className="bg-surface border border-line rounded-xl overflow-hidden shadow-md">
+        <div className="p-3.5 sm:p-5 border-b border-line space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
                 <Box className="w-4 h-4 text-accent-500" />
                 <span>Docker Host Endpoints</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
+              <p className="text-xs text-fg-muted mt-0.5 max-w-2xl">
                 Collect container logs across local Unix sockets, remote socket proxies, and mutual TLS daemons into a unified pipeline.
               </p>
             </div>
@@ -201,7 +201,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                 type="button"
                 onClick={loadHosts}
                 disabled={isLoading}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-dark-800 hover:bg-dark-700 border border-dark-600 rounded-lg transition cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-soft bg-raised hover:bg-raised-strong border border-line-strong rounded-lg transition cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
                 <span>Refresh</span>
@@ -209,7 +209,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
               <button
                 type="button"
                 onClick={() => openAddModal()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg shadow-xs transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 rounded-lg shadow-xs transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Docker Host</span>
@@ -218,35 +218,35 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           </div>
 
           {errorMsg && (
-            <div className="mt-4 p-3 rounded-lg border bg-red-950/60 border-red-800 text-red-300 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <div className="mt-4 p-3 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
         </div>
 
         {/* Configured Docker Hosts Sub-Section */}
-        <div className="p-3.5 sm:px-5 sm:py-3 bg-dark-950/40 border-b border-dark-800 flex items-center justify-between">
-          <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+        <div className="p-3.5 sm:px-5 sm:py-3 bg-canvas/40 border-b border-line-subtle flex items-center justify-between">
+          <h4 className="text-xs font-semibold text-fg-soft uppercase tracking-wider">
             Configured Docker Hosts ({hosts.length})
           </h4>
         </div>
 
         {isLoading ? (
-          <div className="p-8 text-center text-xs text-slate-400 font-mono">
+          <div className="p-8 text-center text-xs text-fg-muted font-mono">
             Loading Docker hosts...
           </div>
         ) : hosts.length === 0 ? (
           <div className="p-8 text-center space-y-2">
-            <Box className="w-8 h-8 text-slate-600 mx-auto" />
-            <p className="text-xs font-medium text-slate-300">No Docker hosts configured</p>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            <Box className="w-8 h-8 text-fg-faint mx-auto" />
+            <p className="text-xs font-medium text-fg-soft">No Docker hosts configured</p>
+            <p className="text-xs text-fg-muted max-w-sm mx-auto">
               Add a remote Docker host or socket proxy to collect logs from other machines.
             </p>
           </div>
         ) : isMobile ? (
           /* Mobile Card View */
-          <div className="block md:hidden divide-y divide-dark-800">
+          <div className="block md:hidden divide-y divide-line-subtle">
             {hosts.map((host) => {
               const testResult = rowTestResults[host.id];
               return (
@@ -254,20 +254,20 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-100">{host.name}</span>
+                        <span className="text-xs font-semibold text-fg-strong">{host.name}</span>
                         {host.id === 1 && (
                           <span className="text-[10px] font-medium bg-accent-950/40 text-accent-400 border border-accent-800/60 px-1.5 py-0.5 rounded-sm">
                             Primary
                           </span>
                         )}
                         {host.tls_enabled && (
-                          <span className="text-[10px] font-medium bg-dark-800 text-slate-300 border border-dark-700 px-1.5 py-0.5 rounded-sm flex items-center gap-1">
+                          <span className="text-[10px] font-medium bg-raised text-fg-soft border border-line px-1.5 py-0.5 rounded-sm flex items-center gap-1">
                             <Lock className="w-2.5 h-2.5 text-accent-400" />
                             TLS
                           </span>
                         )}
                       </div>
-                      <div className="font-mono text-[11px] text-slate-400 truncate mt-1">
+                      <div className="font-mono text-[11px] text-fg-muted truncate mt-1">
                         {host.url}
                       </div>
                     </div>
@@ -276,7 +276,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                       <button
                         type="button"
                         onClick={() => openEditModal(host)}
-                        className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
+                        className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-fg hover:bg-raised rounded-sm transition cursor-pointer"
                         title="Edit Host"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
@@ -285,7 +285,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                         <button
                           type="button"
                           onClick={() => setHostToDelete(host)}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded-sm transition cursor-pointer"
+                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-danger-400 hover:text-danger-300 hover:bg-danger-950/40 rounded-sm transition cursor-pointer"
                           title="Delete Host"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -295,29 +295,29 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-slate-400">Alias:</span>
-                    <span className="font-mono text-slate-300 bg-dark-950 px-1.5 py-0.5 rounded-sm border border-dark-800">
+                    <span className="text-fg-muted">Alias:</span>
+                    <span className="font-mono text-fg-soft bg-canvas px-1.5 py-0.5 rounded-sm border border-line-subtle">
                       {host.source_alias}
                     </span>
 
-                    <span className="text-slate-400 ml-2">Status:</span>
+                    <span className="text-fg-muted ml-2">Status:</span>
                     {!host.enabled ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-dark-800 text-slate-400 border border-dark-700">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-raised text-fg-muted border border-line">
                         Disabled
                       </span>
                     ) : host.is_connected ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-success-950/60 text-success-400 border border-success-800">
                         Connected ({host.active_containers ?? 0} active)
                       </span>
                     ) : host.last_error ? (
                       <span
-                        className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-red-950/60 text-red-400 border border-red-800"
+                        className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-danger-950/60 text-danger-400 border border-danger-800"
                         title={host.last_error}
                       >
                         Error
                       </span>
                     ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-warning-950/60 text-warning-400 border border-warning-800">
                         Reconnecting
                       </span>
                     )}
@@ -327,33 +327,33 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     <div
                       className={`text-[11px] p-2 rounded border flex items-center gap-1.5 ${
                         testResult.success
-                          ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-                          : 'bg-red-950/40 border-red-800 text-red-300'
+                          ? 'bg-success-950/40 border-success-800 text-success-300'
+                          : 'bg-danger-950/40 border-danger-800 text-danger-300'
                       }`}
                     >
                       {testResult.success ? (
                         <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <CheckCircle2 className="w-3.5 h-3.5 text-success-400 shrink-0" />
                           <span>Connected ({testResult.version ?? 'Docker'}, {Math.round(testResult.latency_ms ?? 0)} ms)</span>
                         </>
                       ) : (
                         <>
-                          <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                          <XCircle className="w-3.5 h-3.5 text-danger-400 shrink-0" />
                           <span className="truncate">{testResult.error || 'Connection failed'}</span>
                         </>
                       )}
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between pt-1 border-t border-dark-800">
+                  <div className="flex items-center justify-between pt-1 border-t border-line-subtle">
                     <button
                       type="button"
                       onClick={() => handleToggleEnabled(host)}
                       disabled={togglingIds.has(host.id)}
                       className={`text-[11px] font-medium px-2 py-1 rounded transition cursor-pointer border disabled:opacity-50 ${
                         host.enabled
-                          ? 'text-slate-400 hover:text-slate-200 border-dark-700 bg-dark-950'
-                          : 'text-emerald-400 hover:text-emerald-300 border-emerald-800 bg-emerald-950/30'
+                          ? 'text-fg-muted hover:text-fg border-line bg-canvas'
+                          : 'text-success-400 hover:text-success-300 border-success-800 bg-success-950/30'
                       }`}
                     >
                       {host.enabled ? 'Disable' : 'Enable'}
@@ -362,7 +362,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                       type="button"
                       onClick={() => handleRowTest(host)}
                       disabled={testingRowId === host.id}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-300 bg-dark-800 hover:bg-dark-750 border border-dark-600 rounded-sm transition cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-fg-soft bg-raised hover:bg-raised-hover border border-line-strong rounded-sm transition cursor-pointer disabled:opacity-50"
                     >
                       <Play className="w-3 h-3 text-accent-400" />
                       <span>{testingRowId === host.id ? 'Testing...' : 'Test Connection'}</span>
@@ -377,7 +377,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="border-b border-dark-700/60 bg-dark-950/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                <tr className="border-b border-line/60 bg-canvas/40 text-[11px] font-semibold text-fg-muted uppercase tracking-wider">
                   <th className="py-2.5 px-4">Name</th>
                   <th className="py-2.5 px-4 font-mono">Endpoint URL</th>
                   <th className="py-2.5 px-4">Host Alias</th>
@@ -386,14 +386,14 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   <th className="py-2.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-dark-800 text-slate-200">
+              <tbody className="divide-y divide-line-subtle text-fg">
                 {hosts.map((host) => {
                   const testResult = rowTestResults[host.id];
                   return (
-                    <tr key={`host-${host.id}`} className="hover:bg-dark-800/40 transition">
+                    <tr key={`host-${host.id}`} className="hover:bg-raised/40 transition">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-slate-100">{host.name}</span>
+                          <span className="font-semibold text-fg-strong">{host.name}</span>
                           {host.id === 1 && (
                             <span className="text-[10px] font-medium bg-accent-950/40 text-accent-400 border border-accent-800/60 px-1.5 py-0.5 rounded-sm">
                               Primary
@@ -401,7 +401,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                           )}
                           {host.tls_enabled && (
                             <span
-                              className="text-[10px] font-medium bg-dark-800 text-slate-300 border border-dark-700 px-1.5 py-0.5 rounded-sm flex items-center gap-1"
+                              className="text-[10px] font-medium bg-raised text-fg-soft border border-line px-1.5 py-0.5 rounded-sm flex items-center gap-1"
                               title="Mutual TLS configured"
                             >
                               <Lock className="w-2.5 h-2.5 text-accent-400" />
@@ -410,45 +410,45 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                           )}
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-mono text-[11px] text-slate-300 max-w-xs truncate" title={host.url}>
+                      <td className="py-3 px-4 font-mono text-[11px] text-fg-soft max-w-xs truncate" title={host.url}>
                         {host.url}
                       </td>
                       <td className="py-3 px-4">
-                        <span className="font-mono text-[11px] text-slate-300 bg-dark-950 px-2 py-0.5 rounded-sm border border-dark-800">
+                        <span className="font-mono text-[11px] text-fg-soft bg-canvas px-2 py-0.5 rounded-sm border border-line-subtle">
                           {host.source_alias}
                         </span>
                       </td>
                       <td className="py-3 px-4 w-40 whitespace-nowrap">
                         {!host.enabled ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-dark-800 text-slate-400 border border-dark-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-raised text-fg-muted border border-line">
                             Disabled
                           </span>
                         ) : host.is_connected ? (
                           <div className="flex items-center gap-1.5 whitespace-nowrap">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800 shrink-0">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-success-950/60 text-success-400 border border-success-800 shrink-0">
                               Connected
                             </span>
                             {host.latency_ms != null && (
-                              <span className="font-mono text-[10px] text-slate-400 shrink-0 whitespace-nowrap">
+                              <span className="font-mono text-[10px] text-fg-muted shrink-0 whitespace-nowrap">
                                 {Math.round(host.latency_ms)} ms
                               </span>
                             )}
                           </div>
                         ) : host.last_error ? (
                           <span
-                            className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-red-950/60 text-red-400 border border-red-800 cursor-help whitespace-nowrap"
+                            className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-danger-950/60 text-danger-400 border border-danger-800 cursor-help whitespace-nowrap"
                             title={host.last_error}
                           >
                             Error
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-amber-950/60 text-amber-400 border border-amber-800 whitespace-nowrap">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium bg-warning-950/60 text-warning-400 border border-warning-800 whitespace-nowrap">
                             Reconnecting
                           </span>
                         )}
                       </td>
                       <td className="py-3 px-4 w-28 text-center whitespace-nowrap">
-                        <span className="font-mono text-slate-300">
+                        <span className="font-mono text-fg-soft">
                           {host.enabled && host.is_connected ? host.active_containers ?? 0 : '0'}
                         </span>
                       </td>
@@ -458,8 +458,8 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             <span
                               className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
                                 testResult.success
-                                  ? 'bg-emerald-950/50 text-emerald-400 border-emerald-800'
-                                  : 'bg-red-950/50 text-red-400 border-red-800'
+                                  ? 'bg-success-950/50 text-success-400 border-success-800'
+                                  : 'bg-danger-950/50 text-danger-400 border-danger-800'
                               }`}
                               title={testResult.error || testResult.version || ''}
                             >
@@ -471,7 +471,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             type="button"
                             onClick={() => handleRowTest(host)}
                             disabled={testingRowId === host.id}
-                            className="inline-flex items-center gap-1 h-8 sm:h-auto px-2 sm:py-1 text-[11px] font-medium text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded-sm transition cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 h-8 sm:h-auto px-2 sm:py-1 text-[11px] font-medium text-fg-muted hover:text-accent-400 hover:bg-raised rounded-sm transition cursor-pointer disabled:opacity-50"
                             title="Test Connection"
                             aria-label={`Test connection to ${host.name}`}
                           >
@@ -485,8 +485,8 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             disabled={togglingIds.has(host.id)}
                             className={`w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center rounded transition cursor-pointer disabled:opacity-50 ${
                               host.enabled
-                                ? 'text-accent-400 hover:text-accent-300 hover:bg-dark-800'
-                                : 'text-slate-600 hover:text-slate-400 hover:bg-dark-800'
+                                ? 'text-accent-400 hover:text-accent-300 hover:bg-raised'
+                                : 'text-fg-faint hover:text-fg-muted hover:bg-raised'
                             }`}
                             title={`${host.enabled ? 'Disable' : 'Enable'} host ${host.name}`}
                             aria-label={`${host.enabled ? 'Disable' : 'Enable'} host ${host.name}`}
@@ -497,7 +497,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                           <button
                             type="button"
                             onClick={() => openEditModal(host)}
-                            className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
+                            className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-fg hover:bg-raised rounded-sm transition cursor-pointer"
                             title="Edit Host"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -507,7 +507,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             <button
                               type="button"
                               onClick={() => setHostToDelete(host)}
-                              className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded-sm transition cursor-pointer"
+                              className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-danger-400 hover:text-danger-300 hover:bg-danger-950/40 rounded-sm transition cursor-pointer"
                               title="Delete Host"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -552,17 +552,17 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
         confirmDisabled={isDeleting}
         confirmLabel={isDeleting ? 'Removing...' : 'Remove Host'}
         bodyClassName="space-y-4"
-        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-dark-700"
-        cancelClassName="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition cursor-pointer"
-        confirmClassName="px-3.5 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition cursor-pointer disabled:opacity-50"
+        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-line"
+        cancelClassName="px-3 py-1.5 text-xs font-medium text-fg-muted hover:text-fg transition cursor-pointer"
+        confirmClassName="px-3.5 py-1.5 text-xs font-medium text-on-fill bg-danger-600 hover:bg-danger-500 rounded-lg transition cursor-pointer disabled:opacity-50"
       >
-        <div className="p-3 rounded-lg border bg-amber-950/40 border-amber-800/80 text-amber-200 text-xs flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div className="p-3 rounded-lg border bg-warning-950/40 border-warning-800/80 text-warning-200 text-xs flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-amber-100">Confirm Removal</p>
-            <p className="mt-1 text-slate-300">
+            <p className="font-semibold text-warning-100">Confirm Removal</p>
+            <p className="mt-1 text-fg-soft">
               Are you sure you want to remove Docker host{' '}
-              <strong className="text-slate-100">{hostToDelete?.name}</strong>? Its active container collection task will stop immediately.
+              <strong className="text-fg-strong">{hostToDelete?.name}</strong>? Its active container collection task will stop immediately.
             </p>
           </div>
         </div>
@@ -580,37 +580,37 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
           maxWidth="max-w-md"
         >
           <div className="space-y-4 text-xs font-sans">
-            <div className="flex items-start gap-3 p-3 bg-amber-950/30 border border-amber-800/60 rounded-lg text-slate-200">
-              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 p-3 bg-warning-950/30 border border-warning-800/60 rounded-lg text-fg">
+              <AlertTriangle className="w-5 h-5 text-warning-400 shrink-0 mt-0.5" />
               <div className="space-y-2 flex-1">
-                <p className="font-semibold text-slate-100 text-xs">
+                <p className="font-semibold text-fg-strong text-xs">
                   Docker host endpoint not found
                 </p>
-                <p className="text-slate-400 leading-relaxed">
-                  The Docker host endpoint for <span className="font-mono text-slate-200 font-semibold">{deletedHostNotice.name}</span> is no longer configured in LogShed. You can re-add it as a Docker host or map its IP address as a Syslog host alias.
+                <p className="text-fg-muted leading-relaxed">
+                  The Docker host endpoint for <span className="font-mono text-fg font-semibold">{deletedHostNotice.name}</span> is no longer configured in LogShed. You can re-add it as a Docker host or map its IP address as a Syslog host alias.
                 </p>
-                <p className="text-slate-400 leading-relaxed">
+                <p className="text-fg-muted leading-relaxed">
                   Its old container logs keep their Docker label either way: a Syslog host alias applies only to the syslog logs from that address.
                 </p>
-                <div className="p-2.5 rounded-sm bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+                <div className="p-2.5 rounded-sm bg-canvas/80 border border-line font-mono text-[11px] text-fg-soft space-y-1">
                   <div>
-                    <span className="text-slate-400">Host / Alias:</span> {deletedHostNotice.name}
+                    <span className="text-fg-muted">Host / Alias:</span> {deletedHostNotice.name}
                   </div>
                   <div>
-                    <span className="text-slate-400">Source IP:</span> {deletedHostNotice.ip}
+                    <span className="text-fg-muted">Source IP:</span> {deletedHostNotice.ip}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2 border-t border-dark-700">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2 border-t border-line">
               <button
                 type="button"
                 onClick={() => {
                   setDeletedHostNotice(null);
                   if (onClearSourcesState) onClearSourcesState();
                 }}
-                className="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-600 rounded-lg transition cursor-pointer"
+                className="px-3 py-1.5 text-xs bg-raised hover:bg-raised-strong text-fg-soft border border-line-strong rounded-lg transition cursor-pointer"
               >
                 Close
               </button>
@@ -623,7 +623,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     if (onClearSourcesState) onClearSourcesState();
                     onAddSyslogAlias(targetIp);
                   }}
-                  className="px-3.5 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 text-slate-200 border border-dark-600 rounded-lg font-medium transition cursor-pointer"
+                  className="px-3.5 py-1.5 text-xs bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-lg font-medium transition cursor-pointer"
                 >
                   Add Syslog Host Alias
                 </button>
@@ -643,7 +643,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                         : 'unix:///var/run/docker.sock',
                   });
                 }}
-                className="px-3.5 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-sm transition cursor-pointer"
+                className="px-3.5 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-on-fill font-medium rounded-lg shadow-sm transition cursor-pointer"
               >
                 Re-add Docker Host
               </button>

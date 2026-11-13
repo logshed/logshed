@@ -61,9 +61,9 @@ describe('StorageCard helper text contrast', () => {
     };
     render(<StorageCard metrics={metrics} />);
     for (const caption of [screen.getByText('logs.db + WAL + SHM'), screen.getByText('Indexed in FTS5')]) {
-      expect(caption.className).toContain('text-slate-400');
+      expect(caption.className).toContain('text-fg-muted');
       expect(caption.className).toContain('text-[11px]');
-      expect(caption.className).not.toContain('text-slate-500');
+      expect(caption.className).not.toContain('text-fg-subtle');
       expect(caption.className).not.toContain('text-[10px]');
     }
   });

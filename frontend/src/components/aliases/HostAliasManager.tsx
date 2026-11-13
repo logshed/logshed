@@ -163,28 +163,28 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   return (
     <div className="space-y-6">
       {errorMsg && (
-        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {/* Syslog Host Aliases Card */}
-      <section className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-md">
-        <div className="p-3.5 sm:p-5 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <section className="bg-surface border border-line rounded-xl overflow-hidden shadow-md">
+        <div className="p-3.5 sm:p-5 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
               <Server className="w-4 h-4 text-accent-500" />
               <span>Syslog Host Aliases</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-fg-muted mt-0.5">
               Map incoming syslog source IP addresses to friendly host names (e.g. 192.168.1.1 to OPNsense Firewall). Configured syslog senders push logs directly to LogShed and un-aliased hosts appear by IP in the console view.
             </p>
           </div>
           <button
             type="button"
             onClick={openAddModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-700 hover:bg-accent-600 text-white rounded-sm text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-700 hover:bg-accent-600 text-on-fill rounded-sm text-xs font-medium transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Host Alias</span>
@@ -192,21 +192,21 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
         </div>
 
         {/* Active Host Mappings Sub-Section */}
-        <div className="p-3.5 sm:px-5 sm:py-3 bg-dark-950/40 border-b border-dark-800 flex items-center justify-between">
-          <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+        <div className="p-3.5 sm:px-5 sm:py-3 bg-canvas/40 border-b border-line-subtle flex items-center justify-between">
+          <h4 className="text-xs font-semibold text-fg-soft uppercase tracking-wider">
             Active Host Mappings ({aliases.length})
           </h4>
         </div>
 
         {isLoading ? (
-          <div className="p-6 text-center text-slate-400 font-mono text-xs">Loading mappings...</div>
+          <div className="p-6 text-center text-fg-muted font-mono text-xs">Loading mappings...</div>
         ) : aliases.length === 0 ? (
-          <div className="p-6 text-center text-slate-400 font-mono text-xs">
+          <div className="p-6 text-center text-fg-muted font-mono text-xs">
             No host aliases mapped yet. Add a mapping to label incoming syslog IP addresses.
           </div>
         ) : isMobile ? (
           /* Mobile Card View */
-          <div className="divide-y divide-dark-800">
+          <div className="divide-y divide-line-subtle">
             {aliases.map((item) => (
               <div key={item.ip} className="p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
@@ -217,7 +217,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       onClick={() => handleViewLogs(item)}
                       title={`View logs for ${item.alias}`}
                       aria-label={`View logs for ${item.alias}`}
-                      className="inline-flex items-center gap-1 h-8 px-2 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-800 rounded-sm transition cursor-pointer"
+                      className="inline-flex items-center gap-1 h-8 px-2 text-[11px] font-medium text-fg-soft hover:text-accent-400 hover:bg-raised rounded-sm transition cursor-pointer"
                     >
                       <ScrollText className="w-4 h-4" />
                       <span>View logs</span>
@@ -226,7 +226,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       type="button"
                       onClick={() => openEditModal(item)}
                       title="Edit Alias"
-                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-fg-muted hover:text-fg hover:bg-raised rounded-sm transition cursor-pointer"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -235,15 +235,15 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                       disabled={isDeletingIp === item.ip}
                       onClick={() => setDeleteTargetIp(item.ip)}
                       title="Delete Alias"
-                      className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-800 rounded-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-fg-muted hover:text-danger-400 hover:bg-raised rounded-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
-                <div className="text-slate-200 font-mono text-xs font-medium">{item.alias}</div>
+                <div className="text-fg font-mono text-xs font-medium">{item.alias}</div>
                 {item.notes && (
-                  <div className="text-slate-400 font-sans text-xs">
+                  <div className="text-fg-muted font-sans text-xs">
                     {item.notes}
                   </div>
                 )}
@@ -252,8 +252,8 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           </div>
         ) : (
           /* Desktop Table View */
-          <div className="divide-y divide-dark-800 font-mono text-xs">
-            <div className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2 text-slate-400 font-semibold text-[11px] bg-dark-950/60 select-none">
+          <div className="divide-y divide-line-subtle font-mono text-xs">
+            <div className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2 text-fg-muted font-semibold text-[11px] bg-canvas/60 select-none">
               <div>SOURCE IP</div>
               <div>FRIENDLY ALIAS</div>
               <div>NOTES</div>
@@ -263,11 +263,11 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
             {aliases.map((item) => (
               <div
                 key={item.ip}
-                className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2.5 items-center hover:bg-dark-800/50 transition"
+                className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2.5 items-center hover:bg-raised/50 transition"
               >
                 <div className="text-accent-400 font-semibold">{item.ip}</div>
-                <div className="text-slate-200">{item.alias}</div>
-                <div className="text-slate-400 font-sans text-xs truncate pr-2">
+                <div className="text-fg">{item.alias}</div>
+                <div className="text-fg-muted font-sans text-xs truncate pr-2">
                   {item.notes || '-'}
                 </div>
                 <div className="flex items-center justify-end gap-1.5 font-sans">
@@ -276,7 +276,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     onClick={() => handleViewLogs(item)}
                     title={`View logs for ${item.alias}`}
                     aria-label={`View logs for ${item.alias}`}
-                    className="inline-flex items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-300 hover:text-accent-400 hover:bg-dark-700 rounded-sm transition cursor-pointer whitespace-nowrap"
+                    className="inline-flex items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-fg-soft hover:text-accent-400 hover:bg-raised-strong rounded-sm transition cursor-pointer whitespace-nowrap"
                   >
                     <ScrollText className="w-3.5 h-3.5" />
                     <span>View logs</span>
@@ -285,7 +285,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     type="button"
                     onClick={() => openEditModal(item)}
                     title="Edit Alias"
-                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-dark-700 rounded-sm transition cursor-pointer"
+                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-fg hover:bg-raised-strong rounded-sm transition cursor-pointer"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
@@ -294,7 +294,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     disabled={isDeletingIp === item.ip}
                     onClick={() => setDeleteTargetIp(item.ip)}
                     title="Delete Alias"
-                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-dark-700 rounded-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-danger-400 hover:bg-raised-strong rounded-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -315,14 +315,14 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
         >
           <form onSubmit={handleSave} className="space-y-4">
             {modalError && (
-              <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
                 <span>{modalError}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Source IP Address
               </label>
               <input
@@ -332,17 +332,17 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 disabled={Boolean(editingIp)}
                 placeholder="e.g. 192.168.1.50"
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono disabled:opacity-50"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono disabled:opacity-50"
               />
               {editingIp && (
-                <p className="text-[11px] text-slate-400 mt-1">
+                <p className="text-[11px] text-fg-muted mt-1">
                   Source IP cannot be modified while editing. Delete and re-create to change the IP.
                 </p>
               )}
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Friendly Host Alias
               </label>
               <input
@@ -351,12 +351,12 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 onChange={(e) => setAlias(e.target.value)}
                 placeholder="e.g. Proxmox-Node-01"
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Notes (Optional)
               </label>
               <input
@@ -364,22 +364,22 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="e.g. Main hypervisor in rack 1"
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500"
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-dark-800">
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-line-subtle">
               <button
                 type="button"
                 onClick={handleCancelModal}
-                className="px-3.5 py-1.5 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-sm text-xs transition cursor-pointer"
+                className="px-3.5 py-1.5 bg-raised hover:bg-raised-strong text-fg-soft rounded-sm text-xs transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSaving || !ip.trim() || !alias.trim()}
-                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-white font-medium px-4 py-1.5 rounded-sm text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
+                className="bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill font-medium px-4 py-1.5 rounded-sm text-xs flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer min-h-[34px]"
               >
                 {isSaving ? (
                   <>
@@ -406,21 +406,21 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           confirmDisabled={isDeletingIp === deleteTargetIp}
           confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
           confirmLabel={isDeletingIp === deleteTargetIp ? 'Deleting...' : 'Delete Alias'}
-          confirmClassName="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          confirmClassName="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-lg shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <p className="font-semibold text-slate-100 text-xs">
+          <p className="font-semibold text-fg-strong text-xs">
             Remove host alias mapping?
           </p>
-          <p className="text-slate-400 leading-relaxed">
+          <p className="text-fg-muted leading-relaxed">
             Incoming logs from this IP address will no longer be assigned a friendly alias.
           </p>
-          <div className="p-2.5 rounded-sm bg-dark-950/80 border border-dark-700 font-mono text-[11px] text-slate-300 space-y-1">
+          <div className="p-2.5 rounded-sm bg-canvas/80 border border-line font-mono text-[11px] text-fg-soft space-y-1">
             <div>
-              <span className="text-slate-400">IP:</span> {deleteTargetIp}
+              <span className="text-fg-muted">IP:</span> {deleteTargetIp}
             </div>
             {aliases.find((a) => a.ip === deleteTargetIp)?.alias && (
               <div>
-                <span className="text-slate-400">Alias:</span>{' '}
+                <span className="text-fg-muted">Alias:</span>{' '}
                 {aliases.find((a) => a.ip === deleteTargetIp)?.alias}
               </div>
             )}

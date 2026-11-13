@@ -430,8 +430,8 @@ describe('DockerHostsTab row controls', () => {
     const enable = screen.getByRole('button', { name: 'Enable host Remote Worker' });
     expect(enable).toHaveAttribute('title', 'Enable host Remote Worker');
     // Disabled hosts are muted
-    expect(enable.className).toContain('text-slate-600');
-    expect(disable.className).not.toContain('text-slate-600');
+    expect(enable.className).toContain('text-fg-faint');
+    expect(disable.className).not.toContain('text-fg-faint');
   });
 
   it('shows a visible Test label on the row test button', async () => {

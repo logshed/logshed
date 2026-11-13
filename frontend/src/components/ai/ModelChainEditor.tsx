@@ -8,7 +8,7 @@ import { SelectDropdown } from '../common/SelectDropdown.tsx';
 const SIZES = {
   roomy: {
     wrapper: 'space-y-2',
-    empty: 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-[11px] text-slate-400 font-mono',
+    empty: 'p-3 bg-canvas border border-line-subtle rounded-lg text-[11px] text-fg-muted font-mono',
     list: 'space-y-1.5 max-h-48 overflow-y-auto',
     row: 'p-2',
     rowButton: 'p-1',
@@ -19,7 +19,7 @@ const SIZES = {
   },
   compact: {
     wrapper: 'space-y-1.5',
-    empty: 'p-2 bg-dark-950 border border-dark-800 rounded-sm text-[11px] text-slate-400 font-mono',
+    empty: 'p-2 bg-canvas border border-line-subtle rounded-sm text-[11px] text-fg-muted font-mono',
     list: 'space-y-1 max-h-36 overflow-y-auto',
     row: 'p-1.5',
     rowButton: 'p-0.5',
@@ -85,14 +85,14 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
     onChange([...fallbacks, trimmed]);
   };
 
-  const label = <label className="block text-[11px] font-semibold text-slate-400 uppercase">{heading}</label>;
+  const label = <label className="block text-[11px] font-semibold text-fg-muted uppercase">{heading}</label>;
 
   return (
     <div className={s.wrapper}>
       {headingNote ? (
         <div className="flex items-center justify-between">
           {label}
-          <span className="text-[11px] text-slate-400 font-mono">{headingNote}</span>
+          <span className="text-[11px] text-fg-muted font-mono">{headingNote}</span>
         </div>
       ) : (
         label
@@ -107,15 +107,15 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
             return (
               <div
                 key={idx}
-                className={`flex items-center justify-between ${s.row} bg-dark-950 border border-dark-800 rounded-sm text-xs font-mono`}
+                className={`flex items-center justify-between ${s.row} bg-canvas border border-line-subtle rounded-sm text-xs font-mono`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="px-1.5 py-0.5 rounded-sm bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold shrink-0">
+                  <span className="px-1.5 py-0.5 rounded-sm bg-warning-500/20 text-warning-300 border border-warning-500/30 text-[10px] font-semibold shrink-0">
                     {`${getOrdinalSuffix(idx + 1)} Fallback`}
                   </span>
-                  <span className="text-slate-200 font-medium truncate">{fb}</span>
+                  <span className="text-fg font-medium truncate">{fb}</span>
                   {isThinking && (
-                    <span className="px-1 py-0.2 rounded-sm bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] shrink-0">
+                    <span className="px-1 py-0.2 rounded-sm bg-marker-500/20 text-marker-300 border border-marker-500/30 text-[9px] shrink-0">
                       Reasoning
                     </span>
                   )}
@@ -124,7 +124,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                   <button
                     type="button"
                     onClick={() => (idx === 0 ? onPromoteFirst() : move(idx, -1))}
-                    className={`${s.rowButton} text-slate-400 hover:text-slate-200 cursor-pointer`}
+                    className={`${s.rowButton} text-fg-muted hover:text-fg cursor-pointer`}
                     title={idx === 0 ? 'Swap with primary model' : 'Move up in priority'}
                     aria-label={idx === 0 ? 'Make primary model' : 'Move fallback up'}
                   >
@@ -134,7 +134,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                     type="button"
                     disabled={idx === fallbacks.length - 1}
                     onClick={() => move(idx, 1)}
-                    className={`${s.rowButton} text-slate-400 hover:text-slate-200 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer`}
+                    className={`${s.rowButton} text-fg-muted hover:text-fg disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer`}
                     title="Move down in priority"
                     aria-label="Move fallback down"
                   >
@@ -143,7 +143,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                   <button
                     type="button"
                     onClick={() => remove(idx)}
-                    className={`${s.rowButton} text-red-400 hover:text-red-300 cursor-pointer`}
+                    className={`${s.rowButton} text-danger-400 hover:text-danger-300 cursor-pointer`}
                     title="Remove fallback model"
                     aria-label="Remove fallback"
                   >
@@ -162,7 +162,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
             <div className="flex-1 min-w-0">
               <SelectDropdown
                 variant="panel"
-                fieldClassName={`bg-dark-950 border-dark-700 rounded-sm ${s.field} font-mono text-slate-200`}
+                fieldClassName={`bg-canvas border-line rounded-sm ${s.field} font-mono text-fg`}
                 label="Add Fallback Model"
                 options={[
                   { value: '', label: '-- Add Fallback Model --' },
@@ -187,7 +187,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                 add(selectedToAdd);
                 setSelectedToAdd('');
               }}
-              className={`shrink-0 ${s.addButton} bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-sm text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
+              className={`shrink-0 ${s.addButton} bg-raised hover:bg-raised-hover border border-line rounded-sm text-xs text-fg font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>
@@ -200,7 +200,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
               placeholder="Enter custom model ID"
-              className={`flex-1 min-w-0 bg-dark-950 border border-dark-700 rounded-sm ${s.field} text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono`}
+              className={`flex-1 min-w-0 bg-canvas border border-line rounded-sm ${s.field} text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono`}
             />
             <button
               type="button"
@@ -210,7 +210,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                 setCustomInput('');
                 setShowCustomInput(false);
               }}
-              className={`shrink-0 ${s.addButton} bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-sm text-xs text-slate-200 font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
+              className={`shrink-0 ${s.addButton} bg-raised hover:bg-raised-hover border border-line rounded-sm text-xs text-fg font-mono flex items-center gap-1 disabled:opacity-40 cursor-pointer`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>
@@ -221,7 +221,7 @@ export const ModelChainEditor: React.FC<ModelChainEditorProps> = ({
                 setShowCustomInput(false);
                 setCustomInput('');
               }}
-              className={`shrink-0 ${s.cancelButton} text-slate-400 hover:text-slate-200 cursor-pointer`}
+              className={`shrink-0 ${s.cancelButton} text-fg-muted hover:text-fg cursor-pointer`}
               title="Cancel custom fallback"
             >
               <X className="w-3.5 h-3.5" />

@@ -318,8 +318,8 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       <form onSubmit={handleSubmit} className="space-y-4 text-xs font-sans">
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-slate-300 font-medium">
-              Rule Name <span className="text-red-400">*</span>
+            <label className="text-fg-soft font-medium">
+              Rule Name <span className="text-danger-400">*</span>
             </label>
             <a
               href="https://github.com/logshed/logshed/blob/main/docs/RULES_GUIDE.md#ingestion-drop-rules"
@@ -340,13 +340,13 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             maxLength={NAME_MAX_LENGTH}
             required
             autoFocus
-            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-1.5 text-slate-200 focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-canvas border border-line rounded-sm px-3 py-1.5 text-fg focus:outline-hidden focus:border-accent-500"
           />
         </div>
 
         <div>
-          <label className="block text-slate-300 font-medium mb-1">
-            Message Pattern <span className="text-slate-400 font-normal text-[11px]">(Optional if Host or App is selected)</span>
+          <label className="block text-fg-soft font-medium mb-1">
+            Message Pattern <span className="text-fg-muted font-normal text-[11px]">(Optional if Host or App is selected)</span>
           </label>
           <input
             type="text"
@@ -354,9 +354,9 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             onChange={(e) => setMessagePattern(e.target.value)}
             placeholder="e.g. DHCPACK, query\s+from\b, probe, or * to match all messages"
             maxLength={MESSAGE_PATTERN_MAX_LENGTH}
-            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-1.5 text-slate-200 font-mono focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-canvas border border-line rounded-sm px-3 py-1.5 text-fg font-mono focus:outline-hidden focus:border-accent-500"
           />
-          <span className="text-[11px] text-slate-400 mt-1 block">
+          <span className="text-[11px] text-fg-muted mt-1 block">
             Case-insensitive match string. Use * or leave empty to drop all messages matching the selected host or app.
           </span>
         </div>
@@ -367,9 +367,9 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             id="modal-is-regex-checkbox"
             checked={isRegex}
             onChange={(e) => setIsRegex(e.target.checked)}
-            className="rounded-sm bg-dark-950 border-dark-700 text-accent-500 focus:ring-accent-500/20"
+            className="rounded-sm bg-canvas border-line text-accent-500 focus:ring-accent-500/20"
           />
-          <label htmlFor="modal-is-regex-checkbox" className="text-slate-300 cursor-pointer">
+          <label htmlFor="modal-is-regex-checkbox" className="text-fg-soft cursor-pointer">
             Interpret message pattern as Regular Expression
           </label>
         </div>
@@ -377,7 +377,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Host / IP Filter */}
           <div>
-            <span id="modal-host-label" className="block text-slate-300 font-medium mb-1">
+            <span id="modal-host-label" className="block text-fg-soft font-medium mb-1">
               Hosts or IPs (Optional)
             </span>
             <MultiSelectDropdown
@@ -397,18 +397,18 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               optionHint={hostHint}
             />
             {sourceListTooLong ? (
-              <span role="alert" className="text-[11px] text-red-400 mt-1 block">
+              <span role="alert" className="text-[11px] text-danger-400 mt-1 block">
                 The host list is longer than {RULE_FILTER_MAX_LENGTH} characters. Remove some, or use a wildcard pattern.
               </span>
             ) : (
-              <span className="text-[11px] text-slate-400 mt-1 block">
+              <span className="text-[11px] text-fg-muted mt-1 block">
                 Any one must match the alias or IP. Type a pattern such as 192.168.1.* or router* to add it.
               </span>
             )}
             {sources
               .filter((src) => hostAliases.aliasByIp.has(src.trim().toLowerCase()))
               .map((ip) => (
-                <span key={ip} data-testid="host-ip-alias-note" className="text-[11px] text-slate-400 mt-1 block">
+                <span key={ip} data-testid="host-ip-alias-note" className="text-[11px] text-fg-muted mt-1 block">
                   {ip} is the IP of {hostAliases.aliasByIp.get(ip.trim().toLowerCase())}, so this rule drops its logs either way.
                 </span>
               ))}
@@ -416,7 +416,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
 
           {/* Application or Container Filter */}
           <div>
-            <span id="modal-app-label" className="block text-slate-300 font-medium mb-1">
+            <span id="modal-app-label" className="block text-fg-soft font-medium mb-1">
               Apps or Containers (Optional)
             </span>
             <MultiSelectDropdown
@@ -435,11 +435,11 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               labelledBy="modal-app-label"
             />
             {appListTooLong ? (
-              <span role="alert" className="text-[11px] text-red-400 mt-1 block">
+              <span role="alert" className="text-[11px] text-danger-400 mt-1 block">
                 The app list is longer than {RULE_FILTER_MAX_LENGTH} characters. Remove some, or use a wildcard pattern.
               </span>
             ) : (
-              <span className="text-[11px] text-slate-400 mt-1 block">
+              <span className="text-[11px] text-fg-muted mt-1 block">
                 Any one must match. Type a pattern such as smartbulb* to add it.
               </span>
             )}
@@ -447,12 +447,12 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         </div>
 
         <div>
-          <label id="modal-severity-select-label" htmlFor="modal-severity-select" className="block text-slate-300 font-medium mb-1">
+          <label id="modal-severity-select-label" htmlFor="modal-severity-select" className="block text-fg-soft font-medium mb-1">
             Severity Range (Optional)
           </label>
           <SelectDropdown
             variant="panel"
-            fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-1.5 font-mono text-slate-200"
+            fieldClassName="bg-canvas border-line rounded-sm px-3 py-1.5 font-mono text-fg"
             id="modal-severity-select"
             labelledBy="modal-severity-select-label"
             label="Severity Range (Optional)"
@@ -460,7 +460,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             value={severityThreshold === null ? '' : severityThreshold.toString()}
             onChange={(v) => setSeverityThreshold(v === '' ? null : Number(v))}
           />
-          <span className="text-[11px] text-slate-400 mt-1 block">
+          <span className="text-[11px] text-fg-muted mt-1 block">
             Only logs at this level or less severe are dropped. More severe logs are always kept. Leave blank to match every level.
           </span>
         </div>
@@ -471,22 +471,22 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             id="modal-is-enabled-checkbox"
             checked={isEnabled}
             onChange={(e) => setIsEnabled(e.target.checked)}
-            className="rounded-sm bg-dark-950 border-dark-700 text-accent-500 focus:ring-accent-500/20"
+            className="rounded-sm bg-canvas border-line text-accent-500 focus:ring-accent-500/20"
           />
-          <label htmlFor="modal-is-enabled-checkbox" className="text-slate-300 cursor-pointer">
+          <label htmlFor="modal-is-enabled-checkbox" className="text-fg-soft cursor-pointer">
             {ruleToEdit ? 'Rule active' : 'Rule enabled immediately upon creation'}
           </label>
         </div>
 
         {/* Interactive Pattern Tester Section */}
-        <div className="bg-dark-950 border border-dark-800 rounded-lg p-3 space-y-2.5">
+        <div className="bg-canvas border border-line-subtle rounded-lg p-3 space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-slate-200 text-xs">Test Pattern Match</span>
+            <span className="font-semibold text-fg text-xs">Test Pattern Match</span>
             <button
               type="button"
               onClick={handleTestPattern}
               disabled={isTesting || !hasFilterCriteria || !sampleMessage.trim()}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-sm bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-700 transition disabled:opacity-50 cursor-pointer text-[11px]"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-sm bg-raised hover:bg-raised-strong text-fg-soft border border-line transition disabled:opacity-50 cursor-pointer text-[11px]"
             >
               <Play className="w-3 h-3 text-accent-400" />
               <span>{isTesting ? 'Testing...' : 'Dry-Run Test'}</span>
@@ -494,42 +494,42 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-slate-400 text-[11px] mb-1">Sample Log Message</label>
+            <label className="block text-fg-muted text-[11px] mb-1">Sample Log Message</label>
             <textarea
               rows={2}
               value={sampleMessage}
               onChange={(e) => setSampleMessage(e.target.value)}
               placeholder="Paste a representative log line here..."
-              className="w-full bg-dark-900 border border-dark-800 rounded-sm px-2.5 py-1.5 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+              className="w-full bg-surface border border-line-subtle rounded-sm px-2.5 py-1.5 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
-              <label className="block text-slate-400 text-[11px] mb-0.5">Sample Host / IP</label>
+              <label className="block text-fg-muted text-[11px] mb-0.5">Sample Host / IP</label>
               <input
                 type="text"
                 value={sampleSource}
                 onChange={(e) => setSampleSource(e.target.value)}
                 placeholder="e.g. 192.168.1.50"
-                className="w-full bg-dark-900 border border-dark-800 rounded-sm px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+                className="w-full bg-surface border border-line-subtle rounded-sm px-2 py-1 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
               />
             </div>
             <div>
-              <label className="block text-slate-400 text-[11px] mb-0.5">Sample App / Container</label>
+              <label className="block text-fg-muted text-[11px] mb-0.5">Sample App / Container</label>
               <input
                 type="text"
                 value={sampleApp}
                 onChange={(e) => setSampleApp(e.target.value)}
                 placeholder="e.g. dnsmasq"
-                className="w-full bg-dark-900 border border-dark-800 rounded-sm px-2 py-1 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+                className="w-full bg-surface border border-line-subtle rounded-sm px-2 py-1 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
               />
             </div>
             <div>
-              <label id="modal-sample-severity-select-label" htmlFor="modal-sample-severity-select" className="block text-slate-400 text-[11px] mb-0.5">Sample Severity</label>
+              <label id="modal-sample-severity-select-label" htmlFor="modal-sample-severity-select" className="block text-fg-muted text-[11px] mb-0.5">Sample Severity</label>
               <SelectDropdown
                 variant="panel"
-                fieldClassName="bg-dark-900 border-dark-800 rounded-sm px-2 py-1 font-mono text-slate-200"
+                fieldClassName="bg-surface border-line-subtle rounded-sm px-2 py-1 font-mono text-fg"
                 id="modal-sample-severity-select"
                 labelledBy="modal-sample-severity-select-label"
                 label="Sample Severity"
@@ -543,7 +543,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           {!ruleToEdit && messagePattern.trim() !== '' && messagePattern.trim() === sampleMessage.trim() && (
             <div
               data-testid="whole-line-pattern-hint"
-              className="p-2 rounded-sm border text-[11px] bg-amber-950/40 border-amber-800/60 text-amber-300"
+              className="p-2 rounded-sm border text-[11px] bg-warning-950/40 border-warning-800/60 text-warning-300"
             >
               Tip: remove numbers, times or IDs that change between lines from the Message Pattern, so later logs match too.
             </div>
@@ -553,10 +553,10 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             <div
               className={`p-2 rounded border text-xs flex items-center justify-between animate-in fade-in duration-100 ${
                 testResult.error
-                  ? 'bg-red-950/40 border-red-800/60 text-red-300'
+                  ? 'bg-danger-950/40 border-danger-800/60 text-danger-300'
                   : testResult.matched
-                  ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
-                  : 'bg-amber-950/40 border-amber-800/60 text-amber-300'
+                  ? 'bg-success-950/40 border-success-800/60 text-success-300'
+                  : 'bg-warning-950/40 border-warning-800/60 text-warning-300'
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -579,14 +579,14 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-dark-800">
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-line-subtle">
           {ruleToEdit ? (
             <button
               type="button"
               onClick={handleResetInModal}
               disabled={isResetting || currentCount === 0}
               aria-label="Reset counter to 0"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-xs text-slate-400 hover:text-slate-200 bg-dark-900 hover:bg-dark-800 border border-dark-700 transition disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-xs text-fg-muted hover:text-fg bg-surface hover:bg-raised border border-line transition disabled:opacity-50 cursor-pointer"
               title="Reset dropped counter to 0"
             >
               <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
@@ -599,14 +599,14 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             <button
               type="button"
               onClick={handleCloseAttempt}
-              className="px-3 py-1.5 rounded-sm text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer"
+              className="px-3 py-1.5 rounded-sm text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting || !hasFilterCriteria || sourceListTooLong || appListTooLong}
-              className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-white font-medium transition disabled:opacity-50 cursor-pointer"
+              className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-on-fill font-medium transition disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting
                 ? ruleToEdit

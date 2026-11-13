@@ -9,11 +9,11 @@ export interface RuleOrderControlsProps {
 }
 
 const MOVE_BUTTON_CLASS =
-  'w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded-sm text-slate-500 hover:text-slate-200 active:bg-dark-800 disabled:opacity-20 disabled:hover:text-slate-500 transition cursor-pointer disabled:cursor-not-allowed';
+  'w-8 h-8 sm:w-auto sm:h-auto sm:p-0.5 flex items-center justify-center rounded-md sm:rounded-sm text-fg-subtle hover:text-fg active:bg-raised disabled:opacity-20 disabled:hover:text-fg-subtle transition cursor-pointer disabled:cursor-not-allowed';
 
 /** The move up and down buttons around the drag handle at the start of a rule row. */
 export const RuleOrderControls: React.FC<RuleOrderControlsProps> = ({ ruleId, index, count, onMove }) => (
-  <div className="flex flex-col items-center gap-2 sm:gap-0.5 shrink-0 pt-0.5 text-slate-500">
+  <div className="flex flex-col items-center gap-2 sm:gap-0.5 shrink-0 pt-0.5 text-fg-subtle">
     <button
       type="button"
       onClick={() => onMove(index, 'up')}
@@ -25,7 +25,7 @@ export const RuleOrderControls: React.FC<RuleOrderControlsProps> = ({ ruleId, in
       <ChevronUp className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
     </button>
     <div
-      className="hidden sm:flex cursor-grab active:cursor-grabbing p-0.5 text-slate-500 hover:text-slate-300"
+      className="hidden sm:flex cursor-grab active:cursor-grabbing p-0.5 text-fg-subtle hover:text-fg-soft"
       title="Drag to reorder"
     >
       <GripVertical className="w-4 h-4" />

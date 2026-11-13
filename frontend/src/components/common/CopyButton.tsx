@@ -4,7 +4,7 @@ import { useClipboard } from '../../utils/hooks.ts';
 
 // The small ghost button most copy actions use
 const DEFAULT_CLASS =
-  'inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-dark-800 transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-dark-750';
+  'inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-raised-hover';
 
 export interface CopyButtonProps {
   /** The text to copy, or a function that returns it at click time. Nothing is copied when it is empty. */
@@ -43,7 +43,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
 
   return (
     <button type="button" onClick={handleClick} className={className} title={title}>
-      {copied ? <Check className={`${iconClassName} text-emerald-400`} /> : <Copy className={iconClassName} />}
+      {copied ? <Check className={`${iconClassName} text-success-400`} /> : <Copy className={iconClassName} />}
       {copied ? <span className={copiedLabelClassName}>Copied</span> : <span>{label}</span>}
     </button>
   );

@@ -91,6 +91,7 @@ A new environment variable also goes into `.env.example`, `unraid-template.xml`,
 
 ## Code, Text and Commits
 - **Match the surrounding code:** naming, comment density and idiom. Ruff lints the backend; no formatter is configured, so do not run `ruff format`.
+- **Colours:** use the colour roles in `frontend/src/index.css` (`bg-surface`, `text-fg-muted`, `border-line`, `bg-danger-950/60`; list in `docs/spec/frontend.md`, "Colour roles"), never Tailwind's stock colours, which are switched off: a class such as `text-slate-400` builds without error and does nothing.
 - **Hook dependencies:** a dependency left out of a React hook's list on purpose gets `// eslint-disable-next-line react-hooks/exhaustive-deps -- <why>` on the line before the list, so the reason stays next to it.
 - **No plan or backlog IDs** (such as `BL-12`, `B-23`, `S-14`, `WP3` or `Item #4`) in code, comments, docstrings, test names, `describe` blocks or commit messages. They mean nothing to future readers; say what the code does instead.
 - **No em dashes** (the character U+2014) anywhere: code, UI text, error messages, tests and docs. Use ` - `, commas or parentheses. Avoid curly quotes and other typographic symbols in code strings.

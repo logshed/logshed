@@ -208,9 +208,9 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
   }, [max, min]);
 
   return (
-    <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-md space-y-4">
+    <div className="bg-surface border border-line rounded-xl p-5 shadow-md space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
           <Clock className="w-4 h-4 text-accent-500" />
           <span>Log Retention Policy</span>
         </h3>
@@ -220,8 +220,8 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       </div>
 
       {errorMsg && (
-        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           <span>{errorMsg}</span>
         </div>
       )}
@@ -229,12 +229,12 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       {/* Override Notice & Badge */}
       {retentionOverridden && (
         <div className="space-y-1.5 pt-0.5">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] font-mono text-amber-300">
-            <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-warning-500/10 border border-warning-500/20 text-[11px] font-mono text-warning-300">
+            <Lock className="w-3.5 h-3.5 text-warning-400 shrink-0" />
             <span>Locked by MAX_RETENTION_DAYS environment variable override ({max} days)</span>
           </div>
           {max > 30 && (
-            <p className="text-[11px] text-slate-400 leading-relaxed">
+            <p className="text-[11px] text-fg-muted leading-relaxed">
               Extended retention (&gt;30 days) requires additional disk storage and may increase search times over large log volumes.
             </p>
           )}
@@ -243,7 +243,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
       {/* Preset Quick-Select Buttons */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-slate-400 font-medium mr-1">Presets:</span>
+        <span className="text-[11px] text-fg-muted font-medium mr-1">Presets:</span>
         {presets.map((preset) => (
           <button
             key={preset}
@@ -252,10 +252,10 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             onClick={() => !retentionOverridden && setDays(preset)}
             className={`px-2.5 py-0.5 rounded text-[11px] font-mono transition ${
               retentionOverridden
-                ? 'opacity-40 cursor-not-allowed bg-dark-950 text-slate-500 border border-dark-800'
+                ? 'opacity-40 cursor-not-allowed bg-canvas text-fg-subtle border border-line-subtle'
                 : days === preset
-                ? 'bg-accent-700 text-white font-semibold shadow-xs cursor-pointer'
-                : 'bg-dark-950 text-slate-400 hover:text-slate-200 hover:bg-dark-800 border border-dark-700 cursor-pointer'
+                ? 'bg-accent-700 text-on-fill font-semibold shadow-xs cursor-pointer'
+                : 'bg-canvas text-fg-muted hover:text-fg hover:bg-raised border border-line cursor-pointer'
             }`}
           >
             {preset} Day{preset === 1 ? '' : 's'}
@@ -274,11 +274,11 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           value={days}
           disabled={retentionOverridden}
           onChange={(e) => !retentionOverridden && setDays(parseInt(e.target.value, 10))}
-          className={`w-full accent-accent-500 bg-dark-950 h-2 rounded-lg ${
+          className={`w-full accent-accent-500 bg-canvas h-2 rounded-lg ${
             retentionOverridden ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
           }`}
         />
-        <div className="relative h-6 text-[10px] font-mono text-slate-400 mt-1 select-none">
+        <div className="relative h-6 text-[10px] font-mono text-fg-muted mt-1 select-none">
           {presets.map((val) => {
             const leftPercent = max === min ? 0 : ((val - min) / (max - min)) * 100;
             return (
@@ -303,12 +303,12 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
               >
                 <div
                   className={`w-0.5 h-1.5 mb-0.5 transition ${
-                    days === val ? 'bg-accent-400' : 'bg-slate-600 group-hover:bg-slate-400'
+                    days === val ? 'bg-accent-400' : 'bg-neutral-600 group-hover:bg-neutral-400'
                   }`}
                 />
                 <span
                   className={`transition whitespace-nowrap ${
-                    days === val ? 'text-accent-400 font-bold' : 'group-hover:text-slate-300'
+                    days === val ? 'text-accent-400 font-bold' : 'group-hover:text-fg-soft'
                   }`}
                 >
                   {`${val}d`}
@@ -320,18 +320,18 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-dark-800">
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line-subtle">
         <button
           onClick={handleSave}
           disabled={isSaving || days === retentionDays || retentionOverridden}
           className={`font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition ${
             isSaving || days === retentionDays || retentionOverridden
-              ? 'opacity-40 cursor-not-allowed bg-dark-800 text-slate-500 border border-dark-700'
-              : 'bg-accent-700 hover:bg-accent-600 text-white cursor-pointer shadow-md'
+              ? 'opacity-40 cursor-not-allowed bg-raised text-fg-subtle border border-line'
+              : 'bg-accent-700 hover:bg-accent-600 text-on-fill cursor-pointer shadow-md'
           }`}
         >
           {saveSuccess ? (
-            <Check className="w-3.5 h-3.5 text-emerald-400" />
+            <Check className="w-3.5 h-3.5 text-success-400" />
           ) : isSaving ? (
             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           ) : (
@@ -364,7 +364,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             onClick={handlePruneNow}
             disabled={isPruning || isCompacting || isLoadingPreview}
             title="Show what is older than the configured retention policy, then purge those logs and history entries, compact the search index, and checkpoint the SQLite WAL."
-            className="bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
+            className="bg-danger-950/80 hover:bg-danger-900 text-danger-300 border border-danger-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
           >
             {isPruning ? (
               <>
@@ -379,7 +379,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             )}
           </button>
           <div
-            className="text-slate-500 hover:text-slate-300 transition cursor-help p-0.5"
+            className="text-fg-subtle hover:text-fg-soft transition cursor-help p-0.5"
             title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Lowering retention shows what would be deleted and lets you delete it now or at the next daily cleanup. Click 'Purge Expired Logs & History Now' to review and immediately purge older logs and history entries, compact the search index, and checkpoint the WAL. Click 'Compact Database' to repack the database file and return freelist space to the host filesystem."
           >
             <Info className="w-4 h-4" />
@@ -388,13 +388,13 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
       </div>
 
       {/* Explanatory Caption */}
-      <p className="text-[11px] text-slate-400 leading-relaxed">
+      <p className="text-[11px] text-fg-muted leading-relaxed">
         Old logs and history are automatically cleaned up daily. Purging deletes them immediately and frees space for new logs.
       </p>
 
       {/* Active Vacuum Progress Banner */}
       {isCompacting && (
-        <div className="p-3 bg-dark-950 border border-accent-800/60 rounded-lg text-xs text-accent-300 flex items-center gap-2 animate-pulse font-mono">
+        <div className="p-3 bg-canvas border border-accent-800/60 rounded-lg text-xs text-accent-300 flex items-center gap-2 animate-pulse font-mono">
           <RefreshCw className="w-4 h-4 animate-spin text-accent-400 shrink-0" />
           <span>Compacting database... Ingestion writes temporarily paused</span>
         </div>
@@ -402,34 +402,34 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
       {/* Vacuum Error Banner */}
       {vacuumErrorMsg && (
-        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           <span>{vacuumErrorMsg}</span>
         </div>
       )}
 
       {/* Vacuum Result Banner */}
       {vacuumResult && (
-        <div className="p-3 bg-dark-950 border border-accent-900/60 rounded-lg text-xs font-mono text-slate-300 animate-in fade-in">
+        <div className="p-3 bg-canvas border border-accent-900/60 rounded-lg text-xs font-mono text-fg-soft animate-in fade-in">
           <span className="text-accent-400 font-semibold block mb-1">Database Compaction Completed Successfully:</span>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-            <div>Previous Footprint: <span className="text-slate-100">{formatBytes(vacuumResult.previous_size_bytes)}</span></div>
-            <div>New Footprint: <span className="text-slate-100">{formatBytes(vacuumResult.new_size_bytes)}</span></div>
-            <div>Reclaimed Space: <span className="text-emerald-400 font-semibold">{formatBytes(vacuumResult.reclaimed_bytes)}</span></div>
+            <div>Previous Footprint: <span className="text-fg-strong">{formatBytes(vacuumResult.previous_size_bytes)}</span></div>
+            <div>New Footprint: <span className="text-fg-strong">{formatBytes(vacuumResult.new_size_bytes)}</span></div>
+            <div>Reclaimed Space: <span className="text-success-400 font-semibold">{formatBytes(vacuumResult.reclaimed_bytes)}</span></div>
           </div>
         </div>
       )}
 
       {/* Prune Result Banner */}
       {pruneResult && (
-        <div className="p-3 bg-dark-950 border border-emerald-900/60 rounded-lg text-xs font-mono text-slate-300 animate-in fade-in">
-          <span className="text-emerald-400 font-semibold block mb-1">Prune Completed Successfully:</span>
+        <div className="p-3 bg-canvas border border-success-900/60 rounded-lg text-xs font-mono text-fg-soft animate-in fade-in">
+          <span className="text-success-400 font-semibold block mb-1">Prune Completed Successfully:</span>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
-            <div>Deleted Logs: <span className="text-slate-100">{pruneResult.deleted_logs}</span></div>
-            <div>Deleted History Entries: <span className="text-slate-100">{pruneResult.deleted_history}</span></div>
-            <div>Deleted AI Audit Records: <span className="text-slate-100">{pruneResult.deleted_ai_audit}</span></div>
-            <div>Deleted Metrics: <span className="text-slate-100">{pruneResult.deleted_metrics}</span></div>
-            <div>Current DB Footprint: <span className="text-slate-100">{formatBytes(pruneResult.metrics.db_size_bytes)}</span></div>
+            <div>Deleted Logs: <span className="text-fg-strong">{pruneResult.deleted_logs}</span></div>
+            <div>Deleted History Entries: <span className="text-fg-strong">{pruneResult.deleted_history}</span></div>
+            <div>Deleted AI Audit Records: <span className="text-fg-strong">{pruneResult.deleted_ai_audit}</span></div>
+            <div>Deleted Metrics: <span className="text-fg-strong">{pruneResult.deleted_metrics}</span></div>
+            <div>Current DB Footprint: <span className="text-fg-strong">{formatBytes(pruneResult.metrics.db_size_bytes)}</span></div>
           </div>
         </div>
       )}
@@ -457,15 +457,15 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
         confirmDisabled={isCompacting}
         confirmIcon={<Database className="w-3.5 h-3.5" />}
         confirmLabel="Confirm & Compact"
-        bodyClassName="space-y-4 text-xs text-slate-300"
-        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-dark-800"
-        cancelClassName="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer"
-        confirmClassName="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-white font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+        bodyClassName="space-y-4 text-xs text-fg-soft"
+        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-line-subtle"
+        cancelClassName="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-lg transition cursor-pointer"
+        confirmClassName="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-on-fill font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
       >
         <p className="leading-relaxed">
           The database will be repacked to return unused space to the host filesystem.
         </p>
-        <div className="space-y-2 bg-dark-950 border border-dark-800 rounded-lg p-3 text-[11px] text-slate-400">
+        <div className="space-y-2 bg-canvas border border-line-subtle rounded-lg p-3 text-[11px] text-fg-muted">
           <div className="flex items-start gap-2">
             <span className="text-accent-400 font-bold">•</span>
             <span>SQLite database writes will pause briefly during compaction (incoming logs will buffer in memory).</span>

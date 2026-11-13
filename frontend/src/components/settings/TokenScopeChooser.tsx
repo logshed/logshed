@@ -41,14 +41,14 @@ const ScopeCheckbox: React.FC<ScopeCheckboxProps> = ({ id, label, description, c
       }}
       onChange={(e) => onChange(e.target.checked)}
       aria-describedby={description ? `${id}-desc` : undefined}
-      className="mt-0.5 shrink-0 rounded-sm border-dark-600 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-900 cursor-pointer"
+      className="mt-0.5 shrink-0 rounded-sm border-line-strong bg-raised text-accent-600 focus:ring-accent-500 focus:ring-offset-surface cursor-pointer"
     />
     <div className="min-w-0">
-      <label htmlFor={id} className="text-xs text-slate-200 cursor-pointer wrap-break-word">
+      <label htmlFor={id} className="text-xs text-fg cursor-pointer wrap-break-word">
         {label}
       </label>
       {description && (
-        <p id={`${id}-desc`} className="text-[11px] text-slate-400 leading-snug">
+        <p id={`${id}-desc`} className="text-[11px] text-fg-muted leading-snug">
           {description}
         </p>
       )}
@@ -82,7 +82,7 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span id={`${idPrefix}-scope-heading`} className="text-xs font-medium text-slate-300">
+        <span id={`${idPrefix}-scope-heading`} className="text-xs font-medium text-fg-soft">
           Scopes
         </span>
         <a
@@ -102,8 +102,8 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
             key={choice.id}
             className={`block p-2.5 rounded-lg border text-xs cursor-pointer transition ${
               selectedId === choice.id
-                ? 'bg-accent-950/20 border-accent-600/60 text-slate-100'
-                : 'bg-dark-950/60 border-dark-800 text-slate-300 hover:border-dark-700'
+                ? 'bg-accent-950/20 border-accent-600/60 text-fg-strong'
+                : 'bg-canvas/60 border-line-subtle text-fg-soft hover:border-line'
             }`}
           >
             <div className="flex items-start gap-2.5">
@@ -116,8 +116,8 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
                 className="mt-0.5 text-accent-500 focus:ring-accent-500"
               />
               <div>
-                <div className="font-semibold text-slate-200">{choice.name}</div>
-                <p className="text-[11px] text-slate-400 mt-0.5">{choice.description}</p>
+                <div className="font-semibold text-fg">{choice.name}</div>
+                <p className="text-[11px] text-fg-muted mt-0.5">{choice.description}</p>
               </div>
             </div>
           </label>
@@ -125,8 +125,8 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
       </div>
 
       {selectedId === CUSTOM_PRESET_ID && (
-        <fieldset className="mt-3 p-2.5 rounded-lg border border-dark-800 bg-dark-950/60">
-          <legend className="px-1 text-xs font-medium text-slate-300">Custom scopes</legend>
+        <fieldset className="mt-3 p-2.5 rounded-lg border border-line-subtle bg-canvas/60">
+          <legend className="px-1 text-xs font-medium text-fg-soft">Custom scopes</legend>
           <ul>
             <li>
               <ScopeCheckbox
@@ -176,13 +176,13 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
             </li>
           </ul>
 
-          <div className="mt-2 pt-2 border-t border-dark-800 text-[11px]" aria-live="polite">
+          <div className="mt-2 pt-2 border-t border-line-subtle text-[11px]" aria-live="polite">
             {savedScopes.length === 0 ? (
-              <p className="text-amber-300">Choose at least one scope</p>
+              <p className="text-warning-300">Choose at least one scope</p>
             ) : (
-              <p className="text-slate-400">
+              <p className="text-fg-muted">
                 Saved as:{' '}
-                <code data-testid={`${idPrefix}-saved-scopes`} className="font-mono text-slate-200 wrap-break-word">
+                <code data-testid={`${idPrefix}-saved-scopes`} className="font-mono text-fg wrap-break-word">
                   {savedScopes.join(', ')}
                 </code>
               </p>

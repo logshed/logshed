@@ -202,41 +202,41 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
     (isHighRisk && confirmText.trim().toUpperCase() !== 'DELETE');
 
   return (
-    <div className="bg-dark-900 border border-dark-700 rounded-xl p-4 sm:p-5 shadow-md overflow-hidden min-w-0 max-w-full space-y-4">
+    <div className="bg-surface border border-line rounded-xl p-4 sm:p-5 shadow-md overflow-hidden min-w-0 max-w-full space-y-4">
       {/* Header with blue accent icon and no manual purge label */}
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
           <Trash2 className="w-4 h-4 text-accent-500" />
           <span>Targeted Log Deletion</span>
         </h3>
       </div>
 
-      <p className="text-xs text-slate-400 leading-relaxed">
+      <p className="text-xs text-fg-muted leading-relaxed">
         Permanently delete specific logs by host, application, time period, or text search query.
         Deleted logs are purged from the database and search index.
       </p>
 
       {/* Messages */}
       {errorMsg && (
-        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {successMsg && (
-        <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-lg flex items-start gap-2 text-xs text-emerald-300">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-success-950/60 border border-success-800 rounded-lg flex items-start gap-2 text-xs text-success-300">
+          <CheckCircle2 className="w-4 h-4 text-success-400 shrink-0 mt-0.5" />
           <span>{successMsg}</span>
         </div>
       )}
 
       {/* Criteria Form Controls */}
-      <div className="space-y-3 bg-dark-950 p-3.5 rounded-lg border border-dark-800 min-w-0 max-w-full">
+      <div className="space-y-3 bg-canvas p-3.5 rounded-lg border border-line-subtle min-w-0 max-w-full">
         {/* Host and App dropdowns matching AlertRuleModal setup and defaulting to None */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full min-w-0">
           <div className="space-y-1 min-w-0">
-            <label className="text-slate-300 font-medium flex items-center gap-1.5 text-xs">
+            <label className="text-fg-soft font-medium flex items-center gap-1.5 text-xs">
               <Server className="w-3.5 h-3.5 text-accent-500" />
               <span>Host / IP (Optional)</span>
             </label>
@@ -252,7 +252,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
           </div>
 
           <div className="space-y-1 min-w-0">
-            <label className="text-slate-300 font-medium flex items-center gap-1.5 text-xs">
+            <label className="text-fg-soft font-medium flex items-center gap-1.5 text-xs">
               <Box className="w-3.5 h-3.5 text-accent-500" />
               <span>App / Container (Optional)</span>
             </label>
@@ -270,7 +270,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
 
         {/* Time Period Selector */}
         <div className="space-y-1.5 min-w-0">
-          <label className="text-slate-300 font-medium flex items-center gap-1.5 text-xs">
+          <label className="text-fg-soft font-medium flex items-center gap-1.5 text-xs">
             <Calendar className="w-3.5 h-3.5 text-accent-500" />
             <span>Time Period</span>
           </label>
@@ -289,8 +289,8 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
                 onClick={() => setTimePreset((prev) => (prev === preset.id ? '' : preset.id))}
                 className={`px-2.5 py-0.5 rounded text-[11px] font-mono transition cursor-pointer ${
                   timePreset === preset.id
-                    ? 'bg-accent-700 text-white font-semibold shadow-xs'
-                    : 'bg-dark-950 text-slate-400 hover:text-slate-200 hover:bg-dark-800 border border-dark-700'
+                    ? 'bg-accent-700 text-on-fill font-semibold shadow-xs'
+                    : 'bg-canvas text-fg-muted hover:text-fg hover:bg-raised border border-line'
                 }`}
               >
                 {preset.label}
@@ -301,23 +301,23 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
           {timePreset === 'custom' && (
             <div className="flex flex-col sm:flex-row gap-3 w-full min-w-0 max-w-full pt-1">
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
-                <span className="text-[11px] text-slate-400 block font-mono">From ({zoneLabel}):</span>
+                <span className="text-[11px] text-fg-muted block font-mono">From ({zoneLabel}):</span>
                 <input
                   type="datetime-local"
                   aria-label={`From (${zoneLabel})`}
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
-                  className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
+                  className="w-full min-w-0 max-w-full block bg-surface border border-line rounded-lg px-2.5 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
                 />
               </div>
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
-                <span className="text-[11px] text-slate-400 block font-mono">To ({zoneLabel}):</span>
+                <span className="text-[11px] text-fg-muted block font-mono">To ({zoneLabel}):</span>
                 <input
                   type="datetime-local"
                   aria-label={`To (${zoneLabel})`}
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
-                  className="w-full min-w-0 max-w-full block bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
+                  className="w-full min-w-0 max-w-full block bg-surface border border-line rounded-lg px-2.5 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
                 />
               </div>
             </div>
@@ -326,7 +326,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
 
         {/* Text Search Filter */}
         <div className="space-y-1 min-w-0">
-          <label htmlFor="delete-card-query" className="text-slate-300 font-medium flex items-center gap-1.5 text-xs">
+          <label htmlFor="delete-card-query" className="text-fg-soft font-medium flex items-center gap-1.5 text-xs">
             <Search className="w-3.5 h-3.5 text-accent-500" />
             <span>Search Text (Optional)</span>
           </label>
@@ -336,43 +336,43 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g. timeout, connection reset, error"
-            className="w-full min-w-0 max-w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-hidden focus:border-accent-500 font-mono box-border"
+            className="w-full min-w-0 max-w-full bg-surface border border-line rounded-lg px-3 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono box-border"
           />
         </div>
       </div>
 
       {/* Live Preview Counter Box */}
-      <div className="p-3 bg-dark-950 border border-dark-800 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+      <div className="p-3 bg-canvas border border-line-subtle rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {isPreviewLoading ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin text-accent-400 shrink-0" />
-              <span className="text-slate-400">Calculating matching logs...</span>
+              <span className="text-fg-muted">Calculating matching logs...</span>
             </>
           ) : matchedCount !== null ? (
             <div className="flex items-center gap-2">
-              <span className="font-mono text-slate-400">Matching Logs:</span>
+              <span className="font-mono text-fg-muted">Matching Logs:</span>
               <span
                 data-testid="matched-count-display"
                 className={`font-mono font-bold text-sm ${
-                  matchedCount > 0 ? 'text-amber-400' : 'text-slate-400'
+                  matchedCount > 0 ? 'text-warning-400' : 'text-fg-muted'
                 }`}
               >
                 {matchedCount.toLocaleString()}
               </span>
             </div>
           ) : (
-            <span className="text-slate-400">
+            <span className="text-fg-muted">
               Select criteria above to preview logs targeted for deletion.
             </span>
           )}
         </div>
 
-        <div className="text-[11px] text-slate-400 font-mono">
+        <div className="text-[11px] text-fg-muted font-mono">
           {!hasActiveCriteria ? (
-            <span className="text-slate-400">No criteria selected</span>
+            <span className="text-fg-muted">No criteria selected</span>
           ) : isAllLogsTargeted ? (
-            <span className="text-red-400 font-semibold">Targets entire log collection</span>
+            <span className="text-danger-400 font-semibold">Targets entire log collection</span>
           ) : (
             <span>Filtered criteria</span>
           )}
@@ -381,16 +381,16 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
 
       {/* High-Risk Confirmation Barrier */}
       {isHighRisk && matchedCount !== null && matchedCount > 0 && (
-        <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-lg space-y-2 text-xs text-red-200">
-          <div className="flex items-center gap-2 font-semibold text-red-300">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+        <div className="p-3.5 bg-danger-950/40 border border-danger-800/80 rounded-lg space-y-2 text-xs text-danger-200">
+          <div className="flex items-center gap-2 font-semibold text-danger-300">
+            <AlertTriangle className="w-4 h-4 text-danger-400 shrink-0" />
             <span>High Risk Operation Confirmation</span>
           </div>
-          <p className="text-[11px] text-red-300/90 leading-relaxed">
+          <p className="text-[11px] text-danger-300/90 leading-relaxed">
             This will permanently delete{' '}
-            <span className="font-bold font-mono text-white">{matchedCount.toLocaleString()}</span>{' '}
+            <span className="font-bold font-mono text-fg-max">{matchedCount.toLocaleString()}</span>{' '}
             logs. This action cannot be reversed. To proceed, type{' '}
-            <span className="font-mono font-bold bg-dark-950 px-1 py-0.5 rounded-sm text-white border border-red-900">
+            <span className="font-mono font-bold bg-canvas px-1 py-0.5 rounded-sm text-fg-max border border-danger-900">
               DELETE
             </span>{' '}
             below:
@@ -400,7 +400,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="Type DELETE to confirm"
-            className="w-full bg-dark-900 border border-red-700/80 rounded-lg px-3 py-1.5 text-xs text-red-100 placeholder-red-400/50 focus:outline-hidden focus:border-red-500 font-mono"
+            className="w-full bg-surface border border-danger-700/80 rounded-lg px-3 py-1.5 text-xs text-danger-100 placeholder-danger-400/50 focus:outline-hidden focus:border-danger-500 font-mono"
           />
         </div>
       )}
@@ -411,7 +411,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
           type="button"
           onClick={handleResetFilters}
           disabled={isDeleting}
-          className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+          className="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
         >
           <RotateCcw className="w-3.5 h-3.5" />
           <span>Reset Criteria</span>
@@ -421,7 +421,7 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
           type="button"
           onClick={handleDelete}
           disabled={isDeleteDisabled}
-          className="px-4 py-2 text-xs bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isDeleting ? (
             <>

@@ -53,14 +53,14 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
   const endItem = Math.min(offset + historyItems.length, historyTotal);
 
   return (
-    <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-      <div className="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
+    <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+      <div className="px-5 py-4 border-b border-line flex items-center justify-between">
         <div>
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
             <History className="w-4 h-4 text-accent-500" />
             <span>History</span>
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-fg-muted mt-0.5">
             Previous alerts, maintenance windows and on-demand analyses
           </p>
         </div>
@@ -68,7 +68,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
           <button
             type="button"
             onClick={onClearAllHistory}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-900/30 rounded-sm border border-red-800/40 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-danger-400 hover:text-danger-300 bg-danger-950/30 hover:bg-danger-900/30 rounded-sm border border-danger-800/40 transition cursor-pointer"
           >
             <Trash2 className="w-3 h-3" />
             <span>Clear All</span>
@@ -78,15 +78,15 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
 
       {historyItems.length === 0 ? (
         <div className="p-10 text-center space-y-2">
-          <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-          <p className="text-xs text-slate-300 font-medium">No history recorded yet.</p>
-          <p className="text-xs text-slate-400">
+          <CheckCircle2 className="w-8 h-8 text-success-400 mx-auto" />
+          <p className="text-xs text-fg-soft font-medium">No history recorded yet.</p>
+          <p className="text-xs text-fg-muted">
             When alert rules trigger or AI analyses run, records will appear here.
           </p>
         </div>
       ) : isMobile ? (
         /* Mobile Card View */
-        <div className="divide-y divide-dark-800">
+        <div className="divide-y divide-line-subtle">
           {historyItems.map((item) => {
             const isDigest = item.rule_name === 'Daily Digest';
             const isMaintenance = isMaintenanceItem(item);
@@ -107,18 +107,18 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               <div
                 key={item.id}
                 onClick={() => onSelectHistoryItem(item)}
-                className="p-3.5 space-y-2 hover:bg-dark-800/40 transition cursor-pointer select-none"
+                className="p-3.5 space-y-2 hover:bg-raised/40 transition cursor-pointer select-none"
               >
                 {/* Line 1: Type Badge + Target & Timestamp */}
                 <div className="flex items-center justify-between text-xs gap-2">
                   <div className="flex items-center gap-1.5 truncate">
                     {isMaintenance ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-accent-300 bg-accent-950/60 border border-accent-800/60 shrink-0">
                         <Wrench className="w-2.5 h-2.5 shrink-0" />
                         Maintenance
                       </span>
                     ) : isDigest ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-highlight-400 bg-highlight-950/60 border border-highlight-800/60 shrink-0">
                         <Calendar className="w-2.5 h-2.5 shrink-0" />
                         Daily Digest
                       </span>
@@ -128,42 +128,42 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                         On-Demand
                       </span>
                     ) : isAiAlert ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-warning-400 bg-warning-950/60 border border-warning-800/60 shrink-0">
                         <Zap className="w-2.5 h-2.5 shrink-0" />
                         AI Alert
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650 shrink-0">
-                        <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-fg-soft bg-raised border border-line-hover shrink-0">
+                        <Bell className="w-2.5 h-2.5 text-fg-muted shrink-0" />
                         Alert
                       </span>
                     )}
-                    <span className="truncate font-sans font-semibold text-slate-100">
+                    <span className="truncate font-sans font-semibold text-fg-strong">
                       {displayTarget}
                     </span>
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono shrink-0">
+                  <span className="text-[11px] text-fg-muted font-mono shrink-0">
                     {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
                   </span>
                 </div>
 
                 {/* Line 2: Clean Summary */}
                 <div
-                  className="text-slate-300 text-xs line-clamp-2 leading-relaxed font-sans"
+                  className="text-fg-soft text-xs line-clamp-2 leading-relaxed font-sans"
                   title={summaryText}
                 >
                   {summaryText || '-'}
                 </div>
 
                 {/* Line 3: Model / Count + Actions */}
-                <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
+                <div className="flex items-center justify-between pt-1 text-[11px] text-fg-muted">
                   <div className="flex items-center gap-2">
                     {item.ai_model && (
-                      <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded-sm text-[10px] text-slate-300 font-mono truncate max-w-[140px]">
+                      <span className="bg-canvas border border-line px-1.5 py-0.5 rounded-sm text-[10px] text-fg-soft font-mono truncate max-w-[140px]">
                         {item.ai_model}
                       </span>
                     )}
-                    <span className="bg-dark-950 border border-dark-700 px-1.5 py-0.5 rounded-sm text-[10px] text-slate-300 font-mono">
+                    <span className="bg-canvas border border-line px-1.5 py-0.5 rounded-sm text-[10px] text-fg-soft font-mono">
                       {isMaintenance
                         ? maintenanceTypeLabel(item.maintenance_type)
                         : <>{item.trigger_count} {isDigest ? 'logs' : isOnDemand ? `log${item.trigger_count === 1 ? '' : 's'}` : `event${item.trigger_count === 1 ? '' : 's'}`}</>}
@@ -180,7 +180,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteHistoryItem(item)}
-                      className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded-sm transition cursor-pointer"
+                      className="p-1 text-fg-muted hover:text-danger-400 hover:bg-danger-950/50 rounded-sm transition cursor-pointer"
                       title="Delete history record"
                       aria-label={`Delete record ${item.id}`}
                     >
@@ -194,8 +194,8 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
         </div>
       ) : (
         /* Desktop Table View */
-        <div className="divide-y divide-dark-800 font-mono text-xs">
-          <div className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2 text-slate-400 font-medium text-xs font-sans bg-dark-950/60 border-b border-dark-700 select-none">
+        <div className="divide-y divide-line-subtle font-mono text-xs">
+          <div className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2 text-fg-muted font-medium text-xs font-sans bg-canvas/60 border-b border-line select-none">
             <div>Time</div>
             <div>Type</div>
             <div>Target / Rule</div>
@@ -223,19 +223,19 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               <div
                 key={item.id}
                 onClick={() => onSelectHistoryItem(item)}
-                className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-dark-800 transition text-[11px] cursor-pointer group select-none"
+                className="grid grid-cols-[140px_110px_200px_1fr_95px] px-4 py-2.5 items-center hover:bg-raised transition text-[11px] cursor-pointer group select-none"
               >
-                <div className="text-slate-400 group-hover:text-slate-300 font-mono">
+                <div className="text-fg-muted group-hover:text-fg-soft font-mono">
                   {formatLocalTimestamp(item.triggered_at, true, serverTimezone)}
                 </div>
                 <div>
                   {isMaintenance ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-sky-300 bg-sky-950/60 border border-sky-800/60 shrink-0">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-accent-300 bg-accent-950/60 border border-accent-800/60 shrink-0">
                       <Wrench className="w-2.5 h-2.5 shrink-0" />
                       Maintenance
                     </span>
                   ) : isDigest ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-purple-400 bg-purple-950/60 border border-purple-800/60">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-highlight-400 bg-highlight-950/60 border border-highlight-800/60">
                       <Calendar className="w-2.5 h-2.5 shrink-0" />
                       Daily Digest
                     </span>
@@ -245,22 +245,22 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                       On-Demand
                     </span>
                   ) : isAiAlert ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-800/60">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-warning-400 bg-warning-950/60 border border-warning-800/60">
                       <Zap className="w-2.5 h-2.5 shrink-0" />
                       AI Alert
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-slate-300 bg-dark-800 border border-dark-650">
-                      <Bell className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium text-fg-soft bg-raised border border-line-hover">
+                      <Bell className="w-2.5 h-2.5 text-fg-muted shrink-0" />
                       Alert
                     </span>
                   )}
                 </div>
-                <div className="truncate pr-2 font-sans font-medium text-slate-200" title={displayTarget}>
+                <div className="truncate pr-2 font-sans font-medium text-fg" title={displayTarget}>
                   {displayTarget}
                 </div>
                 <div
-                  className="text-slate-300 truncate pr-2 group-hover:text-white font-sans text-xs"
+                  className="text-fg-soft truncate pr-2 group-hover:text-fg-max font-sans text-xs"
                   title={summaryText}
                 >
                   {summaryText || '-'}
@@ -277,7 +277,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                   <button
                     type="button"
                     onClick={() => onDeleteHistoryItem(item)}
-                    className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/50 rounded-sm border border-transparent hover:border-red-900/50 transition cursor-pointer"
+                    className="p-1 text-fg-muted hover:text-danger-400 hover:bg-danger-950/50 rounded-sm border border-transparent hover:border-danger-900/50 transition cursor-pointer"
                     title="Delete history record"
                     aria-label={`Delete record ${item.id}`}
                   >
@@ -292,7 +292,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
 
       {/* Pagination Footer */}
       {historyTotal > limit && onPageChange && (
-        <div className="px-5 py-3 border-t border-dark-800 flex items-center justify-between text-xs text-slate-400 font-mono">
+        <div className="px-5 py-3 border-t border-line-subtle flex items-center justify-between text-xs text-fg-muted font-mono">
           <div>
             Showing {startItem} to {endItem} of {historyTotal} records
           </div>
@@ -301,7 +301,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               type="button"
               disabled={offset <= 0}
               onClick={() => onPageChange(Math.max(0, offset - limit))}
-              className="p-1.5 rounded-sm bg-dark-800 hover:bg-dark-750 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="p-1.5 rounded-sm bg-raised hover:bg-raised-hover text-fg-soft disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               title="Previous page"
               aria-label="Previous page"
             >
@@ -314,7 +314,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
               type="button"
               disabled={offset + limit >= historyTotal}
               onClick={() => onPageChange(offset + limit)}
-              className="p-1.5 rounded-sm bg-dark-800 hover:bg-dark-750 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="p-1.5 rounded-sm bg-raised hover:bg-raised-hover text-fg-soft disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               title="Next page"
               aria-label="Next page"
             >

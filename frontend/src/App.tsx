@@ -133,7 +133,7 @@ export const App: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-dark-950 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
+      <div className="min-h-screen bg-canvas flex flex-col items-center justify-center text-fg-muted font-mono text-xs space-y-3">
         <LogShedLogo className="w-8 h-8 text-accent-500 animate-pulse" />
         <span>Loading LogShed...</span>
       </div>
@@ -232,14 +232,14 @@ export const App: React.FC = () => {
 
   return (
     <AliasProvider>
-      <div className="h-dvh max-h-dvh w-full max-w-full bg-dark-950 text-slate-200 flex flex-col overflow-hidden select-text">
+      <div className="h-dvh max-h-dvh w-full max-w-full bg-canvas text-fg flex flex-col overflow-hidden select-text">
       {/* Mobile Pull-to-Refresh Indicator */}
       {isMobile && (isPulling || isRefreshing) && (
         <div
           style={{ transform: `translateY(${Math.min(pullDistance, 45)}px)` }}
           className="fixed top-0 inset-x-0 flex items-center justify-center pointer-events-none z-50 transition-transform duration-75"
         >
-          <div className="bg-dark-900/95 border border-dark-600 rounded-full px-3.5 py-1 text-xs flex items-center gap-1.5 shadow-xl text-slate-200 backdrop-blur-xs">
+          <div className="bg-surface/95 border border-line-strong rounded-full px-3.5 py-1 text-xs flex items-center gap-1.5 shadow-xl text-fg backdrop-blur-xs">
             <RefreshCw
               className={`w-3.5 h-3.5 text-accent-400 ${
                 isRefreshing || hasReachedThreshold ? 'animate-spin' : ''

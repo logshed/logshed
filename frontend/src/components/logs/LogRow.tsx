@@ -32,17 +32,17 @@ const CURSOR_CLASS = ' group-focus/loglist:ring-1 group-focus/loglist:ring-inset
 
 /** Background and left border: the alert's log (amber) wins over a selected row (accent). */
 function rowStateClass(isSelected: boolean, isFocused: boolean): string {
-  if (isFocused) return 'bg-amber-950/50 border-l-amber-400';
+  if (isFocused) return 'bg-warning-950/50 border-l-warning-400';
   if (isSelected) return 'bg-accent-950/40 border-l-accent-500';
   return 'border-l-transparent';
 }
 
 /** Desktop hover: brightens a highlighted row rather than replacing its colour, so it still looks selected. */
 function rowHoverClass(isSelected: boolean, isFocused: boolean): string {
-  if (isFocused) return 'hover:bg-amber-900/50';
+  if (isFocused) return 'hover:bg-warning-900/50';
   if (isSelected) return 'hover:bg-accent-900/50';
   // A grey edge, not blue: blue marks a selected row
-  return 'hover:bg-dark-800 hover:border-l-slate-500';
+  return 'hover:bg-raised hover:border-l-line-strongest';
 }
 
 export interface LogRowProps {
@@ -126,7 +126,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         data-focused={isFocused || undefined}
         onClick={() => onClick(log)}
         style={style}
-        className={`log-row flex flex-col px-3 py-1 border-b border-dark-700 border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
+        className={`log-row flex flex-col px-3 py-1 border-b border-line border-l-2 cursor-pointer text-[11px] leading-tight space-y-1 ${
           rowStateClass(isSelected, isFocused)
         }${isCursor ? CURSOR_CLASS : ''}`}
       >
@@ -134,23 +134,23 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
         <div className="flex items-center gap-1.5 min-w-0 h-5 shrink-0">
           <SeverityBadge severity={log.severity} />
           <span className="font-mono text-xs truncate">
-            <span className="text-slate-200 font-semibold">{log.app_name}</span>
-            <span className="text-slate-400 font-normal ml-1">({log.source_alias})</span>
+            <span className="text-fg font-semibold">{log.app_name}</span>
+            <span className="text-fg-muted font-normal ml-1">({log.source_alias})</span>
           </span>
         </div>
 
         {/* Line 2: Message Payload (break-all, 2 lines clamp, always two full lines of height) */}
-        <div className="text-slate-200 text-xs font-mono break-all line-clamp-2 select-text leading-4 h-8 shrink-0">
+        <div className="text-fg text-xs font-mono break-all line-clamp-2 select-text leading-4 h-8 shrink-0">
           {displayMessage.trim() ? (
             displayMessage
           ) : (
-            <span className="italic text-slate-500 select-none">(empty message)</span>
+            <span className="italic text-fg-subtle select-none">(empty message)</span>
           )}
         </div>
 
         {/* Line 3: Timestamp (left) + AI Action (right, only when AI is on) */}
-        <div className="flex items-center justify-between h-4 shrink-0 text-[11px] text-slate-400 font-mono">
-          <span className="text-[10px] text-slate-400 font-mono shrink-0 select-none">
+        <div className="flex items-center justify-between h-4 shrink-0 text-[11px] text-fg-muted font-mono">
+          <span className="text-[10px] text-fg-muted font-mono shrink-0 select-none">
             {displayTimestamp}
           </span>
           {aiEnabled && (
@@ -183,7 +183,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       data-focused={isFocused || undefined}
       onClick={() => onClick(log)}
       style={style}
-      className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-dark-900 border-l-2 transition-colors cursor-pointer text-[11px] leading-tight ${
+      className={`log-row grid ${logGridCols(aiEnabled)} px-3 items-center border-b border-surface border-l-2 transition-colors cursor-pointer text-[11px] leading-tight ${
         rowStateClass(isSelected, isFocused)
       } ${rowHoverClass(isSelected, isFocused)}${isCursor ? CURSOR_CLASS : ''}`}
     >
@@ -196,7 +196,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
           e.stopPropagation();
           onSelect(log, index, e.shiftKey);
         }}
-        className="h-full w-full flex items-center justify-center text-slate-500 hover:text-slate-200 cursor-pointer select-none"
+        className="h-full w-full flex items-center justify-center text-fg-subtle hover:text-fg cursor-pointer select-none"
       >
         {isSelected ? (
           <CheckSquare className="w-3.5 h-3.5 text-accent-400" />
@@ -207,7 +207,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
 
       {/* Timestamp */}
       <div
-        className="text-slate-400 truncate pr-2"
+        className="text-fg-muted truncate pr-2"
         title={`UTC: ${log.timestamp}\nReceived: ${log.received_at}`}
       >
         {displayTimestamp}
@@ -219,21 +219,21 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       </div>
 
       {/* Host Alias / IP */}
-      <div className="text-slate-300 truncate pr-2" title={`${log.source_alias} (${log.source_ip})`}>
+      <div className="text-fg-soft truncate pr-2" title={`${log.source_alias} (${log.source_ip})`}>
         {log.source_alias}
       </div>
 
       {/* App Name */}
-      <div className="text-slate-400 truncate pr-2 font-medium" title={log.app_name}>
+      <div className="text-fg-muted truncate pr-2 font-medium" title={log.app_name}>
         {log.app_name}
       </div>
 
       {/* Raw Text Message without dangerouslySetInnerHTML */}
-      <div className="text-slate-200 truncate pr-3 select-text">
+      <div className="text-fg truncate pr-3 select-text">
         {displayMessage.trim() ? (
           displayMessage
         ) : (
-          <span className="italic text-slate-500 select-none">(empty message)</span>
+          <span className="italic text-fg-subtle select-none">(empty message)</span>
         )}
       </div>
 
@@ -249,7 +249,7 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
               onDiagnoseAi([log]);
             }}
             title="Explain with AI"
-            className="p-1 text-slate-400 hover:text-accent-400 hover:bg-dark-800 rounded-sm transition cursor-pointer"
+            className="p-1 text-fg-muted hover:text-accent-400 hover:bg-raised rounded-sm transition cursor-pointer"
           >
             <Sparkles className="w-3 h-3" />
           </div>

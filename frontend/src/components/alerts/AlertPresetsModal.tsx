@@ -40,10 +40,10 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
     >
       <div className="space-y-4">
         {/* Intro, Category Filter and Channel Selector */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-dark-750">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line-muted">
           <div>
-            <p className="text-xs text-slate-300 font-medium">Pre-tuned Monitoring Rules</p>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-fg-soft font-medium">Pre-tuned Monitoring Rules</p>
+            <p className="text-xs text-fg-muted mt-0.5">
               Ready-made rules for failing disks, backups, power, network trouble and security events.
             </p>
           </div>
@@ -54,13 +54,13 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
             )}
             {channels.length > 0 && (
               <div className="flex items-center gap-2 shrink-0">
-                <label id="target-channel-select-label" htmlFor="target-channel-select" className="text-xs text-slate-400 w-24 sm:w-auto">
+                <label id="target-channel-select-label" htmlFor="target-channel-select" className="text-xs text-fg-muted w-24 sm:w-auto">
                   Target Channel:
                 </label>
                 <div className="w-52">
                   <SelectDropdown
                     variant="panel"
-                    fieldClassName="bg-dark-800 border-dark-700 rounded-lg px-2.5 py-1.5 text-slate-200"
+                    fieldClassName="bg-raised border-line rounded-lg px-2.5 py-1.5 text-fg"
                     id="target-channel-select"
                     labelledBy="target-channel-select-label"
                     label="Target Channel"
@@ -79,7 +79,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
 
         {/* Presets Grid */}
         {presets.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-400">No alert presets found.</div>
+          <div className="py-8 text-center text-xs text-fg-muted">No alert presets found.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {visible.map((preset) => {
@@ -94,7 +94,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
                   name={preset.name}
                   isCustom={preset.is_custom}
                   badge={
-                    <span className="px-2 py-0.5 rounded-sm text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/40 shrink-0">
+                    <span className="px-2 py-0.5 rounded-sm text-[10px] font-mono bg-warning-950/40 text-warning-300 border border-warning-800/40 shrink-0">
                       {preset.rule_type}
                     </span>
                   }
@@ -106,25 +106,25 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
                   onInstall={() => onInstallPreset(preset)}
                 >
                   {preset.filter_app && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700 font-mono">
+                    <span className="bg-raised px-2 py-0.5 rounded-sm text-fg-soft border border-line font-mono">
                       app: {preset.filter_app}
                     </span>
                   )}
                   {preset.match_pattern && (
-                    <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-accent-400 border border-dark-700 font-mono truncate max-w-full">
+                    <span className="bg-raised px-2 py-0.5 rounded-sm text-accent-400 border border-line font-mono truncate max-w-full">
                       pattern: {preset.match_pattern}
                     </span>
                   )}
-                  <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700">
+                  <span className="bg-raised px-2 py-0.5 rounded-sm text-fg-soft border border-line">
                     {preset.rule_type === 'rate'
                       ? `>= ${preset.threshold_count} logs/s in ${preset.window_seconds}s`
                       : `${preset.threshold_count} in ${preset.window_seconds}s`}
                   </span>
-                  <span className="bg-dark-800 px-2 py-0.5 rounded-sm text-slate-300 border border-dark-700">
+                  <span className="bg-raised px-2 py-0.5 rounded-sm text-fg-soft border border-line">
                     cooldown: {preset.cooldown_seconds}s
                   </span>
                   {preset.ai_enrichment && (
-                    <span className="bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded-sm border border-purple-800/40 flex items-center gap-1">
+                    <span className="bg-highlight-950/40 text-highlight-300 px-2 py-0.5 rounded-sm border border-highlight-800/40 flex items-center gap-1">
                       <Sparkles className="w-2.5 h-2.5" />
                       <span>AI Enrichment</span>
                     </span>

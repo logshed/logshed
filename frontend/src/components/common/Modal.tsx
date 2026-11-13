@@ -27,9 +27,9 @@ export const Modal: React.FC<ModalProps> = ({
   if (!isOpen) return null;
 
   return createPortal(
-    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs`}>
+    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center p-3 sm:p-4 bg-backdrop/75 backdrop-blur-xs`}>
       <div
-        className={`bg-dark-900 border border-dark-700 rounded-lg shadow-2xl w-full ${maxWidth} max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain outline-hidden animate-in fade-in zoom-in-95 duration-150`}
+        className={`bg-surface border border-line rounded-lg shadow-2xl w-full ${maxWidth} max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain outline-hidden animate-in fade-in zoom-in-95 duration-150`}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
@@ -37,11 +37,11 @@ export const Modal: React.FC<ModalProps> = ({
         tabIndex={-1}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-dark-700 bg-dark-950 rounded-t-lg">
-          <h2 id={titleId} className="text-sm font-semibold text-slate-200 tracking-wide">{title}</h2>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line bg-canvas rounded-t-lg">
+          <h2 id={titleId} className="text-sm font-semibold text-fg tracking-wide">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 hover:bg-dark-800 p-1 rounded-sm transition"
+            className="text-fg-muted hover:text-fg hover:bg-raised p-1 rounded-sm transition"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />

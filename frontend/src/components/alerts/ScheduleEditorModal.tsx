@@ -52,7 +52,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
       <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
         {/* Name */}
         <div>
-          <label className="block text-slate-300 font-medium mb-1">Schedule Name</label>
+          <label className="block text-fg-soft font-medium mb-1">Schedule Name</label>
           <input
             type="text"
             required
@@ -60,21 +60,21 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
             value={scheduleFormName}
             onChange={(e) => setScheduleFormName(e.target.value)}
             placeholder="e.g. Weekly Server Maintenance"
-            className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
+            className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
           />
         </div>
 
         {/* Recurrence Selection */}
         <div>
-          <label className="block text-slate-300 font-medium mb-1">Recurrence</label>
+          <label className="block text-fg-soft font-medium mb-1">Recurrence</label>
           <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => setScheduleFormRecurrence('daily')}
               className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
                 scheduleFormRecurrence === 'daily'
-                  ? 'bg-accent-700 text-white border-accent-500'
-                  : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                  ? 'bg-accent-700 text-on-fill border-accent-500'
+                  : 'bg-canvas text-fg-muted border-line hover:text-fg'
               }`}
             >
               Daily
@@ -84,8 +84,8 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               onClick={() => setScheduleFormRecurrence('weekly')}
               className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
                 scheduleFormRecurrence === 'weekly'
-                  ? 'bg-accent-700 text-white border-accent-500'
-                  : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                  ? 'bg-accent-700 text-on-fill border-accent-500'
+                  : 'bg-canvas text-fg-muted border-line hover:text-fg'
               }`}
             >
               Weekly
@@ -95,8 +95,8 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               onClick={() => setScheduleFormRecurrence('monthly')}
               className={`px-3 py-2 rounded-lg font-medium border text-center transition cursor-pointer ${
                 scheduleFormRecurrence === 'monthly'
-                  ? 'bg-accent-700 text-white border-accent-500'
-                  : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                  ? 'bg-accent-700 text-on-fill border-accent-500'
+                  : 'bg-canvas text-fg-muted border-line hover:text-fg'
               }`}
             >
               Monthly
@@ -107,10 +107,10 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         {/* Weekly Day of Week Picker */}
         {scheduleFormRecurrence === 'weekly' && (
           <div>
-            <label id="schedule-day-of-week-label" htmlFor="schedule-day-of-week" className="block text-slate-300 font-medium mb-1">Day of the Week</label>
+            <label id="schedule-day-of-week-label" htmlFor="schedule-day-of-week" className="block text-fg-soft font-medium mb-1">Day of the Week</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-dark-950 border-dark-700 rounded-lg px-3 py-2 text-slate-200"
+              fieldClassName="bg-canvas border-line rounded-lg px-3 py-2 text-fg"
               id="schedule-day-of-week"
               labelledBy="schedule-day-of-week-label"
               label="Day of the Week"
@@ -124,7 +124,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         {/* Monthly Day of Month Picker */}
         {scheduleFormRecurrence === 'monthly' && (
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Day of the Month (1 - 31)</label>
+            <label className="block text-fg-soft font-medium mb-1">Day of the Month (1 - 31)</label>
             <input
               type="number"
               min="1"
@@ -132,7 +132,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Day of the Month"
               value={scheduleFormDayOfMonth}
               onChange={(e) => setScheduleFormDayOfMonth(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
+              className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
             />
           </div>
         )}
@@ -140,18 +140,18 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         {/* Start Time & Duration */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Start Time (24h)</label>
+            <label className="block text-fg-soft font-medium mb-1">Start Time (24h)</label>
             <input
               type="time"
               required
               aria-label="Start Time"
               value={scheduleFormStartTime}
               onChange={(e) => setScheduleFormStartTime(e.target.value)}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
+              className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
             />
           </div>
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Duration (minutes)</label>
+            <label className="block text-fg-soft font-medium mb-1">Duration (minutes)</label>
             <input
               type="number"
               required
@@ -160,14 +160,14 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Duration in minutes"
               value={scheduleFormDuration}
               onChange={(e) => setScheduleFormDuration(Number(e.target.value))}
-              className="w-full bg-dark-950 border border-dark-700 rounded-lg px-3 py-2 text-slate-200 focus:border-accent-500 focus:outline-hidden"
+              className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
             />
           </div>
         </div>
 
         {/* Quick duration presets */}
         <div className="flex items-center gap-1.5 pt-1">
-          <span className="text-[11px] text-slate-400">Presets:</span>
+          <span className="text-[11px] text-fg-muted">Presets:</span>
           {[15, 30, 60, 120, 240].map((dur) => (
             <button
               key={dur}
@@ -176,7 +176,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               className={`px-2 py-0.5 text-[11px] rounded border transition cursor-pointer ${
                 scheduleFormDuration === dur
                   ? 'bg-accent-950 text-accent-300 border-accent-700'
-                  : 'bg-dark-950 text-slate-400 border-dark-700 hover:text-slate-200'
+                  : 'bg-canvas text-fg-muted border-line hover:text-fg'
               }`}
             >
               {dur >= 60 ? `${dur / 60}h` : `${dur}m`}
@@ -191,25 +191,25 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
             id="schedule-enabled-check"
             checked={scheduleFormEnabled}
             onChange={(e) => setScheduleFormEnabled(e.target.checked)}
-            className="rounded-sm border-dark-700 bg-dark-950 text-accent-500 focus:ring-accent-500 focus:ring-offset-dark-900"
+            className="rounded-sm border-line bg-canvas text-accent-500 focus:ring-accent-500 focus:ring-offset-surface"
           />
-          <label htmlFor="schedule-enabled-check" className="text-slate-300 select-none cursor-pointer">
+          <label htmlFor="schedule-enabled-check" className="text-fg-soft select-none cursor-pointer">
             Enable this maintenance schedule
           </label>
         </div>
 
         {/* Modal Actions */}
-        <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+        <div className="pt-3 border-t border-line flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-fg-soft hover:text-fg-max bg-raised transition cursor-pointer"
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
           >
             {scheduleToEdit ? 'Save Changes' : 'Create Schedule'}
           </button>

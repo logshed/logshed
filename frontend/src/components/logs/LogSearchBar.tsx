@@ -96,7 +96,7 @@ const timeOptions = (customLabel: string): SelectOption[] => [
 // The active border of the filter dropdowns (dropdownStyles.ts), reused for the search box and the
 // custom time fields.
 const ACTIVE_BORDER = 'border-accent-600/60';
-const IDLE_BORDER = 'border-dark-700';
+const IDLE_BORDER = 'border-line';
 
 interface LogSearchBarProps {
   filters: LogFilterParams;
@@ -257,7 +257,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
   }, [onReset]);
 
   return (
-    <div className="bg-dark-950 border-b border-dark-700 p-2.5 flex flex-col gap-2 select-none text-xs shrink-0">
+    <div className="bg-canvas border-b border-line p-2.5 flex flex-col gap-2 select-none text-xs shrink-0">
       {/* Top Row: Search Input & Primary Search Actions. On phones the input and the search
           button get a line of their own, so the query stays readable while typing. */}
       <div className="flex flex-col md:flex-row md:items-center gap-2">
@@ -273,10 +273,10 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
               aria-label="Search logs"
               enterKeyHint="search"
               data-active={active.query}
-              className={`w-full bg-dark-900 border ${active.query ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono`}
+              className={`w-full bg-surface border ${active.query ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-3 py-1.5 pl-8 ${filters.query ? 'pr-14' : 'pr-8'} text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono`}
             />
             {/* The icon and the two buttons are centred on the input, so they stay in line at any input height */}
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-fg-subtle absolute left-2.5 top-1/2 -translate-y-1/2" />
             {/* Search syntax help, left of the clear button. The wrapper is not positioned, so the
                 popover is placed against the input (full input width on phones), not the icon. */}
             <div ref={helpRef} onBlur={handleHelpBlur}>
@@ -284,7 +284,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                 ref={helpButtonRef}
                 type="button"
                 onClick={() => setIsHelpOpen((prev) => !prev)}
-                className={`absolute top-1/2 -translate-y-1/2 leading-none ${filters.query ? 'right-7' : 'right-2'} block transition-colors cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`absolute top-1/2 -translate-y-1/2 leading-none ${filters.query ? 'right-7' : 'right-2'} block transition-colors cursor-pointer ${isHelpOpen ? 'text-accent-400' : 'text-fg-subtle hover:text-fg-soft'}`}
                 title="Search syntax"
                 aria-label="Search syntax help"
                 aria-expanded={isHelpOpen}
@@ -298,14 +298,14 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                   role="dialog"
                   aria-label="Search syntax"
                   tabIndex={-1}
-                  className="absolute inset-x-0 md:left-auto md:w-80 top-full mt-2 bg-dark-900 border border-dark-700 rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-hidden"
+                  className="absolute inset-x-0 md:left-auto md:w-80 top-full mt-2 bg-surface border border-line rounded-md shadow-xl p-3 z-50 font-sans text-xs select-text focus:outline-hidden"
                 >
-                  <p className="font-semibold text-slate-200 mb-2">Search syntax</p>
+                  <p className="font-semibold text-fg mb-2">Search syntax</p>
                   <ul className="space-y-1.5">
                     {SEARCH_SYNTAX_HELP.map((item) => (
                       <li key={item.example} className="flex flex-col gap-0.5">
                         <code className="font-mono text-accent-300">{item.example}</code>
-                        <span className="text-slate-400 leading-snug">{item.text}</span>
+                        <span className="text-fg-muted leading-snug">{item.text}</span>
                       </li>
                     ))}
                   </ul>
@@ -315,7 +315,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             {filters.query && (
               <button
                 onClick={() => onFilterChange({ ...filters, query: '' })}
-                className="absolute right-2 top-1/2 -translate-y-1/2 leading-none text-slate-500 hover:text-slate-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 leading-none text-fg-subtle hover:text-fg-soft"
                 title="Clear search query"
                 aria-label="Clear search query"
               >
@@ -330,7 +330,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             onClick={() => onSearch()}
             title="Search now (Enter)"
             aria-label="Search now"
-            className="flex items-center px-2.5 py-1.5 rounded-sm bg-dark-900 border border-dark-700 text-slate-300 hover:text-white hover:border-slate-600 transition shrink-0 cursor-pointer"
+            className="flex items-center px-2.5 py-1.5 rounded-sm bg-surface border border-line text-fg-soft hover:text-fg-max hover:border-line-stronger transition shrink-0 cursor-pointer"
           >
             <Search className="w-3.5 h-3.5" />
           </button>
@@ -342,14 +342,14 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           data-testid="search-bar-mobile-line"
           className={
             mobileToolbar
-              ? '-mx-2.5 -mb-2.5 px-3 py-1.5 bg-dark-900 border-t border-dark-700 flex flex-nowrap items-center gap-2 relative overflow-hidden md:contents'
+              ? '-mx-2.5 -mb-2.5 px-3 py-1.5 bg-surface border-t border-line flex flex-nowrap items-center gap-2 relative overflow-hidden md:contents'
               : 'flex items-center gap-2 md:contents'
           }
         >
           {/* Mobile Filters Drawer Trigger Button */}
           <button
             onClick={() => setIsMobileDrawerOpen(true)}
-            className={`md:hidden flex items-center gap-1.5 px-2.5 ${mobileToolbar ? 'py-1 bg-dark-800' : 'py-1.5 bg-dark-900'} rounded-sm border border-dark-700 text-slate-300 hover:text-white shrink-0 cursor-pointer`}
+            className={`md:hidden flex items-center gap-1.5 px-2.5 ${mobileToolbar ? 'py-1 bg-raised' : 'py-1.5 bg-surface'} rounded-sm border border-line text-fg-soft hover:text-fg-max shrink-0 cursor-pointer`}
             title="Open filters drawer"
             aria-haspopup="dialog"
           >
@@ -357,7 +357,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <SlidersHorizontal className="w-3.5 h-3.5 text-accent-400" aria-hidden="true" />
             <span className={mobileToolbar ? 'sr-only' : ''}>Filters</span>
             {activeFilterCount > 0 && (
-              <span className="bg-accent-700 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
+              <span className="bg-accent-700 text-on-fill text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold leading-none">
                 {' '}
                 {activeFilterCount}
                 <span className="sr-only"> active</span>
@@ -368,7 +368,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
           {/* Capped or Matched Count Indicator */}
           {hasActiveFilters && totalCount !== undefined && totalCount !== null && (
             <span
-              className="text-slate-400 font-mono text-[11px] shrink-0"
+              className="text-fg-muted font-mono text-[11px] shrink-0"
               data-testid="search-bar-total-count"
               title={totalCapped ? 'Results capped at 1,000+ records' : `${totalCount.toLocaleString()} logs matched`}
             >
@@ -381,12 +381,12 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <button
               onClick={handleResetFilters}
               title="Reset all active filters"
-              className={`bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-600/70 px-2.5 ${mobileToolbar ? 'py-1 md:py-1.5' : 'py-1.5 ml-auto md:ml-0'} rounded-sm flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0`}
+              className={`bg-warning-950/70 hover:bg-warning-900/90 text-warning-300 border border-warning-600/70 px-2.5 ${mobileToolbar ? 'py-1 md:py-1.5' : 'py-1.5 ml-auto md:ml-0'} rounded-sm flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0`}
             >
               {/* Named by its text ("Reset 3 active filters"); on the phone toolbar the word is read, not shown */}
-              <RotateCcw className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              <RotateCcw className="w-3.5 h-3.5 text-warning-400" aria-hidden="true" />
               <span className={mobileToolbar ? 'sr-only md:not-sr-only' : ''}>Reset</span>
-              <span className="bg-amber-500/30 text-amber-200 border border-amber-500/50 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-bold leading-none">
+              <span className="bg-warning-500/30 text-warning-200 border border-warning-500/50 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-bold leading-none">
                 {' '}
                 {activeFilterCount}
                 <span className="sr-only"> active filters</span>
@@ -398,7 +398,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
       </div>
 
       {/* Second Row: Desktop Cohesive Filter Dimension Row (hidden on mobile) */}
-      <div className="hidden md:flex flex-wrap items-center gap-2 pt-1 border-t border-dark-800">
+      <div className="hidden md:flex flex-wrap items-center gap-2 pt-1 border-t border-line-subtle">
         {/* Host / IP Multi-Select */}
         <MultiSelectDropdown
           label="Host / IP"
@@ -454,8 +454,8 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         {showCustomTime && (
           // From and To as two boxes of the dropdowns' height, so choosing Custom... does not make the row taller
           <div className="flex items-center gap-2 w-full max-w-full md:w-auto">
-            <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-dark-900 border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2.5 focus-within:border-accent-500`}>
-              <label htmlFor={`${fieldId}-from`} className="text-slate-400 text-[11px] shrink-0">From:</label>
+            <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-surface border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2.5 focus-within:border-accent-500`}>
+              <label htmlFor={`${fieldId}-from`} className="text-fg-muted text-[11px] shrink-0">From:</label>
               <input
                 id={`${fieldId}-from`}
                 type="datetime-local"
@@ -466,11 +466,11 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                     from: fromLocalDatetimeInputString(e.target.value, timeZone),
                   })
                 }
-                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-fg font-mono focus:outline-hidden"
               />
             </div>
-            <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-dark-900 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2.5 focus-within:border-accent-500`}>
-              <label htmlFor={`${fieldId}-to`} className="text-slate-400 text-[11px] shrink-0">To:</label>
+            <div className={`flex items-center gap-1 min-w-0 flex-1 h-[26px] bg-surface border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2.5 focus-within:border-accent-500`}>
+              <label htmlFor={`${fieldId}-to`} className="text-fg-muted text-[11px] shrink-0">To:</label>
               <input
                 id={`${fieldId}-to`}
                 type="datetime-local"
@@ -481,17 +481,17 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                     to: fromLocalDatetimeInputString(e.target.value, timeZone),
                   })
                 }
-                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-slate-200 font-mono focus:outline-hidden"
+                className="block w-full min-w-0 bg-transparent border-0 p-0 text-[11px] text-fg font-mono focus:outline-hidden"
               />
             </div>
-            <span className="text-slate-400 text-[11px] font-mono shrink min-w-0 truncate" title="From and To are times in this zone">
+            <span className="text-fg-muted text-[11px] font-mono shrink min-w-0 truncate" title="From and To are times in this zone">
               {timeInputZoneLabel(timeZone)}
             </span>
           </div>
         )}
 
         {viewsError && (
-          <span role="alert" className="text-red-400 text-[11px]">
+          <span role="alert" className="text-danger-400 text-[11px]">
             {viewsError}
           </span>
         )}
@@ -526,7 +526,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
         <div className="space-y-4 text-xs font-sans">
           {/* Mobile Saved Views Section */}
           {viewsError && (
-            <p role="alert" className="text-red-400 text-[11px]">
+            <p role="alert" className="text-danger-400 text-[11px]">
               {viewsError}
             </p>
           )}
@@ -551,7 +551,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Host / IP Filter */}
           <div>
-            <label className="block text-slate-400 font-medium mb-1.5">Host / IP</label>
+            <label className="block text-fg-muted font-medium mb-1.5">Host / IP</label>
             <MultiSelectDropdown
               label="Host / IP"
               options={availableSources}
@@ -566,7 +566,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* App / Container Filter */}
           <div>
-            <label className="block text-slate-400 font-medium mb-1.5">App / Container</label>
+            <label className="block text-fg-muted font-medium mb-1.5">App / Container</label>
             <MultiSelectDropdown
               label="App / Container"
               options={availableApps}
@@ -581,7 +581,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Severity Filter */}
           <div>
-            <label id={`${fieldId}-severity-panel-label`} htmlFor={`${fieldId}-severity-panel`} className="block text-slate-400 font-medium mb-1.5">Severity</label>
+            <label id={`${fieldId}-severity-panel-label`} htmlFor={`${fieldId}-severity-panel`} className="block text-fg-muted font-medium mb-1.5">Severity</label>
             <SelectDropdown
               variant="panel"
               id={`${fieldId}-severity-panel`}
@@ -598,7 +598,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Time Preset */}
           <div>
-            <label id={`${fieldId}-time-panel-label`} htmlFor={`${fieldId}-time-panel`} className="block text-slate-400 font-medium mb-1.5">Time Range</label>
+            <label id={`${fieldId}-time-panel-label`} htmlFor={`${fieldId}-time-panel`} className="block text-fg-muted font-medium mb-1.5">Time Range</label>
             <SelectDropdown
               variant="panel"
               id={`${fieldId}-time-panel`}
@@ -615,10 +615,10 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
 
           {/* Custom Time */}
           {showCustomTime && (
-            <div className="w-full space-y-2 p-2.5 bg-dark-950 rounded-sm border border-dark-700">
+            <div className="w-full space-y-2 p-2.5 bg-canvas rounded-sm border border-line">
               <div>
-                <label htmlFor={`${fieldId}-from-panel`} className="block text-slate-400 text-[11px] mb-1">From:</label>
-                <div className={`w-full bg-dark-900 border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2 py-1.5 focus-within:border-accent-500`}>
+                <label htmlFor={`${fieldId}-from-panel`} className="block text-fg-muted text-[11px] mb-1">From:</label>
+                <div className={`w-full bg-surface border ${filters.from ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2 py-1.5 focus-within:border-accent-500`}>
                   <input
                     id={`${fieldId}-from-panel`}
                     type="datetime-local"
@@ -629,13 +629,13 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                         from: fromLocalDatetimeInputString(e.target.value, timeZone),
                       })
                     }
-                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-fg font-mono focus:outline-hidden"
                   />
                 </div>
               </div>
               <div>
-                <label htmlFor={`${fieldId}-to-panel`} className="block text-slate-400 text-[11px] mb-1">To:</label>
-                <div className={`w-full bg-dark-900 border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2 py-1.5 focus-within:border-accent-500`}>
+                <label htmlFor={`${fieldId}-to-panel`} className="block text-fg-muted text-[11px] mb-1">To:</label>
+                <div className={`w-full bg-surface border ${filters.to ? ACTIVE_BORDER : IDLE_BORDER} rounded-sm px-2 py-1.5 focus-within:border-accent-500`}>
                   <input
                     id={`${fieldId}-to-panel`}
                     type="datetime-local"
@@ -646,24 +646,24 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                         to: fromLocalDatetimeInputString(e.target.value, timeZone),
                       })
                     }
-                    className="block w-full bg-transparent border-0 p-0 text-xs text-slate-200 font-mono focus:outline-hidden"
+                    className="block w-full bg-transparent border-0 p-0 text-xs text-fg font-mono focus:outline-hidden"
                   />
                 </div>
               </div>
-              <p className="text-slate-400 text-[11px]">
+              <p className="text-fg-muted text-[11px]">
                 Times in <span className="font-mono">{timeInputZoneLabel(timeZone)}</span>
               </p>
             </div>
           )}
 
           {/* Actions */}
-          <div className="pt-4 border-t border-dark-800 flex items-center gap-2">
+          <div className="pt-4 border-t border-line-subtle flex items-center gap-2">
             <button
               onClick={() => {
                 setIsMobileDrawerOpen(false);
                 onSearch();
               }}
-              className="flex-1 bg-accent-700 hover:bg-accent-600 text-white font-medium py-2 rounded-sm text-center transition"
+              className="flex-1 bg-accent-700 hover:bg-accent-600 text-on-fill font-medium py-2 rounded-sm text-center transition"
             >
               Done
             </button>
@@ -673,7 +673,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
                   handleResetFilters();
                   setIsMobileDrawerOpen(false);
                 }}
-                className="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-sm transition font-medium"
+                className="px-3 py-2 bg-raised hover:bg-raised-strong text-fg-soft rounded-sm transition font-medium"
               >
                 Reset
               </button>

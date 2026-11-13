@@ -30,66 +30,66 @@ export function getSeverityInfo(severity: number): SeverityInfo {
       return {
         label: 'Emergency',
         shortLabel: 'EMERG',
-        bgClass: 'bg-red-950/80',
-        textClass: 'text-red-400',
-        borderClass: 'border-red-800',
+        bgClass: 'bg-danger-950/80',
+        textClass: 'text-danger-400',
+        borderClass: 'border-danger-800',
       };
     case 1:
       return {
         label: 'Alert',
         shortLabel: 'ALERT',
-        bgClass: 'bg-red-950/80',
-        textClass: 'text-red-400',
-        borderClass: 'border-red-800',
+        bgClass: 'bg-danger-950/80',
+        textClass: 'text-danger-400',
+        borderClass: 'border-danger-800',
       };
     case 2:
       return {
         label: 'Critical',
         shortLabel: 'CRIT',
-        bgClass: 'bg-red-950/80',
-        textClass: 'text-red-400',
-        borderClass: 'border-red-800',
+        bgClass: 'bg-danger-950/80',
+        textClass: 'text-danger-400',
+        borderClass: 'border-danger-800',
       };
     case 3:
       return {
         label: 'Error',
         shortLabel: 'ERROR',
-        bgClass: 'bg-red-900/60',
-        textClass: 'text-red-300',
-        borderClass: 'border-red-700',
+        bgClass: 'bg-danger-900/60',
+        textClass: 'text-danger-300',
+        borderClass: 'border-danger-700',
       };
     case 4:
       return {
         label: 'Warning',
         shortLabel: 'WARN',
-        bgClass: 'bg-amber-950/80',
-        textClass: 'text-amber-300',
-        borderClass: 'border-amber-800',
+        bgClass: 'bg-warning-950/80',
+        textClass: 'text-warning-300',
+        borderClass: 'border-warning-800',
       };
     case 5:
       return {
         label: 'Notice',
         shortLabel: 'NOTICE',
-        bgClass: 'bg-blue-950/80',
-        textClass: 'text-blue-300',
-        borderClass: 'border-blue-800',
+        bgClass: 'bg-info-950/80',
+        textClass: 'text-info-300',
+        borderClass: 'border-info-800',
       };
     case 6:
       return {
         label: 'Info',
         shortLabel: 'INFO',
-        bgClass: 'bg-slate-800/80',
-        textClass: 'text-slate-300',
-        borderClass: 'border-slate-700',
+        bgClass: 'bg-neutral-800/80',
+        textClass: 'text-fg-soft',
+        borderClass: 'border-line-strong',
       };
     case 7:
     default:
       return {
         label: 'Debug',
         shortLabel: 'DEBUG',
-        bgClass: 'bg-slate-900/80',
-        textClass: 'text-slate-400',
-        borderClass: 'border-slate-800',
+        bgClass: 'bg-neutral-900/80',
+        textClass: 'text-fg-muted',
+        borderClass: 'border-line',
       };
   }
 }

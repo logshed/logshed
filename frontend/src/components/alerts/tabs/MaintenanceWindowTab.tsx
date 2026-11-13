@@ -78,26 +78,26 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Card 1: On-Demand Maintenance */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-        <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+        <div className="px-5 py-4 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
               <Zap className="w-4 h-4 text-accent-500" />
               <span>On-Demand Maintenance</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-fg-muted mt-0.5">
               Instantly silence external notifications for ad-hoc maintenance or testing without changing alert rules.
             </p>
           </div>
           <div>
             {isOnDemandActiveNow ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-warning-500/15 text-warning-300 border border-warning-500/30">
+                <span className="w-2 h-2 rounded-full bg-warning-400 animate-pulse"></span>
                 Active
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-dark-800 text-slate-400 border border-dark-700">
-                <span className="w-2 h-2 rounded-full bg-slate-600"></span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-raised text-fg-muted border border-line">
+                <span className="w-2 h-2 rounded-full bg-neutral-600"></span>
                 Inactive
               </span>
             )}
@@ -106,25 +106,25 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
         <div className="p-5 space-y-4">
           {isOnDemandActiveNow ? (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-amber-950/20 border border-amber-800/40">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-warning-950/20 border border-warning-800/40">
               <div>
-                <p className="text-xs font-medium text-amber-200">
+                <p className="text-xs font-medium text-warning-200">
                   Alert notifications are currently silenced
                 </p>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Active until <span className="font-semibold text-white">{formatMaintenanceTime(maintenance.until || maintenance.on_demand_until, serverTimezone)}</span>
+                <p className="text-xs text-fg-soft mt-0.5">
+                  Active until <span className="font-semibold text-fg-max">{formatMaintenanceTime(maintenance.until || maintenance.on_demand_until, serverTimezone)}</span>
                 </p>
               </div>
               <button
                 type="button"
                 onClick={onClearMaintenance}
-                className="px-4 py-2 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-amber-300 hover:text-white border border-dark-600 rounded-lg transition cursor-pointer self-start sm:self-auto"
+                className="px-4 py-2 text-xs font-medium bg-raised hover:bg-raised-strong text-warning-300 hover:text-fg-max border border-line-strong rounded-lg transition cursor-pointer self-start sm:self-auto"
               >
                 Clear All
               </button>
             </div>
           ) : (
-            <p className="text-xs text-slate-300">
+            <p className="text-xs text-fg-soft">
               Select a preset duration or set a specific end time to immediately silence outgoing alert notifications.
             </p>
           )}
@@ -132,14 +132,14 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
             {/* Quick Presets */}
             <div className="space-y-1.5">
-              <span className="block text-xs font-medium text-slate-400">{isOnDemandActiveNow ? 'Start a new window' : 'Set end time from now'}</span>
+              <span className="block text-xs font-medium text-fg-muted">{isOnDemandActiveNow ? 'Start a new window' : 'Set end time from now'}</span>
               <div className="flex flex-wrap items-center gap-2">
                 {[1, 4, 8, 24].map((hours) => (
                   <button
                     key={hours}
                     type="button"
                     onClick={() => onSetPreset(hours)}
-                    className="px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 hover:text-white border border-dark-700 hover:border-dark-600 rounded-lg transition cursor-pointer"
+                    className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-hover text-fg hover:text-fg-max border border-line hover:border-line-strong rounded-lg transition cursor-pointer"
                   >
                     {hours} {hours === 1 ? 'Hour' : 'Hours'}
                   </button>
@@ -149,7 +149,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
             {/* Custom Time */}
             <div className="space-y-1.5">
-              <span className="block text-xs font-medium text-slate-400">
+              <span className="block text-xs font-medium text-fg-muted">
                 Specific End Time <span className="font-mono">({timeInputZoneLabel(serverTimezone)})</span>:
               </span>
               <div className="flex items-center gap-2">
@@ -159,13 +159,13 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   value={customUntil}
                   onChange={(e) => setCustomUntil(e.target.value)}
                   min={toLocalDatetimeInputString(new Date().toISOString(), serverTimezone)}
-                  className="bg-dark-950 border border-dark-700 rounded-lg text-xs text-slate-200 px-3 py-1.5 focus:border-accent-500 focus:outline-hidden"
+                  className="bg-canvas border border-line rounded-lg text-xs text-fg px-3 py-1.5 focus:border-accent-500 focus:outline-hidden"
                 />
                 <button
                   type="button"
                   onClick={onApplyCustomWindow}
                   disabled={!customUntil}
-                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-700 hover:bg-accent-600 text-white rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   Set Window
                 </button>
@@ -175,43 +175,43 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
           {/* Active Concurrent Sessions */}
           {maintenance.sessions && maintenance.sessions.length > 0 && (
-            <div className="space-y-2 pt-3 border-t border-dark-800">
-              <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            <div className="space-y-2 pt-3 border-t border-line-subtle">
+              <h4 className="text-[11px] font-semibold text-fg-muted uppercase tracking-wider">
                 Active Concurrent Sessions ({maintenance.sessions.length})
               </h4>
-              <div className="divide-y divide-dark-800 border border-dark-800 rounded-lg overflow-hidden bg-dark-950/40">
+              <div className="divide-y divide-line-subtle border border-line-subtle rounded-lg overflow-hidden bg-canvas/40">
                 {maintenance.sessions.map((sess) => (
                   <div key={sess.session_id} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-200">
+                        <span className="font-semibold text-fg">
                           {sess.reason || 'On-Demand Session'}
                         </span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
                           sess.log_handling === 'drop_errors'
-                            ? 'bg-amber-950/60 border border-amber-800 text-amber-300'
-                            : 'bg-blue-950/60 border border-blue-800 text-blue-300'
+                            ? 'bg-warning-950/60 border border-warning-800 text-warning-300'
+                            : 'bg-info-950/60 border border-info-800 text-info-300'
                         }`}>
                           {sess.log_handling === 'drop_errors' ? 'Filtering Errors' : 'Silencing Alerts'}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <div className="text-[11px] text-fg-muted mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                         <span>Initiated by: {sess.initiated_by}</span>
                         {sess.target_app && <span>App: {sess.target_app}</span>}
                         {sess.target_host && <span>Host: {sess.target_host}</span>}
-                        <span className="font-mono text-slate-400">ID: {sess.session_id.slice(0, 8)}...</span>
+                        <span className="font-mono text-fg-muted">ID: {sess.session_id.slice(0, 8)}...</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
-                      <span className="text-[11px] text-slate-400">
-                        Expires: <strong className="text-white">{formatMaintenanceTime(sess.expires_at, serverTimezone)}</strong>
+                      <span className="text-[11px] text-fg-muted">
+                        Expires: <strong className="text-fg-max">{formatMaintenanceTime(sess.expires_at, serverTimezone)}</strong>
                       </span>
                       <button
                         type="button"
                         onClick={() => onExtendSession(sess.session_id)}
                         title="Move this session's end one hour later"
                         aria-label={`Extend session ${sess.reason || 'On-Demand Session'} by one hour`}
-                        className="px-2.5 py-1 text-xs font-medium bg-amber-950/30 hover:bg-amber-950/50 text-amber-200 hover:text-white border border-amber-800/60 rounded-sm transition cursor-pointer"
+                        className="px-2.5 py-1 text-xs font-medium bg-warning-950/30 hover:bg-warning-950/50 text-warning-200 hover:text-fg-max border border-warning-800/60 rounded-sm transition cursor-pointer"
                       >
                         +1h
                       </button>
@@ -219,7 +219,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         <button
                           type="button"
                           onClick={() => onDisableSession(sess.session_id)}
-                          className="px-2.5 py-1 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-red-400 hover:text-red-300 border border-dark-700 hover:border-dark-600 rounded-sm transition cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-medium bg-raised hover:bg-raised-hover text-danger-400 hover:text-danger-300 border border-line hover:border-line-strong rounded-sm transition cursor-pointer"
                         >
                           Stop Session
                         </button>
@@ -234,21 +234,21 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
       </div>
 
       {/* Card 2: Recurring Scheduled Windows */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-        <div className="px-5 py-4 border-b border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+        <div className="px-5 py-4 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
               <Clock className="w-4 h-4 text-accent-500" />
               <span>Scheduled Maintenance Windows</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-fg-muted mt-0.5">
               Define daily, weekly, or monthly recurring windows to automatically silence alerts during planned maintenance.
             </p>
           </div>
           <button
             type="button"
             onClick={onOpenAddScheduleModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
           >
             <Plus className="w-4 h-4" />
             <span>Add Schedule</span>
@@ -257,48 +257,48 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
         <div className="p-0">
           {(!maintenance.schedules || maintenance.schedules.length === 0) ? (
-            <div className="p-8 text-center text-xs text-slate-400">
-              <Clock className="w-8 h-8 mx-auto text-slate-600 mb-2" />
-              <p className="font-medium text-slate-300">No scheduled windows configured</p>
-              <p className="text-slate-400 mt-1 max-w-sm mx-auto">
+            <div className="p-8 text-center text-xs text-fg-muted">
+              <Clock className="w-8 h-8 mx-auto text-fg-faint mb-2" />
+              <p className="font-medium text-fg-soft">No scheduled windows configured</p>
+              <p className="text-fg-muted mt-1 max-w-sm mx-auto">
                 Add recurring daily, weekly, or monthly schedules to automatically suppress notifications during routine maintenance.
               </p>
               <button
                 type="button"
                 onClick={onOpenAddScheduleModal}
-                className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-750 text-slate-200 border border-dark-700 rounded-lg transition cursor-pointer"
+                className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-raised hover:bg-raised-hover text-fg border border-line rounded-lg transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create First Schedule</span>
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-dark-800">
+            <div className="divide-y divide-line-subtle">
               {maintenance.schedules.map((sched) => (
                 <div
                   key={sched.id}
-                  className="p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-dark-850/50"
+                  className="p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-surface-hover/50"
                 >
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-medium text-slate-200">{sched.name}</span>
+                      <span className="text-xs font-medium text-fg">{sched.name}</span>
                       {sched.is_active && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-warning-500/20 text-warning-300 border border-warning-500/40 animate-pulse">
                           Active Now
                         </span>
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
                       <span>
-                        Recurrence: <span className="text-slate-300">{formatScheduleRecurrence(sched)}</span>
+                        Recurrence: <span className="text-fg-soft">{formatScheduleRecurrence(sched)}</span>
                       </span>
                       <span>
-                        Duration: <span className="font-mono text-slate-300">{sched.duration_minutes} min</span>
+                        Duration: <span className="font-mono text-fg-soft">{sched.duration_minutes} min</span>
                       </span>
                       {sched.next_run && sched.enabled && !sched.is_active && (
                         <span>
-                          Next: <span className="font-mono text-slate-300">{formatMaintenanceTime(sched.next_run, serverTimezone)}</span>
+                          Next: <span className="font-mono text-fg-soft">{formatMaintenanceTime(sched.next_run, serverTimezone)}</span>
                         </span>
                       )}
                     </div>
@@ -307,7 +307,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   {/* Actions & Status */}
                   <div className="flex items-center gap-2.5 self-start md:self-center shrink-0">
                     {sched.is_active ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-warning-500/20 text-warning-300 border border-warning-500/40 animate-pulse">
                         Active Now
                       </span>
                     ) : (
@@ -316,8 +316,8 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         onClick={() => onToggleScheduleEnabled(sched)}
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition cursor-pointer ${
                           sched.enabled
-                            ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/60'
-                            : 'bg-dark-800 text-slate-400 border border-dark-700 hover:text-slate-300'
+                            ? 'bg-success-950/60 text-success-400 border border-success-800/60 hover:bg-success-900/60'
+                            : 'bg-raised text-fg-muted border border-line hover:text-fg-soft'
                         }`}
                         title={sched.enabled ? 'Click to disable' : 'Click to enable'}
                       >
@@ -328,7 +328,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenEditScheduleModal(sched)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-dark-800 rounded-sm transition cursor-pointer"
+                      className="p-1.5 text-fg-muted hover:text-fg hover:bg-raised rounded-sm transition cursor-pointer"
                       title="Edit schedule"
                       aria-label={`Edit ${sched.name}`}
                     >
@@ -337,7 +337,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteSchedule(sched)}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-sm transition cursor-pointer"
+                      className="p-1.5 text-fg-muted hover:text-danger-400 hover:bg-danger-950/40 rounded-sm transition cursor-pointer"
                       title="Delete schedule"
                       aria-label={`Delete ${sched.name}`}
                     >
@@ -352,13 +352,13 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
       </div>
 
       {/* Card 3: External Automation & API Snippets */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl overflow-hidden shadow-xs">
-        <div className="px-5 py-4 border-b border-dark-700">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+        <div className="px-5 py-4 border-b border-line">
+          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
             <Terminal className="w-4 h-4 text-accent-500" />
             <span>External Automation (API cURL Snippets)</span>
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-fg-muted mt-0.5">
             Use these commands in backup runners, Proxmox VE scripts, or Home Assistant automations to start and stop windows.
           </p>
         </div>
@@ -366,7 +366,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
         <div className="p-5 space-y-4">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-300">1. Start Maintenance Window (Drop Errors mode):</span>
+              <span className="text-xs font-medium text-fg-soft">1. Start Maintenance Window (Drop Errors mode):</span>
               <CopyButton
                 text={startSnippet}
                 label="Copy cURL"
@@ -379,7 +379,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               tabIndex={0}
               role="region"
               aria-label="Start maintenance cURL command"
-              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
+              className="p-3 bg-canvas border border-line-subtle rounded-lg text-fg-soft text-[11px] font-mono overflow-x-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
             >
               {startSnippet}
             </pre>
@@ -387,7 +387,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-300">2. Stop Specific Maintenance Session:</span>
+              <span className="text-xs font-medium text-fg-soft">2. Stop Specific Maintenance Session:</span>
               <CopyButton
                 text={stopSnippet}
                 label="Copy cURL"
@@ -400,7 +400,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               tabIndex={0}
               role="region"
               aria-label="Stop maintenance cURL command"
-              className="p-3 bg-dark-950 border border-dark-800 rounded-lg text-slate-300 text-[11px] font-mono overflow-x-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
+              className="p-3 bg-canvas border border-line-subtle rounded-lg text-fg-soft text-[11px] font-mono overflow-x-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
             >
               {stopSnippet}
             </pre>

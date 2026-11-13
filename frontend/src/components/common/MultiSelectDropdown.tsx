@@ -211,7 +211,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   const renderDropdownMenu = () => (
     <>
       {/* Search Box */}
-      <div className="px-2 pb-1.5 border-b border-dark-800">
+      <div className="px-2 pb-1.5 border-b border-line-subtle">
         <div className="relative">
           <input
             ref={searchInputRef}
@@ -225,14 +225,14 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               }
             }}
             placeholder={`Search or add ${label.toLowerCase()}...`}
-            className="w-full bg-dark-950 border border-dark-700 rounded-sm px-2 py-1 pl-6 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+            className="w-full bg-canvas border border-line rounded-sm px-2 py-1 pl-6 text-[11px] text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
           />
-          <Search className="w-3 h-3 text-slate-500 absolute left-2 top-2" />
+          <Search className="w-3 h-3 text-fg-subtle absolute left-2 top-2" />
           {searchTerm && (
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-1.5 top-1.5 text-slate-500 hover:text-slate-300"
+              className="absolute right-1.5 top-1.5 text-fg-subtle hover:text-fg-soft"
               aria-label="Clear search"
               title="Clear search"
             >
@@ -243,13 +243,13 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
       </div>
 
       {note && (
-        <div className="px-2.5 py-1 text-[10px] text-amber-400 border-b border-dark-800" data-testid="multiselect-note">
+        <div className="px-2.5 py-1 text-[10px] text-warning-400 border-b border-line-subtle" data-testid="multiselect-note">
           {note}
         </div>
       )}
 
       {/* Quick Header Actions */}
-      <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-slate-400 border-b border-dark-800 bg-dark-950/50">
+      <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-fg-muted border-b border-line-subtle bg-canvas/50">
         <span>
           {selected.length} of {options.length} selected
         </span>
@@ -258,7 +258,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             <button
               type="button"
               onClick={handleSelectAll}
-              className="hover:text-accent-400 text-slate-400 transition"
+              className="hover:text-accent-400 text-fg-muted transition"
             >
               Select All
             </button>
@@ -267,7 +267,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             <button
               type="button"
               onClick={() => onChange([])}
-              className="hover:text-amber-400 text-slate-400 transition"
+              className="hover:text-warning-400 text-fg-muted transition"
             >
               Clear
             </button>
@@ -289,7 +289,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             }}
             role="button"
             tabIndex={0}
-            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer bg-dark-800/60 hover:bg-accent-950/60 text-accent-300 text-[11px] border-b border-dark-800 focus:outline-hidden focus:bg-accent-950/60"
+            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer bg-raised/60 hover:bg-accent-950/60 text-accent-300 text-[11px] border-b border-line-subtle focus:outline-hidden focus:bg-accent-950/60"
           >
             <Plus className="w-3 h-3 text-accent-400 shrink-0" />
             <span className="truncate">Add "{searchTerm.trim()}"</span>
@@ -297,7 +297,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         )}
 
         {filteredOptions.length === 0 && !isSearchTermNew ? (
-          <div className="px-3 py-3 text-center text-slate-400 text-[11px]">
+          <div className="px-3 py-3 text-center text-fg-muted text-[11px]">
             {options.length === 0 ? `No ${label.toLowerCase()} discovered yet` : 'No matching items'}
           </div>
         ) : (
@@ -317,21 +317,21 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                 role="button"
                 tabIndex={0}
                 aria-pressed={isChecked}
-                className={`flex items-center justify-between px-2.5 py-1 cursor-pointer select-none text-[11px] transition focus:outline-hidden focus:bg-dark-800 ${
+                className={`flex items-center justify-between px-2.5 py-1 cursor-pointer select-none text-[11px] transition focus:outline-hidden focus:bg-raised ${
                   isChecked
                     ? 'bg-accent-950/50 text-accent-200'
-                    : 'text-slate-300 hover:bg-dark-800 hover:text-slate-100'
+                    : 'text-fg-soft hover:bg-raised hover:text-fg-strong'
                 }`}
               >
                 <span className="truncate pr-2" title={hint ? `${option} (${hint})` : option}>
                   {option}
-                  {hint && <span className="text-slate-400 ml-1.5">{hint}</span>}
+                  {hint && <span className="text-fg-muted ml-1.5">{hint}</span>}
                 </span>
                 <div
                   className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition shrink-0 ${
                     isChecked
-                      ? 'bg-accent-700 border-accent-500 text-white'
-                      : 'border-dark-600 bg-dark-950'
+                      ? 'bg-accent-700 border-accent-500 text-on-fill'
+                      : 'border-line-strong bg-canvas'
                   }`}
                 >
                   {isChecked && <Check className="w-2.5 h-2.5" />}
@@ -360,10 +360,10 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         }}
         className={
           isForm
-            ? `w-full h-[38px] flex items-center justify-between bg-dark-800 border rounded-lg px-3 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
+            ? `w-full h-[38px] flex items-center justify-between bg-raised border rounded-lg px-3 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
                 isOpen
                   ? 'border-accent-500 ring-1 ring-accent-500/20'
-                  : 'border-dark-700 hover:border-slate-600 text-slate-200'
+                  : 'border-line hover:border-line-stronger text-fg'
               }`
             : filterTriggerClass(isOpen, selected.length > 0)
         }
@@ -386,7 +386,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               <span
                 id={valueId}
                 className={`truncate ${
-                  selected.length > 0 ? 'text-slate-200 font-mono' : 'text-slate-400'
+                  selected.length > 0 ? 'text-fg font-mono' : 'text-fg-muted'
                 }`}
                 title={selected.length > 0 ? selected.join(', ') : placeholder}
               >
@@ -408,7 +408,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               {/* Room for the clear button, which sits over the trigger rather than inside it */}
               {selected.length > 0 && <span className="w-[18px]" aria-hidden="true" />}
               <ChevronDown
-                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${
+                className={`w-3.5 h-3.5 text-fg-muted transition-transform duration-150 ${
                   isOpen ? 'rotate-180 text-accent-400' : ''
                 }`}
               />
@@ -417,11 +417,11 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         ) : (
           <>
             {icon}
-            <span id={labelId} className="text-slate-400 font-medium text-[11px]">{label}:</span>
+            <span id={labelId} className="text-fg-muted font-medium text-[11px]">{label}:</span>
             <span
               id={valueId}
               className={`font-mono text-[11px] truncate max-w-[130px] ${
-                selected.length > 0 ? 'text-accent-300 font-medium' : 'text-slate-400'
+                selected.length > 0 ? 'text-accent-300 font-medium' : 'text-fg-muted'
               }`}
               title={selected.length > 0 ? selected.join(', ') : placeholder}
             >
@@ -444,7 +444,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             {selected.length > 0 && <span className={FILTER_CLEAR_ROOM} aria-hidden="true" />}
 
             <ChevronDown
-              className={`w-3 h-3 text-slate-400 transition-transform duration-150 ${
+              className={`w-3 h-3 text-fg-muted transition-transform duration-150 ${
                 isOpen ? 'rotate-180 text-accent-400' : ''
               }`}
             />
@@ -468,7 +468,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         <button
           type="button"
           onClick={handleClear}
-          className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-0.5 rounded-sm hover:bg-dark-700 transition"
+          className="absolute right-8 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg p-0.5 rounded-sm hover:bg-raised-strong transition"
           title="Clear selection"
           aria-label="Clear selection"
         >
@@ -502,7 +502,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                   maxWidth: 'calc(100vw - 24px)',
                   visibility: coords ? 'visible' : 'hidden',
                 }}
-                className="bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-9999 py-1.5"
+                className="bg-surface border border-line rounded-md shadow-2xl z-9999 py-1.5"
               >
                 {renderDropdownMenu()}
               </div>
@@ -527,7 +527,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             <div
               ref={popoverRef}
               data-no-pull-refresh
-              className="absolute left-0 mt-1 w-64 bg-dark-900 border border-dark-700 rounded-md shadow-2xl z-50 py-1.5"
+              className="absolute left-0 mt-1 w-64 bg-surface border border-line rounded-md shadow-2xl z-50 py-1.5"
             >
               {renderDropdownMenu()}
             </div>

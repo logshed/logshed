@@ -587,7 +587,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0 flex-1 bg-dark-950 select-text overflow-hidden">
+    <div className="flex flex-col h-full min-h-0 flex-1 bg-canvas select-text overflow-hidden">
       {/* Top Filter & Search Controls (Supports Pull-to-Refresh on Mobile) */}
       <div {...(isMobile && pullTouchHandlers ? pullTouchHandlers : {})} className="shrink-0 select-none">
         {/* Search & Filter Bar with Integrated Saved Views */}
@@ -610,7 +610,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
         {/* Stream Controls & Filter Pills Bar (on phones it is part of the search bar) */}
         {!isMobile && (
-          <div className="bg-dark-900 px-3 py-1.5 border-b border-dark-700 flex flex-nowrap items-center justify-between gap-2 text-xs select-none relative overflow-hidden">
+          <div className="bg-surface px-3 py-1.5 border-b border-line flex flex-nowrap items-center justify-between gap-2 text-xs select-none relative overflow-hidden">
             {streamToolbar}
           </div>
         )}
@@ -622,7 +622,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         {!isMobile && (
           <div
             data-testid="log-table-header"
-            className={`grid bg-dark-950 border-b border-dark-700 border-l-2 border-l-transparent text-slate-400 text-[11px] font-mono font-semibold ${logGridCols(aiEnabled)} px-3 py-1.5 select-none items-center`}
+            className={`grid bg-canvas border-b border-line border-l-2 border-l-transparent text-fg-muted text-[11px] font-mono font-semibold ${logGridCols(aiEnabled)} px-3 py-1.5 select-none items-center`}
           >
             <div className="flex items-center justify-center">
               <button
@@ -630,7 +630,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
                 disabled={logs.length === 0}
                 title={selectedLogIds.size > 0 ? 'Deselect all rows' : (logs.length > SELECT_ALL_LIMIT ? `Select all rows (capped at ${SELECT_ALL_LIMIT})` : 'Select all rows')}
                 aria-label={selectedLogIds.size > 0 ? 'Toggle deselect all in table' : 'Toggle select all in table'}
-                className="p-1 hover:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="p-1 hover:text-fg transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 {selectedLogIds.size > 0 ? (
                   <CheckSquare className="w-3.5 h-3.5 text-accent-400" />
@@ -649,20 +649,20 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         )}
 
         {buffer.loadError && (
-          <div role="alert" className="shrink-0 px-3 py-1.5 bg-red-950/60 border-b border-red-800 text-xs text-red-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+          <div role="alert" className="shrink-0 px-3 py-1.5 bg-danger-950/60 border-b border-danger-800 text-xs text-danger-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
             <span>{buffer.loadError}</span>
           </div>
         )}
 
         {streamDisconnected && !filters.to && (
-          <div role="status" className="shrink-0 px-3 py-1.5 bg-amber-950/60 border-b border-amber-800 text-xs text-amber-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+          <div role="status" className="shrink-0 px-3 py-1.5 bg-warning-950/60 border-b border-warning-800 text-xs text-warning-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-warning-400 shrink-0" />
             <span>Live stream disconnected</span>
             <button
               type="button"
               onClick={reconnectStream}
-              className="underline hover:text-white cursor-pointer font-medium"
+              className="underline hover:text-fg-max cursor-pointer font-medium"
             >
               Reconnect
             </button>
@@ -697,7 +697,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           aria-label="Log list"
           aria-multiselectable={logs.length > 0 ? true : undefined}
           aria-activedescendant={cursorRowRendered ? logRowId(logs[cursorIndex].id) : undefined}
-          className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-dark-950 relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
+          className="group/loglist flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs bg-canvas relative overscroll-contain focus:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-500"
         >
           {emptyKind !== null ? (
             <ConsoleEmptyState
@@ -747,20 +747,20 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
           {/* Infinite Scroll Footer: Loading Spinner or End of Range */}
           {logs.length > 0 && isLoadingMore && (
-            <div className="py-2.5 flex items-center justify-center gap-2 text-slate-400 font-mono text-xs bg-dark-950/90 border-t border-dark-900">
+            <div className="py-2.5 flex items-center justify-center gap-2 text-fg-muted font-mono text-xs bg-canvas/90 border-t border-surface">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-400" />
               <span>Loading older logs...</span>
             </div>
           )}
 
           {logs.length > 0 && !hasMoreLogs && !isLoadingHistory && (
-            <div className="py-2.5 flex items-center justify-center text-slate-400 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none">
+            <div className="py-2.5 flex items-center justify-center text-fg-muted font-mono text-[11px] bg-canvas border-t border-surface select-none">
              - Reached the end of loaded history ({buffer.totalCapped ? '1,000+ logs' : `${logs.length.toLocaleString()} log${logs.length === 1 ? '' : 's'}`} loaded) -
             </div>
           )}
 
           {logs.length >= SCROLLBACK_BUFFER_SIZE && hasMoreLogs && !isLoadingMore && (
-            <div className="py-2.5 flex items-center justify-center text-slate-400 font-mono text-[11px] bg-dark-950 border-t border-dark-900 select-none text-center px-3">
+            <div className="py-2.5 flex items-center justify-center text-fg-muted font-mono text-[11px] bg-canvas border-t border-surface select-none text-center px-3">
               Screen buffer limit reached ({SCROLLBACK_BUFFER_SIZE.toLocaleString()} lines). Narrow the filters or time range to see older logs.
             </div>
           )}
@@ -771,7 +771,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div
             role="status"
             aria-live="polite"
-            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-dark-900/95 border border-dark-700 text-slate-300 text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-in fade-in duration-150"
+            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-surface/95 border border-line text-fg-soft text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-in fade-in duration-150"
           >
             <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-400" />
             <span>Updating results...</span>
@@ -783,7 +783,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 shadow-xl animate-in slide-in-from-bottom-2 w-[92%] sm:w-auto max-w-md flex justify-center">
             <button
               onClick={buffer.resumeAutoScroll}
-              className="w-full sm:w-auto bg-accent-700 hover:bg-accent-600 text-white text-xs font-semibold px-4 py-2 rounded-xl sm:rounded-full flex items-center justify-center gap-2 shadow-lg transition"
+              className="w-full sm:w-auto bg-accent-700 hover:bg-accent-600 text-on-fill text-xs font-semibold px-4 py-2 rounded-xl sm:rounded-full flex items-center justify-center gap-2 shadow-lg transition"
             >
               <ArrowUp className="w-3.5 h-3.5 animate-bounce shrink-0" />
               <div className="flex flex-col items-center justify-center text-center leading-tight">

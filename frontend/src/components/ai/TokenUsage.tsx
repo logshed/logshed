@@ -10,17 +10,17 @@ export interface TokenUsageProps {
 export const TokenUsage: React.FC<TokenUsageProps> = ({ tokensIn, tokensOut, tokensThoughts }) => (
   <>
     {tokensIn != null && (
-      <span className="bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 px-1.5 py-0.5 rounded-sm">
+      <span className="bg-success-950/60 border border-success-800/80 text-success-300 px-1.5 py-0.5 rounded-sm">
         ↓ {tokensIn.toLocaleString()} in
       </span>
     )}
     {tokensOut != null && (
-      <span className="bg-sky-950/60 border border-sky-800/80 text-sky-300 px-1.5 py-0.5 rounded-sm">
+      <span className="bg-accent-950/60 border border-accent-800/80 text-accent-300 px-1.5 py-0.5 rounded-sm">
         ↑ {tokensOut.toLocaleString()} out
       </span>
     )}
     {Boolean(tokensThoughts) && (
-      <span className="bg-purple-950/60 border border-purple-800/80 text-purple-300 px-1.5 py-0.5 rounded-sm">
+      <span className="bg-highlight-950/60 border border-highlight-800/80 text-highlight-300 px-1.5 py-0.5 rounded-sm">
         ⚡ {tokensThoughts!.toLocaleString()} thinking
       </span>
     )}

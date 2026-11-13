@@ -417,7 +417,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   if (isLoading && !settings) {
     return (
-      <div className="p-8 text-center text-slate-400 font-mono text-xs flex items-center justify-center gap-2">
+      <div className="p-8 text-center text-fg-muted font-mono text-xs flex items-center justify-center gap-2">
         <RefreshCw className="w-4 h-4 animate-spin text-accent-500" />
         <span>Loading system settings...</span>
       </div>
@@ -428,31 +428,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8">
       {/* Header */}
       <div>
-        <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+        <h2 className="text-base font-bold text-fg-strong flex items-center gap-2">
           <Settings className="w-5 h-5 text-accent-500" />
           <span>System Configuration</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <p className="text-xs text-fg-muted mt-0.5">
           Configure application logging levels, on-demand AI root-cause diagnosis providers, and account security.
         </p>
       </div>
 
       {errorMsg && (
-        <div className="p-3 bg-red-950/60 border border-red-800 rounded-lg flex items-start gap-2 text-xs text-red-300">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
+          <AlertCircle className="w-4 h-4 text-danger-400 shrink-0 mt-0.5" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {/* Section Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-dark-700 pb-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-2">
         <button
           type="button"
           onClick={() => handleSubTabChange('app')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'app'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <Settings className="w-3.5 h-3.5 shrink-0" />
@@ -464,8 +464,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           onClick={() => handleSubTabChange('sources')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'sources'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <Server className="w-3.5 h-3.5 shrink-0" />
@@ -477,8 +477,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           onClick={() => handleSubTabChange('tokens')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'tokens'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <Key className="w-3.5 h-3.5 shrink-0" />
@@ -490,8 +490,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           onClick={() => handleSubTabChange('advanced')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
             activeSubTab === 'advanced'
-              ? 'bg-dark-800 text-accent-400 border-dark-600 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-dark-900 border-dark-700 hover:border-dark-600'
+              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
+              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
           }`}
         >
           <Shield className="w-3.5 h-3.5 shrink-0" />
@@ -505,30 +505,30 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {/* Settings Form: Logging & AI */}
           <form id="settings-form" onSubmit={handleSaveSettings} className="space-y-6">
         {/* Application Self-Logging Section */}
-        <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+        <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
                 <FileText className="w-4 h-4 text-accent-500" />
                 <span>Internal Application Logging</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-fg-muted mt-0.5">
                 Configure minimum severity level for LogShed operational diagnostics captured into its database and stream.
               </p>
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-dark-950 border border-dark-800 text-[11px] font-mono text-slate-400 shrink-0 self-start sm:self-auto">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-canvas border border-line-subtle text-[11px] font-mono text-fg-muted shrink-0 self-start sm:self-auto">
               <span>Source: <code className="text-accent-400">logshed</code></span>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label id="internal-log-level-label" htmlFor="internal-log-level" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label id="internal-log-level-label" htmlFor="internal-log-level" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Internal Log Severity Threshold
               </label>
               <SelectDropdown
                 variant="panel"
-                fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-2 font-mono text-slate-200"
+                fieldClassName="bg-canvas border-line rounded-sm px-3 py-2 font-mono text-fg"
                 id="internal-log-level"
                 labelledBy="internal-log-level-label"
                 label="Internal Log Severity Threshold"
@@ -537,7 +537,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 onChange={setInternalLogLevel}
               />
             </div>
-            <div className="flex items-center text-xs text-slate-400 sm:pt-4">
+            <div className="flex items-center text-xs text-fg-muted sm:pt-4">
               <span>
                 Logs at or above this level are captured into LogShed. Logs from alerting, notifications and AI analysis are stored but never trigger alert rules, so a rule cannot fire itself. Ingestion pipeline and live stream logs are not captured.
               </span>
@@ -562,31 +562,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
 
         {/* Version Updates Section */}
-        <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
+        <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
                 <ArrowUpCircle className="w-4 h-4 text-accent-500" />
                 <span>Version Updates</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-fg-muted mt-0.5">
                 Periodically check GitHub Container Registry for new stable releases and display notification badges
               </p>
             </div>
           </div>
 
           <div className="pt-1">
-            <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer select-none">
+            <label className="flex items-center gap-2.5 text-xs text-fg cursor-pointer select-none">
               <input
                 type="checkbox"
                 aria-label="Check for new versions"
                 checked={checkForUpdates}
                 onChange={(e) => setCheckForUpdates(e.target.checked)}
-                className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
               />
               <span className="font-medium">Check for new versions</span>
             </label>
-            <p className="text-xs text-slate-400 mt-1 pl-6.5">
+            <p className="text-xs text-fg-muted mt-1 pl-6.5">
               When disabled, LogShed will not query external registries or display update notifications.
             </p>
           </div>

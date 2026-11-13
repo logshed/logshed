@@ -193,28 +193,28 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
   });
 
   return (
-    <section className="bg-dark-900 border border-dark-700 rounded-xl p-3.5 sm:p-5 shadow-md space-y-6">
+    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-6">
       {/* Header */}
       <div>
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
           <Sliders className="w-4 h-4 text-accent-500" />
           <span>Advanced System Settings</span>
         </h3>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <p className="text-xs text-fg-muted mt-0.5">
           Configure internal collector limits, network proxy subnets, and AI execution boundaries.
         </p>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* Section 1: AI Engine Limits */}
-        <div className="space-y-3 pt-1 border-t border-dark-800">
-          <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+        <div className="space-y-3 pt-1 border-t border-line-subtle">
+          <h4 className="text-xs font-semibold text-fg-soft flex items-center gap-2">
             <Cpu className="w-3.5 h-3.5 text-accent-400" />
             <span>AI Engine Limits</span>
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="ai-timeout" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label htmlFor="ai-timeout" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Request Timeout (seconds)
               </label>
               <input
@@ -225,17 +225,17 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 value={aiTimeout}
                 onChange={(e) => setAiTimeout(parseFloat(e.target.value) || 5)}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
 
             <div>
-              <label id="ai-thinking-level-label" htmlFor="ai-thinking-level" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label id="ai-thinking-level-label" htmlFor="ai-thinking-level" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Thinking Level
               </label>
               <SelectDropdown
                 variant="panel"
-                fieldClassName="bg-dark-950 border-dark-700 rounded-sm px-3 py-2 text-slate-200"
+                fieldClassName="bg-canvas border-line rounded-sm px-3 py-2 text-fg"
                 id="ai-thinking-level"
                 labelledBy="ai-thinking-level-label"
                 label="Thinking Level"
@@ -245,20 +245,20 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
               />
             </div>
           </div>
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-fg-muted">
             The timeout applies to every AI provider. The thinking level sets how much reasoning models (Gemini 2.5 and later, Claude 3.7 and later, OpenAI o-series and GPT-5 and later) think before they answer: more thinking can find deeper causes but takes longer and uses more tokens. Claude 5 and later, Gemini 2.5 Pro and Gemini 3 and later still think a little at Off: LogShed asks them for their lowest level.
           </p>
         </div>
 
         {/* Section 2: Notifications & Webhooks */}
-        <div className="space-y-3 pt-3 border-t border-dark-800">
-          <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+        <div className="space-y-3 pt-3 border-t border-line-subtle">
+          <h4 className="text-xs font-semibold text-fg-soft flex items-center gap-2">
             <Bell className="w-3.5 h-3.5 text-accent-400" />
             <span>Notifications & Webhooks</span>
           </h4>
           <div className="space-y-3">
             <div>
-              <label htmlFor="app-url" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label htmlFor="app-url" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Public Instance URL
               </label>
               <input
@@ -267,25 +267,25 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 placeholder="https://logs.example.com"
                 value={appUrl}
                 onChange={(e) => setAppUrl(e.target.value)}
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-[11px] text-fg-muted mt-1">
                 Used in alert notifications for a link that opens the incident.
               </p>
             </div>
 
             <div className="pt-1">
-              <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-2.5 text-xs text-fg-soft cursor-pointer">
                 <input
                   type="checkbox"
                   aria-label="Allow Local / LAN Webhook Targets"
                   checked={allowPrivate}
                   onChange={(e) => setAllowPrivate(e.target.checked)}
-                  className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                  className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-medium">Allow Local / LAN Webhook Targets</span>
               </label>
-              <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
+              <p className="text-[11px] text-fg-muted mt-1 pl-6.5">
                 Permits webhooks targeting private IPv4/IPv6 ranges (e.g. local Gotify or Home Assistant).
               </p>
             </div>
@@ -293,14 +293,14 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
         </div>
 
         {/* Section 3: Network & Reverse Proxy */}
-        <div className="space-y-3 pt-3 border-t border-dark-800">
-          <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+        <div className="space-y-3 pt-3 border-t border-line-subtle">
+          <h4 className="text-xs font-semibold text-fg-soft flex items-center gap-2">
             <Network className="w-3.5 h-3.5 text-accent-400" />
             <span>Network & Reverse Proxy</span>
           </h4>
           <div className="space-y-3">
             <div>
-              <label htmlFor="trusted-proxies" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label htmlFor="trusted-proxies" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Trusted Reverse Proxies
               </label>
               <input
@@ -309,42 +309,42 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 placeholder="10.0.0.0/8, 192.168.1.1"
                 value={trustedProxies}
                 onChange={(e) => setTrustedProxies(e.target.value)}
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-[11px] text-fg-muted mt-1">
                 Comma-separated IP addresses or CIDR ranges. Enables X-Forwarded-For parsing.
               </p>
             </div>
 
             <div className="space-y-2 pt-1">
               <div>
-                <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs text-fg-soft cursor-pointer">
                   <input
                     type="checkbox"
                     aria-label="Trust Docker Bridge Networks"
                     checked={trustDockerProxies}
                     onChange={(e) => setTrustDockerProxies(e.target.checked)}
-                    className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                    className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
                   />
                   <span className="font-medium">Trust Docker Bridge Networks</span>
                 </label>
-                <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
+                <p className="text-[11px] text-fg-muted mt-1 pl-6.5">
                   Trusts private Docker subnet 172.16.0.0/12 as reverse proxy gateways.
                 </p>
               </div>
 
               <div>
-                <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs text-fg-soft cursor-pointer">
                   <input
                     type="checkbox"
                     aria-label="Force Secure Session Cookies"
                     checked={cookieSecure}
                     onChange={(e) => setCookieSecure(e.target.checked)}
-                    className="rounded-sm bg-dark-950 border-dark-700 text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
+                    className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
                   />
                   <span className="font-medium">Force Secure Session Cookies</span>
                 </label>
-                <p className="text-[11px] text-slate-400 mt-1 pl-6.5">
+                <p className="text-[11px] text-fg-muted mt-1 pl-6.5">
                   Applies immediately to inbound client IP extraction and session cookie generation.
                 </p>
               </div>
@@ -353,14 +353,14 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
         </div>
 
         {/* Section 4: Syslog TCP Connection Limits */}
-        <div className="space-y-3 pt-3 border-t border-dark-800">
-          <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+        <div className="space-y-3 pt-3 border-t border-line-subtle">
+          <h4 className="text-xs font-semibold text-fg-soft flex items-center gap-2">
             <Server className="w-3.5 h-3.5 text-accent-400" />
             <span>Syslog TCP Connection Limits</span>
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="syslog-max-tcp-connections" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label htmlFor="syslog-max-tcp-connections" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Max Concurrent TCP Connections
               </label>
               <input
@@ -370,12 +370,12 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 value={syslogMaxTcpConnections}
                 onChange={(e) => setSyslogMaxTcpConnections(parseInt(e.target.value, 10) || 1)}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
 
             <div>
-              <label htmlFor="syslog-tcp-inactivity-timeout" className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+              <label htmlFor="syslog-tcp-inactivity-timeout" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
                 Client Inactivity Timeout (seconds)
               </label>
               <input
@@ -386,11 +386,11 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                 value={syslogTcpInactivityTimeout}
                 onChange={(e) => setSyslogTcpInactivityTimeout(parseFloat(e.target.value) || 0.0)}
                 required
-                className="w-full bg-dark-950 border border-dark-700 rounded-sm px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
             </div>
           </div>
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-fg-muted">
             Takes effect immediately for new connections and active listeners. Setting timeout to 0 keeps connections open indefinitely.
           </p>
         </div>
@@ -399,28 +399,28 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
         {(isDirty || saveInlineSuccess || saveInlineError) && (
           <aside
             aria-label="Unsaved changes bar"
-            className={`sticky bottom-4 z-30 bg-dark-900/95 backdrop-blur-md border rounded-xl p-3 sm:px-5 sm:py-3 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 ${
+            className={`sticky bottom-4 z-30 bg-surface/95 backdrop-blur-md border rounded-xl p-3 sm:px-5 sm:py-3 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 ${
               saveInlineSuccess
-                ? 'border-emerald-500/40'
+                ? 'border-success-500/40'
                 : saveInlineError
-                  ? 'border-red-500/40'
-                  : 'border-amber-500/40'
+                  ? 'border-danger-500/40'
+                  : 'border-warning-500/40'
             }`}
           >
             <div className="flex items-center gap-2 text-xs font-medium">
               {saveInlineSuccess ? (
-                <div className="flex items-center gap-2 text-emerald-400 font-mono">
-                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div className="flex items-center gap-2 text-success-400 font-mono">
+                  <Check className="w-4 h-4 text-success-400 shrink-0" />
                   <span>Settings saved successfully!</span>
                 </div>
               ) : saveInlineError ? (
-                <div className="flex items-center gap-2 text-red-400 font-mono">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <div className="flex items-center gap-2 text-danger-400 font-mono">
+                  <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
                   <span>{saveInlineError}</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-amber-300">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="flex items-center gap-2 text-warning-300">
+                  <AlertCircle className="w-4 h-4 text-warning-400 shrink-0" />
                   <span>You have unsaved changes</span>
                 </div>
               )}
@@ -429,7 +429,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
             {isDirty && (
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                 {isSaving && (
-                  <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 font-mono mr-1">
+                  <div className="hidden sm:flex items-center gap-1.5 text-xs text-fg-muted font-mono mr-1">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent-500" />
                     <span>Saving...</span>
                   </div>
@@ -438,14 +438,14 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
                   type="button"
                   onClick={handleReset}
                   disabled={isSaving}
-                  className="px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-dark-800 hover:bg-dark-750 border border-dark-700 rounded-lg transition cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1.5 text-xs text-fg-soft hover:text-fg-max bg-raised hover:bg-raised-hover border border-line rounded-lg transition cursor-pointer disabled:opacity-50"
                 >
                   Discard
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
+                  className="px-4 py-1.5 text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
                 >
                   {isSaving ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />

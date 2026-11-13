@@ -111,20 +111,20 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
       maxWidth="max-w-lg"
     >
       <div className="space-y-4 text-xs">
-        <p className="text-slate-400">
+        <p className="text-fg-muted">
           Verify pattern matching and IP address extraction against a sample log payload.
         </p>
 
         <div className="space-y-1">
-          <label className="block text-slate-300 font-medium">Active Pattern</label>
-          <div className="p-2 bg-dark-800 rounded-sm font-mono text-slate-300 border border-dark-700">
+          <label className="block text-fg-soft font-medium">Active Pattern</label>
+          <div className="p-2 bg-raised rounded-sm font-mono text-fg-soft border border-line">
             {rule?.match_pattern || '(No pattern filter)'}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label htmlFor="test-sample-app" className="block text-slate-300 font-medium">Sample App</label>
+            <label htmlFor="test-sample-app" className="block text-fg-soft font-medium">Sample App</label>
             {/* Before the input: space-y-* spaces every child but the last, and a datalist is never shown */}
             {availableApps.length > 0 && (
               <datalist id="test-sample-apps-list">
@@ -139,14 +139,14 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
               list="test-sample-apps-list"
               value={testSampleApp}
               onChange={(e) => setTestSampleApp(e.target.value)}
-              className="w-full bg-dark-800 border border-dark-700 rounded-sm px-2.5 py-1.5 text-slate-200"
+              className="w-full bg-raised border border-line rounded-sm px-2.5 py-1.5 text-fg"
             />
           </div>
           <div className="space-y-1">
-            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className="block text-slate-300 font-medium">Sample Severity</label>
+            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className="block text-fg-soft font-medium">Sample Severity</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-dark-800 border-dark-700 rounded-sm px-2.5 py-1.5 text-slate-200"
+              fieldClassName="bg-raised border-line rounded-sm px-2.5 py-1.5 text-fg"
               id="test-sample-severity"
               labelledBy="test-sample-severity-label"
               label="Sample Severity"
@@ -158,15 +158,15 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         </div>
 
         <div className="space-y-1">
-          <label htmlFor="test-sample-message" className="block text-slate-300 font-medium">Sample Message</label>
+          <label htmlFor="test-sample-message" className="block text-fg-soft font-medium">Sample Message</label>
           <textarea
             id="test-sample-message"
             rows={3}
             value={testSampleMessage}
             onChange={(e) => setTestSampleMessage(e.target.value)}
-            className="w-full bg-dark-800 border border-dark-700 rounded-sm p-2 text-slate-200 font-mono text-xs focus:outline-hidden focus:border-accent-500"
+            className="w-full bg-raised border border-line rounded-sm p-2 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
           />
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-fg-muted">
             Enter a sample log line payload to evaluate pattern matching and IP extraction.
           </p>
         </div>
@@ -175,8 +175,8 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
           <div
             className={`p-3 rounded-lg border text-xs space-y-1 ${
               testResult.matched
-                ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300'
-                : 'bg-amber-950/30 border-amber-800/50 text-amber-300'
+                ? 'bg-success-950/30 border-success-800/50 text-success-300'
+                : 'bg-warning-950/30 border-warning-800/50 text-warning-300'
             }`}
           >
             <div className="font-semibold flex items-center gap-1.5">
@@ -188,24 +188,24 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
               <span>{testResult.matched ? 'Pattern Matched Successfully' : 'No Match Found'}</span>
             </div>
             {testResult.extracted_ip && (
-              <div className="text-[11px] text-slate-300">
+              <div className="text-[11px] text-fg-soft">
                 Extracted IP address:{' '}
-                <span className="font-mono text-white">{testResult.extracted_ip}</span>
+                <span className="font-mono text-fg-max">{testResult.extracted_ip}</span>
               </div>
             )}
             {testResult.error && (
-              <div className="text-[11px] text-red-300">
+              <div className="text-[11px] text-danger-300">
                 Evaluation error: {testResult.error}
               </div>
             )}
           </div>
         )}
 
-        <div className="pt-3 border-t border-dark-700 flex justify-end gap-2">
+        <div className="pt-3 border-t border-line flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-dark-800 transition cursor-pointer"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft hover:text-fg-max bg-raised transition cursor-pointer"
           >
             Close
           </button>
@@ -213,7 +213,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             type="button"
             onClick={handleRunTest}
             disabled={isTesting}
-            className="px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5"
+            className="px-4 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5"
           >
             {isTesting ? (
               <RefreshCw className="w-3 h-3 animate-spin" />
