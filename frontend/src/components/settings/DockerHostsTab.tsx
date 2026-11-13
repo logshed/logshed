@@ -329,7 +329,12 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                   )}
 
                   <div className="flex items-center justify-between pt-1 border-t border-line-subtle">
-                    <Button size="sm" onClick={() => handleToggleEnabled(host)} disabled={togglingIds.has(host.id)}>
+                    <Button
+                      size="sm"
+                      variant={host.enabled ? 'secondary' : 'soft'}
+                      onClick={() => handleToggleEnabled(host)}
+                      disabled={togglingIds.has(host.id)}
+                    >
                       {host.enabled ? 'Disable' : 'Enable'}
                     </Button>
                     <Button

@@ -18,8 +18,10 @@ import React from 'react';
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'danger-soft' | 'soft' | 'ghost';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
+// No white-space here: a class added after the look cannot override one in it (Tailwind orders
+// utilities by stylesheet, not by class order), so each button chooses nowrap or wrapping itself.
 const BASE =
-  'inline-flex items-center justify-center gap-1.5 rounded-sm border font-medium whitespace-nowrap transition cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center gap-1.5 rounded-sm border font-medium transition cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed';
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'border-transparent bg-accent-700 hover:bg-accent-600 text-on-fill shadow-xs',
@@ -38,8 +40,8 @@ const SIZES: Record<ButtonSize, string> = {
 };
 
 /** The classes of a button's look, for the few links and labels that must look like a button. */
-export function buttonClass(variant: ButtonVariant = 'secondary', size: ButtonSize = 'md'): string {
-  return `${BASE} ${VARIANTS[variant]} ${SIZES[size]}`;
+export function buttonClass(variant: ButtonVariant = 'secondary', size: ButtonSize = 'md', wrap = false): string {
+  return `${BASE} ${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} ${VARIANTS[variant]} ${SIZES[size]}`;
 }
 
 export interface ButtonProps extends React.ComponentPropsWithRef<'button'> {
@@ -47,12 +49,15 @@ export interface ButtonProps extends React.ComponentPropsWithRef<'button'> {
   size?: ButtonSize;
   /** An icon before the label. */
   icon?: React.ReactNode;
+  /** Lets a long label wrap onto more lines instead of staying on one. */
+  wrap?: boolean;
 }
 
 export const Button: React.FC<ButtonProps> = ({
   variant = 'secondary',
   size = 'md',
   icon,
+  wrap = false,
   type = 'button',
   className,
   children,
@@ -60,7 +65,7 @@ export const Button: React.FC<ButtonProps> = ({
 }) => (
   <button
     type={type}
-    className={className ? `${buttonClass(variant, size)} ${className}` : buttonClass(variant, size)}
+    className={className ? `${buttonClass(variant, size, wrap)} ${className}` : buttonClass(variant, size, wrap)}
     {...rest}
   >
     {icon}

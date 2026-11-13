@@ -12,10 +12,10 @@ const ERROR_CLASS = 'text-[11px] text-danger-400 mt-1';
  * Safari does not zoom in on focus. The placeholder colour comes from the base layer.
  */
 const CONTROL_BASE =
-  'w-full bg-canvas border rounded-sm px-3 py-2 text-xs text-fg focus:outline-hidden focus:border-accent-500 disabled:opacity-50 disabled:cursor-not-allowed';
+  'w-full bg-canvas border rounded-sm px-3 py-2 text-xs text-fg focus:outline-hidden disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function controlClass({ invalid = false, mono = false }: { invalid?: boolean; mono?: boolean } = {}): string {
-  return `${CONTROL_BASE} ${invalid ? 'border-danger-600' : 'border-line'}${mono ? ' font-mono' : ''}`;
+  return `${CONTROL_BASE} ${invalid ? 'border-danger-600 focus:border-danger-500' : 'border-line focus:border-accent-500'}${mono ? ' font-mono' : ''}`;
 }
 
 /** After a label's text, for a field that must be filled in. */

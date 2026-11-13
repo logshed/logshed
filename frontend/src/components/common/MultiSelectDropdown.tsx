@@ -360,7 +360,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         }}
         className={
           isForm
-            ? `w-full h-[38px] flex items-center justify-between bg-raised border rounded-lg px-3 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
+            ? `w-full h-[34px] flex items-center justify-between bg-canvas border rounded-sm px-3 text-xs cursor-pointer select-none transition focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500/20 ${
                 isOpen
                   ? 'border-accent-500 ring-1 ring-accent-500/20'
                   : 'border-line hover:border-line-stronger text-fg'

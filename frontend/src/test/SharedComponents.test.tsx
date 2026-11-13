@@ -32,6 +32,13 @@ describe('Button', () => {
     expect(buttonClass('danger')).toContain('bg-danger-600');
   });
 
+  it('keeps a label on one line unless asked to wrap, since a class added later cannot undo it', () => {
+    expect(buttonClass('primary').split(' ')).toContain('whitespace-nowrap');
+    const wrapping = buttonClass('primary', 'md', true).split(' ');
+    expect(wrapping).toContain('whitespace-normal');
+    expect(wrapping).not.toContain('whitespace-nowrap');
+  });
+
   it('puts the icon before the label and adds layout classes after the look', () => {
     render(
       <Button icon={<svg data-testid="icon" />} className="w-full">

@@ -16,7 +16,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
         <CopyButton
           text={code}
           title="Copy code"
-          className="flex items-center gap-1 hover:text-fg transition text-[11px] px-1.5 py-0.5 rounded-sm hover:bg-raised cursor-pointer"
+          variant="compact"
           iconClassName="w-3 h-3"
         />
       </div>

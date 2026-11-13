@@ -287,7 +287,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           </div>
 
           {/* Phones: two columns, with Explain with AI across both below them */}
-          <div className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-2 sm:flex sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
             {matchedDockerEndpoint && onEditDockerHost ? (
               <button
                 type="button"

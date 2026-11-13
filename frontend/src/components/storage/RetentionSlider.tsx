@@ -346,7 +346,8 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             onClick={() => setIsVacuumModalOpen(true)}
             disabled={isCompacting || isPruning}
             title="Repack SQLite database file and return freelist space to host filesystem."
-            className="whitespace-normal text-left"
+            wrap
+            className="text-left"
             icon={isCompacting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
           >
             {isCompacting ? 'Compacting database... Ingestion writes temporarily paused' : 'Compact Database'}
@@ -357,7 +358,8 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
             onClick={handlePruneNow}
             disabled={isPruning || isCompacting || isLoadingPreview}
             title="Show what is older than the configured retention policy, then purge those logs and history entries, compact the search index, and checkpoint the SQLite WAL."
-            className="whitespace-normal text-left"
+            wrap
+            className="text-left"
             icon={isPruning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
           >
             {isPruning ? 'Purging & Compacting Index...' : 'Purge Expired Logs & History Now'}

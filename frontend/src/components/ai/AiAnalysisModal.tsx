@@ -662,7 +662,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 value={promptViewMode === 'full' ? fullPromptText : promptText}
                 onChange={handlePromptChange}
                 placeholder={promptViewMode === 'full' ? 'Full LLM prompt envelope...' : 'Redacted prompt...'}
-                className={`${controlClass({ mono: true })} resize-y`}
+                className={`${controlClass({ mono: true })} leading-relaxed whitespace-pre-wrap resize-y overflow-y-hidden`}
               />
 
               {/* Log Redaction Notice */}
