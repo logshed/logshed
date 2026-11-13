@@ -201,8 +201,39 @@ describe('Navbar Component', () => {
     });
 
     const updateLink = screen.getByRole('link', { name: /App update available/i });
-    expect(updateLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases');
+    expect(updateLink).toHaveAttribute('href', 'https://github.com/logshed/logshed/releases/tag/v1.2.0');
     expect(updateLink).toHaveAttribute('target', '_blank');
+  });
+
+  it('keeps the update badge and the Rate figure on one line each on a phone', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({
+      status: 'ok',
+      db: 'ok',
+      queue_depth: 0,
+      dropped_logs: 0,
+      ingest_rate: 0.0,
+    });
+    vi.spyOn(systemApi, 'fetchVersion').mockResolvedValue({
+      current_version: '1.3.1',
+      latest_version: '1.4.0',
+      update_available: true,
+      check_enabled: true,
+      checked_at: 1700000000.0,
+    });
+
+    render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+
+    // Named in full for screen readers and the tooltip, whatever the width
+    const updateLink = await screen.findByRole('link', { name: 'App update available: v1.4.0' });
+    expect(updateLink).toHaveAttribute('title', 'App update available: v1.4.0');
+    expect(updateLink.className).toContain('whitespace-nowrap');
+    // Below sm only the icon and the version show (the icon alone below 360 px), with a tap target
+    // stretched 10 px above and below the badge
+    expect(within(updateLink).getByText('v1.4.0')).toHaveClass('sm:hidden', 'max-[359px]:hidden');
+    expect(within(updateLink).getByText('App update available')).toHaveClass('hidden', 'sm:inline');
+    expect(updateLink.className).toContain('max-sm:after:-inset-y-2.5');
+    // The Rate figure never wraps to a second line
+    expect(screen.getByText('0.0 logs/s').closest('[title]')!.className).toContain('whitespace-nowrap');
   });
 
   it('does not display App update available notice when check_enabled is false', async () => {

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, AlertCircle } from 'lucide-react';
+import { Button } from '../common/Button.tsx';
+import { LABEL_CLASS } from '../common/Field.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
 
@@ -54,11 +56,12 @@ export const SetupModal: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-fg-soft uppercase tracking-wider mb-2">
+            <label htmlFor="setup-password" className={LABEL_CLASS}>
               Master Password (min {PASSWORD_MIN_LENGTH} chars)
             </label>
             <div className="relative">
               <input
+                id="setup-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -66,34 +69,37 @@ export const SetupModal: React.FC = () => {
                 minLength={PASSWORD_MIN_LENGTH}
                 required
                 autoFocus
-                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-4 py-2.5 pl-10 text-base sm:text-sm text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-fg-subtle absolute left-3.5 top-3" />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-fg-soft uppercase tracking-wider mb-2">
+            <label htmlFor="setup-confirm-password" className={LABEL_CLASS}>
               Confirm Master Password
             </label>
             <div className="relative">
               <input
+                id="setup-confirm-password"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm master password..."
                 minLength={PASSWORD_MIN_LENGTH}
                 required
-                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-4 py-2.5 pl-10 text-base sm:text-sm text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-fg-subtle absolute left-3.5 top-3" />
             </div>
           </div>
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="lg"
             disabled={isLoading || password.length < PASSWORD_MIN_LENGTH || password !== confirmPassword}
-            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center gap-x-2"
+            className="w-full"
           >
             {isLoading ? (
               <span>Setting up Account...</span>
@@ -103,7 +109,7 @@ export const SetupModal: React.FC = () => {
                 <span>Set Up Admin & Log In</span>
               </>
             )}
-          </button>
+          </Button>
         </form>
       </div>
     </main>

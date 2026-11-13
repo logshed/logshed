@@ -217,7 +217,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="inline-block w-2 h-2 rounded-full bg-warning-400"
                 />
               )}
-              <span title={getRateTooltip(health)} className="text-[11px] sm:text-xs">
+              <span title={getRateTooltip(health)} className="text-[11px] sm:text-xs whitespace-nowrap">
                 <span className="hidden sm:inline">Rate:{' '}</span>
                 <span className="text-fg">
                   {(health.ingest_rate ?? 0).toFixed(1)} logs/s
@@ -304,15 +304,21 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right Controls */}
         <div className="flex items-center gap-x-2">
           {versionInfo?.update_available && versionInfo?.check_enabled !== false && (
+            // Below sm only the icon and the version show (below 360 px the icon alone), so the badge stays
+            // on one line beside the wordmark and the Rate figure; the full text stays in its name and
+            // tooltip. An invisible layer 10 px above and below makes the tap target 44 px tall on a phone
+            // without making the badge or the header taller.
             <a
-              href="https://github.com/logshed/logshed/releases"
+              href={`https://github.com/logshed/logshed/releases/tag/v${versionInfo.latest_version}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-x-1 px-2 py-0.5 text-xs font-medium text-warning-400 bg-warning-950/40 hover:bg-warning-900/50 border border-warning-800/60 rounded-sm transition cursor-pointer"
+              className="relative flex items-center gap-x-1 px-2 py-0.5 max-sm:after:absolute max-sm:after:inset-x-0 max-sm:after:-inset-y-2.5 max-sm:after:content-[''] text-xs font-medium whitespace-nowrap text-warning-400 bg-warning-950/40 hover:bg-warning-900/50 border border-warning-800/60 rounded-sm transition cursor-pointer"
               title={`App update available: v${versionInfo.latest_version}`}
+              aria-label={`App update available: v${versionInfo.latest_version}`}
             >
               <ArrowUpCircle className="w-3.5 h-3.5 text-warning-400 shrink-0" />
-              <span>App update available</span>
+              <span className="sm:hidden max-[359px]:hidden font-mono">v{versionInfo.latest_version}</span>
+              <span className="hidden sm:inline">App update available</span>
             </a>
           )}
           <button

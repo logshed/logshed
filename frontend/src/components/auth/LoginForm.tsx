@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Lock, AlertCircle, CheckCircle } from 'lucide-react';
+import { Button } from '../common/Button.tsx';
+import { LABEL_CLASS } from '../common/Field.tsx';
 import { LogShedLogo } from '../common/LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 
@@ -68,11 +70,12 @@ export const LoginForm: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-fg-soft uppercase tracking-wider mb-2">
+            <label htmlFor="login-password" className={LABEL_CLASS}>
               Admin Password
             </label>
             <div className="relative">
               <input
+                id="login-password"
                 ref={passwordInputRef}
                 type="password"
                 value={password}
@@ -80,16 +83,18 @@ export const LoginForm: React.FC = () => {
                 placeholder="Enter password..."
                 required
                 autoFocus
-                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 pl-10 text-base sm:text-sm text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500 font-mono"
+                className="w-full bg-canvas border border-line rounded-sm px-4 py-2.5 pl-10 text-base sm:text-sm text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 focus:ring-1 focus:ring-accent-500 font-mono"
               />
               <Lock className="w-4 h-4 text-fg-subtle absolute left-3.5 top-3" />
             </div>
           </div>
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="lg"
             disabled={isLoading || !password.trim()}
-            className="w-full bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill font-medium py-2.5 px-4 rounded-lg text-sm transition-all shadow-md flex items-center justify-center gap-x-2"
+            className="w-full"
           >
             {isLoading ? (
               <span>Authenticating...</span>
@@ -99,7 +104,7 @@ export const LoginForm: React.FC = () => {
                 <span>Sign In to Console</span>
               </>
             )}
-          </button>
+          </Button>
         </form>
       </div>
     </main>
