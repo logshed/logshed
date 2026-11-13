@@ -38,11 +38,11 @@ describe('LoginForm Component', () => {
   });
 
   it('displays auth error from context when no notice is set', () => {
-    mockAuthError = 'Session expired due to password change';
+    mockAuthError = 'This session was ended by a sign-out or a password change. Please log in again.';
 
     render(<LoginForm />);
 
-    expect(screen.getByText('Session expired due to password change')).toBeInTheDocument();
+    expect(screen.getByText('This session was ended by a sign-out or a password change. Please log in again.')).toBeInTheDocument();
   });
 
   it('submits password when valid', async () => {

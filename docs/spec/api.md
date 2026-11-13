@@ -54,7 +54,7 @@ Midnight is built from the local date, so days with a daylight saving change sta
 | **Authentication** | | | | | |
 | `POST` | `/api/auth/setup` | First-time admin creation; also starts a session (returns `403` if already configured) | `{"password": "..."}` (8-128 characters) | `MessageResponse` (`{"status": "ok"}`) | `200`, `403`, `422` |
 | `POST` | `/api/auth/login` | Session login (rate-limited: 5 failures per address per minute; `429` carries `Retry-After`) | `{"password": "..."}` | `MessageResponse` (`{"status": "ok"}`) | `200`, `401`, `429` |
-| `POST` | `/api/auth/logout` | Invalidate session cookie | None | `MessageResponse` (`{"status": "ok"}`) | `200` |
+| `POST` | `/api/auth/logout` | Clear the session cookie; with a valid session, also end every session in every browser (`docs/spec/security.md`, "Ending Sessions") | None | `MessageResponse` (`{"status": "ok"}`) | `200` |
 | `GET` | `/api/auth/status` | Read setup status and current session authentication state | None | `AuthStatusResponse` (`{"setup_required": bool, "authenticated": bool}`) | `200` |
 | `POST` | `/api/auth/password` | Update admin password for authenticated session | `{"current_password": "...", "new_password": "..."}` (new password 8-128 characters) | `MessageResponse` (`{"status": "ok"}`) | `200`, `400`, `401`, `422` |
 | **Log Management & Deletion** | | | | | |

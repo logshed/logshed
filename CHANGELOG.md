@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Storage page in Firefox**: The retention slider is drawn in LogShed's blue and dark grey, as in other browsers, instead of Firefox's grey and white control, and on a phone the "Mount: /data" label no longer touches the card title.
 - **Update badge on a phone**: The "App update available" badge no longer wraps onto two lines and squeezes the navbar: on a narrow screen it shows the new version (or only its icon) on one line, and it opens that release's notes instead of the list of releases. The Rate figure next to it no longer wraps either.
 
+### Security
+
+- **Signing out signs out everywhere**: Signing out, changing the password and `reset-admin` now end every session in every browser at once. Until now, signing out only removed the cookie from that browser, so a copied cookie kept working for up to 7 days, and an open live Console stream kept sending logs after a password change. An open stream now closes within 15 seconds.
+
 ## [1.3.1] - 2026-11-12
 
 ### Upgrade Notes

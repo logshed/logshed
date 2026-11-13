@@ -75,13 +75,11 @@ def reset_admin(password: str, db_path: str = _DEFAULT_DB_PATH) -> None:
             """,
             (password_hash, now, now),
         )
+        # Every session signed in with the old password ends (a running LogShed sees it within seconds)
+        from app.api.deps import bump_session_epoch
+        bump_session_epoch(conn)
         conn.commit()
-        try:
-            from app.api.deps import invalidate_admin_auth_cache
-            invalidate_admin_auth_cache()
-        except Exception:
-            pass
-        print("Admin password has been reset successfully.")
+        print("Admin password has been reset successfully. Every browser must sign in again.")
     except Exception as e:
         conn.rollback()
         print(f"Error resetting admin password: {e}", file=sys.stderr)

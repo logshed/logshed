@@ -199,9 +199,11 @@ def create_session_token(
     user_id: int = 1,
     duration_seconds: int = DEFAULT_SESSION_DURATION_SECONDS,
     key: Optional[bytes] = None,
+    session_epoch: int = 0,
 ) -> str:
     """
-    Creates a signed, encrypted session token containing user id and expiration.
+    Creates a signed, encrypted session token containing user id, expiration and the session
+    epoch it was issued under (a later logout or password change raises the epoch and ends it).
     """
     now = time.time()
     payload = {
@@ -209,6 +211,7 @@ def create_session_token(
         "iat": now,
         "exp": now + duration_seconds,
         "iss": "logshed",
+        "sv": session_epoch,
     }
     json_bytes = json.dumps(payload).encode("utf-8")
     fernet = get_fernet(key)

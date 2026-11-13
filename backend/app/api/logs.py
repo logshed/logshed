@@ -3,6 +3,7 @@ Log querying, streaming (SSE), and context API endpoints for LogShed.
 """
 
 import asyncio
+import time
 import logging
 import sqlite3
 from typing import Any, AsyncGenerator, Optional
@@ -10,7 +11,7 @@ from typing import Any, AsyncGenerator, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_current_user, run_db_query
+from app.api.deps import get_current_user, is_session_revoked, run_db_query
 from app.core.config import get_db_path
 from app.core.sse import SSESubscriberLimitError, sse_manager
 from app.models import (
@@ -44,6 +45,8 @@ router = APIRouter(prefix="/logs", tags=["Logs"])
 
 # Keep-alive comment interval for idle live log streams.
 SSE_PING_INTERVAL_SECONDS = 15
+# How often an open live stream checks that its session has not been ended by a logout or password change
+SSE_SESSION_CHECK_SECONDS = 5.0
 
 
 @router.get("", response_model=LogListResponse)
@@ -154,10 +157,16 @@ async def stream_logs(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         sent = 0
+        session_checked_at = time.monotonic()
         try:
             while True:
                 if max_events is not None and sent >= max_events:
                     break
+                # A sign-out or password change elsewhere ends this stream too
+                if time.monotonic() - session_checked_at >= SSE_SESSION_CHECK_SECONDS:
+                    session_checked_at = time.monotonic()
+                    if await is_session_revoked(user):
+                        break
 
                 try:
                     entry = await asyncio.wait_for(queue.get(), timeout=SSE_PING_INTERVAL_SECONDS)

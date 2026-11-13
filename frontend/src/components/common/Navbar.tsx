@@ -323,7 +323,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
           <button
             onClick={logout}
-            title="Sign Out"
+            title="Log out of every browser"
             className="flex items-center gap-x-1 px-2.5 py-1 text-xs font-medium text-fg-muted hover:text-danger-300 hover:bg-danger-950/30 rounded-sm border border-transparent hover:border-danger-900 transition"
           >
             <LogOut className="w-3.5 h-3.5" />

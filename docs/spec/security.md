@@ -25,8 +25,9 @@ LogShed provides self-contained native authentication and protection controls wi
 ## 4. Session Security & Cookie Handling
 * **Session Cookie Architecture:** Cryptographically signed, HTTP-only, `SameSite=Lax` session cookie named `session`, set at login and at first-run setup.
 * **Browser Storage Baseline:** No JWTs or sensitive authentication tokens stored in browser `localStorage` or `sessionStorage`.
-* **Payload Structure & Encryption:** Session tokens contain user ID, issue timestamp (`iat`), expiration timestamp (`exp`), and issuer claim (`iss="logshed"`). Tokens are encrypted using Fernet (AES-128-CBC + HMAC-SHA256).
-* **Session Lifetime:** Default duration is 7 days (604,800 seconds).
+* **Payload Structure & Encryption:** Session tokens contain user ID, issue timestamp (`iat`), expiration timestamp (`exp`), issuer claim (`iss="logshed"`) and the session epoch they were issued under (`sv`; a token without one counts as epoch 0). Tokens are encrypted using Fernet (AES-128-CBC + HMAC-SHA256).
+* **Session Lifetime:** Default duration is 7 days (604,800 seconds). There is no idle timeout.
+* **Ending Sessions:** `system_settings` key `session_epoch` (an integer, `0` when absent or unreadable) is raised by one on logout, on a password change (in the same transaction as the new hash) and by `reset-admin`. Every request checks that the token's `sv` is not below it, so these end every session in every browser, including copied cookies; a token whose `sv` is not a number is refused. Logout raises the epoch only when the request carries a valid session, so a request without one cannot sign others out; it always clears the cookie. The epoch is cached per database for 5 seconds and the process that raised it applies it at once; `reset-admin` runs in another process, so a running LogShed applies it within 5 seconds. An open live stream (`/api/logs/stream`) checks its session at most every 5 seconds while logs flow and at each 15-second idle ping, and closes once the session has ended; the browser's reconnect then gets `401` and shows the sign-in screen. A refused session returns `401` with `"This session was ended by a sign-out or a password change. Please log in again."`.
 * **Cookie Flags:**
   * `HttpOnly`: Always enabled (`True`) to block client-side JavaScript access.
   * `SameSite`: `Lax` to prevent cross-site leaks while supporting top-level navigation.
@@ -99,6 +100,7 @@ LogShed provides self-contained native authentication and protection controls wi
 ```bash
 docker exec -it <container> python -m app.cli reset-admin
 ```
+* The reset ends every session in every browser (it raises the session epoch, section 4).
 
 ## 10. Response Headers & Cross-Origin Requests
 * **Content-Security-Policy:** Every response carries one. `/docs` and `/redoc` get the same strict policy plus the hash of the one inline start-up script (Swagger UI's), `blob:` workers and `data:` fonts for ReDoc (its icon font is inlined); their scripts, styles and fonts come from `/docs-assets/` on LogShed itself, with no CDN and no Google Fonts. ReDoc 3 loads as a module script, and its usage reports are turned off (`disable-telemetry`).

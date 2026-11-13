@@ -32,16 +32,59 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-_cached_admin_updated_at: Optional[float] = None
-_cached_admin_updated_at_time: float = 0.0
-_ADMIN_CACHE_TTL: float = 5.0  # seconds
+# Every session token carries the session epoch it was issued under. Logout, a password change and
+# reset-admin raise the stored epoch by one, which ends every session issued before. The value is
+# cached per database for a few seconds; reset-admin runs in another process and is seen once the
+# cache expires.
+SESSION_EPOCH_KEY = "session_epoch"
+_SESSION_EPOCH_CACHE_TTL: float = 5.0  # seconds
+_session_epoch_cache: dict[str, tuple[int, float]] = {}
 
 
-def invalidate_admin_auth_cache() -> None:
-    """Invalidate cached admin password updated_at timestamp."""
-    global _cached_admin_updated_at, _cached_admin_updated_at_time
-    _cached_admin_updated_at = None
-    _cached_admin_updated_at_time = 0.0
+def read_session_epoch(conn: sqlite3.Connection) -> int:
+    """The stored session epoch (0 when none was ever stored or the value is unreadable)."""
+    row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (SESSION_EPOCH_KEY,)).fetchone()
+    try:
+        return int(row[0]) if row and row[0] is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def bump_session_epoch(conn: sqlite3.Connection) -> int:
+    """
+    Raise the stored session epoch by one inside the caller's transaction (the caller commits),
+    and return the new value. Every session issued under an older epoch stops working.
+    """
+    new_epoch = read_session_epoch(conn) + 1
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, ?, 0) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (SESSION_EPOCH_KEY, str(new_epoch), now),
+    )
+    return new_epoch
+
+
+def remember_session_epoch(epoch: int, custom_db_path: Optional[Path] = None) -> None:
+    """Store a just-written epoch in the cache, so this process applies it at once."""
+    _session_epoch_cache[str(custom_db_path or get_db_path())] = (epoch, time.monotonic())
+
+
+def invalidate_session_epoch_cache() -> None:
+    """Forget the cached session epochs; the next check reads the database."""
+    _session_epoch_cache.clear()
+
+
+async def current_session_epoch() -> int:
+    """The stored session epoch, read from the database at most every few seconds."""
+    db_key = str(get_db_path())
+    cached = _session_epoch_cache.get(db_key)
+    now_mono = time.monotonic()
+    if cached is not None and now_mono - cached[1] <= _SESSION_EPOCH_CACHE_TTL:
+        return cached[0]
+    epoch = await run_db_query(read_session_epoch)
+    _session_epoch_cache[db_key] = (epoch, now_mono)
+    return epoch
 
 
 _thread_local = threading.local()
@@ -169,54 +212,20 @@ async def run_db_query(
     return await asyncio.to_thread(_execute)
 
 
-async def _is_session_revoked(payload: dict[str, Any]) -> bool:
-    """
-    Checks whether a session token was issued prior to the latest admin password update.
-    Returns True if revoked, False otherwise.
-    """
-    iat = payload.get("iat")
-    if iat is None:
-        return False
-
-    global _cached_admin_updated_at, _cached_admin_updated_at_time
-    now_mono = time.monotonic()
-    updated_at_epoch = _cached_admin_updated_at
-
-    if updated_at_epoch is None or (now_mono - _cached_admin_updated_at_time) > _ADMIN_CACHE_TTL:
-        def _get_admin_updated_at(conn: sqlite3.Connection) -> Optional[str]:
-            cursor = conn.cursor()
-            cursor.execute("SELECT updated_at FROM admin_auth WHERE id = 1")
-            row = cursor.fetchone()
-            return row[0] if row else None
-
-        updated_at_str = await run_db_query(_get_admin_updated_at)
-        if updated_at_str:
-            try:
-                dt = datetime.datetime.fromisoformat(updated_at_str)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=datetime.timezone.utc)
-                updated_at_epoch = dt.timestamp()
-                _cached_admin_updated_at = updated_at_epoch
-                _cached_admin_updated_at_time = now_mono
-            except Exception:
-                updated_at_epoch = None
-        else:
-            _cached_admin_updated_at = None
-            _cached_admin_updated_at_time = now_mono
-
-    if updated_at_epoch is not None:
-        iat_val = float(iat)
-        is_revoked = iat_val < updated_at_epoch
-        return is_revoked
-
-    return False
+async def is_session_revoked(payload: dict[str, Any]) -> bool:
+    """True when the session was issued under an older session epoch (a logout or password change since)."""
+    try:
+        token_epoch = int(payload.get("sv", 0))
+    except (TypeError, ValueError):
+        return True
+    return token_epoch < await current_session_epoch()
 
 
 async def get_current_user(request: Request) -> dict[str, Any]:
     """
     FastAPI dependency that validates the signed session cookie.
     Raises 401 Unauthorized if cookie is missing, invalid, or expired.
-    Also validates that the session was not issued prior to the latest admin password update.
+    Also checks that no logout or password change has ended the session since it was issued.
     """
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
@@ -232,10 +241,10 @@ async def get_current_user(request: Request) -> dict[str, Any]:
             detail="Invalid or expired session. Please log in again.",
         )
 
-    if await _is_session_revoked(payload):
+    if await is_session_revoked(payload):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired due to password change",
+            detail="This session was ended by a sign-out or a password change. Please log in again.",
         )
 
     return payload
@@ -252,7 +261,7 @@ async def get_optional_user(request: Request) -> Optional[dict[str, Any]]:
     payload = verify_session_token(token)
     if not payload:
         return None
-    if await _is_session_revoked(payload):
+    if await is_session_revoked(payload):
         return None
     return payload
 

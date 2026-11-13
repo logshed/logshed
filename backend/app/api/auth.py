@@ -14,13 +14,16 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.deps import (
+    bump_session_epoch,
+    current_session_epoch,
     get_current_user,
     get_optional_user,
-    invalidate_admin_auth_cache,
+    remember_session_epoch,
     run_db_query,
 )
 from app.core.rate_limiter import ip_bucket_key, login_rate_limiter
 from app.core.security import (
+    DEFAULT_SESSION_DURATION_SECONDS,
     SESSION_COOKIE_NAME,
     create_session_token,
     hash_password,
@@ -199,6 +202,40 @@ def _is_secure_cookie(request: Request) -> bool:
     return False
 
 
+async def _issue_session_cookie(request: Request, response: Response) -> None:
+    """Set a new session cookie, issued under the current session epoch."""
+    token = create_session_token(user_id=1, session_epoch=await current_session_epoch())
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure_cookie(request),
+        path="/",
+        max_age=DEFAULT_SESSION_DURATION_SECONDS,
+    )
+
+
+def _clear_session_cookie(request: Request, response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure_cookie(request),
+    )
+
+
+async def _end_every_session() -> None:
+    """Raise the session epoch, which ends every session issued so far, in every browser."""
+    def _bump(conn) -> int:
+        epoch = bump_session_epoch(conn)
+        conn.commit()
+        return epoch
+
+    remember_session_epoch(await run_db_query(_bump))
+
+
 @router.post("/setup", response_model=MessageResponse)
 async def setup_admin(req: SetupRequest, request: Request, response: Response) -> MessageResponse:
     """
@@ -233,19 +270,7 @@ async def setup_admin(req: SetupRequest, request: Request, response: Response) -
     if not await run_db_query(lambda conn: _insert_if_first(conn, pwd_hash)):
         raise already_set_up
 
-    invalidate_admin_auth_cache()
-
-    # Issue signed session cookie
-    token = create_session_token(user_id=1)
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=_is_secure_cookie(request),
-        path="/",
-        max_age=7 * 24 * 3600,
-    )
+    await _issue_session_cookie(request, response)
     return MessageResponse(status="ok")
 
 
@@ -326,29 +351,19 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Mess
             detail="Invalid password.",
         )
 
-    token = create_session_token(user_id=1)
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        secure=_is_secure_cookie(request),
-        path="/",
-        max_age=7 * 24 * 3600,
-    )
+    await _issue_session_cookie(request, response)
     return MessageResponse(status="ok")
 
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(request: Request, response: Response) -> MessageResponse:
-    """Clears the session cookie."""
-    response.delete_cookie(
-        key=SESSION_COOKIE_NAME,
-        path="/",
-        httponly=True,
-        samesite="lax",
-        secure=_is_secure_cookie(request),
-    )
+    """
+    Signs out every session, in every browser, and clears this browser's cookie. Only a valid
+    session can end the others: a request without one just has its cookie cleared.
+    """
+    if await get_optional_user(request) is not None:
+        await _end_every_session()
+    _clear_session_cookie(request, response)
     return MessageResponse(status="ok")
 
 
@@ -400,22 +415,22 @@ async def change_password(
             "UPDATE admin_auth SET password_hash = ?, updated_at = ? WHERE id = 1 AND password_hash = ?",
             (new_hash, now, current_hash),
         )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return None
+        # The new password and the end of every session issued under the old one are one commit.
+        epoch = bump_session_epoch(conn)
         conn.commit()
-        return cursor.rowcount == 1
+        return epoch
 
-    if not await run_db_query(_store_hash):
+    epoch = await run_db_query(_store_hash)
+    if epoch is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="The password was changed by another request. Please try again.",
         )
-    invalidate_admin_auth_cache()
+    remember_session_epoch(epoch)
 
-    # Clear session cookie so client does not retain a revoked token
-    response.delete_cookie(
-        key=SESSION_COOKIE_NAME,
-        path="/",
-        httponly=True,
-        samesite="lax",
-        secure=_is_secure_cookie(request),
-    )
+    # This browser signs in again with the new password, like every other one
+    _clear_session_cookie(request, response)
     return MessageResponse(status="ok")
