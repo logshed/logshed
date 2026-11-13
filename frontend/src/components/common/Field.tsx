@@ -8,8 +8,8 @@ const HINT_CLASS = 'text-[11px] text-fg-muted mt-1';
 const ERROR_CLASS = 'text-[11px] text-danger-400 mt-1';
 
 /**
- * The look of a text box. Touch screens get 16 px text from index.css whatever the size here, so iOS
- * Safari does not zoom in on focus. The placeholder colour comes from the base layer.
+ * The look of a text box. On iOS the viewport stops Safari zooming in when a box under 16 px gets
+ * focus (utils/iosViewport.ts). The placeholder colour comes from the base layer.
  */
 const CONTROL_BASE =
   'w-full bg-canvas border rounded-sm px-3 py-2 text-xs text-fg focus:outline-hidden disabled:opacity-50 disabled:cursor-not-allowed';

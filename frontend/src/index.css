@@ -260,15 +260,3 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.8;
 }
-
-
-
-/* Text fields on touch screens: 16 px, the size below which iOS Safari zooms the page when a field
-   gets focus. Outside any layer, so it beats the fields' own text-xs; pinch zoom stays allowed. */
-@media (pointer: coarse) {
-  input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="reset"], [type="color"], [type="file"]),
-  textarea,
-  select {
-    font-size: 16px;
-  }
-}
