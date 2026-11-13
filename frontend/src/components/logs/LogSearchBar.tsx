@@ -381,7 +381,7 @@ export const LogSearchBar: React.FC<LogSearchBarProps> = React.memo(({
             <button
               onClick={handleResetFilters}
               title="Reset all active filters"
-              className={`bg-warning-950/70 hover:bg-warning-900/90 text-warning-300 border border-warning-600/70 px-2.5 ${mobileToolbar ? 'py-1 md:py-1.5' : 'py-1.5 ml-auto md:ml-0'} rounded-sm flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer animate-in fade-in duration-150 shrink-0`}
+              className={`bg-warning-950/70 hover:bg-warning-900/90 text-warning-300 border border-warning-600/70 px-2.5 ${mobileToolbar ? 'py-1 md:py-1.5' : 'py-1.5 ml-auto md:ml-0'} rounded-sm flex items-center gap-1.5 transition shadow-xs font-medium cursor-pointer duration-150 shrink-0`}
             >
               {/* Named by its text ("Reset 3 active filters"); on the phone toolbar the word is read, not shown */}
               <RotateCcw className="w-3.5 h-3.5 text-warning-400" aria-hidden="true" />

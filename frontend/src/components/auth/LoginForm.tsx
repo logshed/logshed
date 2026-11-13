@@ -48,7 +48,7 @@ export const LoginForm: React.FC = () => {
           <div className="w-12 h-12 rounded-xl bg-raised border border-line flex items-center justify-center mb-3">
             <LogShedLogo className="w-7 h-7 text-accent-600" />
           </div>
-          <h1 className="text-xl font-bold text-fg-bright tracking-[-0.02em]">LogShed</h1>
+          <h1 className="text-xl font-bold text-fg-strong tracking-[-0.02em]">LogShed</h1>
           <p className="text-xs text-fg-muted mt-1">Single-Process Log Aggregator & Ops Console</p>
         </div>
 

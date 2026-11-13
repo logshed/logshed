@@ -29,7 +29,7 @@ export const PresetCard: React.FC<PresetCardProps> = ({
   isInstalling,
   onInstall,
 }) => (
-  <div className="bg-canvas/70 border border-line-muted hover:border-line-hover rounded-xl p-4 flex flex-col justify-between space-y-3 transition">
+  <div className="bg-canvas/70 border border-line-subtle hover:border-line-hover rounded-xl p-4 flex flex-col justify-between space-y-3 transition">
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">

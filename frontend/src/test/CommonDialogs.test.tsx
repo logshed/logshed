@@ -87,7 +87,22 @@ describe('ConfirmDialog', () => {
     expect(box.className).toContain('bg-danger-950/30');
     const confirm = screen.getByRole('button', { name: 'Delete View' });
     expect(confirm.firstElementChild).toBe(screen.getByTestId('confirm-icon'));
-    expect(confirm.querySelector('span')).toHaveTextContent('Delete View');
+    expect(confirm).toHaveTextContent('Delete View');
+  });
+
+  it('confirms in red by default, and in the accent colour for an action that deletes nothing', () => {
+    const { rerender } = render(
+      <ConfirmDialog isOpen title="Delete" onCancel={vi.fn()} onConfirm={vi.fn()} confirmLabel="Delete">
+        <p>Sure?</p>
+      </ConfirmDialog>
+    );
+    expect(screen.getByRole('button', { name: 'Delete' }).className).toContain('bg-danger-600');
+    rerender(
+      <ConfirmDialog isOpen title="Compact" confirmVariant="primary" onCancel={vi.fn()} onConfirm={vi.fn()} confirmLabel="Compact">
+        <p>Sure?</p>
+      </ConfirmDialog>
+    );
+    expect(screen.getByRole('button', { name: 'Compact' }).className).toContain('bg-accent-700');
   });
 });
 

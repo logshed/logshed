@@ -145,7 +145,7 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
       )}
 
       {enableMcp ? (
-        <div className="space-y-5 animate-in fade-in duration-150">
+        <div className="space-y-5 duration-150">
           {/* SSE Endpoint Field */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">

@@ -699,7 +699,6 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           maint.clearAllSessions();
         }}
         confirmLabel="Clear All Sessions"
-        confirmClassName="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-on-fill bg-danger-600 hover:bg-danger-500 transition cursor-pointer"
       >
         <p className="text-fg-soft leading-relaxed">
           Are you sure you want to terminate all active on-demand and API maintenance sessions? Alert notifications will immediately resume.

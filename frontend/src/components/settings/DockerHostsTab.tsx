@@ -551,10 +551,6 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
         cancelDisabled={isDeleting}
         confirmDisabled={isDeleting}
         confirmLabel={isDeleting ? 'Removing...' : 'Remove Host'}
-        bodyClassName="space-y-4"
-        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-line"
-        cancelClassName="px-3 py-1.5 text-xs font-medium text-fg-muted hover:text-fg transition cursor-pointer"
-        confirmClassName="px-3.5 py-1.5 text-xs font-medium text-on-fill bg-danger-600 hover:bg-danger-500 rounded-lg transition cursor-pointer disabled:opacity-50"
       >
         <div className="p-3 rounded-lg border bg-warning-950/40 border-warning-800/80 text-warning-200 text-xs flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 text-warning-400 shrink-0 mt-0.5" />

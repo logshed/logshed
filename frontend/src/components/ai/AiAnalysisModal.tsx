@@ -862,7 +862,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
             {/* In-Flight Live Progress & Failover Pipeline Card */}
             {isDiagnosing && (
-              <div className="p-3.5 bg-canvas border border-accent-800/60 rounded-lg space-y-2.5 animate-in fade-in">
+              <div className="p-3.5 bg-canvas border border-accent-800/60 rounded-lg space-y-2.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <RefreshCw className="w-4 h-4 text-accent-400 animate-spin" />
@@ -965,7 +965,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
 
         {/* Structured AI Analysis Result */}
         {analysisResult && (
-          <div className="space-y-4 animate-in fade-in">
+          <div className="space-y-4">
             {/* Header info - 2-row layout */}
             <div className="bg-canvas p-3 rounded-lg border border-line space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">

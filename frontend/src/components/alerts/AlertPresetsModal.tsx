@@ -40,7 +40,7 @@ export const AlertPresetsModal: React.FC<AlertPresetsModalProps> = ({
     >
       <div className="space-y-4">
         {/* Intro, Category Filter and Channel Selector */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line-muted">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line-subtle">
           <div>
             <p className="text-xs text-fg-soft font-medium">Pre-tuned Monitoring Rules</p>
             <p className="text-xs text-fg-muted mt-0.5">

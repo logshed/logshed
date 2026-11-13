@@ -771,7 +771,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div
             role="status"
             aria-live="polite"
-            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-surface/95 border border-line text-fg-soft text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-in fade-in duration-150"
+            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-surface/95 border border-line text-fg-soft text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg duration-150"
           >
             <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-400" />
             <span>Updating results...</span>
@@ -780,7 +780,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
 
         {/* Floating Pause/Resume Banner */}
         {!autoScroll && missedLogsCount > 0 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 shadow-xl animate-in slide-in-from-bottom-2 w-[92%] sm:w-auto max-w-md flex justify-center">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 shadow-xl w-[92%] sm:w-auto max-w-md flex justify-center">
             <button
               onClick={buffer.resumeAutoScroll}
               className="w-full sm:w-auto bg-accent-700 hover:bg-accent-600 text-on-fill text-xs font-semibold px-4 py-2 rounded-xl sm:rounded-full flex items-center justify-center gap-2 shadow-lg transition"

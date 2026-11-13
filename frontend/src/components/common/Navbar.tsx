@@ -194,7 +194,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <LogShedLogo className="w-6 h-6 text-accent-600" />
             {/* The logshed.dev wordmark; 1px lower than centre looks centred next to the icon */}
-            <span className="relative top-px font-bold tracking-[-0.02em] text-[1.05rem] leading-6 text-fg-bright">LogShed</span>
+            <span className="relative top-px font-bold tracking-[-0.02em] text-[1.05rem] leading-6 text-fg-strong">LogShed</span>
           </div>
 
           {/* Ingestion & Queue Health */}

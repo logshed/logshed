@@ -47,7 +47,7 @@ describe('Navbar Component', () => {
     const brandLogo = screen.getByTitle('Go to Console View');
     // The logshed.dev wordmark: one word in white sans, not LOG plus a monospace SHED
     expect(brandLogo).toHaveTextContent(/^LogShed$/);
-    expect(within(brandLogo).getByText('LogShed')).toHaveClass('font-bold', 'text-fg-bright', 'relative', 'top-px');
+    expect(within(brandLogo).getByText('LogShed')).toHaveClass('font-bold', 'text-fg-strong', 'relative', 'top-px');
     expect(brandLogo.querySelector('.font-mono')).toBeNull();
     fireEvent.click(brandLogo);
 

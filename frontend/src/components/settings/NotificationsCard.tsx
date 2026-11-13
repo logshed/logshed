@@ -524,10 +524,6 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
         confirmDisabled={isDeleting}
         confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
         confirmLabel="Delete Target"
-        bodyClassName="space-y-4"
-        footerClassName="flex justify-end gap-2 pt-2 border-t border-line-subtle"
-        cancelClassName="px-3 py-1.5 text-xs text-fg-muted hover:text-fg cursor-pointer"
-        confirmClassName="px-4 py-1.5 text-xs font-medium text-on-fill bg-danger-600 hover:bg-danger-500 rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50"
       >
         <p className="text-xs text-fg-soft">
           Are you sure you want to delete notification target{' '}

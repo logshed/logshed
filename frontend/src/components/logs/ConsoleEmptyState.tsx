@@ -48,7 +48,7 @@ const FirstRunCard: React.FC<Pick<ConsoleEmptyStateProps, 'syslogPort' | 'onOpen
           <CopyButton
             text={command}
             title="Copy command"
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer min-h-[32px] shrink-0"
+            className="shrink-0"
           />
         </div>
         {onOpenSourcesSettings && (

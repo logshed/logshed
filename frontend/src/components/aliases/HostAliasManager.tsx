@@ -406,7 +406,6 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
           confirmDisabled={isDeletingIp === deleteTargetIp}
           confirmIcon={<Trash2 className="w-3.5 h-3.5" />}
           confirmLabel={isDeletingIp === deleteTargetIp ? 'Deleting...' : 'Delete Alias'}
-          confirmClassName="flex items-center gap-1.5 px-3.5 py-1.5 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-lg shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <p className="font-semibold text-fg-strong text-xs">
             Remove host alias mapping?

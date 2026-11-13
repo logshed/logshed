@@ -456,7 +456,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
                   text={promptToCopy}
                   label="Copy Prompt"
                   title="Copy prompt"
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
+                  className="shrink-0"
                 />
               </div>
 
@@ -493,7 +493,7 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
               text={item.sample_log || ''}
               label="Copy Log"
               title="Copy triggering log"
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer shrink-0 min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
+              className="shrink-0"
             />
           </div>
           <pre className="p-3 bg-canvas font-mono text-[11px] text-fg-soft overflow-x-auto whitespace-pre-wrap max-h-48 leading-relaxed selection:bg-accent-900/50">

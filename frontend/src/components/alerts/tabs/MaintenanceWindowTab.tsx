@@ -370,7 +370,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <CopyButton
                 text={startSnippet}
                 label="Copy cURL"
-                className="text-[11px] text-accent-400 hover:text-accent-300 flex items-center gap-1 cursor-pointer font-medium min-h-[32px] touch-manipulation select-none active:text-accent-200"
+                variant="link"
                 timeoutMs={2500}
               />
             </div>
@@ -391,7 +391,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <CopyButton
                 text={stopSnippet}
                 label="Copy cURL"
-                className="text-[11px] text-accent-400 hover:text-accent-300 flex items-center gap-1 cursor-pointer font-medium min-h-[32px] touch-manipulation select-none active:text-accent-200"
+                variant="link"
                 timeoutMs={2500}
               />
             </div>

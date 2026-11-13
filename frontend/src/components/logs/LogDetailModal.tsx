@@ -398,7 +398,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
         {/* Delete Confirmation Banner */}
         {showDeleteConfirm && (
-          <div className="p-3 bg-danger-950/70 border border-danger-800 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-danger-200 animate-in fade-in">
+          <div className="p-3 bg-danger-950/70 border border-danger-800 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-danger-200">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-danger-400 shrink-0" />
               <span>Permanently delete log record #{log.id}? This action cannot be reversed.</span>
@@ -478,7 +478,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               text={cleanedPayload}
               label="Copy Message"
               title="Copy message payload"
-              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
+              className="-mr-1"
             />
           </div>
           <div className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto">
@@ -501,7 +501,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               text={log.raw ?? ''}
               label="Copy Raw"
               title="Copy raw log record"
-              className="inline-flex items-center gap-1.5 px-2 py-1 -mr-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
+              className="-mr-1"
             />
           </div>
           <div className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg-muted text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto">

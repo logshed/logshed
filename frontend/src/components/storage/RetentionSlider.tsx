@@ -410,7 +410,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
       {/* Vacuum Result Banner */}
       {vacuumResult && (
-        <div className="p-3 bg-canvas border border-accent-900/60 rounded-lg text-xs font-mono text-fg-soft animate-in fade-in">
+        <div className="p-3 bg-canvas border border-accent-900/60 rounded-lg text-xs font-mono text-fg-soft">
           <span className="text-accent-400 font-semibold block mb-1">Database Compaction Completed Successfully:</span>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
             <div>Previous Footprint: <span className="text-fg-strong">{formatBytes(vacuumResult.previous_size_bytes)}</span></div>
@@ -422,7 +422,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
       {/* Prune Result Banner */}
       {pruneResult && (
-        <div className="p-3 bg-canvas border border-success-900/60 rounded-lg text-xs font-mono text-fg-soft animate-in fade-in">
+        <div className="p-3 bg-canvas border border-success-900/60 rounded-lg text-xs font-mono text-fg-soft">
           <span className="text-success-400 font-semibold block mb-1">Prune Completed Successfully:</span>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             <div>Deleted Logs: <span className="text-fg-strong">{pruneResult.deleted_logs}</span></div>
@@ -457,10 +457,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
         confirmDisabled={isCompacting}
         confirmIcon={<Database className="w-3.5 h-3.5" />}
         confirmLabel="Confirm & Compact"
-        bodyClassName="space-y-4 text-xs text-fg-soft"
-        footerClassName="flex items-center justify-end gap-2 pt-2 border-t border-line-subtle"
-        cancelClassName="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-lg transition cursor-pointer"
-        confirmClassName="px-4 py-1.5 text-xs bg-accent-700 hover:bg-accent-600 text-on-fill font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+        confirmVariant="primary"
       >
         <p className="leading-relaxed">
           The database will be repacked to return unused space to the host filesystem.

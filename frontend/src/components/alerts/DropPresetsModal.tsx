@@ -33,7 +33,7 @@ export const DropPresetsModal: React.FC<DropPresetsModalProps> = ({
     >
       <div className="space-y-4">
         {/* Intro */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line-muted">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line-subtle">
           <div>
             <p className="text-xs text-fg-soft font-medium">Common Noise Filter Presets</p>
             <p className="text-xs text-fg-muted mt-0.5">

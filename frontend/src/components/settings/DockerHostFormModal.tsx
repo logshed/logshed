@@ -273,7 +273,7 @@ export const DockerHostFormModal: React.FC<DockerHostFormModalProps> = ({
         </div>
 
         {tlsEnabled && (
-          <div className="space-y-3 p-3.5 bg-canvas border border-line-muted rounded-lg">
+          <div className="space-y-3 p-3.5 bg-canvas border border-line-subtle rounded-lg">
             <div className="flex items-center gap-1.5 text-xs font-medium text-fg-soft">
               <Lock className="w-3.5 h-3.5 text-accent-400" />
               <span>TLS Credentials (PEM format)</span>

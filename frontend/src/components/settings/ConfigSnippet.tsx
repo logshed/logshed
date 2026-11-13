@@ -52,8 +52,7 @@ export const ConfigSnippet: React.FC<ConfigSnippetProps> = ({ title, subtitle, i
             <CopyButton
               text={snippet}
               title="Copy JSON configuration"
-              className="inline-flex items-center gap-1 text-[11px] text-fg-muted hover:text-fg cursor-pointer"
-              iconClassName="w-3 h-3"
+                            iconClassName="w-3 h-3"
               copiedLabelClassName="text-success-400"
             />
           </div>

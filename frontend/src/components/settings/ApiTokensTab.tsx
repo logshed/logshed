@@ -85,7 +85,7 @@ const TokenDialog: React.FC<TokenDialogProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`bg-surface border border-line rounded-xl shadow-2xl w-full overflow-hidden outline-hidden animate-in fade-in zoom-in-95 duration-150 ${panelClassName}`}
+        className={`bg-surface border border-line rounded-xl shadow-2xl w-full overflow-hidden outline-hidden duration-150 ${panelClassName}`}
       >
         {children}
       </div>
@@ -342,7 +342,7 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold text-fg-strong">{token.name}</span>
-                          <span className="font-mono text-[11px] text-fg-soft bg-canvas px-1.5 py-0.5 rounded-sm border border-line-muted">
+                          <span className="font-mono text-[11px] text-fg-soft bg-canvas px-1.5 py-0.5 rounded-sm border border-line-subtle">
                             {token.token_prefix}
                           </span>
                           <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium whitespace-nowrap bg-raised text-accent-300 border border-line">

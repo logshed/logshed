@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, RefreshCw, Save } from 'lucide-react';
 import { Modal } from './Modal.tsx';
+import { Button } from './Button.tsx';
 
 export interface UnsavedChangesModalProps {
   isOpen: boolean;
@@ -53,34 +54,22 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
         </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-3 border-t border-line">
-          <button
-            type="button"
-            onClick={onKeepEditing}
-            className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft hover:text-fg-max bg-raised hover:bg-raised-hover border border-line transition cursor-pointer"
-          >
+          <Button onClick={onKeepEditing} className="w-full sm:w-auto">
             Keep Editing
-          </button>
-          <button
-            type="button"
-            onClick={onDiscard}
-            className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-medium text-danger-400 hover:text-danger-300 bg-danger-950/40 hover:bg-danger-900/40 border border-danger-800/60 transition cursor-pointer"
-          >
+          </Button>
+          <Button variant="danger-soft" onClick={onDiscard} className="w-full sm:w-auto">
             {discardLabel}
-          </button>
+          </Button>
           {onSave && (
-            <button
-              type="button"
+            <Button
+              variant="primary"
               disabled={isSaving}
               onClick={handleSave}
-              className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-xs"
+              className="w-full sm:w-auto"
+              icon={isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             >
-              {isSaving ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>Save &amp; Continue</span>
-            </button>
+              Save &amp; Continue
+            </Button>
           )}
         </div>
       </div>

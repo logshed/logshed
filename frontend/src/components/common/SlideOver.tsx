@@ -1,5 +1,6 @@
 import React, { useId, useRef } from 'react';
 import { X } from 'lucide-react';
+import { IconButton } from './Button.tsx';
 import { useDialog } from '../../utils/dialogStack.ts';
 
 interface SlideOverProps {
@@ -44,7 +45,7 @@ export const SlideOver: React.FC<SlideOverProps> = ({
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className={`pointer-events-auto w-screen ${width} bg-surface border-l border-line shadow-2xl flex flex-col overscroll-contain outline-hidden animate-in slide-in-from-right duration-200 overflow-x-hidden`}
+            className={`pointer-events-auto w-screen ${width} bg-surface border-l border-line shadow-2xl flex flex-col overscroll-contain outline-hidden duration-200 overflow-x-hidden`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -57,13 +58,9 @@ export const SlideOver: React.FC<SlideOverProps> = ({
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {headerActions}
-                <button
-                  onClick={onClose}
-                  className="text-fg-muted hover:text-fg hover:bg-raised p-1.5 rounded-sm transition shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
-                  aria-label="Close panel"
-                >
+                <IconButton label="Close panel" size="lg" onClick={onClose}>
                   <X className="w-5 h-5 sm:w-4 sm:h-4" />
-                </button>
+                </IconButton>
               </div>
             </div>
 

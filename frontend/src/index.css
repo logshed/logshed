@@ -38,7 +38,6 @@
 
   /* Borders and dividers, faintest first */
   --color-line-subtle: #141d30;
-  --color-line-muted: #192336;
   --color-line: #1e293b;
   --color-line-hover: #293548;
   --color-line-strong: #334155;
@@ -47,7 +46,6 @@
 
   /* Text, brightest first. on-fill is text on a filled accent, danger or success button. */
   --color-fg-max: #ffffff;
-  --color-fg-bright: #f8fafc;
   --color-fg-strong: #f1f5f9;
   --color-fg: #e2e8f0;
   --color-fg-soft: #cbd5e1;

@@ -23,7 +23,7 @@ export const SelectionActionBar: React.FC<SelectionActionBarProps> = ({
   const overAiLimit = selectedLogs.length > SELECT_ALL_LIMIT;
 
   return (
-    <div className="bg-surface border-t border-line px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 select-none z-20 shadow-2xl animate-in slide-in-from-bottom">
+    <div className="bg-surface border-t border-line px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 select-none z-20 shadow-2xl">
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         <span className="text-xs font-semibold text-fg shrink-0">
           {selectedLogs.length} log{selectedLogs.length === 1 ? '' : 's'} selected
