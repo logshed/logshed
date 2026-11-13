@@ -27,8 +27,9 @@ _BUSY_RETRY_SECONDS: float = 60.0
 
 
 # Prune schedule tracking (process-local, matches the single-process model).
-# The PruneWorker runs at startup and then every 24 hours from the end of each run.
-_PRUNE_INTERVAL_SECONDS: float = 86400.0
+# The PruneWorker runs at startup and then this long after each UTC midnight, so a day file is
+# deleted on the day its whole day passes the cutoff (retention counts whole UTC days).
+_PRUNE_AFTER_MIDNIGHT_SECONDS: float = 300.0
 _schedule_lock = threading.Lock()
 _last_prune_at: Optional[datetime.datetime] = None
 _next_scheduled_prune_at: Optional[datetime.datetime] = None
@@ -49,6 +50,16 @@ def _set_next_scheduled_prune(delay_seconds: Optional[float]) -> None:
             _next_scheduled_prune_at = datetime.datetime.now(
                 datetime.timezone.utc
             ) + datetime.timedelta(seconds=delay_seconds)
+
+
+def seconds_until_next_prune(now: Optional[datetime.datetime] = None) -> float:
+    """Seconds from now to the next scheduled prune: _PRUNE_AFTER_MIDNIGHT_SECONDS after a UTC midnight."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    midnight = datetime.datetime.combine(now.date(), datetime.time(), tzinfo=datetime.timezone.utc)
+    next_at = midnight + datetime.timedelta(seconds=_PRUNE_AFTER_MIDNIGHT_SECONDS)
+    if next_at <= now:
+        next_at += datetime.timedelta(days=1)
+    return (next_at - now).total_seconds()
 
 
 def get_prune_schedule() -> dict[str, Optional[str]]:
@@ -242,6 +253,7 @@ def execute_prune(
     """
     retention_days = max(1, retention_days)
     total_deleted = 0
+    legacy_dropped = False
     deleted_history = 0
     deleted_ai_audit = 0
     db_path_obj = Path(db_path)
@@ -266,6 +278,15 @@ def execute_prune(
             total_deleted = log_store.prune(conn, cutoff_iso, wait_for_ingest_write)
         finally:
             note_logs_deleted()
+
+        # 1a. Once the logs from before the upgrade to day files are all gone, their table goes too
+        try:
+            legacy_dropped = log_store.drop_empty_legacy(conn)
+        except sqlite3.Error as e:
+            legacy_dropped = False
+            logger.warning(f"Could not drop the emptied table of logs from before 1.4.0: {e}")
+        if legacy_dropped:
+            logger.info("The table of logs stored before the upgrade to day files is empty, so it is dropped.")
 
         # 1b. Prune alert history (alerts, digests, on-demand analyses, maintenance windows)
         # older than the cutoff, plus the AI audit records they link to.
@@ -332,14 +353,29 @@ def execute_prune(
         "deleted_history": deleted_history,
         "deleted_ai_audit": deleted_ai_audit,
         "metrics": metrics,
+        "legacy_dropped": legacy_dropped,
     }
 
 
 async def execute_prune_async(
     db_path: str | Path, retention_days: int = 14, index_pending: bool = True
 ) -> dict:
-    """Async wrapper executing prune on a thread."""
-    return await asyncio.to_thread(execute_prune, db_path, retention_days, index_pending)
+    """
+    Async wrapper executing prune on a thread. When the prune dropped the emptied legacy logs
+    table, logs.db is compacted once (it holds only settings and history by then, so this takes
+    seconds) if the disk has room; otherwise the space comes back with Compact Database.
+    """
+    result = await asyncio.to_thread(execute_prune, db_path, retention_days, index_pending)
+    if result.get("legacy_dropped"):
+        try:
+            vacuumed = await execute_vacuum(db_path)
+            result["metrics"] = vacuumed["metrics"]
+            logger.info(f"Compacted logs.db after dropping the old logs table: {vacuumed['reclaimed_bytes']} bytes reclaimed.")
+        except InsufficientDiskSpaceError as e:
+            logger.warning(f"logs.db was not compacted after dropping the old logs table, so the space comes back with Compact Database: {e}")
+        except Exception as e:
+            logger.warning(f"Could not compact logs.db after dropping the old logs table: {e}")
+    return result
 
 
 
@@ -370,8 +406,8 @@ def get_effective_retention_days(conn: sqlite3.Connection) -> int:
 
 class PruneWorker:
     """
-    Background worker that runs daily automated retention pruning.
-    Executes once every 24 hours using the configured retention_days from system_settings.
+    Background worker that runs automated retention pruning with the configured retention_days:
+    once at start-up, then a few minutes after each UTC midnight (seconds_until_next_prune).
     """
     def __init__(self, db_path: str | Path):
         self._db_path = Path(db_path)
@@ -417,10 +453,11 @@ class PruneWorker:
                     backoff = min(backoff * 2.0, 3600.0)
                     continue
 
-            # Wait 24 hours (86400 seconds) or until stop signal
+            # Wait until just after the next UTC midnight, or until stop signal
             try:
-                _set_next_scheduled_prune(_PRUNE_INTERVAL_SECONDS)
-                await asyncio.wait_for(self._stop_event.wait(), timeout=_PRUNE_INTERVAL_SECONDS)
+                delay = seconds_until_next_prune()
+                _set_next_scheduled_prune(delay)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
                 break
             except asyncio.TimeoutError:
                 continue

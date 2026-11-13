@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from app.core.day_files import RAW_SQL, day_start_us, iso_sql, iso_to_us
+from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us
 from app.core.utils import DOCKER_ALIASES_SQL, format_severity_label
 from app.services import day_store
 from app.services.log_query import (
@@ -167,8 +167,11 @@ def relabel_host(
         kept = (target_alias, *keep_aliases)
         day_sql = f"source_ip = ? AND host_id NOT IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(kept))}))"
         day_params = (source_ip, *kept)
-    for _day, day_conn in day_store.open_day_connections(conn):
-        total += day_store.set_names(day_conn, "host_id", day_sql, day_params, target_alias, batch_size, _pause)
+    for day, day_conn in day_store.open_day_connections(conn):
+        changed = day_store.set_names(day_conn, "host_id", day_sql, day_params, target_alias, batch_size, _pause)
+        if changed:
+            day_store.refresh_figures(conn, day)
+        total += changed
     if not _has_legacy_table(conn):
         return total
     if only_alias is not None:
@@ -260,8 +263,9 @@ def relabel_docker_app(
         hosts_sql = f"host_id IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(names))}))"
         host_params = tuple(names)
     day_sql = f"source_ip = ? AND app_id = (SELECT id FROM apps WHERE name = ?) AND {hosts_sql}"
-    for _day, day_conn in day_store.open_day_connections(conn):
-        day_store.set_names(day_conn, "app_id", day_sql, (source_ip, raw_name, *host_params), target_name, batch_size, _pause)
+    for day, day_conn in day_store.open_day_connections(conn):
+        if day_store.set_names(day_conn, "app_id", day_sql, (source_ip, raw_name, *host_params), target_name, batch_size, _pause):
+            day_store.refresh_figures(conn, day)
     if not _has_legacy_table(conn):
         return
     cursor = conn.cursor()
@@ -346,19 +350,22 @@ def _delete_in_parts(
             ids = [i for i in log_filter.log_ids if part.min_id <= i <= part.max_id]  # type: ignore[operator]
             if part.legacy:
                 deleted += _delete_ids(conn, tuple(ids), between_batches)
-            else:
-                deleted += day_store.delete_ids(part.conn, ids, between_batches)
-            continue
-        where_sql, params = query.where(part)
-        if part.legacy:
-            deleted += _delete_legacy_where(conn, where_sql, params, log_filter.query, batch_size, between_batches)
+                continue
+            gone = day_store.delete_ids(part.conn, ids, between_batches)
         else:
-            deleted += execute_with_fts_fallback(
+            where_sql, params = query.where(part)
+            if part.legacy:
+                deleted += _delete_legacy_where(conn, where_sql, params, log_filter.query, batch_size, between_batches)
+                continue
+            gone = execute_with_fts_fallback(
                 lambda p, c=part.conn, w=where_sql: day_store.delete_rows(c, w, p, batch_size, between_batches),
                 params,
                 log_filter.query,
                 empty=0,
             )
+        if gone and part.sealed:
+            day_store.refresh_figures(conn, part.day)
+        deleted += gone
     return deleted
 
 
@@ -427,9 +434,12 @@ def delete_everything(conn: sqlite3.Connection, batch_size: int, between_batches
                 deleted += part.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
                 day_store.delete_file(conn, part.day)
             else:
-                deleted += day_store.delete_rows(
+                gone = day_store.delete_rows(
                     part.conn, "WHERE logs.id <= :last", {"last": part.max_id}, batch_size, between_batches
                 )
+                if gone and part.sealed:
+                    day_store.refresh_figures(conn, part.day)
+                deleted += gone
     if not _has_legacy_table(conn):
         return deleted
     conn.execute("BEGIN IMMEDIATE")
@@ -465,9 +475,11 @@ def _expired_days(conn: sqlite3.Connection, cutoff_iso: str) -> list[tuple[str, 
     """(day, rows) of the day files whose whole UTC day is older than the cutoff, oldest first."""
     cutoff_us = iso_to_us(cutoff_iso)
     expired = []
-    for part in reversed(day_store.parts(conn)):
-        if not part.legacy and day_start_us(part.day) + _DAY_US <= cutoff_us:
-            expired.append((part.day, part.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]))
+    # From the catalogue, not parts(): a file with no rows left expires too
+    for day, state in day_store.catalogue_days(conn):
+        if day == LEGACY_DAY or day_start_us(day) + _DAY_US > cutoff_us:
+            continue
+        expired.append((day, day_store.stored_count(conn, day, state)))
     return sorted(expired)
 
 
@@ -515,6 +527,33 @@ def prune(
         if count == 0:
             return total
         between_batches()
+
+
+def drop_empty_legacy(conn: sqlite3.Connection) -> bool:
+    """
+    Once retention (or a delete) has emptied the legacy logs table, drop it with its full-text
+    index, triggers and indexer state, and remove its catalogue entry. Returns True when it
+    dropped them. Only from schema 4, where new logs go to day files; the space comes back with
+    a VACUUM of logs.db, which the caller runs.
+    """
+    if not _writes_day_files(conn) or not _has_legacy_table(conn):
+        return False
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("SELECT EXISTS(SELECT 1 FROM logs)").fetchone()[0]:
+            conn.execute("ROLLBACK")
+            return False
+        # Dropping the table drops its triggers; logs_fts drops its own shadow tables
+        conn.execute("DROP TABLE IF EXISTS logs_fts")
+        conn.execute("DROP TABLE logs")
+        conn.execute("DROP TABLE IF EXISTS fts_index_state")
+        conn.execute("DELETE FROM log_files WHERE day = ?", (LEGACY_DAY,))
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -752,18 +791,49 @@ def count(
     if label is None:
         total = 0
         for part in found:
-            total += _part_groups(part, query, None).get(None, 0)
+            groups = _catalogue_groups(conn, part, log_filter, None)
+            total += (groups if groups is not None else _part_groups(part, query, None)).get(None, 0)
         return total, None, {}, False
 
     merged: dict[Any, int] = {}
     for part in found:
-        for key, cnt in _part_groups(part, query, label).items():
+        groups = _catalogue_groups(conn, part, log_filter, label)
+        for key, cnt in (groups if groups is not None else _part_groups(part, query, label)).items():
             merged[key] = merged.get(key, 0) + cnt
     total = sum(merged.values())
     if label == "severity":
         return total, label, {format_severity_label(sev): merged[sev] for sev in sorted(merged)}, False
     ordered = sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))
     return total, label, dict(ordered[:group_limit]), len(ordered) > group_limit
+
+
+def _catalogue_groups(
+    conn: sqlite3.Connection, part: day_store.Part, log_filter: LogFilter, label: Optional[str]
+) -> Optional[dict[Any, int]]:
+    """
+    _part_groups() of a sealed day file from the catalogue's counts, without opening the file,
+    when the filter takes the whole file (no criterion but a time range that covers it). None
+    when the file must be read: another criterion, a range that cuts it, or hosts by address
+    (a row without a host name is grouped by its address, which the counts do not keep).
+    """
+    if not part.sealed or part.row_count is None:
+        return None
+    if log_filter.query or log_filter.sources or log_filter.apps or log_filter.log_ids or log_filter.severity_max is not None:
+        return None
+    from_us, to_us = _bound_us(log_filter.from_ts), _bound_us(log_filter.to_ts)
+    if (log_filter.from_ts and (from_us is None or part.min_ts is None or from_us > part.min_ts)) or (
+        log_filter.to_ts and (to_us is None or part.max_ts is None or to_us < part.max_ts)
+    ):
+        return None
+    if label is None:
+        return {None: part.row_count}
+    column = {"severity": "severity", "app": "app", "source": "host"}[label]
+    rows = conn.execute(
+        f"SELECT {column}, SUM(count) FROM log_file_counts WHERE day = ? GROUP BY {column}", (part.day,)
+    ).fetchall()
+    if label == "source" and any(r[0] == "" for r in rows):
+        return None
+    return {r[0]: r[1] for r in rows}
 
 
 def _part_groups(part: day_store.Part, query: _PartQuery, label: Optional[str]) -> dict[Any, int]:
@@ -1281,6 +1351,46 @@ def _legacy_seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: in
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class StoredFile:
+    """One place logs are stored, for the Storage page: a day file, or the legacy table in logs.db."""
+
+    day: str  # 'YYYY-MM-DD' (UTC), or 'legacy'
+    file_name: str
+    state: str  # 'open', 'sealed' or 'legacy'
+    row_count: Optional[int]  # None for the legacy table (the caller counts it)
+    size_bytes: Optional[int]  # None for the legacy table, which shares logs.db
+    max_ts: Optional[str]  # the newest log's own time (ISO, UTC)
+
+
+def files(conn: sqlite3.Connection) -> list[StoredFile]:
+    """
+    Every day file in the catalogue (newest day first) with its logs and size, then the legacy
+    table while it exists. The open files' figures are brought up to date first.
+    """
+    if not _writes_day_files(conn):
+        return []
+    day_store.refresh_open_figures(conn)
+    found = []
+    for day, file_name, state, row_count, size_bytes in conn.execute(
+        "SELECT day, file_name, state, row_count, size_bytes FROM log_files "
+        "WHERE day != ? AND state IN ('open', 'sealed') ORDER BY day DESC",
+        (LEGACY_DAY,),
+    ).fetchall():
+        found.append(StoredFile(day, file_name, state, row_count, size_bytes or 0, None))
+    if _has_legacy_table(conn):
+        newest = conn.execute("SELECT MAX(timestamp) FROM logs").fetchone()[0]
+        found.append(StoredFile(LEGACY_DAY, "logs.db", "legacy", None, None, newest))
+    return found
+
+
+def legacy_count(conn: sqlite3.Connection) -> Optional[int]:
+    """How many logs the legacy table holds, or None when it is gone."""
+    if not _has_legacy_table(conn):
+        return None
+    return conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+
+
 def max_id(conn: sqlite3.Connection) -> int:
     """The highest log id stored (0 when there are none)."""
     return max((p.max_id or 0 for p in day_store.parts(conn)), default=0)
@@ -1290,7 +1400,9 @@ def count_rows(conn: sqlite3.Connection, after_id: Optional[int] = None) -> int:
     """How many logs are stored, or only those with an id above after_id."""
     total = 0
     for part in day_store.parts(conn):
-        if after_id is None:
+        if after_id is None and part.row_count is not None:
+            total += part.row_count
+        elif after_id is None:
             total += part.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
         elif part.max_id is not None and part.max_id > after_id:
             total += part.conn.execute("SELECT COUNT(*) FROM logs WHERE id > ?", (after_id,)).fetchone()[0]

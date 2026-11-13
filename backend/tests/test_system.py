@@ -283,9 +283,7 @@ class TestRetentionAndPruneWorker:
         await worker.stop()
         await task
 
-        with open_db(db_file) as conn:
-            count = conn.execute("SELECT COUNT(*) FROM logs WHERE message = 'old log pruned by worker'").fetchone()[0]
-            assert count == 0
+        assert not [r for r in stored_logs(db_file) if r["message"] == "old log pruned by worker"]
 
     def test_prune_retains_freelist_for_reuse(self, tmp_path: Path):
         db_file = tmp_path / "logs.db"

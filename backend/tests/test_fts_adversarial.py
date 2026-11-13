@@ -490,15 +490,11 @@ class TestAdversarialRetentionPruning:
         result_full = execute_prune(db_path, retention_days=14, index_pending=True)
         assert result_full["deleted_logs"] == 50
 
+        # Emptied, the legacy table goes with its full-text index (new logs are in day files)
         conn = get_connection(db_path)
-        final_logs = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
-        final_fts = conn.execute("SELECT COUNT(*) FROM logs_fts").fetchone()[0]
-        final_docsize = conn.execute("SELECT COUNT(*) FROM logs_fts_docsize").fetchone()[0]
+        left = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE name LIKE 'logs%'")}
         conn.close()
-
-        assert final_logs == 0
-        assert final_fts == 0
-        assert final_docsize == 0
+        assert not {"logs", "logs_fts", "logs_fts_docsize"} & left
 
 
 # ===================================================================

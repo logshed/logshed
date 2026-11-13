@@ -3,6 +3,7 @@ System health, storage metrics, and retention maintenance API endpoints for LogS
 """
 
 import asyncio
+import datetime
 import logging
 from typing import Any, Mapping, Optional
 
@@ -22,6 +23,7 @@ from app.models import (
     PrunePreviewResponse,
     PruneResponse,
     StorageMetricItem,
+    LogFileItem,
     StorageOverviewResponse,
     VacuumResponse,
     VersionResponse,
@@ -262,6 +264,28 @@ async def trigger_vacuum(user: dict = Depends(get_current_user)) -> VacuumRespon
     return await run_vacuum_operation()
 
 
+def _log_file_item(item: dict, retention_days: int) -> LogFileItem:
+    """A snapshot's day file as the API item, with the time retention deletes it from."""
+    keep = datetime.timedelta(days=retention_days)
+    expires: Optional[str] = None
+    try:
+        if item["state"] == "legacy":
+            if item.get("newest_log_at"):
+                newest = datetime.datetime.fromisoformat(item["newest_log_at"])
+                if newest.tzinfo is None:
+                    newest = newest.replace(tzinfo=datetime.timezone.utc)
+                expires = (newest + keep).astimezone(datetime.timezone.utc).isoformat()
+        else:
+            day_end = datetime.datetime.fromisoformat(item["day"]).replace(tzinfo=datetime.timezone.utc) + datetime.timedelta(days=1)
+            expires = (day_end + keep).isoformat()
+    except ValueError:
+        expires = None
+    return LogFileItem(
+        day=item["day"], file_name=item["file_name"], state=item["state"], logs=item["logs"],
+        size_bytes=item["size_bytes"], expires_at=expires,
+    )
+
+
 @router.get("/system/storage", response_model=StorageOverviewResponse)
 async def get_storage_overview(user: dict = Depends(get_current_user)) -> StorageOverviewResponse:
     """
@@ -285,12 +309,17 @@ async def get_storage_overview(user: dict = Depends(get_current_user)) -> Storag
 
     history = await run_db_query(_get_history)
     backups = await asyncio.to_thread(db_backup.list_backups, db_backup.backups_dir(db_path))
+    retention_days = await run_db_query(get_effective_retention_days)
 
     return StorageOverviewResponse(
         db_size_bytes=current["db_size_bytes"],
         disk_free_bytes=current["disk_free_bytes"],
         disk_total_bytes=current["disk_total_bytes"],
         total_logs_count=current["total_logs_count"],
+        main_db_size_bytes=current.get("main_db_size_bytes", current["db_size_bytes"]),
+        day_files_size_bytes=current.get("day_files_size_bytes", 0),
+        log_files=[_log_file_item(f, retention_days) for f in current.get("log_files", [])],
+        retention_days=retention_days,
         backups_size_bytes=sum(b.size_bytes for b in backups),
         backups_count=len(backups),
         history=history,

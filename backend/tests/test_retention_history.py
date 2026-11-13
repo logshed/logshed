@@ -454,10 +454,37 @@ class TestPruneWorkerSchedule:
                 await asyncio.sleep(0.05)
             schedule = get_prune_schedule()
             assert schedule["last_cleanup_at"] is not None
+            # Five minutes after the next UTC midnight (or today's, before 00:05 UTC)
             next_at = datetime.datetime.fromisoformat(schedule["next_cleanup_at"])
+            assert (next_at.hour, next_at.minute) == (0, 5)
             delta = (next_at - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
-            assert 86000 < delta <= 86400
+            assert 0 < delta <= 86400
         finally:
             await worker.stop()
             await asyncio.wait_for(task, timeout=5)
         assert get_prune_schedule()["next_cleanup_at"] is None
+
+
+class TestPruneAfterMidnight:
+    def test_next_prune_is_five_minutes_after_the_next_utc_midnight(self):
+        utc = datetime.timezone.utc
+        at = datetime.datetime(2026, 3, 29, 13, 0, tzinfo=utc)
+        assert retention_mod.seconds_until_next_prune(at) == 11 * 3600 + 5 * 60
+        # Between midnight and 00:05 the run is still to come today
+        early = datetime.datetime(2026, 3, 29, 0, 2, tzinfo=utc)
+        assert retention_mod.seconds_until_next_prune(early) == 3 * 60
+        # At 00:05 exactly it has just run: the next is a day later
+        on_time = datetime.datetime(2026, 3, 29, 0, 5, tzinfo=utc)
+        assert retention_mod.seconds_until_next_prune(on_time) == 86400
+
+    def test_schedule_follows_utc_whatever_the_server_zone(self, monkeypatch):
+        import time as time_mod
+        monkeypatch.setenv("TZ", "Europe/London")
+        time_mod.tzset()
+        try:
+            # 23:30 UTC on the day British clocks go back (25-hour local day)
+            at = datetime.datetime(2026, 10, 25, 23, 30, tzinfo=datetime.timezone.utc)
+            assert retention_mod.seconds_until_next_prune(at) == 35 * 60
+        finally:
+            monkeypatch.delenv("TZ")
+            time_mod.tzset()

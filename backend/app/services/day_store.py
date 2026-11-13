@@ -32,6 +32,8 @@ ID_BLOCK = 100_000
 # Rows per multi-row INSERT (12 parameters each)
 INSERT_CHUNK_ROWS = 500
 
+_DAY_US = 86_400_000_000
+
 _local = threading.local()
 _generation = 0
 _generation_lock = threading.Lock()
@@ -149,16 +151,33 @@ def main_path(conn: sqlite3.Connection) -> Optional[Path]:
 
 @dataclass
 class Part:
-    """One place logs are stored: the legacy table in logs.db, or one day file."""
+    """
+    One place logs are stored: the legacy table in logs.db, or one day file. A sealed day
+    file's ranges come from the catalogue, and the file is opened only when a query uses it.
+    """
 
     day: str
-    conn: sqlite3.Connection
+    _conn: Optional[sqlite3.Connection]
     legacy: bool
     min_id: Optional[int]
     max_id: Optional[int]
     # The logs' own times, UTC microseconds; None when unknown (the part is then searched)
     min_ts: Optional[int]
     max_ts: Optional[int]
+    # A sealed day file: its path, and its row count from the catalogue
+    path: Optional[Path] = None
+    sealed: bool = False
+    row_count: Optional[int] = None
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            assert self.path is not None
+            opened = connection(self.path)
+            if opened is None:
+                raise sqlite3.OperationalError(f"The log file {self.path} is missing")
+            self._conn = opened
+        return self._conn
 
     def overlaps(self, from_us: Optional[int], to_us: Optional[int]) -> bool:
         if from_us is not None and self.max_ts is not None and self.max_ts < from_us:
@@ -237,7 +256,10 @@ def parts(conn: sqlite3.Connection) -> list[Part]:
         return [legacy] if legacy else []
     db_path = main_path(conn)
     found: list[Part] = []
-    for day, state in catalogue_days(conn):
+    rows = conn.execute(
+        "SELECT day, state, row_count, min_id, max_id, min_ts, max_ts FROM log_files ORDER BY day DESC"
+    ).fetchall()
+    for day, state, row_count, min_id, max_id, min_ts, max_ts in rows:
         if day == day_files.LEGACY_DAY:
             if _legacy_table_exists(conn):
                 part = _legacy_part(conn)
@@ -246,7 +268,13 @@ def parts(conn: sqlite3.Connection) -> list[Part]:
             continue
         if db_path is None or state == "deleting":
             continue
-        day_conn = connection(day_files.day_path(db_path, day))
+        path = day_files.day_path(db_path, day)
+        if state == "sealed":
+            # The seal wrote the file's figures, and a write after it opens the file again
+            if row_count and path.exists():
+                found.append(Part(day, None, False, min_id, max_id, min_ts, max_ts, path, True, row_count))
+            continue
+        day_conn = connection(path)
         if day_conn is None:
             continue
         part = _day_part(day, day_conn)
@@ -459,6 +487,12 @@ def write_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
             for entry, _ts, _received in rows:
                 entry.pop("id", None)
             raise
+        if day < _today():
+            reopen_if_sealed(db_path, day)
+
+
+def _today() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).date().isoformat()
 
 
 def _insert(day_conn: sqlite3.Connection, rows: list[tuple[dict, int, int]]) -> None:
@@ -537,6 +571,253 @@ def has_unindexed(day_conn: sqlite3.Connection) -> bool:
             "SELECT EXISTS(SELECT 1 FROM logs WHERE id > (SELECT last_indexed_id FROM fts_index_state WHERE id = 1))"
         ).fetchone()[0]
     )
+
+
+# ---------------------------------------------------------------------------
+# Start-up
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StartUpCheck:
+    finished_deletes: list[str]
+    unlisted: list[str]
+
+
+def check_files(conn: sqlite3.Connection) -> StartUpCheck:
+    """
+    At start-up, before anything writes: finish deleting the day files a crash left 'deleting',
+    remove day files left half built under a temporary name, and list the day files beside the
+    database that the catalogue does not list. Those are never used: after a restore, or a run
+    of 1.3.x, the same log ids may have been handed out again. The caller warns about them.
+    """
+    db_path = main_path(conn)
+    if db_path is None or not has_catalogue(conn):
+        return StartUpCheck([], [])
+    listed = {}
+    for day, state in catalogue_days(conn):
+        listed[day] = state
+    finished = [day for day, state in listed.items() if state == "deleting"]
+    for day in finished:
+        delete_file(conn, day)
+    unlisted = []
+    for entry in sorted(db_path.parent.iterdir()):
+        name = entry.name
+        if name.startswith(".logs-") and ".tmp" in name and entry.is_file():
+            with contextlib.suppress(OSError):
+                entry.unlink()
+            continue
+        day = day_files.day_from_file_name(name)
+        if day is not None and day not in listed:
+            unlisted.append(name)
+    return StartUpCheck(finished, unlisted)
+
+
+# ---------------------------------------------------------------------------
+# Sealing and the catalogue's figures
+# ---------------------------------------------------------------------------
+
+# A day is sealed this long after it ends (UTC), so the tail of a queue that was still writing
+# the day's last logs at midnight is usually in before the seal
+SEAL_AFTER_US = 2 * 60 * 1_000_000
+
+_HOUR_US = 3_600_000_000
+
+
+def file_bytes(path: Path) -> int:
+    """The size of a database file with its -wal and -shm."""
+    total = 0
+    for name in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        with contextlib.suppress(FileNotFoundError):
+            total += name.stat().st_size
+    return total
+
+
+@dataclass
+class Figures:
+    """What the catalogue holds about one day file's rows."""
+
+    row_count: int
+    min_id: Optional[int]
+    max_id: Optional[int]
+    min_ts: Optional[int]
+    max_ts: Optional[int]
+    # (hour start in epoch seconds, host, app, severity) -> count
+    counts: dict[tuple[int, str, str, int], int]
+
+
+def figures(day_conn: sqlite3.Connection) -> Figures:
+    """A day file's figures: its id and time ranges, and its counts by hour x host x app x severity."""
+    bounds = day_conn.execute(
+        "SELECT COUNT(*), MIN(id), MAX(id), MIN(ts), MAX(ts) FROM logs"
+    ).fetchone()
+    # The hour of a log's own time; // rounds down, so times before 1970 land in their hour too
+    rows = day_conn.execute(
+        f"""
+        SELECT g.hour, hosts.name, apps.name, g.severity, g.cnt FROM (
+            SELECT (ts - (((ts % {_HOUR_US}) + {_HOUR_US}) % {_HOUR_US})) / 1000000 AS hour,
+                   host_id, app_id, severity, COUNT(*) AS cnt
+            FROM logs GROUP BY hour, host_id, app_id, severity
+        ) AS g
+        JOIN hosts ON hosts.id = g.host_id
+        JOIN apps ON apps.id = g.app_id
+        """
+    ).fetchall()
+    counts: dict[tuple[int, str, str, int], int] = {}
+    for hour, host, app, severity, cnt in rows:
+        key = (hour, host, app, severity)
+        counts[key] = counts.get(key, 0) + cnt
+    return Figures(bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], counts)
+
+
+def _write_figures(write: sqlite3.Connection, day: str, found: Figures, size: int, seal: bool) -> None:
+    """Store a day file's figures and counts in the catalogue (in the caller's transaction)."""
+    sealed = ", state = 'sealed', sealed_at = :now" if seal else ""
+    write.execute(
+        f"""
+        UPDATE log_files SET row_count = :rows, min_id = :min_id, max_id = :max_id,
+            min_ts = :min_ts, max_ts = :max_ts, size_bytes = :size{sealed}
+        WHERE day = :day
+        """,
+        {
+            "rows": found.row_count, "min_id": found.min_id, "max_id": found.max_id,
+            "min_ts": found.min_ts, "max_ts": found.max_ts, "size": size, "day": day,
+            "now": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
+    )
+    write.execute("DELETE FROM log_file_counts WHERE day = ?", (day,))
+    write.executemany(
+        "INSERT INTO log_file_counts (day, hour, host, app, severity, count) VALUES (?, ?, ?, ?, ?, ?)",
+        [(day, hour, host, app, sev, cnt) for (hour, host, app, sev), cnt in found.counts.items()],
+    )
+
+
+def seal(conn: sqlite3.Connection, day: str) -> bool:
+    """
+    Seal a finished day's file: compact its full-text index (FTS5 'optimize'), store its figures
+    and counts in the catalogue, and mark it 'sealed'. Returns False, changing nothing, when the
+    file is missing, not 'open', or has rows not yet in its full-text index.
+
+    The file's write lock is held from the check to the catalogue write, so no row can arrive
+    between them; a batch that arrives after the seal opens the day again (reopen_if_sealed).
+    """
+    db_path = main_path(conn)
+    if db_path is None:
+        return False
+    path = day_files.day_path(db_path, day)
+    day_conn = connection(path)
+    if day_conn is None:
+        return False
+    if day_conn.in_transaction:
+        day_conn.commit()
+    day_conn.execute("BEGIN IMMEDIATE")
+    try:
+        state = conn.execute("SELECT state FROM log_files WHERE day = ?", (day,)).fetchone()
+        if state is None or state[0] != "open" or has_unindexed(day_conn):
+            day_conn.execute("ROLLBACK")
+            return False
+        day_conn.execute("INSERT INTO logs_fts(logs_fts) VALUES('optimize')")
+        found = figures(day_conn)
+        write = _main_write_conn(db_path)
+        with write:
+            # file_bytes before the checkpoint below: the size settles once the WAL is folded in,
+            # and the next storage snapshot writes the final figure
+            _write_figures(write, day, found, file_bytes(path), seal=True)
+        day_conn.execute("COMMIT")
+    except BaseException:
+        with contextlib.suppress(Exception):
+            day_conn.execute("ROLLBACK")
+        raise
+    with contextlib.suppress(sqlite3.Error):
+        day_conn.execute("PRAGMA optimize")
+        day_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return True
+
+
+def days_to_seal(conn: sqlite3.Connection, now_us: int) -> list[str]:
+    """The 'open' days that ended at least SEAL_AFTER_US before now_us, oldest first."""
+    if not has_catalogue(conn):
+        return []
+    return [
+        r[0]
+        for r in conn.execute("SELECT day FROM log_files WHERE state = 'open' ORDER BY day ASC").fetchall()
+        if r[0] != day_files.LEGACY_DAY and day_files.day_start_us(r[0]) + _DAY_US + SEAL_AFTER_US <= now_us
+    ]
+
+
+def seal_finished_days(conn: sqlite3.Connection, now_us: Optional[int] = None) -> list[str]:
+    """Seal every finished day whose file is fully indexed; returns the days sealed."""
+    if now_us is None:
+        now_us = iso_to_us(datetime.datetime.now(datetime.timezone.utc).isoformat())
+    return [day for day in days_to_seal(conn, now_us) if seal(conn, day)]
+
+
+def reopen_if_sealed(db_path: Path, day: str) -> None:
+    """A batch was written to a sealed day (a queue still draining after midnight): open it again to index and seal later."""
+    write = _main_write_conn(db_path)
+    with write:
+        write.execute("UPDATE log_files SET state = 'open', sealed_at = NULL WHERE day = ? AND state = 'sealed'", (day,))
+
+
+def stored_count(conn: sqlite3.Connection, day: str, state: str) -> int:
+    """How many logs a day file holds: the catalogue's figure once sealed, otherwise counted (0 when missing)."""
+    if state == "sealed":
+        row = conn.execute("SELECT row_count FROM log_files WHERE day = ?", (day,)).fetchone()
+        return row[0] if row else 0
+    db_path = main_path(conn)
+    day_conn = connection(day_files.day_path(db_path, day)) if db_path is not None else None
+    return day_conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0] if day_conn is not None else 0
+
+
+def refresh_figures(conn: sqlite3.Connection, day: str) -> None:
+    """Rewrite a sealed day's figures and counts after a targeted delete or relabel changed its rows."""
+    db_path = main_path(conn)
+    if db_path is None:
+        return
+    state = conn.execute("SELECT state FROM log_files WHERE day = ?", (day,)).fetchone()
+    if state is None or state[0] != "sealed":
+        return
+    path = day_files.day_path(db_path, day)
+    day_conn = connection(path)
+    if day_conn is None:
+        return
+    found = figures(day_conn)
+    write = _main_write_conn(db_path)
+    with write:
+        state = write.execute("SELECT state FROM log_files WHERE day = ?", (day,)).fetchone()
+        if state is not None and state[0] == "sealed":
+            _write_figures(write, day, found, file_bytes(path), seal=False)
+
+
+def refresh_open_figures(conn: sqlite3.Connection) -> None:
+    """
+    Bring the catalogue's row counts, ranges and sizes up to date: the ranges of the open files
+    (which the writer does not record as it goes), and every file's size on disk.
+    """
+    db_path = main_path(conn)
+    if db_path is None or not has_catalogue(conn):
+        return
+    updates = []
+    for day, state in catalogue_days(conn):
+        if day == day_files.LEGACY_DAY or state == "deleting":
+            continue
+        path = day_files.day_path(db_path, day)
+        size = file_bytes(path)
+        if state == "open":
+            day_conn = connection(path)
+            if day_conn is None:
+                continue
+            bounds = day_conn.execute("SELECT COUNT(*), MIN(id), MAX(id), MIN(ts), MAX(ts) FROM logs").fetchone()
+            updates.append(("UPDATE log_files SET row_count = ?, min_id = ?, max_id = ?, min_ts = ?, max_ts = ?, size_bytes = ? "
+                            "WHERE day = ? AND state = 'open'", (*bounds, size, day)))
+        else:
+            updates.append(("UPDATE log_files SET size_bytes = ? WHERE day = ?", (size, day)))
+    if not updates:
+        return
+    write = _main_write_conn(db_path)
+    with write:
+        for sql, params in updates:
+            write.execute(sql, params)
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +906,8 @@ def write_rows_one_by_one(
                 entry.pop("id", None)
             raise
         stored.extend(file_stored)
+        if file_stored and day < _today():
+            reopen_if_sealed(db_path, day)
     return stored, skipped
 
 

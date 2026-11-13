@@ -118,11 +118,33 @@ export interface StorageMetricsSnapshot {
   total_logs_count: number;
 }
 
+/** One place logs are stored: a UTC day's file, or the logs kept from before 1.4.0 ("legacy"). */
+export interface LogFileItem {
+  /** 'YYYY-MM-DD' (UTC), or 'legacy'. */
+  day: string;
+  file_name: string;
+  /** 'open' (today's, or still being indexed), 'sealed' or 'legacy'. */
+  state: string;
+  logs: number;
+  /** None for 'legacy', which is inside logs.db. */
+  size_bytes?: number | null;
+  /** UTC time from which retention deletes the file; for 'legacy', when its newest log goes. */
+  expires_at?: string | null;
+}
+
 export interface StorageMetricsResponse {
+  /** logs.db and every day file. */
   db_size_bytes: number;
   disk_free_bytes: number;
   disk_total_bytes: number;
   total_logs_count?: number;
+  /** logs.db alone (settings, rules, history, and the logs from before 1.4.0). */
+  main_db_size_bytes?: number;
+  /** The day files together. */
+  day_files_size_bytes?: number;
+  /** Day files newest first, then the logs from before 1.4.0 while any are left. */
+  log_files?: LogFileItem[];
+  retention_days?: number | null;
   /** Bytes and number of the database backup archives beside the database. */
   backups_size_bytes?: number;
   backups_count?: number;

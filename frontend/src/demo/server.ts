@@ -353,7 +353,22 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   ['DELETE', /^\/api\/aliases\/(.+)$/, (m) => { store.setAliases(store.aliases.filter((a) => a.ip !== decodeURIComponent(m[1]))); return { status: 'ok' }; }],
   ['GET', /^\/api\/system\/storage$/, () => {
     const count = logs.length * 40;
-    return { db_size_bytes: count * 640, disk_free_bytes: 394e9, disk_total_bytes: 1e12, total_logs_count: count, history: storage };
+    const days = Number(settings.retention_days) || 14;
+    // One file per UTC day: today's open, the rest sealed, each holding an even share of the logs
+    const logFiles = Array.from({ length: days }, (_v, i) => {
+      const start = new Date(Date.now() - i * 86400_000);
+      start.setUTCHours(0, 0, 0, 0);
+      const day = start.toISOString().slice(0, 10);
+      return {
+        day, file_name: `logs-${day}-UTC.db`, state: i === 0 ? 'open' : 'sealed', logs: Math.round(count / days),
+        size_bytes: Math.round((count / days) * 360), expires_at: new Date(start.getTime() + (days + 1) * 86400_000).toISOString(),
+      };
+    });
+    const dayBytes = logFiles.reduce((sum, f) => sum + f.size_bytes, 0);
+    return {
+      db_size_bytes: dayBytes + 24e6, main_db_size_bytes: 24e6, day_files_size_bytes: dayBytes, log_files: logFiles,
+      retention_days: days, disk_free_bytes: 394e9, disk_total_bytes: 1e12, total_logs_count: count, history: storage,
+    };
   }],
   ['GET', /^\/api\/maintenance\/prune\/preview$/, (_m, q) => ({
     retention_days: Number(q.get('retention_days') || settings.retention_days), cutoff: new Date(Date.now() - 30 * 86400_000).toISOString(),

@@ -130,6 +130,18 @@ def layouts(tmp_path_factory) -> dict[str, Path]:
     run_migrations(split, backup=False)
     _write_days(split, ROWS[SPLIT_AT:])
     paths["split"] = split
+
+    # The same two with every day sealed: ranges and whole-file counts come from the catalogue
+    for name, source in (("sealed", days), ("split_sealed", split)):
+        copy = base / name / "logs.db"
+        copy.parent.mkdir()
+        for f in source.parent.iterdir():
+            copy.parent.joinpath(f.name).write_bytes(f.read_bytes())
+        day_store.forget_connections()
+        with open_db(copy) as conn:
+            sealed = day_store.seal_finished_days(conn)
+            assert sealed and all(state == "sealed" for day, state in day_store.catalogue_days(conn) if day != "legacy")
+        paths[name] = copy
     yield paths
     day_store.forget_connections()
 
@@ -157,8 +169,8 @@ def _plain(value):
 
 def _assert_same(results: dict) -> None:
     reference = results["legacy"]
-    assert results["days"] == reference
-    assert results["split"] == reference
+    for name in ("days", "split", "sealed", "split_sealed"):
+        assert results[name] == reference, name
 
 
 def test_the_layouts_hold_what_they_should(layouts):

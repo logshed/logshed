@@ -356,10 +356,29 @@ async def _maintenance_sweep_worker(db_path) -> None:
             await asyncio.sleep(10)
 
 
+def _check_day_files(conn) -> None:
+    from app.services import day_store
+    found = day_store.check_files(conn)
+    for day in found.finished_deletes:
+        logger.info(f"Finished deleting the log file of {day} (UTC), which a stop part way had left.")
+    if found.unlisted:
+        logger.warning(
+            f"LogShed does not use these log files beside the database, because its catalogue does not list them "
+            f"(left by a restore or by running an older version): {', '.join(found.unlisted)}. "
+            "Move or delete them when you no longer need them."
+        )
+
+
 async def _start_services(db_path) -> None:
     """Everything start-up does once the database is at the current schema: settings, workers and listeners."""
     global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
     await asyncio.to_thread(get_or_create_master_key)
+
+    # Finish what a crash left of a day file's deletion, and name day files the catalogue does not list
+    try:
+        await run_db_query(_check_day_files, custom_db_path=Path(db_path))
+    except Exception as e:
+        logger.warning(f"Could not check the log files beside the database: {e}")
 
     # Save MAX_RETENTION_DAYS as the stored retention (a settings read never writes)
     try:

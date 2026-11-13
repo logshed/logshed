@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 from app.core.migrations import get_connection
 from app.services import log_store
@@ -24,6 +25,9 @@ logger = logging.getLogger(__name__)
 _count_lock = threading.Lock()
 _count_generation = 0
 _count_state: dict[str, tuple[int, int, int]] = {}  # db path -> (generation, count, max id)
+# The legacy table's count: it takes no new rows after the upgrade to day files, so it changes
+# only when logs are deleted
+_legacy_state: dict[str, tuple[int, Optional[int]]] = {}  # db path -> (generation, count)
 
 
 def note_logs_deleted() -> None:
@@ -55,21 +59,39 @@ def count_logs(conn: sqlite3.Connection, db_path: str | Path) -> int:
     return total
 
 
+def _legacy_count(conn: sqlite3.Connection, db_path: str | Path) -> Optional[int]:
+    """The legacy table's row count, kept until logs are deleted (None when the table is gone)."""
+    key = str(db_path)
+    with _count_lock:
+        generation = _count_generation
+        state = _legacy_state.get(key)
+    if state is not None and state[0] == generation:
+        return state[1]
+    total = log_store.legacy_count(conn)
+    with _count_lock:
+        if generation == _count_generation:
+            _legacy_state[key] = (generation, total)
+    return total
+
+
+def _file_items(conn: sqlite3.Connection, db_path: str | Path) -> list[dict]:
+    """The Storage page's list of day files (and the legacy table), as dicts."""
+    items = []
+    for f in log_store.files(conn):
+        rows = _legacy_count(conn, db_path) if f.state == "legacy" else f.row_count
+        items.append({
+            "day": f.day, "file_name": f.file_name, "state": f.state,
+            "logs": rows or 0, "size_bytes": f.size_bytes, "newest_log_at": f.max_ts,
+        })
+    return items
+
+
 def sample_storage_metrics(db_path: str | Path) -> dict:
     """
     Collects a single storage metrics snapshot.
     """
     db_path_obj = Path(db_path)
     
-    # Calculate database footprint
-    db_size = 0
-    for suffix in ["", "-wal", "-shm"]:
-        file_path = db_path_obj.with_name(f"{db_path_obj.name}{suffix}")
-        try:
-            db_size += os.path.getsize(file_path)
-        except FileNotFoundError:
-            pass
-
     # Disk usage
     parent_dir = db_path_obj.parent
     try:
@@ -81,24 +103,39 @@ def sample_storage_metrics(db_path: str | Path) -> dict:
         disk_free = 0
         disk_total = 0
 
-    # Query log count
+    # Query log count, and the day files (their sizes count towards the database's)
     total_logs = 0
+    log_files: list[dict] = []
     conn = None
     try:
         conn = get_connection(db_path)
+        log_files = _file_items(conn, db_path)
         total_logs = count_logs(conn, db_path)
     except sqlite3.Error as e:
         logger.error(f"Failed to query log count: {e}")
     finally:
         if conn:
             conn.close()
+    day_files_size = sum(f["size_bytes"] or 0 for f in log_files)
+
+    # Database footprint, measured after the catalogue refresh above wrote to logs.db
+    db_size = 0
+    for suffix in ["", "-wal", "-shm"]:
+        file_path = db_path_obj.with_name(f"{db_path_obj.name}{suffix}")
+        try:
+            db_size += os.path.getsize(file_path)
+        except FileNotFoundError:
+            pass
 
     return {
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "db_size_bytes": db_size,
+        "db_size_bytes": db_size + day_files_size,
         "disk_free_bytes": disk_free,
         "disk_total_bytes": disk_total,
-        "total_logs_count": total_logs
+        "total_logs_count": total_logs,
+        "main_db_size_bytes": db_size,
+        "day_files_size_bytes": day_files_size,
+        "log_files": log_files,
     }
 
 
@@ -258,3 +295,4 @@ def clear_storage_snapshot_cache() -> None:
         _snapshot_cache.clear()
     with _count_lock:
         _count_state.clear()
+        _legacy_state.clear()

@@ -49,6 +49,28 @@ describe('StoragePanel Component', () => {
     expect(await screen.findByText('No backups yet.')).toBeInTheDocument();
   });
 
+  it('lists the day files between the retention card and the backups card', async () => {
+    vi.spyOn(systemApi, 'fetchStorageMetrics').mockResolvedValue({
+      db_size_bytes: 3 * 1024 ** 3,
+      main_db_size_bytes: 1024 ** 3,
+      day_files_size_bytes: 2 * 1024 ** 3,
+      disk_free_bytes: 450000000000,
+      disk_total_bytes: 1000000000000,
+      retention_days: 14,
+      log_files: [
+        { day: '2026-11-13', file_name: 'logs-2026-11-13-UTC.db', state: 'open', logs: 5, size_bytes: 1024 ** 3, expires_at: '2026-11-28T00:00:00+00:00' },
+        { day: '2026-11-12', file_name: 'logs-2026-11-12-UTC.db', state: 'sealed', logs: 9, size_bytes: 1024 ** 3, expires_at: '2026-11-27T00:00:00+00:00' },
+      ],
+      history: [],
+    });
+    render(<StoragePanel />);
+    const card = await screen.findByTestId('log-files-card');
+    expect(screen.getByTestId('db-split-display')).toHaveTextContent('logs.db 1 GB + 2 day files 2 GB');
+    const retention = screen.getByText(/Log Retention Policy/i);
+    expect(retention.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(screen.getByTestId('database-backups-card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders storage metrics, retention slider, and storage trend chart', async () => {
     render(<StoragePanel />);
 

@@ -9,6 +9,7 @@ import asyncio
 import logging
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Optional, Union
 
@@ -125,6 +126,9 @@ def merge_fts_index(
     Returns:
         Number of merge steps that did work.
     """
+    if not _has_legacy_logs(conn):
+        # Day files compact their own index when sealed
+        return 0
     steps = 0
     for step in range(max_steps):
         before = conn.total_changes
@@ -165,6 +169,9 @@ class FTSIndexWorker:
     to guarantee catch-up latency <= 1000ms.
     """
 
+    # How often an idle pass looks for finished days to seal (day_store.seal_finished_days)
+    SEAL_CHECK_INTERVAL = 60.0
+
     def __init__(
         self,
         db_path: Union[str, Path],
@@ -186,6 +193,7 @@ class FTSIndexWorker:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._conn: Optional[sqlite3.Connection] = None
         self._conn_lock = threading.Lock()
+        self._next_seal_check = 0.0
         set_fts_worker(self)
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -307,9 +315,21 @@ class FTSIndexWorker:
             raise
 
     def _index_pending_chunk(self, batch_size: int) -> int:
-        """Synchronously index one batch chunk using the persistent worker connection."""
+        """
+        Synchronously index one batch chunk using the persistent worker connection. When that
+        leaves nothing to index, seal the finished days (at most once per SEAL_CHECK_INTERVAL):
+        a day is sealed only once its file is fully indexed, which this worker is first to know.
+        """
         conn = self._get_connection()
-        return index_pending_chunk(conn, batch_size=batch_size)
+        indexed = index_pending_chunk(conn, batch_size=batch_size)
+        if indexed < batch_size and time.monotonic() >= self._next_seal_check:
+            self._next_seal_check = time.monotonic() + self.SEAL_CHECK_INTERVAL
+            try:
+                for day in day_store.seal_finished_days(conn):
+                    logger.info(f"Sealed the log file of {day} (UTC).")
+            except sqlite3.Error as e:
+                logger.warning(f"Could not seal the finished days' log files: {e}")
+        return indexed
 
     async def stop(self) -> None:
         """Signal graceful shutdown, drain pending unindexed logs, and close connection."""

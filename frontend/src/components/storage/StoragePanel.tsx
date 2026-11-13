@@ -12,6 +12,7 @@ import { RetentionSlider } from './RetentionSlider.tsx';
 import { StorageTrendChart } from './StorageTrendChart.tsx';
 import { DeleteLogsCard } from './DeleteLogsCard.tsx';
 import { DatabaseBackupsCard } from './DatabaseBackupsCard.tsx';
+import { LogFilesCard } from './LogFilesCard.tsx';
 
 export const StoragePanel: React.FC = () => {
   const [storageMetrics, setStorageMetrics] = useState<StorageMetricsResponse | null>(null);
@@ -110,6 +111,8 @@ export const StoragePanel: React.FC = () => {
             onVacuumCompleted={loadAllData}
           />
         )}
+
+        <LogFilesCard files={storageMetrics?.log_files ?? []} retentionDays={storageMetrics?.retention_days} />
 
         <DatabaseBackupsCard
           backupBeforeMigration={backupBeforeMigration}

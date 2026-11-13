@@ -9,6 +9,14 @@ interface StorageCardProps {
 }
 import { formatBytes } from '../../utils/formatters.ts';
 
+/** What the Database Size figure is made of: logs.db and the day files. */
+export function dbSplitLabel(metrics: StorageMetricsResponse): string {
+  const dayFiles = (metrics.log_files ?? []).filter((f) => f.state !== 'legacy').length;
+  if (metrics.main_db_size_bytes === undefined || dayFiles === 0) return 'logs.db + WAL + SHM';
+  return `logs.db ${formatBytes(metrics.main_db_size_bytes)} + ${dayFiles} day ${dayFiles === 1 ? 'file' : 'files'} ${formatBytes(
+    metrics.day_files_size_bytes ?? 0
+  )}`;
+}
 
 export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
   if (!metrics) {
@@ -50,7 +58,9 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
           <span className="text-lg font-bold font-mono text-fg-strong" data-testid="db-size-display">
             {formatBytes(metrics.db_size_bytes)}
           </span>
-          <span className="text-[11px] text-fg-muted block mt-0.5 font-mono">logs.db + WAL + SHM</span>
+          <span className="text-[11px] text-fg-muted block mt-0.5 font-mono" data-testid="db-split-display">
+            {dbSplitLabel(metrics)}
+          </span>
           <span className="text-[11px] text-fg-muted block mt-0.5 font-mono" data-testid="backups-size-display">
             Backups: {formatBytes(metrics.backups_size_bytes ?? 0)}
           </span>

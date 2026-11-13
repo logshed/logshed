@@ -569,12 +569,30 @@ class StorageMetricItem(BaseModel):
     total_logs_count: int
 
 
+class LogFileItem(BaseModel):
+    """One place logs are stored: a day file, or the table of logs kept from before 1.4.0."""
+    day: str = Field(description="The UTC day ('YYYY-MM-DD') whose logs the file holds, or 'legacy'")
+    file_name: str
+    state: str = Field(description="'open' (today's, or still being indexed), 'sealed' or 'legacy'")
+    logs: int
+    size_bytes: Optional[int] = Field(None, description="File size with its WAL; none for 'legacy', which is inside logs.db")
+    expires_at: Optional[str] = Field(
+        None,
+        description="UTC time from which retention deletes the file (its whole day older than the retention); "
+        "for 'legacy', when its newest log goes",
+    )
+
+
 class StorageOverviewResponse(BaseModel):
     """Storage overview with current metrics and history."""
-    db_size_bytes: int
+    db_size_bytes: int = Field(description="logs.db and every day file, with their WAL and shared-memory files")
     disk_free_bytes: int
     disk_total_bytes: int
     total_logs_count: int
+    main_db_size_bytes: int = 0
+    day_files_size_bytes: int = 0
+    log_files: list[LogFileItem] = []
+    retention_days: Optional[int] = None
     backups_size_bytes: int = 0
     backups_count: int = 0
     history: list[StorageMetricItem]

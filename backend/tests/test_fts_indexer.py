@@ -394,13 +394,11 @@ class TestRetentionPruningCoordination:
         # Rows 1..10 should now be deleted cleanly
         assert res2["deleted_logs"] == 10
 
+        # Emptied, the legacy table is dropped with its full-text index
         conn = get_connection(db_path)
-        count_after = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
-        fts_after = conn.execute("SELECT COUNT(*) FROM logs_fts").fetchone()[0]
+        left = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE name IN ('logs', 'logs_fts')")}
         conn.close()
-
-        assert count_after == 0
-        assert fts_after == 0
+        assert left == set()
 
 
 class _CursorProxy:
