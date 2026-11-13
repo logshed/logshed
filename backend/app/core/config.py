@@ -207,6 +207,11 @@ def get_max_retention_days() -> int:
     return 30
 
 
+def get_auto_backup_on_migration() -> bool:
+    """AUTO_BACKUP_ON_MIGRATION: back up the database before a schema upgrade. On unless set to false."""
+    return parse_bool(os.environ.get("AUTO_BACKUP_ON_MIGRATION"), True)
+
+
 def is_max_retention_days_overridden() -> bool:
     """
     Returns True if MAX_RETENTION_DAYS is explicitly defined as a valid integer in the environment.

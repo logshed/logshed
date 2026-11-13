@@ -44,7 +44,7 @@ from app.core.config import (
     get_internal_log_level,
 )
 from app.core.loop_lag import get_loop_lag_monitor
-from app.core.migrations import DatabaseNewerThanAppError, run_migrations
+from app.core.migrations import DatabaseNewerThanAppError, MigrationBackupError, run_migrations
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
 from app.core.security import get_or_create_master_key
 from app.core.static_files import mount_frontend
@@ -342,7 +342,7 @@ async def lifespan(app: FastAPI):
     # 1. Run migrations and set up master key
     try:
         await asyncio.to_thread(run_migrations, db_path)
-    except DatabaseNewerThanAppError as e:
+    except (DatabaseNewerThanAppError, MigrationBackupError) as e:
         # Nothing has been written; start-up fails and the container exits with this message
         logger.error(str(e))
         raise

@@ -3,6 +3,7 @@ CLI tool for LogShed admin operations.
 
 Usage:
     python -m app.cli reset-admin --password <new_password>
+    python -m app.cli backup [--db-path <path>]
 
 Provides password recovery by UPSERTing the admin_auth row (id=1)
 with a new Argon2id password hash.
@@ -11,9 +12,16 @@ with a new Argon2id password hash.
 import argparse
 import datetime
 import getpass
+import sqlite3
 import sys
 
-from app.core.migrations import DatabaseNewerThanAppError, get_connection, run_migrations
+from app.core.migrations import (
+    DatabaseNewerThanAppError,
+    MigrationBackupError,
+    get_connection,
+    get_user_version,
+    run_migrations,
+)
 from app.core.security import hash_password
 
 # Default database path inside the container
@@ -153,6 +161,44 @@ def seed_logs(
         conn.close()
 
 
+def backup_database(db_path: str | None = None) -> int:
+    """
+    Make a manual backup of a database that may be in use. It copies with VACUUM INTO, a read
+    snapshot, so the running app keeps writing; a prune or Compact at the same time only costs
+    disk space. Prints the archive's path, size and expiry date. Returns the exit status.
+    """
+    from contextlib import closing
+    from pathlib import Path
+
+    from app.core import backup as db_backup
+    from app.core.config import get_db_path
+
+    path = Path(db_path) if db_path else get_db_path()
+    if not path.is_file():
+        print(f"Error: there is no database at {path}.", file=sys.stderr)
+        return 1
+    with closing(get_connection(path)) as conn:
+        schema = get_user_version(conn)
+    try:
+        result = db_backup.create_backup(
+            path, kind=f"manual-v{schema}", schema_version=schema, method=db_backup.METHOD_VACUUM_INTO
+        )
+    except db_backup.BackupSpaceError as e:
+        print(
+            f"Error: {e} Stop the container and copy the data folder instead.",
+            file=sys.stderr,
+        )
+        return 1
+    except (db_backup.BackupError, OSError, sqlite3.Error) as e:
+        print(f"Error: the backup failed: {e}", file=sys.stderr)
+        return 1
+    expires = db_backup.archive_created_at(result.path) + datetime.timedelta(days=db_backup.BACKUP_EXPIRY_DAYS)
+    print(f"Backup written: {result.path}")
+    print(f"Size: {db_backup.format_bytes(result.size_bytes)}")
+    print(f"Deleted automatically after {expires.strftime('%Y-%m-%d %H:%M')} UTC.")
+    return 0
+
+
 def run_mcp_stdio(db_path: str | None = None) -> None:
     """
     Run built-in MCP server over stdio transport.
@@ -237,10 +283,23 @@ def main() -> None:
         help=f"Path to SQLite database (default: {_DEFAULT_DB_PATH})",
     )
 
+    # backup subcommand
+    backup_parser = subparsers.add_parser(
+        "backup",
+        help="Back up the database into the backups folder beside it, while LogShed runs",
+    )
+    backup_parser.add_argument(
+        "--db-path",
+        default=None,
+        help="Path to SQLite database (default: DB_PATH, or logs.db in DATA_DIR, as for the web process)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mcp":
         run_mcp_stdio(args.db_path)
+    elif args.command == "backup":
+        sys.exit(backup_database(args.db_path))
     elif args.command == "reset-admin":
         password = args.password
         if password:
@@ -263,13 +322,13 @@ def main() -> None:
             sys.exit(1)
         try:
             reset_admin(password, args.db_path)
-        except DatabaseNewerThanAppError as e:
+        except (DatabaseNewerThanAppError, MigrationBackupError) as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
     elif args.command == "seed-logs":
         try:
             seed_logs(args.count, args.days, args.db_path)
-        except DatabaseNewerThanAppError as e:
+        except (DatabaseNewerThanAppError, MigrationBackupError) as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
     else:

@@ -158,6 +158,7 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
 | `MAX_RETENTION_DAYS` | `30` | Docker Compose only | Maximum log retention in days (minimum `1`), and the ceiling of the retention slider in the web interface. While the variable is set, LogShed uses it as the retention itself: it is saved at startup and the slider is fixed to it. If you remove the variable later, the saved value stays until you change it on the **Storage** page, but retention never exceeds the default ceiling of 30 days. | 1.0.0 |
+| `AUTO_BACKUP_ON_MIGRATION` | `true` | Docker Compose or Unraid template | Back up the database before an upgrade changes its schema (see [Database Backups](#database-backups)). Set to `false` to upgrade without a backup, for example when the disk has no room for one. | 1.4.0 |
 | `DB_PATH` | *(empty)* | Docker Compose only | Custom SQLite database file path. Supported for backward compatibility; prefer `DATA_DIR`. | 1.0.0 |
 | `SECRET_KEY_PATH` | *(empty)* | Docker Compose only | Custom path to the persisted encryption key file. Supported for backward compatibility; prefer `DATA_DIR`. | 1.0.0 |
 
@@ -259,6 +260,7 @@ All persistent application data is stored under the `/data` directory:
 | `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). Anyone holding a backup of `/data` also holds this key. To keep the key out of `/data` backups, set `LOGSHED_SECRET_KEY` instead (see above) and store the value separately. It may be a symbolic link to a key file (a mounted secret, for example): LogShed reads the key through it. If the file exists but cannot be read, or is not a regular file (a dangling link or a directory, for example), LogShed stops at start-up with an error naming it rather than replace the key. An empty file is replaced, unless it is reached through a link: then LogShed stops with an error and leaves the link alone. |
 | `/data/presets/alerts/` | Directory for custom and community alert rule JSON definitions. |
 | `/data/presets/drops/` | Directory for custom and community ingestion drop rule JSON definitions. |
+| `/data/backups/` | Database backups: one `.tar.gz` archive per backup, made before an upgrade changes the schema or by the `backup` command, and deleted after 30 days (see [Database Backups](#database-backups)). It sits beside the database (it follows `DATA_DIR` and `DB_PATH`). |
 | `/data/.tmp/` | SQLite's temporary files: the copy of the database that **Compact Database** builds, and large sorts. They are deleted as soon as they are created, so the folder looks empty while they take space. It sits beside the database (it follows `DATA_DIR` and `DB_PATH`), so this space comes from the `/data` disk and not from the container's own filesystem (on Unraid, `docker.img`). |
 
 **Free space for Compact Database:** compacting writes a copy of the database and then the whole database again into `logs.db-wal`, so it needs free space of about **twice the database's size** on the `/data` disk. LogShed checks before it starts and refuses with the figures if there is not enough. The extra space is released when it finishes.
@@ -278,6 +280,33 @@ LogShed creates its files with `umask 027`: the `PUID` user can read and write t
 - A backup tool that runs as another user can read the database if that user is in the `PGID` group, or if the tool runs as the `PUID` user. To include `.secret_key`, run it as `PUID` or as root.
 - Stop the container before copying, so `logs.db` and `logs.db-wal` are copied in a consistent state.
 
+### Database Backups
+
+LogShed backs up the database by itself before an upgrade changes its schema, and you can make a backup at any time with a command. Each backup is one file in `/data/backups/`:
+
+- `logshed-backup-pre-v3-to-v4-20261113T120000Z.tar.gz`: made before upgrading from schema 3 to schema 4, at that time (UTC).
+- `logshed-backup-manual-v4-20261113T120000Z.tar.gz`: made by the `backup` command, on schema 4.
+
+An archive is a gzip-compressed tar that any archive tool opens (`tar -xzf <file>`). It holds `logs.db` and `manifest.json`, which records the LogShed version, the time, the schema the database was on, and for a backup before an upgrade the schema it was upgraded to. Backups are deleted 30 days after they were made, by the daily cleanup. Files in the folder with other names are left alone.
+
+**Before an upgrade.** When a new version starts on a database with an older schema, it backs the database up first, then upgrades it. A large database takes a while: about 2 minutes for 20 GiB, with progress in the container log (`docker logs`) about every 10%. Do not restart the container while it runs. Upgrades that leave the stored logs as they are (the schema 4 upgrade in 1.4.0) back up everything except the logs, which takes a second or two. To upgrade without a backup, set `AUTO_BACKUP_ON_MIGRATION=false`.
+
+**Free space.** A backup must leave at least 10% of the disk free (at least 2 GiB and at most 20 GiB), because `/data` often sits on a disk shared with other containers, whose databases fail when it fills. A backup before an upgrade needs about 30% of the database's size on top of that; a manual backup needs the database's size plus 30% while it runs. When there is not enough room, LogShed does not upgrade and does not start: the log says how much space it needs and how much is free. Free some space, or set `AUTO_BACKUP_ON_MIGRATION=false`, and start it again. A backup that was interrupted (the container stopped while it ran) leaves a `.tmp` file in `/data/backups/`, which is deleted after a day; the message names their size, and you can delete them when no backup is running. LogShed never deletes a backup to make room. Each backup keeps its space for 30 days: delete archives you no longer need from `/data/backups/`.
+
+**Manual backup.** Run this while LogShed runs:
+
+```
+docker exec <container> python -m app.cli backup
+```
+
+It copies the database from a consistent snapshot while logging carries on, then compresses the copy and prints the archive's path, size and when it will be deleted. It is safe to run during a cleanup or a Compact, which only costs disk space. If there is not enough free space it stops and says so: stop the container and copy `/data` instead (see [Backing Up `/data`](#backing-up-data)). Run as root by `docker exec`, it hands the folder and the archive to the owner of `logs.db`, so LogShed can still manage them.
+
+**What an archive holds.** Every stored log line, including anything in them that LogShed never redacts (redaction applies only to what is sent to an AI provider), and every setting and rule. Treat an archive like the database itself. The encryption key (`.secret_key`) is never in an archive: a backup restored into the same `/data` uses the key already there. To move to a new host, copy `.secret_key` yourself.
+
+**Appdata backup tools** such as Unraid's Appdata Backup plugin copy `/data/backups/` too, which can double the size of that backup for a month. Exclude the `backups` folder in the tool if you do not need it twice.
+
+**Going back to 1.3.x** leaves the folder as it is: 1.3.x does not delete old backups, so delete them by hand.
+
 ### Going back to an older version
 
 An upgrade can change the database's schema (its structure). The schema version is stored in `logs.db`, and each LogShed release understands the schemas up to its own. LogShed 1.3.1 and later refuse to start on a database upgraded by a newer version, because running on it could fail in odd places or write data the newer version misreads. Nothing in the database is changed. The log shows an error such as:
@@ -289,6 +318,7 @@ The database at /data/logs.db was upgraded by a newer version of LogShed (schema
 With a restart policy (such as Docker's `unless-stopped`), the container starts, logs this error and exits again in a loop. That is expected: nothing is written while it does. To recover, do one of these:
 
 - **Start the newer version again** (set the image tag back). Its data is all there.
+- **Restore the backup LogShed made before the upgrade** (1.4.0 and later; see [Database Backups](#database-backups)). Stop the container. In `/data`, move `logs.db`, `logs.db-wal` and `logs.db-shm` aside together (into another folder), so the current database stays whole. Extract `logs.db` from the archive into `/data` (`tar -xzf backups/<archive> logs.db`). Then start the image tag whose schema matches the archive's `schema_version` in `manifest.json` (the `pre-v3-to-v4` in its name: schema 3 is LogShed 1.3.x). Keep `.secret_key` as it is. Logs and settings changed since the backup are lost; a backup made without the logs (its manifest lists `omitted_tables`) brings back the settings, rules and history, with no logs.
 - **Restore a copy of `/data` made before the upgrade.** Stop the container, put the old files back (`logs.db` and, if you copied them, `logs.db-wal` and `logs.db-shm`; delete any newer `-wal` and `-shm` files), then start the older version. Logs and settings changed after that copy was made are lost. Keep `.secret_key` with the database: the stored secrets can only be read with the key they were encrypted with.
 
-So take a copy of `/data` before an upgrade you might want to undo (see [Backing Up `/data`](#backing-up-data)). An upgrade that does not change the schema (a patch release such as 1.3.0 to 1.3.1) can be undone by switching the image tag back.
+LogShed 1.4.0 and later make that backup for you. With an older version, or with `AUTO_BACKUP_ON_MIGRATION=false`, take a copy of `/data` before an upgrade you might want to undo (see [Backing Up `/data`](#backing-up-data)). An upgrade that does not change the schema (a patch release such as 1.3.0 to 1.3.1) can be undone by switching the image tag back.

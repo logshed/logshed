@@ -250,3 +250,35 @@ class TestDatabaseNewerThanApp:
         queue_consumer.assert_not_called()
         syslog_server.assert_not_called()
         assert startup_env.read_bytes() == before
+
+
+class TestBackupBeforeMigrationFails:
+    async def test_start_up_fails_with_the_space_figures_and_migrates_nothing(self, startup_env, monkeypatch, caplog):
+        import collections
+
+        import app.core.migrations as migrations_mod
+        from app.core import backup as db_backup
+        from app.core.migrations import MIGRATIONS, MigrationBackupError
+
+        monkeypatch.delenv("AUTO_BACKUP_ON_MIGRATION", raising=False)
+        monkeypatch.setattr(migrations_mod, "MIGRATIONS", list(MIGRATIONS) + [(4, lambda conn: None)])
+        usage = collections.namedtuple("usage", "total used free")
+        monkeypatch.setattr(db_backup.shutil, "disk_usage", lambda p: usage(50 * 1024**3, 50 * 1024**3, 0))
+        queue_consumer = Mock()
+        syslog_server = Mock()
+        monkeypatch.setattr(main_mod, "QueueConsumer", queue_consumer)
+        monkeypatch.setattr(main_mod, "SyslogServer", syslog_server)
+
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            with pytest.raises(MigrationBackupError):
+                await _start_and_stop()
+
+        errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR and r.name == "app.main"]
+        assert len(errors) == 1
+        assert "from schema 3 to 4" in errors[0] and "AUTO_BACKUP_ON_MIGRATION=false" in errors[0]
+        queue_consumer.assert_not_called()
+        syslog_server.assert_not_called()
+        conn = sqlite3.connect(str(startup_env))
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        conn.close()
+        assert not (startup_env.parent / "backups").exists()

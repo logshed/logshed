@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Source installs** need Python 3.14. The Docker image already has it.
 - **Browsers**: The web interface needs Chrome or Edge 111, Safari 16.4 (both from 2023) or Firefox 128 (2024) or later. Older browsers, such as Safari on iOS 15, may not work.
 
+### Added
+
+- **Backup before every upgrade**: When an upgrade changes the database's schema, LogShed first saves a compressed backup in `/data/backups/`, so going back to the previous version is a restore of one file. A large database takes a few minutes, with progress in the container log. If the disk has no room for the backup (it always leaves at least 10% of the disk free, between 2 and 20 GiB), LogShed does not upgrade and says how much space it needs; `AUTO_BACKUP_ON_MIGRATION=false` upgrades without one. Backups are deleted after 30 days. `docker exec <container> python -m app.cli backup` makes one at any time while logging carries on. The encryption key is never in a backup. See "Database Backups" in `docs/CONFIGURATION.md`.
+
 ### Changed
 
 - **Tailwind CSS 4**: The web interface is styled with Tailwind CSS 4, and looks the same apart from small details. Hover highlights appear only with a mouse or trackpad, so a button tapped on a phone no longer stays highlighted. A few badges and borders that named no colour of their own take their text colour instead of a light grey (for example the Alert badge in Rules & History). Dialogs slightly blur the page behind them, the descriptions under the Advanced settings checkboxes line up with their labels, and the end time box under Maintenance is 2 pixels shorter.

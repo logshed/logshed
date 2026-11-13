@@ -29,5 +29,6 @@
   <Config Name="PUID" Target="PUID" Default="99" Description="User ID for non-root execution." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Description="Group ID for non-root execution." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
   <Config Name="Timezone" Target="TZ" Default="UTC" Description="Your own time zone, for example Europe/London or America/New_York. LogShed uses it for syslog timestamps that carry no zone, maintenance schedules and the daily digest." Type="Variable" Display="advanced" Required="false" Mask="false">UTC</Config>
+  <Config Name="Backup Before Upgrades" Target="AUTO_BACKUP_ON_MIGRATION" Default="" Description="Leave empty to back up the database into /data/backups before an upgrade changes its schema (kept 30 days). Set to false to upgrade without a backup." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Internal Log Level" Target="LOGSHED_INTERNAL_LOG_LEVEL" Default="WARNING" Description="Minimum severity level for LogShed internal application logs captured into LogShed (DEBUG, INFO, WARNING, ERROR, CRITICAL, or DISABLED)." Type="Variable" Display="advanced" Required="false" Mask="false">WARNING</Config>
 </Container>

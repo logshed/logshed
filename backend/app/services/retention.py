@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from app.services.operation_guard import OperationInProgressError, run_exclusive
+from app.core.backup import backups_dir, prune_backups
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
 from app.core.pipeline import wait_for_ingest_write
@@ -237,7 +238,7 @@ def execute_prune(
 ) -> dict:
     """
     Executes iterative batch pruning, FTS5 index compaction, WAL checkpointing,
-    and updates storage metrics.
+    expiry of database backups older than 30 days, and updates storage metrics.
 
     Returns a dict with:
         deleted_logs: Total number of log rows deleted (logs only)
@@ -329,6 +330,12 @@ def execute_prune(
 
     # 4. Prune storage metrics older than 30 days
     deleted_metrics = prune_old_metrics(db_path_obj)
+
+    # 4b. Delete database backups older than 30 days and stale temporary backup files
+    try:
+        prune_backups(backups_dir(db_path_obj))
+    except OSError as e:
+        logger.warning(f"Could not expire old database backups: {e}")
 
     # 5. Take fresh storage metrics snapshot
     metrics = record_metrics(db_path_obj)

@@ -37,6 +37,7 @@ The following environment variables are supplied at container start and are stri
 - `DOCKER_HOST` - Docker endpoint socket or proxy address (defaults to `unix:///var/run/docker.sock`).
 - `DOCKER_ADDITIONAL_HOSTS` - JSON array of remote Docker host endpoints to pre-seed on container boot.
 - `MAX_RETENTION_DAYS` - Ceiling in days for the log retention slider in the UI (defaults to `30`, minimum `1`). While it is set it is also saved as the retention at startup and the slider is fixed to it; removing it keeps the saved value.
+- `AUTO_BACKUP_ON_MIGRATION` - Back up the database before a schema upgrade (default on; `false` turns it off). See the database backups section in [database.md](database.md).
 - `ENVIRONMENT` / `DEBUG` - `ENVIRONMENT=development` adds the localhost development CORS origins and debug logging (`production` by default). `DEBUG=true` alone no longer trusts localhost origins.
 - `CORS_ORIGINS` - Comma-separated list of allowed cross-origin hosts (defaults to empty in production). A `*` entry is ignored and logged as an error.
 - `ENABLE_API_DOCS` - Serves `/docs`, `/redoc` and `/openapi.json` (default `true`).

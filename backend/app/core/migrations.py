@@ -14,16 +14,21 @@ Each migration, together with its `user_version` bump, runs in one explicit
 `BEGIN IMMEDIATE` transaction, so a crash part way through leaves the previous
 version intact. Statements run one at a time through `execute()`: `executescript()`
 would commit the open transaction first and run the script in autocommit mode.
+
+Before the pending steps of an existing database run, the database is backed up once
+(`core/backup.py`), unless AUTO_BACKUP_ON_MIGRATION is false.
 """
 
 import logging
 import os
 import sqlite3
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
-from app.core.config import parse_bool, thinking_level_for_budget
+from app.core import backup as db_backup
+from app.core.config import get_auto_backup_on_migration, parse_bool, thinking_level_for_budget
 
 logger = logging.getLogger(__name__)
 
@@ -593,6 +598,43 @@ MIGRATIONS = [
 ]
 
 
+def _no_extra_space(db_size: int) -> int:
+    return 0
+
+
+@dataclass(frozen=True)
+class MigrationNeeds:
+    """
+    What a step needs from the backup made before it.
+    - extra_space(db_size): bytes the step itself writes (beyond the database), kept free by the backup.
+    - backup_without_logs: the step changes no log rows, and going back after it is a restore without
+      logs, so its backup may leave the log tables out. The backup leaves them out only when every
+      pending step says so: v3 does not, so an install jumping from 1.2.x keeps its logs in the backup.
+    """
+
+    extra_space: Callable[[int], int] = _no_extra_space
+    backup_without_logs: bool = False
+
+
+# Steps not listed need nothing beyond the default (a full backup, no extra space).
+MIGRATION_NEEDS: dict[int, MigrationNeeds] = {}
+
+
+class MigrationBackupError(RuntimeError):
+    """The backup before a migration could not be made, so the migration was not started."""
+
+    def __init__(self, cause: BaseException, from_version: int, target_version: int):
+        self.cause = cause
+        self.from_version = from_version
+        self.target_version = target_version
+        super().__init__(
+            f"LogShed did not upgrade the database from schema {from_version} to {target_version}, because "
+            f"the backup before the upgrade could not be made: {cause} The database is unchanged. "
+            + ("Free some space" if isinstance(cause, db_backup.BackupSpaceError) else "Fix the cause")
+            + " and start LogShed again, or set AUTO_BACKUP_ON_MIGRATION=false to upgrade without a backup."
+        )
+
+
 class DatabaseNewerThanAppError(RuntimeError):
     """The database's schema is newer than this version of LogShed knows, so it must not be used."""
 
@@ -706,7 +748,28 @@ def _run_in_transaction(conn: sqlite3.Connection, step: Callable[[sqlite3.Connec
         raise
 
 
-def run_migrations(db_path: Union[str, Path]) -> None:
+def _backup_before_migrations(db_path: Path, current_version: int, pending: list[int]) -> None:
+    """One backup before the whole run of pending steps; raises MigrationBackupError if it cannot be made."""
+    target = pending[-1]
+    needs = [MIGRATION_NEEDS.get(v, MigrationNeeds()) for v in pending]
+    without_logs = all(n.backup_without_logs for n in needs)
+    db_size = db_path.stat().st_size
+    extra = sum(n.extra_space(db_size) for n in needs)
+    try:
+        db_backup.create_backup(
+            db_path,
+            kind=f"pre-v{current_version}-to-v{target}",
+            schema_version=current_version,
+            target_schema=target,
+            method=db_backup.METHOD_WITHOUT_LOGS if without_logs else db_backup.METHOD_LOCKED_STREAM,
+            extra_space=extra,
+        )
+    except (db_backup.BackupError, OSError, sqlite3.Error) as e:
+        logger.warning(f"The backup before upgrading from schema {current_version} to {target} failed: {e}")
+        raise MigrationBackupError(e, current_version, target) from e
+
+
+def run_migrations(db_path: Union[str, Path], backup: Optional[bool] = None) -> None:
     """
     Main entry point for database migrations.
 
@@ -718,8 +781,12 @@ def run_migrations(db_path: Union[str, Path]) -> None:
     A database whose user_version is above the newest migration was upgraded by a newer
     LogShed: it is closed without any change and DatabaseNewerThanAppError is raised.
 
+    An existing database (user_version above 0) with steps pending is backed up first
+    (_backup_before_migrations); if that fails, nothing is migrated and MigrationBackupError is raised.
+
     Args:
         db_path: Path to the SQLite database file.
+        backup: back up before migrating; None reads AUTO_BACKUP_ON_MIGRATION (on unless false).
     """
     db_path = Path(db_path)
     # Ensure the parent directory exists
@@ -734,6 +801,13 @@ def run_migrations(db_path: Union[str, Path]) -> None:
         latest_version = MIGRATIONS[-1][0] if MIGRATIONS else 0
         if current_version > latest_version:
             raise DatabaseNewerThanAppError(current_version, latest_version, db_path)
+
+        pending = [v for v, _ in MIGRATIONS if v > current_version]
+        if pending and current_version > 0:
+            if get_auto_backup_on_migration() if backup is None else backup:
+                _backup_before_migrations(db_path, current_version, pending)
+            else:
+                logger.info("Upgrading without a backup: AUTO_BACKUP_ON_MIGRATION is false.")
 
         for target_version, migration_func in MIGRATIONS:
             if current_version >= target_version:
