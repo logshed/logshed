@@ -1,10 +1,10 @@
 """
-The one way to select logs by filter, used by the web UI list (``app/api/logs.py``), REST v1
-and MCP (``app/api/external_v1.py``) and scoped deletion (``app/services/log_deletion.py``):
-``LogFilter`` holds the filter, ``build_where`` turns it into SQL, ``row_to_log_entry`` maps the
-rows and ``fetch_log_context`` reads the lines around one log. The helpers below them keep FTS5
-error handling, the FTS indexer wake-up, newest-first windows and the search time limit the
-same on every path.
+The one way to select logs by filter: ``LogFilter`` holds the filter, which the web UI list
+(``app/api/logs.py``), REST v1 and MCP (``app/services/log_search.py``) and scoped deletion
+(``app/services/log_deletion.py``) pass to the log store (``app/services/log_store.py``).
+``build_where`` turns a filter into SQL for the store, and ``row_to_log_entry`` maps the rows
+the store returns. The helpers below them keep FTS5 error handling, the FTS indexer wake-up,
+newest-first windows and the search time limit the same on every path.
 """
 
 import asyncio
@@ -240,55 +240,6 @@ def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = Tr
         message=redact(row["message"]),
         raw=redact(raw) if raw is not None else None,
     )
-
-
-def fetch_log_context(
-    conn: sqlite3.Connection,
-    log_id: int,
-    before: int,
-    after: int,
-    same_app: bool = False,
-    include_raw: bool = True,
-) -> Optional[tuple[Any, list[Any], list[Any]]]:
-    """
-    The rows around one log, from the same host (context_source_clause) and, with same_app, the
-    same app: (target, up to before earlier rows, up to after later rows), each list in time
-    order. None when the log does not exist.
-    """
-    columns = log_columns(include_raw)
-    target = conn.execute(f"SELECT {columns} FROM logs WHERE id = ?", (log_id,)).fetchone()
-    if target is None:
-        return None
-
-    source_clause, source_params = context_source_clause(target["source_alias"], target["source_ip"])
-    if not same_app:
-        app_clause, app_params = "", ()
-    elif target["app_name"] is None:
-        app_clause, app_params = "AND app_name IS NULL ", ()
-    else:
-        app_clause, app_params = "AND app_name = ? ", (target["app_name"],)
-    t_time, t_id = target["timestamp"], target["id"]
-
-    before_rows = conn.execute(
-        f"""
-        SELECT {columns} FROM logs
-        WHERE {source_clause}{app_clause}AND (timestamp < ? OR (timestamp = ? AND id < ?))
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ?
-        """,
-        (*source_params, *app_params, t_time, t_time, t_id, before),
-    ).fetchall()
-    before_rows.reverse()
-    after_rows = conn.execute(
-        f"""
-        SELECT {columns} FROM logs
-        WHERE {source_clause}{app_clause}AND (timestamp > ? OR (timestamp = ? AND id > ?))
-        ORDER BY timestamp ASC, id ASC
-        LIMIT ?
-        """,
-        (*source_params, *app_params, t_time, t_time, t_id, after),
-    ).fetchall()
-    return target, before_rows, after_rows
 
 
 def add_fts_filter(where_clauses: list[str], params: dict[str, Any], query: Optional[str]) -> None:

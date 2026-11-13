@@ -18,7 +18,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.aliases import keyset_alias_backfill, raise_if_alias_used_by_syslog
+from app.api.aliases import raise_if_alias_used_by_syslog
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.docker_collector import (
     _build_client,
@@ -33,6 +33,7 @@ from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
 from app.core.utils import note_docker_alias_change
 from app.services.alias_rename import AliasRenameResult, alias_in_use, follow_alias_rename, reload_after_alias_rename
+from app.services import log_store
 from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
 
 logger = logging.getLogger(__name__)
@@ -375,16 +376,9 @@ def _batch_update_docker_aliases(
     if source_ip != "docker":
         if not old_alias or old_alias == target_alias:
             return
-        keyset_alias_backfill(conn, source_ip, "+source_alias = ?", (old_alias,), target_alias, batch_size)
+        log_store.relabel_host(conn, source_ip, target_alias, only_alias=old_alias, batch_size=batch_size)
     else:
-        keyset_alias_backfill(
-            conn,
-            "docker",
-            "+source_alias != ? OR +source_alias IS NULL",
-            (target_alias,),
-            target_alias,
-            batch_size,
-        )
+        log_store.relabel_host(conn, "docker", target_alias, batch_size=batch_size)
 
 
 @router.put("/{endpoint_id}", response_model=DockerEndpointResponse)

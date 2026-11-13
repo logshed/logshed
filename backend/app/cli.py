@@ -105,6 +105,8 @@ def seed_logs(
     Returns:
         Number of logs inserted.
     """
+    from app.services import log_store
+
     run_migrations(db_path)
 
     sample_sources = [
@@ -138,29 +140,21 @@ def seed_logs(
         message = f"[{i+1}/{count}] {base_msg}"
         raw = f"<{severity + 8}>1 {ts_iso} {alias} {app} - - - {message}"
 
-        entries.append((
-            ts_iso,
-            ts_iso,
-            ip,
-            alias,
-            app,
-            1,  # facility
-            severity,
-            message,
-            raw,
-        ))
+        entries.append({
+            "timestamp": ts_iso,
+            "received_at": ts_iso,
+            "source_ip": ip,
+            "source_alias": alias,
+            "app_name": app,
+            "facility": 1,
+            "severity": severity,
+            "message": message,
+            "raw": raw,
+        })
 
     conn = get_connection(db_path)
     try:
-        conn.executemany(
-            """
-            INSERT INTO logs (
-                timestamp, received_at, source_ip, source_alias,
-                app_name, facility, severity, message, raw
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            entries,
-        )
+        log_store.insert_rows(conn, entries)
         conn.commit()
         print(f"Successfully seeded {len(entries)} logs across the last {days} days into {db_path}.")
         return len(entries)

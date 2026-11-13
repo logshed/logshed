@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from app.core.migrations import get_connection
+from app.services import log_store
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,11 @@ def count_logs(conn: sqlite3.Connection, db_path: str | Path) -> int:
     # One read transaction, so the maximum id and the count see the same rows
     conn.execute("BEGIN")
     try:
-        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM logs").fetchone()[0]
+        max_id = log_store.max_id(conn)
         if state is not None and state[0] == generation and max_id >= state[2]:
-            added = conn.execute("SELECT COUNT(*) FROM logs WHERE id > ?", (state[2],)).fetchone()[0]
-            total = state[1] + added
+            total = state[1] + log_store.count_rows(conn, after_id=state[2])
         else:
-            total = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+            total = log_store.count_rows(conn)
     finally:
         conn.rollback()
     with _count_lock:

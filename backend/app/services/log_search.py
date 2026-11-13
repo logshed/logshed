@@ -8,25 +8,21 @@ external=True: redacted text, filled-in host and app names).
 import base64
 import json
 import sqlite3
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import HTTPException, Request, status
 
 from app.api.deps import run_db_query
-from app.core.utils import format_severity_label, resolve_severity
+from app.core.utils import resolve_severity
 from app.models import ExternalLogContextResponse, ExternalLogListResponse, LogCountResponse
+from app.services import log_store
 from app.services.log_query import (
     MAX_API_FILTER_VALUES,
     InvalidTimeBound,
     LogFilter,
-    build_where,
     check_filter_value_counts,
     db_busy_exception,
-    execute_with_fts_fallback,
-    fetch_log_context,
-    log_columns,
     row_to_log_entry,
-    run_newest_first,
     run_search_query,
 )
 
@@ -102,48 +98,9 @@ async def search_logs(
     cursor_pos = decode_log_cursor(cursor) if cursor else None
 
     def _query_db(conn):
-        where_sql, params = build_where(conn, log_filter)
-
-        # Total: capped count of all rows matching the filters (independent of the cursor
-        # position), which avoids full table scans on broad queries.
-        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
-
-        page_where = where_sql
-        cursor_params: dict[str, Any] = {}
-        if cursor_pos is not None:
-            keyset_sql = (
-                "(logs.timestamp < :cursor_ts OR (logs.timestamp = :cursor_ts AND logs.id < :cursor_id))"
-            )
-            page_where = f"{where_sql} AND {keyset_sql}" if where_sql else f"WHERE {keyset_sql}"
-            cursor_params["cursor_ts"], cursor_params["cursor_id"] = cursor_pos
-
-        select_sql = f"""
-            SELECT {log_columns(include_raw)}
-            FROM logs
-            {page_where}
-            ORDER BY logs.timestamp DESC, logs.id DESC
-            LIMIT :fetch_limit
-        """
-        db_cursor = conn.cursor()
-
-        def _run(run_params: dict[str, Any]):
-            db_cursor.execute(count_sql, {**run_params, "count_limit": TOTAL_CAP})
-            run_total = db_cursor.fetchone()[0]
-            db_cursor.execute(select_sql, {**run_params, **cursor_params, "fetch_limit": limit + 1})
-            return run_total, db_cursor.fetchall()
-
-        def _oldest_needed(result: tuple[int, list]) -> Optional[str]:
-            run_total, run_rows = result
-            if run_total >= TOTAL_CAP and len(run_rows) > limit:
-                return run_rows[-1]["timestamp"]
-            # Too few matches: still complete when the window covers the whole time range
-            return log_filter.from_ts
-
-        total, rows = execute_with_fts_fallback(
-            lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], TOTAL_CAP),
-            params,
-            log_filter.query,
-            empty=(0, []),
+        # The total counts every match whatever the cursor, capped so broad queries do not scan every row
+        total, rows = log_store.search(
+            conn, log_filter, fetch=limit + 1, count_limit=TOTAL_CAP, before=cursor_pos, include_raw=include_raw
         )
 
         # One extra row signals another page exists
@@ -183,66 +140,7 @@ async def count_logs(
 ) -> LogCountResponse:
     """Count logs matching the filter, optionally grouped by severity, app or source (at most group_limit groups)."""
     def _count_db(conn):
-        where_sql, params = build_where(conn, log_filter)
-        cursor = conn.cursor()
-        valid_group = (group_by or "").lower().strip()
-
-        def _total_count(run_params: dict[str, Any]) -> int:
-            cursor.execute(f"SELECT COUNT(*) FROM logs {where_sql}", run_params)
-            return cursor.fetchone()[0]
-
-        def _limited_group(run_params: dict[str, Any], expr: str, label: str):
-            """Run a capped GROUP BY, fetching one extra row to detect truncation."""
-            group_sql = f"""
-                SELECT {expr} as grp, COUNT(*) as cnt
-                FROM logs
-                {where_sql}
-                GROUP BY grp
-                ORDER BY cnt DESC, grp ASC
-                LIMIT :group_fetch_limit
-            """
-            cursor.execute(group_sql, {**run_params, "group_fetch_limit": group_limit + 1})
-            rows = cursor.fetchall()
-            truncated = len(rows) > group_limit
-            rows = rows[:group_limit]
-            breakdown = {r["grp"]: r["cnt"] for r in rows}
-            # When every group was returned, the group counts sum to the exact total,
-            # so the extra COUNT query is only needed when the breakdown is truncated.
-            total = _total_count(run_params) if truncated else sum(breakdown.values())
-            return total, label, breakdown, truncated
-
-        def _severity_groups(run_params: dict[str, Any]):
-            group_sql = f"""
-                SELECT logs.severity, COUNT(*) as cnt
-                FROM logs
-                {where_sql}
-                GROUP BY logs.severity
-                ORDER BY logs.severity ASC
-            """
-            cursor.execute(group_sql, run_params)
-            rows = cursor.fetchall()
-            breakdown: dict[str, int] = {}
-            total = 0
-            for r in rows:
-                sev_int = r["severity"]
-                cnt = r["cnt"]
-                total += cnt
-                label = format_severity_label(sev_int)
-                breakdown[label] = cnt
-            return total, "severity", breakdown, False
-
-        if valid_group in ("severity", "level"):
-            run, label = _severity_groups, "severity"
-        elif valid_group in ("app", "app_name"):
-            run, label = (lambda p: _limited_group(p, "COALESCE(logs.app_name, 'unknown')", "app")), "app"
-        elif valid_group in ("source", "source_alias", "host"):
-            run, label = (
-                lambda p: _limited_group(p, "COALESCE(NULLIF(logs.source_alias, ''), logs.source_ip, 'unknown')", "source")
-            ), "source"
-        else:
-            run, label = (lambda p: (_total_count(p), None, {}, False)), None
-
-        return execute_with_fts_fallback(run, params, log_filter.query, empty=(0, label, {}, False))
+        return log_store.count(conn, log_filter, group_by, group_limit)
 
     try:
         total, grouped_by_out, breakdown_out, truncated_out = await run_search_query(_count_db, request)
@@ -266,7 +164,7 @@ async def log_context(
 ) -> ExternalLogContextResponse:
     """Up to lines logs before and after one log, from the same host. HTTP 404 when the log does not exist."""
     def _fetch(conn):
-        found = fetch_log_context(conn, log_id, before=lines, after=lines, same_app=same_app, include_raw=include_raw)
+        found = log_store.context(conn, log_id, before=lines, after=lines, same_app=same_app, include_raw=include_raw)
         if found is None:
             return None, [], []
         target_row, before_rows, after_rows = found

@@ -38,6 +38,7 @@ from app.core.utils import (
     parse_iso_to_utc_datetime,
     zone_from_name,
 )
+from app.services import log_store
 from app.services.ai_engine import (
     DEFAULT_SYSTEM_PROMPT,
     build_analysis_prompt,
@@ -61,18 +62,7 @@ def fetch_and_validate_logs(
     if not log_ids:
         return None, "No logs found for provided IDs."
 
-    placeholders = ",".join("?" * len(log_ids))
-    cursor = conn.cursor()
-    cursor.execute(
-        f"""
-        SELECT id, timestamp, source_ip, source_alias, app_name, severity, message, raw
-        FROM logs
-        WHERE id IN ({placeholders})
-        ORDER BY timestamp ASC, id ASC
-        """,
-        log_ids,
-    )
-    rows = cursor.fetchall()
+    rows = log_store.get_many(conn, log_ids)
     if not rows:
         return None, "No logs found for provided IDs."
 

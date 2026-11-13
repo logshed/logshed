@@ -18,7 +18,6 @@ import shutil
 import socket
 import ssl
 import tempfile
-import time
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -35,7 +34,8 @@ from app.core.pipeline import (
     detect_severity,
     clean_log_text,
 )
-from app.core.utils import DOCKER_ALIASES_SQL, SEVERITY_NAME_MAP
+from app.core.utils import SEVERITY_NAME_MAP
+from app.services import log_store
 
 logger = logging.getLogger(__name__)
 
@@ -556,40 +556,7 @@ def _batch_update_app_aliases(
     Prevents long table locks on large datasets while interleaving concurrent writes.
     Protects Syslog logs on shared IP hosts by scoping by Docker source_alias.
     """
-    cursor = conn.cursor()
-    if source_alias:
-        update_query = """
-            UPDATE logs SET app_name = ?
-            WHERE source_ip = ? AND app_name = ? AND source_alias = ? AND id IN (
-                SELECT id FROM logs
-                WHERE source_ip = ? AND app_name = ? AND source_alias = ?
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        """
-        params = (target_alias, source_ip, raw_name, source_alias, source_ip, raw_name, source_alias, batch_size)
-    else:
-        update_query = f"""
-            UPDATE logs SET app_name = ?
-            WHERE source_ip = ? AND app_name = ?
-              AND source_alias IN ({DOCKER_ALIASES_SQL})
-              AND id IN (
-                SELECT id FROM logs
-                WHERE source_ip = ? AND app_name = ?
-                  AND source_alias IN ({DOCKER_ALIASES_SQL})
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        """
-        params = (target_alias, source_ip, raw_name, source_ip, raw_name, batch_size)
-
-    while True:
-        cursor.execute(update_query, params)
-        count = cursor.rowcount
-        conn.commit()
-        if count < batch_size:
-            break
-        time.sleep(0.005)
+    log_store.relabel_docker_app(conn, raw_name, target_alias, source_ip, source_alias, batch_size)
 
 
 def _should_ignore_container(

@@ -9,6 +9,7 @@ from typing import Any
 from app.api.deps import run_db_query
 from app.core.utils import AliasIndex, load_former_docker_aliases
 from app.models import LogFacetsResponse
+from app.services import log_store
 
 # Facet lists (and each mapping value) are capped: syslog is unauthenticated, so random
 # APP-NAME or host values could otherwise grow the facets response without limit.
@@ -21,257 +22,159 @@ _FACET_PAIR_LIMIT = 20 * FACET_LIMIT
 
 def fetch_facets(conn: sqlite3.Connection) -> dict[str, Any]:
     """The facets of every stored log and configured host (get_facets), as a LogFacetsResponse dict."""
-    cursor = conn.cursor()
-    # Fast loose index skip-scans (O(K log N) B-Tree seeks) over covering index.
-    # Eliminates the 7-day cutoff so that any host or app within retention (even with only 1 log)
-    # is retained, executing in single-digit milliseconds without scanning millions of rows.
-
-    # 1. Distinct sources
-    cursor.execute(
-        f"""
-        WITH RECURSIVE distinct_sources AS (
-            SELECT MIN(source_alias) AS val FROM logs WHERE source_alias != ''
-            UNION ALL
-            SELECT (SELECT MIN(source_alias) FROM logs WHERE source_alias > s.val AND source_alias != '')
-            FROM distinct_sources s
-            WHERE s.val IS NOT NULL
-            LIMIT {_FACET_SCAN_LIMIT}
-        )
-        SELECT s.val, (SELECT source_ip FROM logs WHERE source_alias = s.val LIMIT 1)
-        FROM distinct_sources s
-        WHERE s.val IS NOT NULL;
-        """
-    )
-    sources = cursor.fetchall()
-
-    # 2. Distinct fallback IPs for logs where source_alias is empty
-    cursor.execute(
-        f"""
-        WITH RECURSIVE distinct_ips AS (
-            SELECT MIN(source_ip) AS val FROM logs WHERE source_alias = '' AND source_ip != ''
-            UNION ALL
-            SELECT (SELECT MIN(source_ip) FROM logs WHERE source_alias = '' AND source_ip > s.val AND source_ip != '')
-            FROM distinct_ips s
-            WHERE s.val IS NOT NULL
-            LIMIT {_FACET_SCAN_LIMIT}
-        )
-        SELECT val FROM distinct_ips WHERE val IS NOT NULL;
-        """
-    )
-    fallback_ips = [r[0] for r in cursor.fetchall()]
-
-    # 3. Distinct apps
-    cursor.execute(
-        f"""
-        WITH RECURSIVE distinct_apps AS (
-            SELECT MIN(app_name) AS val FROM logs WHERE app_name != ''
-            UNION ALL
-            SELECT (SELECT MIN(app_name) FROM logs WHERE app_name > a.val AND app_name != '')
-            FROM distinct_apps a
-            WHERE a.val IS NOT NULL
-            LIMIT {_FACET_SCAN_LIMIT}
-        )
-        SELECT val FROM distinct_apps WHERE val IS NOT NULL;
-        """
-    )
-    apps_res = [r[0] for r in cursor.fetchall()]
-
-    # 4. Distinct (source_alias, app_name, source_ip) pairs via covering index skip-scan
-    cursor.execute(
-        f"""
-        WITH RECURSIVE cte(s, a, ip) AS (
-            SELECT s.source_alias, s.app_name, s.source_ip
-            FROM (
-                SELECT source_alias, app_name, source_ip
-                FROM logs
-                WHERE source_alias != '' AND app_name != ''
-                ORDER BY source_alias ASC, app_name ASC
-                LIMIT 1
-            ) s
-            UNION ALL
-            SELECT nxt.source_alias, nxt.app_name, nxt.source_ip
-            FROM cte
-            JOIN logs nxt ON nxt.id = COALESCE(
-                (SELECT id FROM logs WHERE source_alias = cte.s AND app_name > cte.a AND app_name != '' ORDER BY app_name ASC LIMIT 1),
-                (SELECT id FROM logs WHERE source_alias > cte.s AND source_alias != '' AND app_name != '' ORDER BY source_alias ASC, app_name ASC LIMIT 1)
-            )
-            LIMIT {_FACET_PAIR_LIMIT}
-        )
-        SELECT s AS source_alias, a AS app_name, ip AS source_ip FROM cte;
-        """
-    )
-    pairs = cursor.fetchall()
+    seen = log_store.seen_names(conn, _FACET_SCAN_LIMIT, _FACET_PAIR_LIMIT)
     truncated = (
-        len(sources) > FACET_LIMIT
-        or len(fallback_ips) > FACET_LIMIT
-        or len(apps_res) > FACET_LIMIT
-        or len(pairs) >= _FACET_PAIR_LIMIT
+        len(seen.aliases) > FACET_LIMIT
+        or len(seen.bare_ips) > FACET_LIMIT
+        or len(seen.apps) > FACET_LIMIT
+        or len(seen.alias_apps) >= _FACET_PAIR_LIMIT
+        or len(seen.bare_ip_apps) >= _FACET_PAIR_LIMIT
     )
-
-    # Edge case: Mappings for fallback IPs where source_alias was empty. One skip-scan over
-    # idx_logs_source_app_ip lists every (app, IP) pair of alias-less logs with one index seek
-    # per pair, instead of one query per IP that read all of that IP's logs.
-    if fallback_ips:
-        cursor.execute(
-            f"""
-            WITH RECURSIVE ip_apps(a, ip) AS (
-                SELECT * FROM (
-                    SELECT app_name, source_ip FROM logs
-                    WHERE source_alias = '' AND app_name != '' AND source_ip != ''
-                    ORDER BY source_alias, app_name, source_ip
-                    LIMIT 1
-                )
-                UNION ALL
-                SELECT nxt.app_name, nxt.source_ip
-                FROM ip_apps
-                JOIN logs nxt ON nxt.id = COALESCE(
-                    (SELECT id FROM logs WHERE source_alias = '' AND app_name = ip_apps.a AND source_ip > ip_apps.ip
-                     ORDER BY source_alias, app_name, source_ip LIMIT 1),
-                    (SELECT id FROM logs WHERE source_alias = '' AND app_name > ip_apps.a AND source_ip != ''
-                     ORDER BY source_alias, app_name, source_ip LIMIT 1)
-                )
-                LIMIT {_FACET_PAIR_LIMIT}
-            )
-            SELECT a, ip FROM ip_apps;
-            """
-        )
-        ip_app_rows = cursor.fetchall()
-        if len(ip_app_rows) >= _FACET_PAIR_LIMIT:
-            truncated = True
-        listed_ips = set(fallback_ips)
-        apps_by_ip: dict[str, list[str]] = {}
-        for app_name, ip in ip_app_rows:
-            if ip in listed_ips:
-                apps_by_ip.setdefault(ip, []).append(app_name)
-        for ip in fallback_ips:
-            ip_apps = apps_by_ip.get(ip, [])
-            if len(ip_apps) > FACET_LIMIT:
-                truncated = True
-            for app_name in ip_apps[:FACET_LIMIT + 1]:
-                pairs.append((ip, app_name, ip))
-
+    pairs, bare_ip_truncated = _host_app_pairs(seen)
     alias_index = AliasIndex.load(conn)
-    aliases_map = alias_index.alias_by_ip
+    facets = _FacetSets()
+    facets.add_configured_hosts(alias_index.alias_by_ip, _configured_docker_aliases(conn))
+    facets.add_seen(seen, pairs, alias_index)
+    facets.fold_addresses_into_aliases(alias_index.alias_by_ip)
+    result = facets.capped()
+    result["truncated"] = result["truncated"] or truncated or bare_ip_truncated
+    result["former_docker_aliases"] = load_former_docker_aliases(conn)
+    return result
 
-    sources_set = set()
-    apps_set = set(apps_res)
-    host_to_apps: dict[str, set[str]] = {}
-    app_to_hosts: dict[str, set[str]] = {}
 
-    # The aliases Docker hosts use now. Only these are listed as hosts without any logs, so a
-    # renamed host's old name (or "docker") stays listed only while logs still carry it.
-    configured_docker_aliases = {
+def _host_app_pairs(seen: log_store.SeenNames) -> tuple[list[tuple[str, str, str]], bool]:
+    """
+    Every (host, app, address) pair seen: logs with a host name, then logs with only an address
+    (named by it). Also whether an address had more than FACET_LIMIT apps (some left out).
+    """
+    pairs = list(seen.alias_apps)
+    if not seen.bare_ips:
+        return pairs, False
+    truncated = False
+    listed_ips = set(seen.bare_ips)
+    apps_by_ip: dict[str, list[str]] = {}
+    for app_name, ip in seen.bare_ip_apps:
+        if ip in listed_ips:
+            apps_by_ip.setdefault(ip, []).append(app_name)
+    for ip in seen.bare_ips:
+        ip_apps = apps_by_ip.get(ip, [])
+        if len(ip_apps) > FACET_LIMIT:
+            truncated = True
+        for app_name in ip_apps[:FACET_LIMIT + 1]:
+            pairs.append((ip, app_name, ip))
+    return pairs, truncated
+
+
+def _configured_docker_aliases(conn: sqlite3.Connection) -> set[str]:
+    """
+    The aliases Docker hosts use now. Only these are listed as hosts without any logs, so a
+    renamed host's old name (or "docker") stays listed only while logs still carry it.
+    """
+    return {
         str(r[0]).strip()
-        for r in cursor.execute("SELECT source_alias FROM docker_endpoints").fetchall()
+        for r in conn.execute("SELECT source_alias FROM docker_endpoints").fetchall()
         if r[0] and str(r[0]).strip()
     }
 
-    # Add all configured Syslog aliases
-    for alias in aliases_map.values():
-        if alias:
-            sources_set.add(alias)
-            if alias not in host_to_apps:
-                host_to_apps[alias] = set()
 
-    # Add all configured Docker aliases
-    for d_alias in configured_docker_aliases:
-        if d_alias:
-            sources_set.add(d_alias)
-            if d_alias not in host_to_apps:
-                host_to_apps[d_alias] = set()
+class _FacetSets:
+    """The host and app lists and their mappings while they are built, before the caps."""
 
-    # Add all distinct sources from logs (even if they logged without app_name)
-    for row in sources:
-        s = row[0]
-        ip = row[1]
-        if alias_index.is_docker(s, ip):
-            canonical = s or "docker"
-        else:
-            canonical = (ip and aliases_map.get(ip)) or aliases_map.get(s) or s or ip
-        sources_set.add(canonical)
-        if canonical not in host_to_apps:
-            host_to_apps[canonical] = set()
+    def __init__(self) -> None:
+        self.sources: set[str] = set()
+        self.apps: set[str] = set()
+        self.host_to_apps: dict[str, set[str]] = {}
+        self.app_to_hosts: dict[str, set[str]] = {}
+        self.truncated = False
 
-    for ip in fallback_ips:
-        canonical = aliases_map.get(ip, ip)
-        sources_set.add(canonical)
-        if canonical not in host_to_apps:
-            host_to_apps[canonical] = set()
+    def _add_host(self, host: str) -> None:
+        self.sources.add(host)
+        self.host_to_apps.setdefault(host, set())
 
-    for r in pairs:
-        raw_alias = r[0]
-        app = r[1]
-        ip = r[2]
+    def add_configured_hosts(self, aliases_by_ip: dict[str, str], docker_aliases: set[str]) -> None:
+        """List every configured syslog alias and Docker host name, with or without logs."""
+        for alias in aliases_by_ip.values():
+            if alias:
+                self._add_host(alias)
+        for d_alias in docker_aliases:
+            if d_alias:
+                self._add_host(d_alias)
 
-        # Canonical host resolution:
-        # Docker logs preserve their Docker endpoint alias without resolving to Syslog IP aliases.
-        if alias_index.is_docker(raw_alias, ip):
-            canonical_host = raw_alias or "docker"
-        else:
-            canonical_host = aliases_map.get(ip) or aliases_map.get(raw_alias) or raw_alias or ip
-        if not canonical_host:
-            continue
+    def add_seen(self, seen: log_store.SeenNames, pairs: list[tuple[str, str, str]], alias_index: AliasIndex) -> None:
+        """Add the hosts, addresses and apps stored logs carry, each host under its canonical name."""
+        aliases_map = alias_index.alias_by_ip
+        self.apps.update(seen.apps)
+        # Hosts from logs, even if they logged without app_name
+        for alias, ip in seen.aliases:
+            self._add_host(_canonical_host(alias, ip, alias_index))
+        for ip in seen.bare_ips:
+            self._add_host(aliases_map.get(ip, ip))
+        for raw_alias, app, ip in pairs:
+            canonical_host = _canonical_host(raw_alias, ip, alias_index)
+            if not canonical_host:
+                continue
+            self.sources.add(canonical_host)
+            if app:
+                self.apps.add(app)
+                self.host_to_apps.setdefault(canonical_host, set()).add(app)
+                self.app_to_hosts.setdefault(app, set()).add(canonical_host)
 
-        sources_set.add(canonical_host)
-
-        if app:
-            apps_set.add(app)
-            if canonical_host not in host_to_apps:
-                host_to_apps[canonical_host] = set()
-            host_to_apps[canonical_host].add(app)
-
-            if app not in app_to_hosts:
-                app_to_hosts[app] = set()
-            app_to_hosts[app].add(canonical_host)
-
-    # Safety: Ensure no IP that has a distinct alias remains in sources_set or host_to_apps
-    for ip, alias in aliases_map.items():
-        if ip != alias:
-            if ip in sources_set:
-                sources_set.remove(ip)
-            if ip in host_to_apps:
-                if alias in host_to_apps:
-                    host_to_apps[alias].update(host_to_apps[ip])
-                else:
-                    host_to_apps[alias] = set(host_to_apps[ip])
-                del host_to_apps[ip]
-            for app, hosts in app_to_hosts.items():
+    def fold_addresses_into_aliases(self, aliases_map: dict[str, str]) -> None:
+        """An address that has an alias is listed only under its alias, with its apps moved there."""
+        for ip, alias in aliases_map.items():
+            if ip == alias:
+                continue
+            self.sources.discard(ip)
+            if ip in self.host_to_apps:
+                self.host_to_apps.setdefault(alias, set()).update(self.host_to_apps.pop(ip))
+            for hosts in self.app_to_hosts.values():
                 if ip in hosts:
                     hosts.remove(ip)
                     hosts.add(alias)
 
-    def _capped(values) -> list[str]:
-        nonlocal truncated
+    def _capped(self, values) -> list[str]:
         ordered = sorted(values)
         if len(ordered) > FACET_LIMIT:
-            truncated = True
+            self.truncated = True
             ordered = ordered[:FACET_LIMIT]
         return ordered
 
-    sources_out = _capped(sources_set)
-    apps_out = _capped(apps_set)
-    kept_sources = set(sources_out)
-    kept_apps = set(apps_out)
-    mapping = {
-        h: _capped(apps) for h, apps in sorted(host_to_apps.items()) if h in kept_sources
-    }
-    if len(mapping) < len(host_to_apps):
-        truncated = True
-    app_mapping = {
-        a: _capped(hosts) for a, hosts in sorted(app_to_hosts.items()) if a in kept_apps
-    }
-    if len(app_mapping) < len(app_to_hosts):
-        truncated = True
-    return {
-        "sources": sources_out,
-        "apps": apps_out,
-        "host_to_apps": mapping,
-        "source_app_mapping": mapping,
-        "app_to_hosts": app_mapping,
-        "truncated": truncated,
-        "limit": FACET_LIMIT,
-        "former_docker_aliases": load_former_docker_aliases(conn),
-    }
+    def capped(self) -> dict[str, Any]:
+        """The lists and mappings in alphabetical order, each at most FACET_LIMIT long."""
+        sources_out = self._capped(self.sources)
+        apps_out = self._capped(self.apps)
+        kept_sources = set(sources_out)
+        kept_apps = set(apps_out)
+        mapping = {
+            h: self._capped(apps) for h, apps in sorted(self.host_to_apps.items()) if h in kept_sources
+        }
+        if len(mapping) < len(self.host_to_apps):
+            self.truncated = True
+        app_mapping = {
+            a: self._capped(hosts) for a, hosts in sorted(self.app_to_hosts.items()) if a in kept_apps
+        }
+        if len(app_mapping) < len(self.app_to_hosts):
+            self.truncated = True
+        return {
+            "sources": sources_out,
+            "apps": apps_out,
+            "host_to_apps": mapping,
+            "source_app_mapping": mapping,
+            "app_to_hosts": app_mapping,
+            "truncated": self.truncated,
+            "limit": FACET_LIMIT,
+        }
+
+
+def _canonical_host(raw_alias: str, ip: str, alias_index: AliasIndex) -> str:
+    """
+    The name a log's host is listed under: Docker logs keep their Docker host name ("docker"
+    when they have none); syslog logs take the alias configured for their address or name.
+    """
+    if alias_index.is_docker(raw_alias, ip):
+        return raw_alias or "docker"
+    aliases_map = alias_index.alias_by_ip
+    return (ip and aliases_map.get(ip)) or aliases_map.get(raw_alias) or raw_alias or ip
 
 
 async def get_facets() -> LogFacetsResponse:

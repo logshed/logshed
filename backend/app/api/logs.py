@@ -6,7 +6,7 @@ import asyncio
 import time
 import logging
 import sqlite3
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -25,17 +25,13 @@ from app.models import (
 from app.core.utils import AliasIndex, parse_multi_values
 from app.services.log_facets import get_facets
 from app.services.log_deletion import count_matching_logs_async, execute_delete_logs_async
+from app.services import log_store
 from app.services.log_query import (
     InvalidTimeBound,
     LogFilter,
-    build_where,
     check_ui_filter_value_counts,
     db_busy_exception,
-    execute_with_fts_fallback,
-    fetch_log_context,
-    log_columns,
     row_to_log_entry,
-    run_newest_first,
     run_search_query,
 )
 
@@ -76,49 +72,12 @@ async def list_logs(
     except InvalidTimeBound as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # The total is capped, so a broad query does not count every row
+    count_limit = max(1001, offset + limit + 1)
+
     def _query_db(conn):
-        where_sql, params = build_where(conn, log_filter)
-        params.update({"limit": limit, "offset": offset})
-
-        # Total count query: cap count evaluation to avoid full table scans on broad queries
-        count_limit = max(1001, offset + limit + 1)
-        params["count_limit"] = count_limit
-        count_sql = f"SELECT COUNT(*) FROM (SELECT 1 FROM logs {where_sql} LIMIT :count_limit)"
-        # Log selection query
-        select_sql = f"""
-            SELECT {log_columns()}
-            FROM logs
-            {where_sql}
-            ORDER BY logs.timestamp DESC, logs.id DESC
-            LIMIT :limit OFFSET :offset
-        """
-
-        cursor = conn.cursor()
-
-        def _run(run_params: dict[str, Any]):
-            cursor.execute(count_sql, run_params)
-            run_total = cursor.fetchone()[0]
-            cursor.execute(select_sql, run_params)
-            return run_total, cursor.fetchall()
-
-        def _oldest_needed(result: tuple[int, list]) -> Optional[str]:
-            run_total, run_rows = result
-            if run_total >= count_limit and len(run_rows) >= limit:
-                return run_rows[-1]["timestamp"]
-            # Too few matches: still complete when the window covers the whole time range
-            return log_filter.from_ts
-
-        total, rows = execute_with_fts_fallback(
-            lambda p: run_newest_first(conn, p, _run, _oldest_needed, lambda r: r[0], count_limit),
-            params,
-            query,
-            empty=(0, []),
-        )
-
-        logs = [row_to_log_entry(r) for r in rows]
-
-        total_capped = bool(total >= count_limit)
-        return logs, total, total_capped
+        total, rows = log_store.search(conn, log_filter, fetch=limit, offset=offset, count_limit=count_limit)
+        return [row_to_log_entry(r) for r in rows], total, bool(total >= count_limit)
 
     try:
         logs, total, total_capped = await run_search_query(_query_db, request)
@@ -246,7 +205,7 @@ async def get_log_context(
     """
     def _fetch_context(conn):
         half = max(1, lines // 2)
-        found = fetch_log_context(conn, id, before=half, after=half, same_app=same_app)
+        found = log_store.context(conn, id, before=half, after=half, same_app=same_app)
         if found is None:
             return None, []
         target_row, before_rows, after_rows = found

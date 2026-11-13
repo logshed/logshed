@@ -17,6 +17,7 @@ from app.core.backup import backups_dir, prune_backups
 from app.core.config import get_max_retention_days, is_max_retention_days_overridden
 from app.core.migrations import get_connection
 from app.core.pipeline import wait_for_ingest_write
+from app.services import log_store
 from app.services.storage_metrics import note_logs_deleted, record_metrics, prune_old_metrics
 
 logger = logging.getLogger(__name__)
@@ -180,15 +181,7 @@ def compute_prune_preview(conn: sqlite3.Connection, retention_days: int) -> dict
     params = {"cutoff": cutoff_iso}
     cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        SELECT COUNT(*) FROM logs
-        WHERE timestamp < :cutoff
-          AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)
-        """,
-        params,
-    )
-    logs = cursor.fetchone()[0]
+    logs = log_store.count_prunable(conn, cutoff_iso)
 
     cursor.execute("SELECT COUNT(*) FROM storage_metrics WHERE recorded_at < datetime('now', '-30 days')")
     metrics = cursor.fetchone()[0]
@@ -266,27 +259,11 @@ def execute_prune(
     try:
         cursor = conn.cursor()
         
-        # 1. Iterative batch deletion of logs older than retention_days.
-        # Defense-in-depth: only delete rows that have already been indexed by FTSIndexWorker
-        # to prevent orphaned FTS records or deleting unindexed rows.
-        delete_query = """
-            DELETE FROM logs WHERE id IN (
-                SELECT id FROM logs 
-                WHERE timestamp < :cutoff_time 
-                  AND id <= (SELECT COALESCE(last_indexed_id, 0) FROM fts_index_state WHERE id = 1)
-                LIMIT 5000
-            )
-        """
+        # 1. Batch deletion of logs older than retention_days. Only rows the FTS indexer has
+        # reached are deleted, so no deleted row leaves its tokens in logs_fts.
         note_logs_deleted()
         try:
-            while True:
-                cursor.execute(delete_query, {"cutoff_time": cutoff_iso})
-                count = cursor.rowcount
-                conn.commit()
-                total_deleted += count
-                if count == 0:
-                    break
-                wait_for_ingest_write()
+            total_deleted = log_store.prune(conn, cutoff_iso, wait_for_ingest_write)
         finally:
             note_logs_deleted()
 

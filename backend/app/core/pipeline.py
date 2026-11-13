@@ -17,6 +17,7 @@ from pathlib import Path
 from collections import deque
 
 from app.core.utils import SEVERITY_NAME_MAP
+from app.services import log_store
 
 
 logger = logging.getLogger(__name__)
@@ -481,21 +482,6 @@ def replace_surrogates(text: str) -> str:
     if not text:
         return text
     return _SURROGATES_RE.sub("\ufffd", text)
-
-
-def _insert_params(entry: dict) -> list:
-    """Values for one row of the logs INSERT, in column order."""
-    return [
-        entry.get("timestamp"),
-        entry.get("received_at"),
-        entry.get("source_ip", ""),
-        entry.get("source_alias", ""),
-        entry.get("app_name", ""),
-        entry.get("facility", 1),
-        entry.get("severity", 6),
-        entry.get("message", ""),
-        entry.get("raw", ""),
-    ]
 
 
 _RE_KV = re.compile(r"""\b(?:level|lvl|severity)\s*=\s*["']?([a-zA-Z]+)["']?""")
@@ -1226,32 +1212,8 @@ class QueueConsumer:
         conn = self._get_connection()
 
         try:
-            cursor = conn.cursor()
             self._normalize_timestamps(batch)
-
-            # Chunked multi-row parameterized insert with RETURNING id (chunk size <= 500)
-            chunk_size = 500
-            row_placeholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            for i in range(0, len(batch), chunk_size):
-                chunk = batch[i:i + chunk_size]
-                placeholders = ", ".join([row_placeholder] * len(chunk))
-                sql = f"""
-                    INSERT INTO logs (
-                        timestamp, received_at, source_ip, source_alias,
-                        app_name, facility, severity, message, raw
-                    ) VALUES {placeholders} RETURNING id
-                """
-                params = []
-                for entry in chunk:
-                    params.extend(_insert_params(entry))
-                cursor.execute(sql, params)
-                returned_rows = cursor.fetchall()
-                if len(returned_rows) != len(chunk):
-                    raise RuntimeError(
-                        f"Returned ID count ({len(returned_rows)}) does not match chunk size ({len(chunk)})"
-                    )
-                for entry, (row_id,) in zip(chunk, returned_rows):
-                    entry["id"] = row_id
+            log_store.insert_rows(conn, batch)
 
             conn.commit()
             self._notify_fts_indexer()
@@ -1272,12 +1234,6 @@ class QueueConsumer:
         Returns the stored entries and the skipped entries with their errors.
         """
         conn = self._get_connection()
-        sql = """
-            INSERT INTO logs (
-                timestamp, received_at, source_ip, source_alias,
-                app_name, facility, severity, message, raw
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-        """
         stored: list[dict] = []
         skipped: list[tuple[dict, Exception]] = []
         try:
@@ -1289,13 +1245,12 @@ class QueueConsumer:
                 conn.execute("SAVEPOINT log_row")
                 try:
                     try:
-                        rows = conn.execute(sql, _insert_params(entry)).fetchall()
+                        entry["id"] = log_store.insert_row(conn, entry)
                     except UnicodeEncodeError:
                         for key, value in entry.items():
                             if isinstance(value, str):
                                 entry[key] = replace_surrogates(value)
-                        rows = conn.execute(sql, _insert_params(entry)).fetchall()
-                    entry["id"] = rows[0][0]
+                        entry["id"] = log_store.insert_row(conn, entry)
                     stored.append(entry)
                 except sqlite3.OperationalError:
                     raise

@@ -22,6 +22,7 @@ import urllib.parse
 from app.api.deps import run_db_query
 from app.core.config import get_cached_setting, get_db_path, parse_bool
 from app.core.utils import parse_iso_to_epoch
+from app.services import log_store
 from app.services.notifier import get_notifier
 from app.services.retention import get_db_footprint_bytes
 
@@ -66,66 +67,11 @@ def compute_daily_digest_rollup(
 
     cursor = conn.cursor()
 
-    # 1. Total logs ingested
-    cursor.execute("SELECT COUNT(*) FROM logs WHERE timestamp >= ?", (since_iso,))
-    total_logs = cursor.fetchone()[0]
-
-    # 2. Total errors (severity <= 3)
-    cursor.execute("SELECT COUNT(*) FROM logs WHERE severity <= 3 AND timestamp >= ?", (since_iso,))
-    total_errors = cursor.fetchone()[0]
-
-    # Error count by top 3 container/host (severity <= 3: emerg, alert, crit, error)
-    cursor.execute(
-        """
-        SELECT
-            CASE
-                WHEN lower(source_ip) = 'docker' OR lower(source_alias) = 'docker' THEN app_name
-                ELSE COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown')
-            END AS entity,
-            COUNT(*) as error_count,
-            SUM(CASE WHEN severity = 0 THEN 1 ELSE 0 END) as emerg_count,
-            SUM(CASE WHEN severity = 1 THEN 1 ELSE 0 END) as alert_count,
-            SUM(CASE WHEN severity = 2 THEN 1 ELSE 0 END) as crit_count,
-            SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END) as err_count,
-            MIN(severity) as min_severity
-        FROM logs
-        WHERE severity <= 3 AND timestamp >= ?
-        GROUP BY entity
-        ORDER BY min_severity ASC, error_count DESC, entity ASC
-        LIMIT 3
-        """,
-        (since_iso,),
-    )
-    top_errors = [
-        {
-            "entity": row[0],
-            "error_count": row[1],
-            "emerg_count": row[2] or 0,
-            "alert_count": row[3] or 0,
-            "crit_count": row[4] or 0,
-            "err_count": row[5] or 0,
-        }
-        for row in cursor.fetchall()
-    ]
-
-    # 3. Top 3 noisy services
-    cursor.execute(
-        """
-        SELECT
-            COALESCE(NULLIF(app_name, ''), 'unknown') AS service,
-            COUNT(*) as log_count
-        FROM logs
-        WHERE timestamp >= ?
-        GROUP BY service
-        ORDER BY log_count DESC, service ASC
-        LIMIT 3
-        """,
-        (since_iso,),
-    )
-    top_services = [
-        {"service": row[0], "log_count": row[1]}
-        for row in cursor.fetchall()
-    ]
+    figures = log_store.digest_figures(conn, since_iso)
+    total_logs = figures.total_logs
+    total_errors = figures.total_errors
+    top_errors = figures.top_errors
+    top_services = figures.top_services
 
     # 4. Storage delta
     effective_db = Path(db_path) if db_path else get_db_path()

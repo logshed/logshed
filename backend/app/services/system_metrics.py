@@ -26,6 +26,7 @@ from app.models import (
     TopErrorBreakdown,
     TopErrorEntity,
 )
+from app.services import log_store
 from app.services.maintenance_service import get_maintenance_status
 from app.services.storage_metrics import get_cached_storage_metrics
 from app.version import APP_VERSION
@@ -51,55 +52,10 @@ def _fetch_error_aggregates(conn) -> dict[str, Any]:
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     since_24h = (now_utc - datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
     since_1h = (now_utc - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
-    cur = conn.cursor()
-
-    # The error totals and per-severity counts (warning included) share one pass over the
-    # 24-hour range of idx_logs_time_sev, so use conditional aggregation
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(CASE WHEN severity <= 3 THEN 1 ELSE 0 END), 0) AS count_24h,
-               COALESCE(SUM(CASE WHEN severity <= 3 AND timestamp >= ? THEN 1 ELSE 0 END), 0) AS count_1h,
-               COALESCE(SUM(CASE WHEN severity = 0 THEN 1 ELSE 0 END), 0) AS count_emergency,
-               COALESCE(SUM(CASE WHEN severity = 1 THEN 1 ELSE 0 END), 0) AS count_alert,
-               COALESCE(SUM(CASE WHEN severity = 2 THEN 1 ELSE 0 END), 0) AS count_critical,
-               COALESCE(SUM(CASE WHEN severity = 3 THEN 1 ELSE 0 END), 0) AS count_error,
-               COALESCE(SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END), 0) AS count_warning
-        FROM logs
-        WHERE severity <= 4 AND timestamp >= ?
-        """,
-        (since_1h, since_24h),
-    )
-    counts = cur.fetchone()
-
-    # Top error apps (24h). The unary + keeps SQLite on the 24-hour range of idx_logs_time_sev:
-    # left to itself it walks every app's range of idx_logs_app_time (1.3 s instead of 0.13 s at
-    # 50 million logs).
-    cur.execute(
-        """
-        SELECT app_name, COUNT(*) as cnt
-        FROM logs
-        WHERE severity <= 3 AND timestamp >= ? AND +app_name IS NOT NULL AND +app_name != ''
-        GROUP BY +app_name
-        ORDER BY cnt DESC
-        LIMIT 5
-        """,
-        (since_24h,),
-    )
-    top_apps = [TopErrorEntity(name=r["app_name"], count=r["cnt"]) for r in cur.fetchall()]
-
-    # Top error hosts (24h)
-    cur.execute(
-        """
-        SELECT COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown') as host_val, COUNT(*) as cnt
-        FROM logs
-        WHERE severity <= 3 AND timestamp >= ?
-        GROUP BY host_val
-        ORDER BY cnt DESC
-        LIMIT 5
-        """,
-        (since_24h,),
-    )
-    top_hosts = [TopErrorEntity(name=r["host_val"] or "unknown", count=r["cnt"]) for r in cur.fetchall()]
+    figures = log_store.error_figures(conn, since_1h, since_24h)
+    counts = figures.severity_counts
+    top_apps = [TopErrorEntity(name=r["app_name"], count=r["cnt"]) for r in figures.top_apps]
+    top_hosts = [TopErrorEntity(name=r["host_val"] or "unknown", count=r["cnt"]) for r in figures.top_hosts]
 
     return {
         "count_24h": counts["count_24h"],
