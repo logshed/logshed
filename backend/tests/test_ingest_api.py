@@ -1114,6 +1114,13 @@ class TestIngestSenderAddress:
         assert entry["source_ip"] == "127.0.0.1"
 
     @pytest.mark.asyncio
+    async def test_the_docker_range_passes_on_the_sender_when_trusted(self, write_token: str, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        monkeypatch.setenv("TRUST_DOCKER_PROXIES", "true")
+        entry = await self._ingest_through("172.18.0.5", write_token, "203.0.113.7")
+        assert entry["source_ip"] == "203.0.113.7"
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("peer, listed", [("127.0.0.1", "127.0.0.1"), ("10.0.0.2", "10.0.0.0/24")])
     async def test_a_listed_proxy_passes_on_the_sender(self, write_token: str, monkeypatch, peer, listed):
         monkeypatch.setenv("TRUSTED_PROXIES", listed)

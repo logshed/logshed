@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 from app.core import backup as db_backup
 from app.core import instance_lock, lifecycle
+from app.core.session_epoch import bump_session_epoch, read_session_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,25 @@ def _move_aside(db_path: Path, stamp: str) -> tuple[Optional[Path], int]:
     return aside, size
 
 
+def _end_sessions(restored: Path, current: Path) -> None:
+    """
+    Raise the restored copy's session epoch above both its own and the current database's, so every
+    browser signs in again: the backup's older epoch would otherwise bring back sessions ended since.
+    """
+    current_epoch = 0
+    if current.exists():
+        # The database being replaced may be the broken one: if it cannot be read, the restored
+        # copy's own epoch is raised, which still ends every session issued under the backup
+        try:
+            with contextlib.closing(sqlite3.connect(f"file:{current}?mode=ro", uri=True)) as conn:
+                current_epoch = read_session_epoch(conn)
+        except sqlite3.Error:
+            current_epoch = 0
+    with contextlib.closing(sqlite3.connect(restored)) as conn:
+        bump_session_epoch(conn, at_least=current_epoch)
+        conn.commit()
+
+
 def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = print) -> RestoreResult:
     """
     Put the database from `archive` in place of `db_path`. Raises RestoreError, with the current
@@ -209,6 +229,7 @@ def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = 
             entry = _check_manifest(manifest, db_name, tmp, latest_schema)
             schema = manifest["schema_version"]
             _check_database(tmp, schema, say)
+            _end_sessions(tmp, db_path)
             os.chmod(tmp, 0o640)
             db_backup._give_to(tmp, owner)
             # The two renames happen together: a stop request in between would leave no database

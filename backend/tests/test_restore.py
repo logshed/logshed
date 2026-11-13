@@ -315,3 +315,30 @@ def test_restore_removes_a_failed_upgrade_marker_and_a_stale_copy(db, capsys):
     out = capsys.readouterr().out
     assert not lifecycle.marker_path(db).exists() and "next start runs the upgrade again" in out
     assert not stale.exists() and "left by an interrupted restore" in out
+
+
+def test_a_restore_ends_every_session(db):
+    """The backup's older session epoch would bring back sessions ended after it was made."""
+    _set(db, "session_epoch", "2")
+    archive = _backup(db)
+    _set(db, "session_epoch", "7")  # sign-outs after the backup
+
+    assert cli.restore_database(archive.name, str(db)) == 0
+    assert _get(db, "session_epoch") == "8"
+
+
+def test_a_restore_ends_sessions_issued_under_the_backup_too(db):
+    archive = _backup(db)  # no epoch stored: every session so far is at 0
+    assert cli.restore_database(archive.name, str(db)) == 0
+    assert _get(db, "session_epoch") == "1"
+
+
+def test_an_unreadable_current_database_does_not_stop_the_restore(db, tmp_path):
+    _set(db, "session_epoch", "3")
+    archive = _backup(db)
+    for suffix in ("-wal", "-shm"):
+        db.with_name(db.name + suffix).unlink(missing_ok=True)
+    db.write_bytes(b"this is not a database" * 200)
+
+    assert cli.restore_database(archive.name, str(db)) == 0
+    assert _get(db, "session_epoch") == "4"

@@ -25,6 +25,7 @@ from app.core.migrations import (
     run_migrations,
 )
 from app.core.security import hash_password
+from app.core.session_epoch import bump_session_epoch
 
 # Default database path inside the container
 _DEFAULT_DB_PATH = "/data/logs.db"
@@ -76,7 +77,6 @@ def reset_admin(password: str, db_path: str = _DEFAULT_DB_PATH) -> None:
             (password_hash, now, now),
         )
         # Every session signed in with the old password ends (a running LogShed sees it within seconds)
-        from app.api.deps import bump_session_epoch
         bump_session_epoch(conn)
         conn.commit()
         print("Admin password has been reset successfully. Every browser must sign in again.")

@@ -166,6 +166,19 @@ class TestPassphraseKeys:
         with pytest.raises(ValueError):
             decrypt_value(stored)
 
+    def test_reading_the_same_key_again_does_not_run_scrypt_again(self, key_env, monkeypatch):
+        """Start-up reads the key before an upgrade and again when the services start."""
+        monkeypatch.setenv("LOGSHED_SECRET_KEY", PASSPHRASE)
+        scrypt = mock.Mock(wraps=hashlib.scrypt)
+        monkeypatch.setattr(security.hashlib, "scrypt", scrypt)
+        get_or_create_master_key(key_env)
+        get_or_create_master_key(key_env)
+        assert scrypt.call_count == 1
+
+        monkeypatch.setenv("LOGSHED_SECRET_KEY", "another passphrase")
+        get_or_create_master_key(key_env)
+        assert scrypt.call_count == 2
+
     def test_production_cost_is_2_to_the_17(self, fast_passphrase_kdf):
         """128 MiB once per start: OWASP's minimum for scrypt (the tests run with a lower cost)."""
         assert fast_passphrase_kdf == 2**17

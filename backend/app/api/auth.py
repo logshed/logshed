@@ -15,9 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.deps import (
     bump_session_epoch,
-    current_session_epoch,
     get_current_user,
     get_optional_user,
+    read_session_epoch,
     remember_session_epoch,
     run_db_query,
 )
@@ -203,8 +203,14 @@ def _is_secure_cookie(request: Request) -> bool:
 
 
 async def _issue_session_cookie(request: Request, response: Response) -> None:
-    """Set a new session cookie, issued under the current session epoch."""
-    token = create_session_token(user_id=1, session_epoch=await current_session_epoch())
+    """
+    Set a new session cookie, issued under the current session epoch. The epoch is read from the
+    database, not the cache: reset-admin raises it from another process, and a session issued under
+    a stale cached value would end a few seconds later.
+    """
+    epoch = await run_db_query(read_session_epoch)
+    remember_session_epoch(epoch)
+    token = create_session_token(user_id=1, session_epoch=epoch)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,

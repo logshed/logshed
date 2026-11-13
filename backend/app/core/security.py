@@ -57,6 +57,7 @@ class _Keys:
 
 
 _cached_keys: Optional[_Keys] = None
+_cached_raw_key: Optional[bytes] = None
 
 SESSION_COOKIE_NAME = "session"
 DEFAULT_SESSION_DURATION_SECONDS = 7 * 24 * 3600  # 7 days
@@ -137,11 +138,15 @@ def _hkdf_fernet(master: bytes, info: bytes) -> Fernet:
 
 def _use_master_key(raw_key: str | bytes) -> bytes:
     """Derive and cache the session, stored-secrets and legacy keys; return the legacy Fernet key."""
-    global _cached_keys
+    global _cached_keys, _cached_raw_key
     raw = _key_bytes(raw_key)
+    legacy_key = _derive_fernet_key(raw)
+    # Start-up reads the key more than once (before an upgrade, then again with the services):
+    # the same master key keeps the keys already derived, so scrypt runs once per start.
+    if _cached_keys is not None and _cached_raw_key == raw:
+        return legacy_key
     master = _master_secret(raw)
     secrets_fernet = _hkdf_fernet(master, _SECRETS_KEY_INFO)
-    legacy_key = _derive_fernet_key(raw)
     legacy = Fernet(legacy_key)
     _cached_keys = _Keys(
         session=_hkdf_fernet(master, _SESSION_KEY_INFO),
@@ -149,6 +154,7 @@ def _use_master_key(raw_key: str | bytes) -> bytes:
         legacy=legacy,
         secrets_reader=MultiFernet([secrets_fernet, legacy]),
     )
+    _cached_raw_key = raw
     return legacy_key
 
 
@@ -234,8 +240,9 @@ def get_legacy_fernet() -> Fernet:
 
 def reset_crypto_cache() -> None:
     """Forget the derived keys (primarily for testing); the next use reads the master key again."""
-    global _cached_keys
+    global _cached_keys, _cached_raw_key
     _cached_keys = None
+    _cached_raw_key = None
 
 
 def encrypt_value(plain_text: str) -> str:

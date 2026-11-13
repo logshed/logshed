@@ -26,6 +26,7 @@ from app.core.api_tokens import (
 )
 from app.core.config import get_db_path
 from app.core.security import SESSION_COOKIE_NAME, verify_session_token
+from app.core.session_epoch import bump_session_epoch, read_session_epoch  # noqa: F401 (used by the auth routes and the CLI)
 from app.core.utils import parse_iso_to_utc_datetime
 
 logger = logging.getLogger(__name__)
@@ -36,33 +37,8 @@ T = TypeVar("T")
 # reset-admin raise the stored epoch by one, which ends every session issued before. The value is
 # cached per database for a few seconds; reset-admin runs in another process and is seen once the
 # cache expires.
-SESSION_EPOCH_KEY = "session_epoch"
 _SESSION_EPOCH_CACHE_TTL: float = 5.0  # seconds
 _session_epoch_cache: dict[str, tuple[int, float]] = {}
-
-
-def read_session_epoch(conn: sqlite3.Connection) -> int:
-    """The stored session epoch (0 when none was ever stored or the value is unreadable)."""
-    row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (SESSION_EPOCH_KEY,)).fetchone()
-    try:
-        return int(row[0]) if row and row[0] is not None else 0
-    except (TypeError, ValueError):
-        return 0
-
-
-def bump_session_epoch(conn: sqlite3.Connection) -> int:
-    """
-    Raise the stored session epoch by one inside the caller's transaction (the caller commits),
-    and return the new value. Every session issued under an older epoch stops working.
-    """
-    new_epoch = read_session_epoch(conn) + 1
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    conn.execute(
-        "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES (?, ?, ?, 0) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        (SESSION_EPOCH_KEY, str(new_epoch), now),
-    )
-    return new_epoch
 
 
 def remember_session_epoch(epoch: int, custom_db_path: Optional[Path] = None) -> None:

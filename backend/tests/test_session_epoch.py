@@ -175,6 +175,22 @@ class TestResetAdminEndsEverySession:
         assert (await second.get("/api/settings")).status_code == 401
 
 
+    @pytest.mark.asyncio
+    async def test_signing_in_right_after_reset_admin_is_not_ended_by_the_stale_cache(self, browsers, session_env):
+        from app.cli import reset_admin
+
+        _, second = browsers
+        assert (await second.get("/api/settings")).status_code == 200  # the cache now holds epoch 0
+        reset_admin("reset_password_789", str(session_env))
+
+        async with _new_client() as fresh:
+            assert (await fresh.post("/api/auth/login", json={"password": "reset_password_789"})).status_code == 200
+            assert (await fresh.get("/api/settings")).status_code == 200
+            deps_mod.invalidate_session_epoch_cache()  # the cache expires
+            assert (await fresh.get("/api/settings")).status_code == 200
+        assert (await second.get("/api/settings")).status_code == 401
+
+
 class TestTokenEpochClaim:
 
     def _token(self, **claims) -> str:
@@ -236,6 +252,44 @@ class TestLiveStreamEndsWithItsSession:
         await asyncio.wait_for(_read_until_closed(), timeout=5)
         await task
         assert sse_manager.subscriber_count() == 0
+
+    @pytest.mark.asyncio
+    async def test_open_stream_closes_while_logs_flow(self, browsers, monkeypatch):
+        """Under load the stream never idles to a ping, so the check also runs between batches."""
+        first, second = browsers
+        monkeypatch.setattr(logs_mod, "SSE_PING_INTERVAL_SECONDS", 60)
+        monkeypatch.setattr(logs_mod, "SSE_SESSION_CHECK_SECONDS", 0.05)
+        stop = asyncio.Event()
+
+        async def _flood_then_logout():
+            for _ in range(200):
+                if sse_manager.subscriber_count() > 0:
+                    break
+                await asyncio.sleep(0.01)
+            sent = 0
+            while not stop.is_set():
+                await sse_manager.broadcast({"id": sent, "message": f"flood {sent}", "severity": 6})
+                sent += 1
+                if sent == 20:
+                    await first.post("/api/auth/logout")
+                await asyncio.sleep(0.005)
+
+        task = asyncio.create_task(_flood_then_logout())
+        events = 0
+
+        async def _read_until_closed() -> None:
+            nonlocal events
+            async with second.stream("GET", "/api/logs/stream") as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("event: log"):
+                        events += 1
+
+        try:
+            await asyncio.wait_for(_read_until_closed(), timeout=5)
+        finally:
+            stop.set()
+            await task
+        assert events >= 1
 
     @pytest.mark.asyncio
     async def test_open_stream_keeps_running_while_its_session_is_valid(self, browsers, monkeypatch):
