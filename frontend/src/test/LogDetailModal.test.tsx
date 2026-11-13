@@ -187,7 +187,8 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
       expect(fetchSpy).toHaveBeenCalledWith(100, 10, false);
     });
 
-    expect(screen.getByText(/totem message transmission token received/i)).toBeInTheDocument();
+    // The rows render after the response resolves, which can be later than the call on a slow runner
+    expect(await screen.findByText(/totem message transmission token received/i)).toBeInTheDocument();
     expect(screen.getByText(/task worker died with error code 1/i)).toBeInTheDocument();
   });
 
