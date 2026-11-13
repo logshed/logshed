@@ -392,7 +392,7 @@ A malformed body is refused with `400` naming the line, and nothing from it is s
 | `timestamp` (or `time`, `ts`) | When the event happened: an ISO 8601 string, or Unix time in seconds or milliseconds, as a number or as a string of exactly 10 (seconds) or 13 (milliseconds) digits | the time LogShed received the entry |
 | `severity` (or `level`) | `0` to `7`, or a name such as `error`, `warning`, `info` or `debug` | `6` (info) |
 | `app_name` (or `app`) | Application or service name | `app` |
-| `source_ip` | Address or name of the sending host | the address the request came from |
+| `source_ip` | Address or name of the sending host | the address the request came from (behind a proxy listed in `TRUSTED_PROXIES`, the client address it passes on in `X-Forwarded-For`) |
 | `source_alias` | Display name of the source host | `source_ip` |
 | `raw` | The original unparsed line | `message` |
 | `facility` | Syslog facility `0` to `23` | `1` |

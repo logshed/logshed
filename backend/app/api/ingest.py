@@ -15,6 +15,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, Response, Security, status
 from fastapi.security import HTTPAuthorizationCredentials
 
+from app.api.auth import get_client_ip
 from app.api.deps import bearer_scheme, parse_bearer_token, rate_limit_headers, verify_api_token
 from app.core.api_tokens import ApiTokenRateLimiter
 from app.core.config import get_max_retention_days
@@ -343,7 +344,8 @@ async def ingest_logs(
             detail=f"Too many log entries in one request ({len(raw_entries)}); the maximum is {INGEST_MAX_ENTRIES}.",
         )
 
-    client_ip = request.client.host if request.client else "external"
+    # The sender's address, also behind a proxy listed in TRUSTED_PROXIES
+    client_ip = get_client_ip(request) if request.client else "external"
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     now_utc_str = now_dt.isoformat()
     # Entry timestamps outside this range are replaced with the received time.

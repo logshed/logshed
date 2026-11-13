@@ -1085,3 +1085,37 @@ class TestIngestMalformedPayloads:
         assert (entries["negative"]["facility"], entries["negative"]["severity"]) == (0, 6)
         assert (entries["named"]["facility"], entries["named"]["severity"]) == (16, 4)
         assert entries["from msg"]["raw"] == "from msg"
+
+
+class TestIngestSenderAddress:
+    """An entry without source_ip gets the sender's address, read through TRUSTED_PROXIES like sign-in."""
+
+    async def _ingest_through(self, peer: str, token: str, forwarded_for: str | None) -> dict:
+        transport = ASGITransport(app=create_app(), client=(peer, 50000))
+        headers = {"Authorization": f"Bearer {token}"}
+        if forwarded_for:
+            headers["X-Forwarded-For"] = forwarded_for
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post("/api/v1/ingest", json=[{"message": "from the edge"}], headers=headers)
+        assert resp.status_code == 200
+        (entry,) = _queued_entries()
+        return entry
+
+    @pytest.mark.asyncio
+    async def test_a_direct_sender_is_its_own_address(self, write_token: str, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        entry = await self._ingest_through("192.0.2.40", write_token, "203.0.113.7")
+        assert entry["source_ip"] == "192.0.2.40"
+
+    @pytest.mark.asyncio
+    async def test_an_unlisted_loopback_peer_is_not_a_proxy(self, write_token: str, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        entry = await self._ingest_through("127.0.0.1", write_token, "203.0.113.7")
+        assert entry["source_ip"] == "127.0.0.1"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("peer, listed", [("127.0.0.1", "127.0.0.1"), ("10.0.0.2", "10.0.0.0/24")])
+    async def test_a_listed_proxy_passes_on_the_sender(self, write_token: str, monkeypatch, peer, listed):
+        monkeypatch.setenv("TRUSTED_PROXIES", listed)
+        entry = await self._ingest_through(peer, write_token, "203.0.113.7")
+        assert entry["source_ip"] == "203.0.113.7"

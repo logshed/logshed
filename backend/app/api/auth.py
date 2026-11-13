@@ -123,27 +123,27 @@ def _get_trusted_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Networ
 
 
 def _is_trusted_proxy(ip_str: str, trusted_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network]) -> bool:
-    """Check if an IP string is loopback or belongs to one of the trusted proxy networks."""
+    """
+    Check if an IP string belongs to one of the trusted proxy networks. Loopback is trusted only
+    when listed: a proxy or tunnel sharing the container's network can be reached by anyone it serves.
+    """
     cleaned = _clean_ip(ip_str)
     try:
         addr = ipaddress.ip_address(cleaned)
     except ValueError:
         return False
-    if addr.is_loopback:
-        return True
     for net in trusted_networks:
         if addr in net:
             return True
     return False
 
 
-def _get_client_ip(request: Request) -> str:
+def get_client_ip(request: Request) -> str:
     """
     Extract client IP address safely with trusted proxy validation.
-    Inspects request.client.host. If TRUSTED_PROXIES is configured or the connection
-    origin is loopback, parses the client IP from the rightmost untrusted hop
-    in X-Forwarded-For. If TRUSTED_PROXIES is not set and the caller is not on loopback,
-    falls back strictly to request.client.host.
+    Inspects request.client.host. When the direct peer is a trusted proxy (TRUSTED_PROXIES, or the
+    Docker bridge range with TRUST_DOCKER_PROXIES), parses the client IP from the rightmost untrusted
+    hop in X-Forwarded-For; otherwise uses request.client.host.
     """
     if not request.client or not request.client.host:
         return "127.0.0.1"
@@ -318,7 +318,7 @@ async def login(req: LoginRequest, request: Request, response: Response) -> Mess
     Enforces strict in-memory rate limiting on login attempts: per client IP (IPv6 by /64),
     and per-IP concurrency.
     """
-    limiter_key = ip_bucket_key(_get_client_ip(request))
+    limiter_key = ip_bucket_key(get_client_ip(request))
 
     # Reserve the attempt before any await so concurrent requests count against each other.
     attempt = login_rate_limiter.begin(limiter_key)

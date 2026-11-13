@@ -101,9 +101,11 @@ umask 027
 # Default port
 PORT=${PORT:-8080}
 
-# Execute custom command or default single-worker uvicorn process with gosu privilege drop
+# Execute custom command or default single-worker uvicorn process with gosu privilege drop.
+# --no-proxy-headers: LogShed decides which proxies may set X-Forwarded-For and X-Forwarded-Proto
+# (TRUSTED_PROXIES); uvicorn would otherwise trust any connection from loopback.
 if [ $# -gt 0 ]; then
     exec gosu appuser tini -- "$@"
 else
-    exec gosu appuser tini -- uvicorn app.main:app --app-dir /app/backend --host 0.0.0.0 --port "$PORT" --workers 1 --no-access-log
+    exec gosu appuser tini -- uvicorn app.main:app --app-dir /app/backend --host 0.0.0.0 --port "$PORT" --workers 1 --no-access-log --no-proxy-headers
 fi

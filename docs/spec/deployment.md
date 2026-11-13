@@ -58,7 +58,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 if [ $# -gt 0 ]; then
     exec gosu appuser tini -- "$@"
 else
-    exec gosu appuser tini -- uvicorn app.main:app --app-dir /app/backend --host 0.0.0.0 --port "$PORT" --workers 1 --no-access-log
+    exec gosu appuser tini -- uvicorn app.main:app --app-dir /app/backend --host 0.0.0.0 --port "$PORT" --workers 1 --no-access-log --no-proxy-headers
 fi
 ```
 

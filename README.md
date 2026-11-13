@@ -261,7 +261,7 @@ cd ..
 
 # 3. Run backend tests and start the dev server
 .venv/bin/pytest backend/tests/ -v
-DATA_DIR=./data python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload
+DATA_DIR=./data python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8080 --reload --no-proxy-headers
 ```
 
 ---

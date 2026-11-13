@@ -279,7 +279,7 @@ export const AdvancedSettingsCard: React.FC<AdvancedSettingsCardProps> = ({
           <div className="space-y-3">
             <TextField
               label="Trusted Reverse Proxies"
-              hint="Comma-separated IP addresses or CIDR ranges. Enables X-Forwarded-For parsing."
+              hint="Comma-separated IP addresses or CIDR ranges. Enables X-Forwarded-For parsing. Add 127.0.0.1 for a proxy or tunnel that shares LogShed's network."
               id="trusted-proxies"
               type="text"
               placeholder="10.0.0.0/8, 192.168.1.1"

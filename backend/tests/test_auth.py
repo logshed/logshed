@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import get_cors_origins
+from app.core.config import get_cors_origins, invalidate_settings_cache
 from app.core.migrations import run_migrations
 from app.core.rate_limiter import login_rate_limiter
 from app.core.security import (
@@ -342,7 +342,16 @@ class TestAuthentication:
         cookie_parts_http = [p.strip() for p in set_cookie_http.split(";")]
         assert "secure" not in cookie_parts_http
 
-        # Proxy with x-forwarded-proto: https -> secure=True
+        # A loopback peer that TRUSTED_PROXIES does not list is not a proxy: its header is ignored
+        res_unlisted = await client.post(
+            "/api/auth/login", json={"password": "secure_pwd_123"}, headers={"x-forwarded-proto": "https"}
+        )
+        assert res_unlisted.status_code == 200
+        assert "secure" not in [p.strip() for p in res_unlisted.headers.get("set-cookie", "").lower().split(";")]
+
+        # A listed proxy with x-forwarded-proto: https -> secure=True
+        monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1")
+        invalidate_settings_cache()
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(
@@ -629,7 +638,8 @@ class TestLoginLimiterHardening:
             assert res.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_ipv6_addresses_in_one_slash_64_share_a_bucket(self, client: AsyncClient):
+    async def test_ipv6_addresses_in_one_slash_64_share_a_bucket(self, client: AsyncClient, monkeypatch):
+        monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1")
         await client.post("/api/auth/setup", json={"password": "correct_password"})
 
         for i in range(5):
@@ -891,10 +901,11 @@ class TestCorsAndBearerHardening:
 class TestLoginHasNoGlobalFailureLimit:
 
     @pytest.mark.asyncio
-    async def test_failures_from_many_addresses_do_not_trip_a_limit(self, client: AsyncClient):
+    async def test_failures_from_many_addresses_do_not_trip_a_limit(self, client: AsyncClient, monkeypatch):
+        monkeypatch.setenv("TRUSTED_PROXIES", "127.0.0.1")
         await client.post("/api/auth/setup", json={"password": "correct_password"})
 
-        # Loopback peer is a trusted proxy, so each X-Forwarded-For value is a distinct client
+        # The loopback peer is a listed proxy, so each X-Forwarded-For value is a distinct client
         for i in range(40):
             res = await client.post(
                 "/api/auth/login",
@@ -1135,3 +1146,53 @@ class TestSetupUsesArgon2Pool:
         assert codes == [200, 403]
         winner = "FirstSecurePass123!" if results[0].status_code == 200 else "SecondSecurePass456!"
         assert (await client.post("/api/auth/login", json={"password": winner})).status_code == 200
+
+
+# ===================================================================
+# Loopback is a proxy only when TRUSTED_PROXIES lists it
+# ===================================================================
+
+class TestLoopbackProxyTrust:
+
+    async def _wrong_logins_with_rotating_forwarded_for(self, peer: str, count: int) -> list[int]:
+        transport = ASGITransport(app=create_app(), client=(peer, 50000))
+        async with AsyncClient(transport=transport, base_url="http://test", headers={"X-Requested-With": "XMLHttpRequest"}) as ac:
+            await ac.post("/api/auth/setup", json={"password": "correct_password"})
+            return [
+                (await ac.post(
+                    "/api/auth/login",
+                    json={"password": "wrong_password"},
+                    headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+                )).status_code
+                for i in range(count)
+            ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("peer", ["127.0.0.1", "::1"])
+    async def test_an_unlisted_loopback_peer_cannot_rotate_its_address(self, monkeypatch, peer):
+        """A tunnel or sidecar sharing the container's network: every client it forwards shares one limit."""
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        codes = await self._wrong_logins_with_rotating_forwarded_for(peer, 6)
+        assert codes == [401] * 5 + [429]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("peer, listed", [("127.0.0.1", "127.0.0.1"), ("::1", "::1"), ("127.0.0.1", "127.0.0.0/8")])
+    async def test_a_listed_loopback_proxy_passes_on_the_client_address(self, monkeypatch, peer, listed):
+        monkeypatch.setenv("TRUSTED_PROXIES", listed)
+        codes = await self._wrong_logins_with_rotating_forwarded_for(peer, 6)
+        assert codes == [401] * 6
+
+    @pytest.mark.asyncio
+    async def test_trusting_the_docker_range_does_not_trust_loopback(self, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        monkeypatch.setenv("TRUST_DOCKER_PROXIES", "true")
+        codes = await self._wrong_logins_with_rotating_forwarded_for("127.0.0.1", 6)
+        assert codes[-1] == 429
+
+
+def test_the_image_starts_uvicorn_without_its_own_proxy_header_handling():
+    """uvicorn would trust X-Forwarded-For from loopback itself, before LogShed's TRUSTED_PROXIES check."""
+    entrypoint = (Path(__file__).resolve().parents[2] / "entrypoint.sh").read_text()
+    (command,) = [line for line in entrypoint.splitlines() if "uvicorn app.main:app" in line]
+    assert "--no-proxy-headers" in command.split()
+

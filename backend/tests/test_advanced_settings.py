@@ -680,7 +680,7 @@ class TestSubsystemIntegrations:
         self, client: AsyncClient, tmp_path: Path
     ):
         """Auth client IP extraction trusts proxies configured via cached settings."""
-        from app.api.auth import _get_client_ip
+        from app.api.auth import get_client_ip
 
         # Mock request with X-Forwarded-For
         class MockRequest:
@@ -691,7 +691,7 @@ class TestSubsystemIntegrations:
         # Case 1: Untrusted proxy -> uses direct client IP
         invalidate_settings_cache()
         req1 = MockRequest(client_ip="198.51.100.5", forwarded_for="203.0.113.10")
-        assert _get_client_ip(req1) == "198.51.100.5"
+        assert get_client_ip(req1) == "198.51.100.5"
 
         # Case 2: Configure trusted proxy in settings
         db_file = tmp_path / "logs.db"
@@ -703,7 +703,7 @@ class TestSubsystemIntegrations:
         invalidate_settings_cache()
 
         req2 = MockRequest(client_ip="198.51.100.5", forwarded_for="203.0.113.10")
-        assert _get_client_ip(req2) == "203.0.113.10"
+        assert get_client_ip(req2) == "203.0.113.10"
 
     def test_syslog_server_dynamic_limit_update(self, tmp_path: Path):
         """SyslogServer dynamically updates max connections and inactivity timeout."""
