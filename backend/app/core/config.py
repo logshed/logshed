@@ -212,6 +212,21 @@ def get_auto_backup_on_migration() -> bool:
     return parse_bool(os.environ.get("AUTO_BACKUP_ON_MIGRATION"), True)
 
 
+def is_auto_backup_on_migration_overridden() -> bool:
+    """True when AUTO_BACKUP_ON_MIGRATION is set, so it wins over the setting stored from the web UI."""
+    return bool((os.environ.get("AUTO_BACKUP_ON_MIGRATION") or "").strip())
+
+
+def resolve_backup_before_migration(stored: Optional[str]) -> bool:
+    """
+    Whether to back up before a schema upgrade: AUTO_BACKUP_ON_MIGRATION when it is set, otherwise
+    the stored `backup_before_migration` setting (absent means on).
+    """
+    if is_auto_backup_on_migration_overridden():
+        return get_auto_backup_on_migration()
+    return parse_bool(stored, True)
+
+
 def is_max_retention_days_overridden() -> bool:
     """
     Returns True if MAX_RETENTION_DAYS is explicitly defined as a valid integer in the environment.

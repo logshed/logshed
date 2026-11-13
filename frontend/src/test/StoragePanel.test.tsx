@@ -4,6 +4,7 @@ import { StoragePanel } from '../components/storage/StoragePanel.tsx';
 import * as settingsApi from '../api/settings.ts';
 import * as systemApi from '../api/system.ts';
 import * as logsApi from '../api/logs.ts';
+import * as backupsApi from '../api/backups.ts';
 
 describe('StoragePanel Component', () => {
   beforeEach(() => {
@@ -31,8 +32,21 @@ describe('StoragePanel Component', () => {
       db_size_bytes: 18247000000,
       disk_free_bytes: 450000000000,
       disk_total_bytes: 1000000000000,
+      backups_size_bytes: 3 * 1024 ** 3,
+      backups_count: 2,
       history: [],
     });
+    vi.spyOn(backupsApi, 'fetchBackups').mockResolvedValue({ backups: [], total_size_bytes: 0 });
+    vi.spyOn(backupsApi, 'fetchBackupJob').mockResolvedValue({ state: 'idle', done: 0, total: 0 });
+  });
+
+  it('shows backups as their own line and the backups card between retention and the trend chart', async () => {
+    render(<StoragePanel />);
+    expect(await screen.findByTestId('backups-size-display')).toHaveTextContent('Backups: 3 GB');
+    const card = await screen.findByTestId('database-backups-card');
+    const retention = screen.getByText(/Log Retention Policy/i);
+    expect(retention.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByText('No backups yet.')).toBeInTheDocument();
   });
 
   it('renders storage metrics, retention slider, and storage trend chart', async () => {

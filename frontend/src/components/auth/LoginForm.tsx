@@ -5,7 +5,12 @@ import { LABEL_CLASS } from '../common/Field.tsx';
 import { LogShedLogo } from '../common/LogShedLogo.tsx';
 import { useAuth } from '../../context/AuthContext.tsx';
 
-export const LoginForm: React.FC = () => {
+interface LoginFormProps {
+  /** Shown above the form, for a screen that asks for sign-in first (recovery mode). */
+  notice?: React.ReactNode;
+}
+
+export const LoginForm: React.FC<LoginFormProps> = ({ notice }) => {
   const { login, error: authError } = useAuth();
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -53,6 +58,8 @@ export const LoginForm: React.FC = () => {
           <h1 className="text-xl font-bold text-fg-strong tracking-[-0.02em]">LogShed</h1>
           <p className="text-xs text-fg-muted mt-1">Single-Process Log Aggregator & Ops Console</p>
         </div>
+
+        {notice && <div className="mb-4">{notice}</div>}
 
         {noticeMsg && (
           <div className="mb-4 p-3 bg-success-950/60 border border-success-800 rounded-lg flex items-start gap-x-2 text-xs text-success-300">

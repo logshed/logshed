@@ -71,6 +71,9 @@ export interface SystemSettings {
   retention_days: number;
   max_retention_days?: number;
   retention_overridden?: boolean;
+  /** Back up the database before an upgrade changes its schema; locked when AUTO_BACKUP_ON_MIGRATION is set. */
+  backup_before_migration?: boolean;
+  backup_before_migration_overridden?: boolean;
   internal_log_level?: string;
   check_for_updates?: boolean;
   maintenance_until?: string | null;
@@ -120,11 +123,28 @@ export interface StorageMetricsResponse {
   disk_free_bytes: number;
   disk_total_bytes: number;
   total_logs_count?: number;
+  /** Bytes and number of the database backup archives beside the database. */
+  backups_size_bytes?: number;
+  backups_count?: number;
   history: StorageMetricsSnapshot[];
 }
 
+/** Where a database upgrade is (status "upgrading") or where it stopped (status "migration_failed"). */
+export interface UpgradeStatus {
+  /** backup, migrate or starting while upgrading; backup or migration after a failure. */
+  stage: string;
+  /** Bytes backed up, or steps finished; bytes or steps in all. */
+  done?: number | null;
+  total?: number | null;
+  from_schema: number;
+  target_schema: number;
+  failed_at?: string | null;
+}
+
 export interface HealthResponse {
+  /** ok or degraded normally; upgrading or migration_failed during and after a database upgrade. */
   status: string;
+  upgrade?: UpgradeStatus | null;
   db?: string;
   queue_depth?: number;
   dropped_logs?: number;
@@ -736,4 +756,54 @@ export interface DockerEndpointTestResult {
   version?: string | null;
   latency_ms?: number | null;
   error?: string | null;
+}
+
+export interface BackupItem {
+  filename: string;
+  kind: 'pre-migration' | 'manual';
+  schema_version: number;
+  target_schema?: number | null;
+  size_bytes: number;
+  created_at: string;
+  expires_at: string;
+  days_until_expiry: number;
+}
+
+export interface BackupListResponse {
+  backups: BackupItem[];
+  total_size_bytes: number;
+}
+
+/** The web UI's backup job: a VACUUM INTO copy, then compression with byte progress. */
+export interface BackupJob {
+  state: 'idle' | 'running' | 'done' | 'failed';
+  stage?: 'copying' | 'compressing' | null;
+  done: number;
+  total: number;
+  filename?: string | null;
+  size_bytes?: number | null;
+  error?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+/** The failed upgrade the recovery screen describes (signed in only). */
+export interface RecoveryDetails {
+  status: string;
+  app_version?: string | null;
+  stage?: 'backup' | 'migration' | null;
+  from_schema?: number | null;
+  target_schema?: number | null;
+  current_schema?: number | null;
+  failed_at?: string | null;
+  error?: string | null;
+  backup_filename?: string | null;
+  backup_available: boolean;
+  disk_free_bytes?: number | null;
+  disk_total_bytes?: number | null;
+  database_size_bytes?: number | null;
+  backup_needed_bytes?: number | null;
+  backup_floor_bytes?: number | null;
+  /** The server's time zone, for showing failed_at (the Settings route is closed in recovery). */
+  server_timezone?: string | null;
 }

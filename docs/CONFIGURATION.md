@@ -158,7 +158,7 @@ Set this on the Docker host, not in the Compose file: Docker refuses `net.core.r
 | Variable | Default | Where to Configure | Description | Since |
 |---|---|---|---|:---:|
 | `MAX_RETENTION_DAYS` | `30` | Docker Compose only | Maximum log retention in days (minimum `1`), and the ceiling of the retention slider in the web interface. While the variable is set, LogShed uses it as the retention itself: it is saved at startup and the slider is fixed to it. If you remove the variable later, the saved value stays until you change it on the **Storage** page, but retention never exceeds the default ceiling of 30 days. | 1.0.0 |
-| `AUTO_BACKUP_ON_MIGRATION` | `true` | Docker Compose or Unraid template | Back up the database before an upgrade changes its schema (see [Database Backups](#database-backups)). Set to `false` to upgrade without a backup, for example when the disk has no room for one. | 1.4.0 |
+| `AUTO_BACKUP_ON_MIGRATION` | `true` | Docker Compose or Unraid template | Back up the database before an upgrade changes its schema (see [Database Backups](#database-backups)). Set to `false` to upgrade without a backup, for example when the disk has no room for one. When set, it wins over the checkbox on the Storage page, which is then locked; when not set, the checkbox decides (on by default). | 1.4.0 |
 | `DB_PATH` | *(empty)* | Docker Compose only | Custom SQLite database file path. Supported for backward compatibility; prefer `DATA_DIR`. | 1.0.0 |
 | `SECRET_KEY_PATH` | *(empty)* | Docker Compose only | Custom path to the persisted encryption key file. Supported for backward compatibility; prefer `DATA_DIR`. | 1.0.0 |
 
@@ -261,6 +261,7 @@ All persistent application data is stored under the `/data` directory:
 | `/data/presets/alerts/` | Directory for custom and community alert rule JSON definitions. |
 | `/data/presets/drops/` | Directory for custom and community ingestion drop rule JSON definitions. |
 | `/data/backups/` | Database backups: one `.tar.gz` archive per backup, made before an upgrade changes the schema or by the `backup` command, and deleted after 30 days (see [Database Backups](#database-backups)). It sits beside the database (it follows `DATA_DIR` and `DB_PATH`). |
+| `/data/.migration_failed` | Written when an upgrade of the database stopped; it keeps LogShed in [recovery mode](#recovery-mode) across restarts. Removed by a retry, or when another version starts. |
 | `/data/.tmp/` | SQLite's temporary files: the copy of the database that **Compact Database** builds, and large sorts. They are deleted as soon as they are created, so the folder looks empty while they take space. It sits beside the database (it follows `DATA_DIR` and `DB_PATH`), so this space comes from the `/data` disk and not from the container's own filesystem (on Unraid, `docker.img`). |
 
 **Free space for Compact Database:** compacting writes a copy of the database and then the whole database again into `logs.db-wal`, so it needs free space of about **twice the database's size** on the `/data` disk. LogShed checks before it starts and refuses with the figures if there is not enough. The extra space is released when it finishes.
@@ -289,9 +290,11 @@ LogShed backs up the database by itself before an upgrade changes its schema, an
 
 An archive is a gzip-compressed tar that any archive tool opens (`tar -xzf <file>`). It holds `logs.db` and `manifest.json`, which records the LogShed version, the time, the schema the database was on, and for a backup before an upgrade the schema it was upgraded to. Backups are deleted 30 days after they were made, by the daily cleanup. Files in the folder with other names are left alone.
 
-**Before an upgrade.** When a new version starts on a database with an older schema, it backs the database up first, then upgrades it. A large database takes a while: about 2 minutes for 20 GiB, with progress in the container log (`docker logs`) about every 10%. Do not restart the container while it runs. Upgrades that leave the stored logs as they are (the schema 4 upgrade in 1.4.0) back up everything except the logs, which takes a second or two. To upgrade without a backup, set `AUTO_BACKUP_ON_MIGRATION=false`.
+**Before an upgrade.** When a new version starts on a database with an older schema, it backs the database up first, then upgrades it. A large database takes a while: about 2 minutes for 20 GiB. Meanwhile the web interface shows a status page with the progress (also in the container log, `docker logs`, about every 10%), `/api/health` answers `200` with `"status": "upgrading"`, and no logs are received. Do not restart the container while it runs; if it is stopped part way, nothing is lost and the upgrade starts again at the next start. Upgrades that leave the stored logs as they are (the schema 4 upgrade in 1.4.0) back up everything except the logs, which takes a second or two. To upgrade without a backup, untick **Back up the database before upgrades** on the Storage page, or set `AUTO_BACKUP_ON_MIGRATION=false`.
 
-**Free space.** A backup must leave at least 10% of the disk free (at least 2 GiB and at most 20 GiB), because `/data` often sits on a disk shared with other containers, whose databases fail when it fills. A backup before an upgrade needs about 30% of the database's size on top of that; a manual backup needs the database's size plus 30% while it runs. When there is not enough room, LogShed does not upgrade and does not start: the log says how much space it needs and how much is free. Free some space, or set `AUTO_BACKUP_ON_MIGRATION=false`, and start it again. A backup that was interrupted (the container stopped while it ran) leaves a `.tmp` file in `/data/backups/`, which is deleted after a day; the message names their size, and you can delete them when no backup is running. LogShed never deletes a backup to make room. Each backup keeps its space for 30 days: delete archives you no longer need from `/data/backups/`.
+**Free space.** A backup must leave at least 10% of the disk free (at least 2 GiB and at most 20 GiB), because `/data` often sits on a disk shared with other containers, whose databases fail when it fills. A backup before an upgrade needs about 30% of the database's size on top of that; a manual backup needs the database's size plus 30% while it runs. When there is not enough room, LogShed does not upgrade and waits in [recovery mode](#recovery-mode), which shows how much space it needs and how much is free. A backup that was interrupted (the container stopped while it ran) leaves a `.tmp` file in `/data/backups/`, which is deleted after a day; the message names their size, and you can delete them when no backup is running. LogShed never deletes a backup to make room. Each backup keeps its space for 30 days: delete archives you no longer need from `/data/backups/`.
+
+**From the web interface.** The **Database Backups** card on the Storage page lists the backups (newest first) with their kind ("Before upgrade (v3 to v4)" or "Manual (v4)"), size, time and the days left before they are deleted, each with **Download** and **Delete**. **Create backup now** makes a backup as the command below does, while logging carries on, and shows its progress; it needs the database's size plus 30% free while it runs, and refuses with the figures when the disk has less. It does not run at the same time as a cleanup, a Compact or another backup. Backups are not available through the `/api/v1` API or MCP: a download is the whole database, so it needs the web sign-in.
 
 **Manual backup.** Run this while LogShed runs:
 
@@ -306,6 +309,22 @@ It copies the database from a consistent snapshot while logging carries on, then
 **Appdata backup tools** such as Unraid's Appdata Backup plugin copy `/data/backups/` too, which can double the size of that backup for a month. Exclude the `backups` folder in the tool if you do not need it twice.
 
 **Going back to 1.3.x** leaves the folder as it is: 1.3.x does not delete old backups, so delete them by hand.
+
+### Recovery mode
+
+If the backup before an upgrade cannot be made, or a step of the upgrade fails, LogShed does not exit. Each step runs in one transaction, so a failed step is rolled back and the database stays at the last schema that worked (an upgrade across several schemas can stop part way, for example at schema 3 on the way from 2 to 4). LogShed then:
+
+- writes `/data/.migration_failed` (the versions, the stage, the time, the error and the backup's name), so a restart goes straight back to recovery mode instead of running the same upgrade, and its backup, again;
+- sends one notification to every enabled notification channel;
+- answers `/api/health` with `200` and `"status": "migration_failed"`, and every other API request with `503`, so it stops receiving logs.
+
+Open the web interface and sign in. The recovery screen shows the error, the disk's free space against what a backup needs, and the backup made before the upgrade (with a download link). Then:
+
+- **Retry the upgrade**: after you fixed the cause (for example freed some disk space). The backup made before the failed attempt is used again while the database is still at its schema, so a retry does not make a second one.
+- **Upgrade without a backup**: for a disk with no room for one. Without a backup, the way back is a copy of `/data` you made yourself.
+- **Go back to the version you ran before**: set the image tag back and start the container. That works while the database is still at the older schema, as it is after a failed upgrade. See [Going back to an older version](#going-back-to-an-older-version).
+
+A different version of LogShed (a fixed release, or the tag you went back to) removes `.migration_failed` when it starts and runs its own upgrade, if any.
 
 ### Going back to an older version
 

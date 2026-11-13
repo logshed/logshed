@@ -71,14 +71,11 @@ def reset_operation_state() -> None:
         _last_success.clear()
 
 
-async def run_exclusive(name: str, work: Callable[[], Awaitable[T]]) -> T:
+def start_exclusive(name: str, work: Callable[[], Awaitable[T]]) -> "asyncio.Future[T]":
     """
-    Run ``work`` while holding the shared in-progress lock, or raise immediately when busy.
-
-    The work runs in its own task behind ``asyncio.shield``. If the caller is cancelled (for
-    example the HTTP client disconnects mid-prune), the work and its worker thread keep running
-    and the lock is released only once the work has really finished, so a second prune or
-    vacuum can never overlap with one still running in a thread.
+    Take the shared in-progress lock now (raising OperationInProgressError when busy) and run
+    ``work`` in its own task, which releases the lock when the work has really finished. For work
+    that outlives the request that starts it, such as a backup from the web UI.
     """
     global _active_operation
     if not _in_progress_lock.acquire(blocking=False):
@@ -98,4 +95,17 @@ async def run_exclusive(name: str, work: Callable[[], Awaitable[T]]) -> T:
     task = asyncio.ensure_future(_runner())
     # Retrieve any exception from an orphaned task (caller cancelled) so it is not reported as unretrieved
     task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    return task
+
+
+async def run_exclusive(name: str, work: Callable[[], Awaitable[T]]) -> T:
+    """
+    Run ``work`` while holding the shared in-progress lock, or raise immediately when busy.
+
+    The work runs in its own task behind ``asyncio.shield``. If the caller is cancelled (for
+    example the HTTP client disconnects mid-prune), the work and its worker thread keep running
+    and the lock is released only once the work has really finished, so a second prune or
+    vacuum can never overlap with one still running in a thread.
+    """
+    task = start_exclusive(name, work)
     return await asyncio.shield(task)

@@ -361,6 +361,12 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     last_cleanup_at: new Date(Date.now() - 5 * 3600_000).toISOString(), next_cleanup_at: new Date(Date.now() + 19 * 3600_000).toISOString(),
   })],
   ['POST', /^\/api\/(maintenance\/prune|system\/vacuum)$/, () => { throw notInDemo('Database maintenance'); }],
+  // No archives: a download link would leave the demo for a file it cannot serve
+  ['GET', /^\/api\/system\/backups$/, () => ({ backups: [], total_size_bytes: 0 })],
+  ['GET', /^\/api\/system\/backups\/current$/, () => ({ state: 'idle', done: 0, total: 0 })],
+  ['POST', /^\/api\/system\/backups$/, () => { throw notInDemo('Database backups'); }],
+  ['DELETE', /^\/api\/system\/backups\/.+$/, () => { throw notInDemo('Database backups'); }],
+  ['GET', /^\/api\/system\/recovery$/, () => ({ status: 'ready', backup_available: false })],
 ];
 
 /** Whether the demo answers this method and path (used by the drift test). */

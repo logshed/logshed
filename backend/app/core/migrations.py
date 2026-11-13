@@ -16,19 +16,26 @@ version intact. Statements run one at a time through `execute()`: `executescript
 would commit the open transaction first and run the script in autocommit mode.
 
 Before the pending steps of an existing database run, the database is backed up once
-(`core/backup.py`), unless AUTO_BACKUP_ON_MIGRATION is false.
+(`core/backup.py`), unless backups before upgrades are turned off (AUTO_BACKUP_ON_MIGRATION, or
+the `backup_before_migration` setting when the variable is not set).
 """
 
 import logging
 import os
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Union
 
 from app.core import backup as db_backup
-from app.core.config import get_auto_backup_on_migration, parse_bool, thinking_level_for_budget
+from app.core.config import (
+    is_auto_backup_on_migration_overridden,
+    parse_bool,
+    resolve_backup_before_migration,
+    thinking_level_for_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -620,6 +627,25 @@ class MigrationNeeds:
 MIGRATION_NEEDS: dict[int, MigrationNeeds] = {}
 
 
+@dataclass
+class MigrationRun:
+    """How far a run of run_migrations got, filled in as it goes, so a caller can describe a failure."""
+
+    from_version: int = 0
+    target_version: int = 0
+    current_version: int = 0
+    stage: str = ""  # "backup" or "migrate"
+    backup_path: Optional[Path] = None
+
+
+class MigrationCancelled(Exception):
+    """The run was stopped between steps (LogShed is shutting down); every finished step is kept."""
+
+
+# progress(stage, done, total): stage "backup" counts bytes compressed, "migrate" counts steps.
+MigrationProgress = Callable[[str, int, int], None]
+
+
 class MigrationBackupError(RuntimeError):
     """The backup before a migration could not be made, so the migration was not started."""
 
@@ -631,7 +657,8 @@ class MigrationBackupError(RuntimeError):
             f"LogShed did not upgrade the database from schema {from_version} to {target_version}, because "
             f"the backup before the upgrade could not be made: {cause} The database is unchanged. "
             + ("Free some space" if isinstance(cause, db_backup.BackupSpaceError) else "Fix the cause")
-            + " and start LogShed again, or set AUTO_BACKUP_ON_MIGRATION=false to upgrade without a backup."
+            + " and retry the upgrade, or upgrade without a backup (from the recovery page, or with"
+            " AUTO_BACKUP_ON_MIGRATION=false)."
         )
 
 
@@ -748,28 +775,57 @@ def _run_in_transaction(conn: sqlite3.Connection, step: Callable[[sqlite3.Connec
         raise
 
 
-def _backup_before_migrations(db_path: Path, current_version: int, pending: list[int]) -> None:
-    """One backup before the whole run of pending steps; raises MigrationBackupError if it cannot be made."""
+def _backup_wanted(conn: sqlite3.Connection) -> bool:
+    """AUTO_BACKUP_ON_MIGRATION when set, otherwise the setting stored from the web UI (on when absent)."""
+    stored = None
+    if not is_auto_backup_on_migration_overridden():
+        try:
+            row = conn.execute("SELECT value FROM system_settings WHERE key = 'backup_before_migration';").fetchone()
+            stored = row[0] if row else None
+        except sqlite3.Error:
+            stored = None
+    return resolve_backup_before_migration(stored)
+
+
+def _backup_before_migrations(
+    db_path: Path,
+    current_version: int,
+    pending: list[int],
+    progress: Optional[MigrationProgress] = None,
+    cancel: Optional[threading.Event] = None,
+) -> db_backup.BackupResult:
+    """
+    One backup before the whole run of pending steps; raises MigrationBackupError if it cannot be
+    made, and lets BackupCancelled through when `cancel` stops it.
+    """
     target = pending[-1]
     needs = [MIGRATION_NEEDS.get(v, MigrationNeeds()) for v in pending]
     without_logs = all(n.backup_without_logs for n in needs)
     db_size = db_path.stat().st_size
     extra = sum(n.extra_space(db_size) for n in needs)
     try:
-        db_backup.create_backup(
+        return db_backup.create_backup(
             db_path,
             kind=f"pre-v{current_version}-to-v{target}",
             schema_version=current_version,
             target_schema=target,
             method=db_backup.METHOD_WITHOUT_LOGS if without_logs else db_backup.METHOD_LOCKED_STREAM,
             extra_space=extra,
+            progress_cb=(lambda done, total: progress("backup", done, total)) if progress else None,
+            cancel=cancel,
         )
     except (db_backup.BackupError, OSError, sqlite3.Error) as e:
         logger.warning(f"The backup before upgrading from schema {current_version} to {target} failed: {e}")
         raise MigrationBackupError(e, current_version, target) from e
 
 
-def run_migrations(db_path: Union[str, Path], backup: Optional[bool] = None) -> None:
+def run_migrations(
+    db_path: Union[str, Path],
+    backup: Optional[bool] = None,
+    progress: Optional[MigrationProgress] = None,
+    run: Optional[MigrationRun] = None,
+    cancel: Optional[threading.Event] = None,
+) -> None:
     """
     Main entry point for database migrations.
 
@@ -786,7 +842,12 @@ def run_migrations(db_path: Union[str, Path], backup: Optional[bool] = None) -> 
 
     Args:
         db_path: Path to the SQLite database file.
-        backup: back up before migrating; None reads AUTO_BACKUP_ON_MIGRATION (on unless false).
+        backup: back up before migrating; None reads AUTO_BACKUP_ON_MIGRATION, or the stored
+            setting when the variable is not set (on unless one of them says false).
+        progress: called with ("backup", bytes done, bytes total) and ("migrate", steps done, steps total).
+        run: filled in with the versions, the stage and the backup made, for describing a failure.
+        cancel: when set, the backup stops (BackupCancelled) and no further step starts
+            (MigrationCancelled). A step that has started always finishes or rolls back.
     """
     db_path = Path(db_path)
     # Ensure the parent directory exists
@@ -803,16 +864,29 @@ def run_migrations(db_path: Union[str, Path], backup: Optional[bool] = None) -> 
             raise DatabaseNewerThanAppError(current_version, latest_version, db_path)
 
         pending = [v for v, _ in MIGRATIONS if v > current_version]
+        run = run if run is not None else MigrationRun()
+        run.from_version = run.current_version = current_version
+        run.target_version = pending[-1] if pending else current_version
         if pending and current_version > 0:
-            if get_auto_backup_on_migration() if backup is None else backup:
-                _backup_before_migrations(db_path, current_version, pending)
+            if _backup_wanted(conn) if backup is None else backup:
+                run.stage = "backup"
+                run.backup_path = _backup_before_migrations(db_path, current_version, pending, progress, cancel).path
             else:
-                logger.info("Upgrading without a backup: AUTO_BACKUP_ON_MIGRATION is false.")
+                logger.info(
+                    "Upgrading without a backup: backups before upgrades are turned off."
+                    if backup is None
+                    else "Upgrading without a new backup, as asked (a retry reusing its backup, or an upgrade without one)."
+                )
+        run.stage = "migrate"
 
         for target_version, migration_func in MIGRATIONS:
             if current_version >= target_version:
                 logger.debug(f"Skipping migration {target_version}, already applied.")
                 continue
+            if cancel is not None and cancel.is_set():
+                raise MigrationCancelled()
+            if progress:
+                progress("migrate", pending.index(target_version), len(pending))
             logger.info(f"Migrating from {current_version} to {target_version}")
 
             def _apply(c: sqlite3.Connection, version: int = target_version, func=migration_func) -> None:
@@ -827,8 +901,10 @@ def run_migrations(db_path: Union[str, Path], backup: Optional[bool] = None) -> 
             except Exception as e:
                 logger.error(f"Migration to version {target_version} failed: {e}")
                 raise
-            current_version = target_version
+            current_version = run.current_version = target_version
             logger.info(f"Successfully migrated to version {target_version}")
+        if progress and pending:
+            progress("migrate", len(pending), len(pending))
 
         # Ensure schema integrity for v3 databases (pre-release and interrupted v1.3.0 upgrades)
         if current_version == 3:

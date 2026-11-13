@@ -207,6 +207,8 @@ class SettingsResponse(BaseModel):
     retention_days: int = 14
     max_retention_days: int = Field(default_factory=get_max_retention_days)
     retention_overridden: bool = False
+    backup_before_migration: bool = True
+    backup_before_migration_overridden: bool = False
     has_ai_api_key: bool = False
     internal_log_level: str = "WARNING"
     check_for_updates: bool = True
@@ -285,6 +287,10 @@ class SettingsUpdateRequest(BaseModel):
     check_for_updates: Optional[bool] = Field(
         None,
         description="Whether to check GHCR periodically for new stable releases.",
+    )
+    backup_before_migration: Optional[bool] = Field(
+        None,
+        description="Back up the database before an upgrade changes its schema (AUTO_BACKUP_ON_MIGRATION wins when set).",
     )
     maintenance_until: Optional[str] = Field(
         None,
@@ -527,9 +533,21 @@ class HostAliasResponse(BaseModel):
 # System, Health & Storage Models
 # ---------------------------------------------------------------------------
 
+class UpgradeStatus(BaseModel):
+    """Where a database upgrade is (status upgrading) or where it stopped (status migration_failed)."""
+    stage: str = Field(description="backup, migrate or starting while upgrading; backup or migration after a failure.")
+    done: Optional[int] = Field(None, description="Bytes backed up, or steps finished.")
+    total: Optional[int] = Field(None, description="Bytes to back up, or steps in all.")
+    from_schema: int
+    target_schema: int
+    failed_at: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     """Container and ingestion health status."""
     status: str
+    # Present while status is "upgrading" or "migration_failed" (both answer HTTP 200)
+    upgrade: Optional[UpgradeStatus] = None
     db: Optional[str] = None
     queue_depth: Optional[int] = None
     dropped_logs: Optional[int] = None
@@ -557,6 +575,8 @@ class StorageOverviewResponse(BaseModel):
     disk_free_bytes: int
     disk_total_bytes: int
     total_logs_count: int
+    backups_size_bytes: int = 0
+    backups_count: int = 0
     history: list[StorageMetricItem]
 
 
@@ -1435,3 +1455,54 @@ class SystemMetricsResponse(BaseModel):
 
 
 
+
+
+class BackupItem(BaseModel):
+    """One database backup archive in the backups folder."""
+    filename: str
+    kind: str = Field(description="pre-migration or manual")
+    schema_version: int
+    target_schema: Optional[int] = None
+    size_bytes: int
+    created_at: str
+    expires_at: str
+    days_until_expiry: int
+
+
+class BackupListResponse(BaseModel):
+    backups: list[BackupItem]
+    total_size_bytes: int
+
+
+class BackupJobResponse(BaseModel):
+    """The web UI's backup job: idle, running, done or failed."""
+    state: str
+    stage: Optional[str] = Field(None, description="copying, then compressing")
+    done: int = 0
+    total: int = 0
+    filename: Optional[str] = None
+    size_bytes: Optional[int] = None
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class RecoveryResponse(BaseModel):
+    """What the recovery screen shows a signed-in admin after a failed upgrade."""
+    status: str
+    app_version: Optional[str] = None
+    stage: Optional[str] = None
+    from_schema: Optional[int] = None
+    target_schema: Optional[int] = None
+    current_schema: Optional[int] = None
+    failed_at: Optional[str] = None
+    error: Optional[str] = None
+    backup_filename: Optional[str] = None
+    backup_available: bool = False
+    disk_free_bytes: Optional[int] = None
+    disk_total_bytes: Optional[int] = None
+    database_size_bytes: Optional[int] = None
+    backup_needed_bytes: Optional[int] = None
+    backup_floor_bytes: Optional[int] = None
+    # The Settings route is closed in recovery, so the screen shows times in this zone
+    server_timezone: Optional[str] = None

@@ -11,12 +11,15 @@ import { StorageCard } from './StorageCard.tsx';
 import { RetentionSlider } from './RetentionSlider.tsx';
 import { StorageTrendChart } from './StorageTrendChart.tsx';
 import { DeleteLogsCard } from './DeleteLogsCard.tsx';
+import { DatabaseBackupsCard } from './DatabaseBackupsCard.tsx';
 
 export const StoragePanel: React.FC = () => {
   const [storageMetrics, setStorageMetrics] = useState<StorageMetricsResponse | null>(null);
   const [retentionDays, setRetentionDays] = useState<number>(14);
   const [maxRetentionDays, setMaxRetentionDays] = useState<number | undefined>(30);
   const [retentionOverridden, setRetentionOverridden] = useState<boolean>(false);
+  const [backupBeforeMigration, setBackupBeforeMigration] = useState<boolean>(true);
+  const [backupOverridden, setBackupOverridden] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -33,6 +36,8 @@ export const StoragePanel: React.FC = () => {
       setRetentionDays(settRes.retention_days);
       setMaxRetentionDays(settRes.max_retention_days);
       setRetentionOverridden(Boolean(settRes.retention_overridden));
+      setBackupBeforeMigration(settRes.backup_before_migration ?? true);
+      setBackupOverridden(Boolean(settRes.backup_before_migration_overridden));
       setStorageMetrics(storRes);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load storage and retention data.');
@@ -44,6 +49,19 @@ export const StoragePanel: React.FC = () => {
   useEffect(() => {
     loadAllData();
   }, []);
+
+  const reloadStorageMetrics = async () => {
+    try {
+      setStorageMetrics(await fetchStorageMetrics());
+    } catch {
+      // The figures refresh on the next visit
+    }
+  };
+
+  const handleSaveBackupBeforeMigration = async (value: boolean) => {
+    await updateSettings({ backup_before_migration: value });
+    setBackupBeforeMigration(value);
+  };
 
   const handleSaveRetention = async (newDays: number) => {
     await updateSettings({ retention_days: newDays });
@@ -92,6 +110,13 @@ export const StoragePanel: React.FC = () => {
             onVacuumCompleted={loadAllData}
           />
         )}
+
+        <DatabaseBackupsCard
+          backupBeforeMigration={backupBeforeMigration}
+          backupBeforeMigrationOverridden={backupOverridden}
+          onSaveBackupBeforeMigration={handleSaveBackupBeforeMigration}
+          onBackupsChanged={reloadStorageMetrics}
+        />
 
         <StorageTrendChart history={storageMetrics?.history || []} />
 

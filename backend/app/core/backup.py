@@ -31,6 +31,7 @@ import re
 import shutil
 import sqlite3
 import tarfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +81,10 @@ class BackupError(RuntimeError):
     """A backup could not be made. Any partial file has been removed."""
 
 
+class BackupCancelled(Exception):
+    """A backup was stopped part way (LogShed is shutting down). Any partial file has been removed."""
+
+
 class BackupSpaceError(BackupError):
     """Too little free space for a backup without going under the free-space floor."""
 
@@ -100,6 +105,22 @@ class BackupSpaceError(BackupError):
                 " by an interrupted backup, and can be deleted when no backup is running."
             )
         super().__init__(message)
+
+
+@dataclass(frozen=True)
+class BackupInfo:
+    """One archive in the backups folder, described from its name (the manifest is at the end of the gzip)."""
+
+    path: Path
+    kind: str
+    schema_version: int
+    target_schema: Optional[int]
+    size_bytes: int
+    created_at: datetime.datetime
+
+    @property
+    def expires_at(self) -> datetime.datetime:
+        return self.created_at + datetime.timedelta(days=BACKUP_EXPIRY_DAYS)
 
 
 @dataclass(frozen=True)
@@ -137,6 +158,62 @@ def archive_created_at(path: Path) -> datetime.datetime:
         except ValueError:
             pass
     return datetime.datetime.fromtimestamp(path.stat().st_mtime, datetime.timezone.utc)
+
+
+def list_backups(folder: Path) -> list[BackupInfo]:
+    """The archives in the folder whose names match the archive pattern, newest first."""
+    found = []
+    if not folder.is_dir():
+        return found
+    for entry in folder.iterdir():
+        match = ARCHIVE_NAME_RE.match(entry.name)
+        if not match:
+            continue
+        try:
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            size = entry.stat().st_size
+            created = archive_created_at(entry)
+        except OSError:
+            continue
+        if match["schema"] is not None:
+            kind, schema, target = "manual", int(match["schema"]), None
+        else:
+            kind, schema, target = "pre-migration", int(match["from"]), int(match["to"])
+        found.append(BackupInfo(entry, kind, schema, target, size, created))
+    found.sort(key=lambda b: (b.created_at, b.path.name), reverse=True)
+    return found
+
+
+def find_backup(folder: Path, filename: str) -> Optional[Path]:
+    """
+    The archive called `filename` in the folder, or None. The name must match the archive pattern
+    exactly, and the file must be a regular file directly inside the folder (no symlink, no path).
+    """
+    if not ARCHIVE_NAME_RE.match(filename):
+        return None
+    candidate = folder / filename
+    try:
+        if candidate.resolve().parent != folder.resolve():
+            return None
+        if candidate.is_symlink() or not candidate.is_file():
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
+def backup_space_needed(db_path: Path, method: str) -> int:
+    """Bytes a backup of the database by `method` needs on the disk while it runs (its copy and archive)."""
+    if method == METHOD_WITHOUT_LOGS:
+        copy_size = _size_without_logs(db_path)
+        return copy_size + _compressed_estimate(copy_size)
+    db_size = db_path.stat().st_size
+    if method == METHOD_VACUUM_INTO:
+        return db_size + _compressed_estimate(db_size)
+    if method == METHOD_LOCKED_STREAM:
+        return _compressed_estimate(db_size)
+    raise ValueError(f"Unknown backup method {method!r}")
 
 
 def prune_backups(folder: Path, now: Optional[float] = None) -> tuple[int, int]:
@@ -252,8 +329,16 @@ def _free_name(folder: Path, kind: str, now: datetime.datetime) -> str:
 class _ProgressReader:
     """A file wrapper for tarfile that reports progress and logs about every 10%."""
 
-    def __init__(self, fileobj, total: int, label: str, progress_cb: Optional[ProgressCallback]):
+    def __init__(
+        self,
+        fileobj,
+        total: int,
+        label: str,
+        progress_cb: Optional[ProgressCallback],
+        cancel: Optional[threading.Event] = None,
+    ):
         self._f = fileobj
+        self._cancel = cancel
         self._total = total
         self._done = 0
         self._label = label
@@ -261,6 +346,8 @@ class _ProgressReader:
         self._next_log = 10
 
     def read(self, size: int = -1) -> bytes:
+        if self._cancel is not None and self._cancel.is_set():
+            raise BackupCancelled()
         data = self._f.read(CHUNK_BYTES if size is None or size < 0 else min(size, CHUNK_BYTES))
         self._done += len(data)
         if self._cb is not None:
@@ -281,6 +368,7 @@ def _write_archive(
     file_entry: dict,
     label: str,
     progress_cb: Optional[ProgressCallback],
+    cancel: Optional[threading.Event] = None,
 ) -> None:
     """Stream `db_file` into a new gzip tar at `tmp_path`, then the manifest, with no uncompressed copy."""
     size = db_file.stat().st_size
@@ -291,7 +379,7 @@ def _write_archive(
         info.mtime = int(created)
         info.mode = 0o640
         with open(db_file, "rb") as f:
-            tar.addfile(info, fileobj=_ProgressReader(f, size, label, progress_cb))
+            tar.addfile(info, fileobj=_ProgressReader(f, size, label, progress_cb, cancel))
         file_entry["size_bytes"] = size
         manifest["files"] = [file_entry]
         body = json.dumps(manifest, indent=2).encode("utf-8")
@@ -314,7 +402,7 @@ class _WalNotEmpty(Exception):
     pass
 
 
-def _locked_stream(db_path: Path, tmp_path: Path, manifest: dict, label: str, progress_cb) -> None:
+def _locked_stream(db_path: Path, tmp_path: Path, manifest: dict, label: str, progress_cb, cancel=None) -> None:
     """
     Checkpoint, then take the write lock, then check the WAL is empty, then stream the file. The
     checkpoint comes before the lock (it cannot run inside a transaction), so another connection can
@@ -326,17 +414,28 @@ def _locked_stream(db_path: Path, tmp_path: Path, manifest: dict, label: str, pr
         try:
             if not _wal_is_empty(db_path):
                 raise _WalNotEmpty()
-            _write_archive(tmp_path, db_path, db_path.name, manifest, {"name": db_path.name, "role": "main"}, label, progress_cb)
+            _write_archive(
+                tmp_path, db_path, db_path.name, manifest, {"name": db_path.name, "role": "main"}, label, progress_cb, cancel
+            )
         finally:
             conn.execute("ROLLBACK;")
 
 
-def _vacuum_into(db_path: Path, copy_path: Path) -> None:
+def _stop_when_set(conn: sqlite3.Connection, cancel: Optional[threading.Event]) -> None:
+    """Make a long statement on `conn` stop (raising sqlite3.OperationalError) once `cancel` is set."""
+    if cancel is not None:
+        conn.set_progress_handler(lambda: 1 if cancel.is_set() else 0, 100_000)
+
+
+def _vacuum_into(db_path: Path, copy_path: Path, cancel: Optional[threading.Event] = None) -> None:
     with contextlib.closing(sqlite3.connect(str(db_path), timeout=5.0, isolation_level=None)) as conn:
+        _stop_when_set(conn, cancel)
         conn.execute("VACUUM INTO ?;", (str(copy_path),))
 
 
-def _copy_without_logs(db_path: Path, copy_path: Path, omitted: tuple[str, ...] = LOG_TABLES) -> None:
+def _copy_without_logs(
+    db_path: Path, copy_path: Path, omitted: tuple[str, ...] = LOG_TABLES, cancel: Optional[threading.Event] = None
+) -> None:
     """
     Write a new database with the source's full schema and every row except those of the omitted
     tables (and their full-text shadow tables), from one read snapshot of the source. Rows of
@@ -346,6 +445,7 @@ def _copy_without_logs(db_path: Path, copy_path: Path, omitted: tuple[str, ...] 
     src_uri = f"{db_path.resolve().as_uri()}?mode=ro"
     with contextlib.closing(sqlite3.connect(str(copy_path), isolation_level=None, uri=True)) as conn:
         conn.execute("ATTACH DATABASE ? AS src;", (src_uri,))
+        _stop_when_set(conn, cancel)
         conn.execute("BEGIN;")
         try:
             kinds = {name: kind for name, kind in conn.execute("SELECT name, type FROM pragma_table_list WHERE schema = 'src';")}
@@ -415,6 +515,7 @@ def create_backup(
     extra_space: int = 0,
     progress_cb: Optional[ProgressCallback] = None,
     now: Optional[datetime.datetime] = None,
+    cancel: Optional[threading.Event] = None,
 ) -> BackupResult:
     """
     Make one archive in the backups folder and return it.
@@ -422,6 +523,8 @@ def create_backup(
     `kind` is `pre-v<from>-to-v<to>` or `manual-v<schema>`. `extra_space` is space the caller needs
     afterwards (a migration's own needs), kept out of what the backup may use. Expired archives and
     stale temporary files are deleted first; no other archive is deleted to make room.
+    `progress_cb(done, total)` gets the bytes compressed so far (a VACUUM INTO copy comes before the
+    first call). Setting `cancel` stops the backup at its next chunk and raises BackupCancelled.
     Raises BackupSpaceError when there is not enough room, BackupError or OSError when writing fails;
     no `.tmp` file is left behind either way.
     """
@@ -435,17 +538,7 @@ def create_backup(
         with contextlib.closing(sqlite3.connect(str(db_path), timeout=5.0)) as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     db_size = db_path.stat().st_size
-
-    if method == METHOD_WITHOUT_LOGS:
-        copy_size = _size_without_logs(db_path)
-        needed = copy_size + _compressed_estimate(copy_size)
-    elif method == METHOD_VACUUM_INTO:
-        needed = db_size + _compressed_estimate(db_size)
-    elif method == METHOD_LOCKED_STREAM:
-        needed = _compressed_estimate(db_size)
-    else:
-        raise ValueError(f"Unknown backup method {method!r}")
-    check_backup_space(folder, needed + extra_space)
+    check_backup_space(folder, backup_space_needed(db_path, method) + extra_space)
 
     _ensure_dir(folder, owner)
     now = now or datetime.datetime.now(datetime.timezone.utc)
@@ -468,7 +561,7 @@ def create_backup(
     try:
         if method == METHOD_LOCKED_STREAM:
             try:
-                _locked_stream(db_path, tmp, manifest, label, progress_cb)
+                _locked_stream(db_path, tmp, manifest, label, progress_cb, cancel)
             except _WalNotEmpty:
                 # Another process committed between the checkpoint and the lock: take a snapshot instead.
                 tmp.unlink(missing_ok=True)
@@ -476,20 +569,27 @@ def create_backup(
                 check_backup_space(folder, db_size + _compressed_estimate(db_size) + extra_space)
                 used = METHOD_VACUUM_INTO
         if used in (METHOD_VACUUM_INTO, METHOD_WITHOUT_LOGS):
-            if used == METHOD_VACUUM_INTO:
-                _vacuum_into(db_path, copy)
-                entry = {"name": db_path.name, "role": "main"}
-            else:
-                _copy_without_logs(db_path, copy)
-                entry = {"name": db_path.name, "role": "main", "omitted_tables": list(LOG_TABLES)}
+            try:
+                if used == METHOD_VACUUM_INTO:
+                    _vacuum_into(db_path, copy, cancel)
+                    entry = {"name": db_path.name, "role": "main"}
+                else:
+                    _copy_without_logs(db_path, copy, cancel=cancel)
+                    entry = {"name": db_path.name, "role": "main", "omitted_tables": list(LOG_TABLES)}
+            except sqlite3.OperationalError:
+                if cancel is not None and cancel.is_set():
+                    raise BackupCancelled() from None
+                raise
             os.chmod(copy, 0o640)
             _give_to(copy, owner)
-            _write_archive(tmp, copy, db_path.name, manifest, entry, label, progress_cb)
+            _write_archive(tmp, copy, db_path.name, manifest, entry, label, progress_cb, cancel)
         os.chmod(tmp, 0o640)
         _give_to(tmp, owner)
         os.replace(tmp, final)
-    except BaseException:
+    except BaseException as e:
         tmp.unlink(missing_ok=True)
+        if isinstance(e, BackupCancelled):
+            logger.info(f"Database backup {name} stopped part way; its unfinished files are deleted.")
         raise
     finally:
         copy.unlink(missing_ok=True)

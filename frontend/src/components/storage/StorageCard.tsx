@@ -51,6 +51,9 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
             {formatBytes(metrics.db_size_bytes)}
           </span>
           <span className="text-[11px] text-fg-muted block mt-0.5 font-mono">logs.db + WAL + SHM</span>
+          <span className="text-[11px] text-fg-muted block mt-0.5 font-mono" data-testid="backups-size-display">
+            Backups: {formatBytes(metrics.backups_size_bytes ?? 0)}
+          </span>
         </div>
 
         <div className="bg-canvas p-3 rounded-lg border border-line-subtle">

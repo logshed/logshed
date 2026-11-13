@@ -11,6 +11,7 @@ import html
 import json
 import logging
 import re
+import sqlite3
 import sys
 from contextlib import asynccontextmanager
 from time import monotonic as _monotonic
@@ -26,7 +27,24 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api import ai, alerts, aliases, auth, docker_hosts, drop_rules, external_v1, logs, mcp, notifications, saved_views, settings, system, tokens
+from app.api import (
+    ai,
+    alerts,
+    aliases,
+    auth,
+    backups,
+    docker_hosts,
+    drop_rules,
+    external_v1,
+    logs,
+    mcp,
+    notifications,
+    recovery,
+    saved_views,
+    settings,
+    system,
+    tokens,
+)
 from app.api.deps import get_optional_user, require_auth_or_token, run_db_query
 from app.collectors.docker_collector import DockerTailer
 from app.collectors.docker_pool import DockerCollectorPool
@@ -44,7 +62,15 @@ from app.core.config import (
     get_internal_log_level,
 )
 from app.core.loop_lag import get_loop_lag_monitor
-from app.core.migrations import DatabaseNewerThanAppError, MigrationBackupError, run_migrations
+from app.core import backup as db_backup
+from app.core import lifecycle
+from app.core.migrations import (
+    DatabaseNewerThanAppError,
+    MigrationBackupError,
+    MigrationCancelled,
+    MigrationRun,
+    run_migrations,
+)
 from app.core.pipeline import KeyedMultilineAssembler, QueueConsumer, InternalLogHandler
 from app.core.security import get_or_create_master_key
 from app.core.static_files import mount_frontend
@@ -328,24 +354,9 @@ async def _maintenance_sweep_worker(db_path) -> None:
             await asyncio.sleep(10)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
-    Sets up database schema, master encryption keys, and starts background workers.
-    """
+async def _start_services(db_path) -> None:
+    """Everything start-up does once the database is at the current schema: settings, workers and listeners."""
     global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
-
-    db_path = get_db_path()
-    logger.info(f"Setting up LogShed database at {db_path}...")
-
-    # 1. Run migrations and set up master key
-    try:
-        await asyncio.to_thread(run_migrations, db_path)
-    except (DatabaseNewerThanAppError, MigrationBackupError) as e:
-        # Nothing has been written; start-up fails and the container exits with this message
-        logger.error(str(e))
-        raise
     await asyncio.to_thread(get_or_create_master_key)
 
     # Save MAX_RETENTION_DAYS as the stored retention (a settings read never writes)
@@ -502,10 +513,13 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("InternalLogHandler disabled by configuration.")
 
-    yield
 
+async def _stop_services(db_path) -> None:
+    """Stop what _start_services started (anything not started is skipped)."""
+    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
     # Shutdown sequence
     logger.info("Shutting down background workers...")
+    await backups.stop_backup_job()
     try:
         from app.api.mcp import stop_mcp_session_manager
         await stop_mcp_session_manager()
@@ -620,6 +634,182 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete.")
 
 
+# --- Start-up through the upgrade path (core/lifecycle.py) ---
+
+_upgrade_task: Optional[asyncio.Task] = None
+# Bounded so a slow notification channel cannot hold recovery mode's start (the send carries on).
+RECOVERY_NOTIFY_TIMEOUT = 30.0
+
+
+async def _notify_recovery(marker: dict) -> None:
+    """Tell every enabled notification channel that the upgrade stopped (once, when the marker is first written)."""
+    from app.services.notifier import get_notifier
+
+    stage = "the backup before it" if marker.get("stage") == "backup" else "the database upgrade"
+    title = "LogShed upgrade stopped"
+    body = (
+        f"LogShed {marker.get('app_version')} could not upgrade its database from schema {marker.get('from_schema')} "
+        f"to {marker.get('target_schema')}: {stage} failed. The database is unchanged at schema "
+        f"{marker.get('current_schema')}. LogShed is not receiving or storing logs until you act: open LogShed "
+        "to see the error and retry, or go back to the version you ran before."
+    )
+    try:
+        await asyncio.wait_for(get_notifier().send_notification(title, body), timeout=RECOVERY_NOTIFY_TIMEOUT)
+    except Exception as e:
+        logger.warning(f"Could not send the upgrade failure notification: {e}")
+
+
+async def _enter_recovery(db_path, run: MigrationRun, error: BaseException) -> None:
+    stage = "backup" if isinstance(error, MigrationBackupError) else "migration"
+    backup_name = run.backup_path.name if run.backup_path else None
+    marker = lifecycle.new_marker(stage, run.from_version, run.target_version, run.current_version, error, backup_name)
+    try:
+        await asyncio.to_thread(lifecycle.write_marker, db_path, marker)
+    except OSError as e:
+        logger.error(f"Could not write the failed upgrade marker: {e}")
+    detail = str(error).rstrip()
+    if not detail.endswith("."):
+        detail += "."
+    logger.error(
+        f"The database upgrade from schema {run.from_version} to {run.target_version} stopped "
+        f"({'backup' if stage == 'backup' else 'migration'} failed): {detail} LogShed is in recovery mode and is not "
+        "receiving logs; open the web UI to retry, or go back to the version you ran before."
+    )
+    lifecycle.set_recovery(marker)
+    await _notify_recovery(marker)
+
+
+async def _upgrade_then_start(db_path, backup: Optional[bool], reused_backup: Optional[str]) -> None:
+    """The upgrade path's background task: back up and migrate, then start the services, or enter recovery."""
+    run = MigrationRun()
+    try:
+        await asyncio.to_thread(
+            run_migrations, db_path, backup=backup, progress=lifecycle.report_progress, run=run,
+            cancel=lifecycle.cancel_event(),
+        )
+    except (MigrationCancelled, db_backup.BackupCancelled):
+        logger.warning(
+            "LogShed is stopping part way through the database upgrade. Every finished step is kept, and "
+            "the upgrade carries on at the next start."
+        )
+        return
+    except Exception as e:
+        if reused_backup and run.backup_path is None:
+            run.backup_path = db_backup.backups_dir(db_path) / reused_backup
+        await _enter_recovery(db_path, run, e)
+        return
+    lifecycle.set_starting()
+    try:
+        await _start_services(db_path)
+    except Exception:
+        logger.exception("Starting LogShed after the database upgrade failed")
+    lifecycle.set_ready()
+    logger.info("The database upgrade is complete and LogShed is running.")
+
+
+def _begin_upgrade(db_path, from_schema: int, backup: Optional[bool] = None, reused_backup: Optional[str] = None) -> None:
+    global _upgrade_task
+    lifecycle.set_upgrading(from_schema, _latest_schema())
+    _upgrade_task = asyncio.create_task(_upgrade_then_start(db_path, backup, reused_backup))
+
+
+def _retry_choice(db_path, marker: dict, skip_backup: bool) -> tuple[int, Optional[bool], Optional[str]]:
+    """
+    How a retry from recovery runs: (current schema, backup argument, backup reused). Retry reuses
+    the backup the failed run made when it is still there and the database is still at the schema
+    it holds; otherwise it backs up again (if backups before upgrades are on). Removes the marker.
+    """
+    from_schema = lifecycle.read_user_version(Path(db_path))
+    backup: Optional[bool] = False if skip_backup else None
+    reused = None
+    name = marker.get("backup_filename")
+    if not skip_backup and name and from_schema == marker.get("from_schema"):
+        if db_backup.find_backup(db_backup.backups_dir(db_path), name) is not None:
+            backup, reused = False, name
+            logger.info(f"Retrying the database upgrade with the backup made before the failed run ({name}).")
+    if skip_backup:
+        logger.warning("Retrying the database upgrade without a backup, as asked from the recovery page.")
+    lifecycle.clear_marker(db_path)
+    return from_schema, backup, reused
+
+
+async def _retry_from_recovery(db_path, skip_backup: bool, marker: dict) -> None:
+    """Recovery's Retry and Migrate without a backup."""
+    from_schema, backup, reused = await asyncio.to_thread(_retry_choice, db_path, marker, skip_backup)
+    _begin_upgrade(db_path, from_schema, backup=backup, reused_backup=reused)
+
+
+def _latest_schema() -> int:
+    from app.core import migrations
+
+    return migrations.MIGRATIONS[-1][0] if migrations.MIGRATIONS else 0
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager.
+    Sets up database schema, master encryption keys, and starts background workers. An existing
+    database with an upgrade pending (or a failed one) takes the upgrade path (core/lifecycle.py).
+    """
+    global _upgrade_task
+
+    db_path = get_db_path()
+    logger.info(f"Setting up LogShed database at {db_path}...")
+
+    try:
+        plan, version, marker = await asyncio.to_thread(lifecycle.start_up_plan, db_path, _latest_schema())
+    except sqlite3.Error:
+        # run_migrations reports an unreadable database as it always has
+        plan, version, marker = lifecycle.PLAN_FAST, 0, None
+
+    if plan == lifecycle.PLAN_FAST:
+        try:
+            await asyncio.to_thread(run_migrations, db_path)
+        except (DatabaseNewerThanAppError, MigrationBackupError) as e:
+            # Nothing has been written; start-up fails and the container exits with this message
+            logger.error(str(e))
+            raise
+        await _start_services(db_path)
+        try:
+            yield
+        finally:
+            await _stop_services(db_path)
+        return
+
+    # The upgrade path: the web server answers (status page, recovery screen) while this runs.
+    # Sign-in and notification channel URLs need the key before anything else.
+    await asyncio.to_thread(get_or_create_master_key)
+    lifecycle.set_retry_handler(lambda skip_backup, marker: _retry_from_recovery(db_path, skip_backup, marker))
+    if plan == lifecycle.PLAN_RECOVERY:
+        logger.error(
+            f"The last database upgrade from schema {marker.get('from_schema')} to {marker.get('target_schema')} failed "
+            f"({marker.get('error')}). LogShed starts in recovery mode and is not receiving logs; open the web UI "
+            "to retry, or go back to the version you ran before."
+        )
+        lifecycle.set_recovery(marker)
+    else:
+        logger.info(
+            f"The database needs an upgrade from schema {version} to {_latest_schema()}. LogShed answers with a status "
+            "page until it is done; do not restart the container."
+        )
+        _begin_upgrade(db_path, version)
+    try:
+        yield
+    finally:
+        lifecycle.cancel_event().set()
+        task, _upgrade_task = _upgrade_task, None
+        if task is not None:
+            # The task stops at the backup's next chunk or before the next step, so this wait is short
+            try:
+                await task
+            except BaseException:
+                pass
+        lifecycle.set_retry_handler(None)
+        lifecycle.reset()
+        await _stop_services(db_path)
+
+
 # Content-Security-Policy for the SPA and every other response. The built SPA loads only
 # same-origin scripts, styles and data; inline style attributes (React style props) and data:
 # images are the only relaxations.
@@ -664,6 +854,113 @@ class CSRFMiddleware:
                         await response(scope, receive, send)
                         return
         await self.app(scope, receive, send)
+
+
+_RECOVERY_ROUTES = frozenset((
+    ("GET", "/api/auth/status"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/logout"),
+    ("GET", "/api/system/recovery"),
+    ("POST", "/api/system/recovery/retry"),
+    ("POST", "/api/system/recovery/skip-backup"),
+))
+_RECOVERY_DOWNLOAD_RE = re.compile(r"^/api/system/backups/[^/]+/download$")
+
+
+def _is_api_path(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/") or path == "/mcp" or path.startswith("/mcp/")
+
+
+def _upgrade_progress_text(snap: dict) -> str:
+    stage, done, total = snap.get("stage"), snap.get("done", 0), snap.get("total", 0)
+    if stage == "backup":
+        if total:
+            return (
+                f"Backing up the database: {db_backup.format_bytes(done)} of {db_backup.format_bytes(total)} "
+                f"({done * 100 // total}%)"
+            )
+        return "Backing up the database"
+    if stage == "migrate":
+        text = f"Upgrading the database from schema {snap.get('from_schema')} to {snap.get('target_schema')}"
+        return text + (f" (step {min(done + 1, total)} of {total})" if total else "")
+    return "Starting LogShed"
+
+
+def upgrade_status_page(snap: dict) -> str:
+    """The page browsers get while upgrading: no script (the CSP allows only inline styles), it reloads itself."""
+    progress = html.escape(_upgrade_progress_text(snap))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="3">
+<title>LogShed is upgrading</title>
+<style>
+body {{ margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: #070a10; color: #e2e8f0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }}
+main {{ max-width: 34rem; margin: 1rem; padding: 1.5rem; background: #0b0f19; border: 1px solid #1e293b; border-radius: 0.75rem; }}
+h1 {{ margin: 0 0 0.75rem; font-size: 1.1rem; color: #f1f5f9; }}
+p {{ margin: 0.5rem 0; }}
+.progress {{ font-family: ui-monospace, monospace; color: #38bdf8; }}
+.muted {{ color: #94a3b8; font-size: 0.85rem; }}
+</style>
+</head>
+<body>
+<main>
+<h1>LogShed is upgrading its database</h1>
+<p class="progress">{progress}</p>
+<p><strong>Do not restart or stop the container.</strong> LogShed starts by itself when the upgrade is done, and this page then opens it.</p>
+<p class="muted">Logs sent in the meantime are not received. This page refreshes every few seconds.</p>
+</main>
+</body>
+</html>
+"""
+
+
+class LifecycleMiddleware:
+    """
+    While the database is being upgraded, browsers get the status page and every API request
+    except /api/health gets 503 with Retry-After. In recovery, the web UI and the routes its
+    recovery screen needs (sign-in, the recovery actions, the backup download) work; the rest gets 503.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or lifecycle.is_ready():
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        method = scope["method"].upper()
+        if path == "/api/health":
+            await self.app(scope, receive, send)
+            return
+        state = lifecycle.status()
+        headers = {"Retry-After": "5", "Cache-Control": "no-store"}
+        if state == lifecycle.RECOVERY:
+            api = _is_api_path(path)
+            allowed = (not api and method in ("GET", "HEAD")) or (method, path) in _RECOVERY_ROUTES or (
+                method == "GET" and _RECOVERY_DOWNLOAD_RE.match(path)
+            )
+            if allowed:
+                await self.app(scope, receive, send)
+                return
+            response = JSONResponse(
+                status_code=503,
+                content={"detail": "LogShed is in recovery mode after a failed upgrade: open the web UI to retry it."},
+                headers=headers,
+            )
+        elif method in ("GET", "HEAD") and not _is_api_path(path):
+            response = HTMLResponse(upgrade_status_page(lifecycle.snapshot()), status_code=503, headers=headers)
+        else:
+            response = JSONResponse(
+                status_code=503,
+                content={"detail": "LogShed is upgrading its database. Try again in a few seconds."},
+                headers=headers,
+            )
+        await response(scope, receive, send)
 
 
 class SecurityHeadersMiddleware:
@@ -842,6 +1139,8 @@ def create_app() -> FastAPI:
     # (app.services.log_query.execute_with_fts_fallback), which MCP calls also pass through.
 
     # CSRF protection for mutating endpoints (innermost of the three)
+    # Innermost: the CSRF check still applies to the routes recovery mode lets through
+    app.add_middleware(LifecycleMiddleware)
     app.add_middleware(CSRFMiddleware)
 
     # CORS Middleware allowing credentials for Vite frontend development
@@ -868,6 +1167,8 @@ def create_app() -> FastAPI:
     api_router.include_router(notifications.router)
     api_router.include_router(alerts.router)
     api_router.include_router(system.router)
+    api_router.include_router(backups.router)
+    api_router.include_router(recovery.router)
     api_router.include_router(ai.router)
     api_router.include_router(tokens.router)
     api_router.include_router(docker_hosts.router)

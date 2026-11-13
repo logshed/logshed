@@ -419,7 +419,7 @@ class PruneWorker:
                     )
                 except OperationInProgressError:
                     logger.info(
-                        f"PruneWorker: another prune or compaction is running, retrying in {_BUSY_RETRY_SECONDS:.0f}s."
+                        f"PruneWorker: another prune, compaction or backup is running, retrying in {_BUSY_RETRY_SECONDS:.0f}s."
                     )
                     try:
                         _set_next_scheduled_prune(_BUSY_RETRY_SECONDS)

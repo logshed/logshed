@@ -16,6 +16,8 @@ from app.core.config import (
     DEFAULT_AI_MODEL,
     get_all_system_settings,
     get_max_retention_days,
+    is_auto_backup_on_migration_overridden,
+    resolve_backup_before_migration,
     get_syslog_port,
     is_max_retention_days_overridden,
     get_internal_log_level,
@@ -149,6 +151,7 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         internal_log_level = env_level_name
 
     check_for_updates = parse_bool(stored.get("check_for_updates"), True)
+    backup_before_migration = resolve_backup_before_migration(stored.get("backup_before_migration"))
 
     stored_until = stored.get("maintenance_until")
     maintenance_until = None
@@ -195,6 +198,8 @@ async def get_settings(user: dict = Depends(get_current_user)) -> SettingsRespon
         has_ai_api_key=has_active_key,
         internal_log_level=internal_log_level,
         check_for_updates=check_for_updates,
+        backup_before_migration=backup_before_migration,
+        backup_before_migration_overridden=is_auto_backup_on_migration_overridden(),
         maintenance_until=maintenance_until,
         ai_timeout=resolved["ai_timeout"],
         ai_thinking_level=resolved["ai_thinking_level"],
@@ -320,6 +325,9 @@ async def update_settings(
 
         if req.check_for_updates is not None:
             updates.append(("check_for_updates", "1" if req.check_for_updates else "0", 0))
+        if req.backup_before_migration is not None:
+            # Stored even while AUTO_BACKUP_ON_MIGRATION is set: it applies once the variable is removed
+            updates.append(("backup_before_migration", "1" if req.backup_before_migration else "0", 0))
 
         # Advanced System Settings
         if req.ai_timeout is not None:

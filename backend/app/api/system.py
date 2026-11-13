@@ -10,12 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 
 from app.api.deps import get_current_user, get_optional_user, run_db_query
 from app.collectors.syslog import get_udp_receive_errors
+from app.core import backup as db_backup
+from app.core import lifecycle
 from app.core.config import get_db_path, get_max_retention_days
 from app.core.loop_lag import get_loop_lag
 from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
 from app.models import (
     HealthResponse,
+    UpgradeStatus,
     PrunePreviewResponse,
     PruneResponse,
     StorageMetricItem,
@@ -54,7 +57,23 @@ async def health_check(request: Request, response: Response) -> HealthResponse:
     Returns HTTP 503 when the database check fails so Docker container healthcheck detects unhealthy state.
     Unauthenticated callers receive minimal {"status": "ok"} or {"status": "degraded"}.
     Authenticated callers receive detailed queue and ingest metrics.
+    While the database is upgraded or after a failed upgrade, everyone gets HTTP 200 with status
+    "upgrading" or "migration_failed" and the stage, so a health check does not restart the
+    container part way through a backup.
     """
+    if not lifecycle.is_ready():
+        snap = lifecycle.snapshot()
+        upgrade = UpgradeStatus(
+            stage=snap.get("stage") or "",
+            done=snap.get("done"),
+            total=snap.get("total"),
+            from_schema=snap.get("from_schema") or 0,
+            target_schema=snap.get("target_schema") or 0,
+            failed_at=snap.get("failed_at"),
+        )
+        state = "upgrading" if snap["status"] == lifecycle.UPGRADING else "migration_failed"
+        return HealthResponse(status=state, upgrade=upgrade)
+
     def _ping_db(conn):
         cursor = conn.cursor()
         cursor.execute("SELECT 1")
@@ -90,11 +109,13 @@ async def health_check(request: Request, response: Response) -> HealthResponse:
     )
 
 
-def _operation_conflict() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="A prune or compaction operation is already in progress.",
+def operation_conflict(active: Optional[str] = None) -> HTTPException:
+    detail = (
+        "A database backup is in progress; try again when it has finished."
+        if active == "backup"
+        else "A prune or compaction operation is already in progress."
     )
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
 def _enforce_cooldown(name: str, label: str) -> None:
@@ -143,8 +164,8 @@ async def run_prune_operation(*, cooldown: bool = False) -> PruneResponse:
 
     try:
         result = await run_exclusive("prune", _work)
-    except OperationInProgressError:
-        raise _operation_conflict()
+    except OperationInProgressError as e:
+        raise operation_conflict(e.active)
 
     return PruneResponse(
         status="ok",
@@ -186,8 +207,8 @@ async def run_vacuum_operation(*, cooldown: bool = False) -> VacuumResponse:
 
     try:
         result = await run_exclusive("vacuum", _work)
-    except OperationInProgressError:
-        raise _operation_conflict()
+    except OperationInProgressError as e:
+        raise operation_conflict(e.active)
 
     return VacuumResponse(
         status="ok",
@@ -263,12 +284,15 @@ async def get_storage_overview(user: dict = Depends(get_current_user)) -> Storag
         return [metrics_to_item(r) for r in rows]
 
     history = await run_db_query(_get_history)
+    backups = await asyncio.to_thread(db_backup.list_backups, db_backup.backups_dir(db_path))
 
     return StorageOverviewResponse(
         db_size_bytes=current["db_size_bytes"],
         disk_free_bytes=current["disk_free_bytes"],
         disk_total_bytes=current["disk_total_bytes"],
         total_logs_count=current["total_logs_count"],
+        backups_size_bytes=sum(b.size_bytes for b in backups),
+        backups_count=len(backups),
         history=history,
     )
 
