@@ -1,12 +1,10 @@
-import React, { useEffect, useId, useState, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Plus,
   Trash2,
   Check,
   AlertCircle,
   AlertTriangle,
-  X,
   Edit2,
 } from 'lucide-react';
 import { Key } from '../common/icons.ts';
@@ -18,7 +16,6 @@ import { NAME_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { useMediaQuery } from '../../utils/hooks.ts';
 import { TokenScopeChooser } from './TokenScopeChooser.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
-import { useDialog } from '../../utils/dialogStack.ts';
 import {
   CUSTOM_PRESET_ID,
   FULL_ACCESS_SCOPE,
@@ -32,6 +29,13 @@ import {
 } from './tokenScopes.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
 import { McpAccessCard } from './McpAccessCard.tsx';
+import { Badge } from '../common/Badge.tsx';
+import { Button } from '../common/Button.tsx';
+import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
+import { Field, LABEL_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
+import { Modal } from '../common/Modal.tsx';
+import { TableHead } from '../common/Table.tsx';
 
 const DEFAULT_PRESET_ID = 'ai_mcp';
 
@@ -52,47 +56,13 @@ const chosenScopes = (presetId: string, selection: ReadonlySet<string>): string[
 // same scopes and show as "Read Only"; any other combination is "Custom".
 export const getPresetName = (scopes: string[]): string => findMatchingPreset(scopes)?.name ?? 'Custom';
 
-interface TokenDialogProps {
-  titleId: string;
-  onClose: () => void;
-  closeOnEscape?: boolean;
-  testId?: string;
-  overlayClassName?: string;
-  panelClassName?: string;
-  children: React.ReactNode;
-}
-
-/**
- * The overlay and panel of this tab's dialogs, on the shared dialog stack (focus trap, Esc, focus return).
- * Rendered on the page body, so the tab's child spacing cannot push the overlay down from the top edge.
- */
-const TokenDialog: React.FC<TokenDialogProps> = ({
-  titleId,
-  onClose,
-  closeOnEscape = true,
-  testId,
-  overlayClassName = 'bg-canvas/80',
-  panelClassName = '',
-  children,
-}) => {
-  const panelRef = useRef<HTMLDivElement>(null);
-  useDialog(true, onClose, panelRef, { closeOnEscape });
-  return createPortal(
-    <div data-testid={testId} className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClassName} backdrop-blur-xs`}>
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className={`bg-surface border border-line rounded-xl shadow-2xl w-full overflow-hidden outline-hidden duration-150 ${panelClassName}`}
-      >
-        {children}
-      </div>
-    </div>,
-    document.body
-  );
-};
+/** An error inside one of this tab's dialogs. */
+const ModalError: React.FC<{ message: string }> = ({ message }) => (
+  <div role="alert" className="p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+    <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
+    <span>{message}</span>
+  </div>
+);
 
 export interface ApiTokensTabProps {
   settings?: Partial<SystemSettings> | null;
@@ -127,7 +97,6 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Ids for the dialogs' titles (aria-labelledby)
-  const dialogIdBase = useId();
 
   // One-time created token modal
   const [createdRawToken, setCreatedRawToken] = useState<string | null>(null);
@@ -278,45 +247,38 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Header Card */}
-      <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-              <Key className="w-4 h-4 text-accent-500" />
-              <span>External API Access</span>
-            </h3>
-            <p className="text-xs text-fg-muted mt-1 max-w-2xl leading-relaxed">
+      <Card>
+        <CardHeader
+          icon={<Key />}
+          title="External API Access"
+          description={
+            <>
               Generate secure Bearer tokens for external automation, Home Assistant integrations,
               and AI assistants. All API requests authenticate via HTTP header{' '}
               <code className="text-accent-400 font-mono text-[11px] bg-canvas px-1.5 py-0.5 rounded-sm border border-line-subtle">
                 Authorization: Bearer ls_live_...
               </code>
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleOpenGenerateModal}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Generate Token</span>
-          </button>
-        </div>
+            </>
+          }
+          actions={
+            <Button variant="primary" onClick={handleOpenGenerateModal} icon={<Plus className="w-4 h-4" />}>
+              Generate Token
+            </Button>
+          }
+        />
 
         {errorMsg && (
-          <div className="mt-4 p-3 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
+          <div className="p-3 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
-      </section>
+      </Card>
 
       {/* Token List Table */}
-      <section className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+      <Card padding="flush">
         <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider">
-            Active Tokens ({tokens.length})
-          </h3>
+          <h3 className={SECTION_TITLE_CLASS}>Active Tokens ({tokens.length})</h3>
         </div>
 
         {isLoading ? (
@@ -345,30 +307,27 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           <span className="font-mono text-[11px] text-fg-soft bg-canvas px-1.5 py-0.5 rounded-sm border border-line-subtle">
                             {token.token_prefix}
                           </span>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-medium whitespace-nowrap bg-raised text-accent-300 border border-line">
-                            {presetName}
-                          </span>
+                          <Badge tone="accent">{presetName}</Badge>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
+                        <Button
+                          size="sm"
                           onClick={() => handleOpenEditModal(token)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-fg-soft hover:text-fg-strong hover:bg-raised border border-line rounded-lg transition cursor-pointer"
                           title="Edit Token"
+                          icon={<Edit2 className="w-3.5 h-3.5" />}
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          type="button"
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger-soft"
                           onClick={() => { setModalError(null); setTokenToRevoke(token); }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-danger-400 hover:text-danger-300 hover:bg-danger-950/40 border border-line hover:border-danger-900 rounded-lg transition cursor-pointer"
                           title="Revoke Token"
+                          icon={<Trash2 className="w-3.5 h-3.5" />}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Revoke</span>
-                        </button>
+                          Revoke
+                        </Button>
                       </div>
                     </div>
 
@@ -397,17 +356,17 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
           /* Desktop Table View */
           <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-line/60 bg-canvas/40 text-[11px] font-semibold text-fg-muted uppercase tracking-wider">
-                    <th className="py-2.5 px-4">Name</th>
-                    <th className="py-2.5 px-4 font-mono">Identifier</th>
-                    <th className="py-2.5 px-4">Scopes</th>
-                    <th className="py-2.5 px-4">Created</th>
-                    <th className="py-2.5 px-4">Expires</th>
-                    <th className="py-2.5 px-4">Last Used</th>
-                    <th className="py-2.5 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
+                <TableHead
+                  columns={[
+                    { label: 'Name' },
+                    { label: 'Identifier' },
+                    { label: 'Scopes' },
+                    { label: 'Created' },
+                    { label: 'Expires' },
+                    { label: 'Last Used' },
+                    { label: 'Actions', align: 'right' },
+                  ]}
+                />
                 <tbody className="divide-y divide-line-subtle text-fg">
                   {tokens.map((token) => {
                     const presetName = getPresetName(token.scopes);
@@ -420,42 +379,36 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
                           {token.token_prefix}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-medium whitespace-nowrap bg-raised text-accent-300 border border-line">
-                            {presetName}
-                          </span>
+                          <Badge tone="accent">{presetName}</Badge>
                         </td>
                         <td className="py-3 px-4 text-fg-muted">
                           {formatDate(token.created_at, serverTimezone)}
                         </td>
                         <td className="py-3 px-4 text-fg-muted">
-                          {token.expires_at ? formatDate(token.expires_at, serverTimezone) : (
-                            <span className="text-fg-muted">Never</span>
-                          )}
+                          {token.expires_at ? formatDate(token.expires_at, serverTimezone) : 'Never'}
                         </td>
                         <td className="py-3 px-4 text-fg-muted">
-                          {token.last_used_at ? formatDate(token.last_used_at, serverTimezone) : (
-                            <span className="text-fg-muted">Never</span>
-                          )}
+                          {token.last_used_at ? formatDate(token.last_used_at, serverTimezone) : 'Never'}
                         </td>
-                        <td className="py-3 px-4 text-right whitespace-nowrap">
-                          <button
-                            type="button"
+                        <td className="py-3 px-4 text-right whitespace-nowrap space-x-1.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
                             onClick={() => handleOpenEditModal(token)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-fg-soft hover:text-fg-strong hover:bg-raised border border-transparent hover:border-line rounded-sm transition cursor-pointer"
                             title="Edit Token"
+                            icon={<Edit2 className="w-3.5 h-3.5" />}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            <span>Edit</span>
-                          </button>
-                          <button
-                            type="button"
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger-soft"
                             onClick={() => { setModalError(null); setTokenToRevoke(token); }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-danger-400 hover:text-danger-300 hover:bg-danger-950/40 border border-transparent hover:border-danger-900 rounded-sm transition cursor-pointer"
                             title="Revoke Token"
+                            icon={<Trash2 className="w-3.5 h-3.5" />}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Revoke</span>
-                          </button>
+                            Revoke
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -464,336 +417,228 @@ export const ApiTokensTab: React.FC<ApiTokensTabProps> = ({
               </table>
             </div>
         )}
-      </section>
+      </Card>
 
       {/* Model Context Protocol (MCP) Section */}
       <McpAccessCard settings={settings} onSettingsSaved={onSettingsSaved} onGenerateToken={handleOpenGenerateModal} />
 
       {/* Generate Token Modal */}
-      {isGenerateModalOpen && (
-        <TokenDialog
-          testId="generate-token-modal"
-          titleId={`${dialogIdBase}-generate`}
-          onClose={() => setIsGenerateModalOpen(false)}
-          panelClassName="max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain"
-        >
-            <div className="shrink-0 px-5 py-4 border-b border-line flex items-center justify-between">
-              <h2 id={`${dialogIdBase}-generate`} className="text-sm font-semibold text-fg-strong flex items-center gap-2">
-                <Key className="w-4 h-4 text-accent-500" />
-                <span>Generate API Token</span>
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsGenerateModalOpen(false)}
-                className="text-fg-muted hover:text-fg p-1 rounded-md transition"
-                aria-label="Close dialog"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {modalError && (
-              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
+      <Modal
+        isOpen={isGenerateModalOpen}
+        testId="generate-token-modal"
+        title="Generate API Token"
+        icon={<Key />}
+        onClose={() => setIsGenerateModalOpen(false)}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleGenerateSubmit} className="space-y-4">
+          {modalError && <ModalError message={modalError} />}
 
-            <form onSubmit={handleGenerateSubmit} className="p-5 space-y-4 overflow-y-auto">
-              <div>
-                <label htmlFor="token-name" className="block text-xs font-medium text-fg-soft mb-1">
-                  Token Name
-                </label>
-                <input
-                  id="token-name"
-                  type="text"
-                  required
-                  placeholder="e.g. Home Assistant or Claude Desktop"
-                  value={newTokenName}
-                  onChange={(e) => setNewTokenName(e.target.value)}
-                  className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500"
-                />
-              </div>
+          <TextField
+            label="Token Name"
+            id="token-name"
+            type="text"
+            required
+            placeholder="e.g. Home Assistant or Claude Desktop"
+            value={newTokenName}
+            onChange={(e) => setNewTokenName(e.target.value)}
+          />
 
-              <TokenScopeChooser
-                idPrefix="create-token"
-                selectedId={selectedPresetId}
-                onSelect={handleGeneratePresetSelect}
-                selection={newTokenSelection}
-                onSelectionChange={setNewTokenSelection}
+          <TokenScopeChooser
+            idPrefix="create-token"
+            selectedId={selectedPresetId}
+            onSelect={handleGeneratePresetSelect}
+            selection={newTokenSelection}
+            onSelectionChange={setNewTokenSelection}
+          />
+
+          <Field label="Expiration" id="token-expiry">
+            {({ id, labelId }) => (
+              <SelectDropdown
+                variant="panel"
+                fieldClassName={SELECT_FIELD_CLASS}
+                id={id}
+                labelledBy={labelId}
+                label="Expiration"
+                options={EXPIRY_OPTIONS}
+                value={expiresDays === null ? 'never' : String(expiresDays)}
+                onChange={(v) => setExpiresDays(v === 'never' ? null : parseInt(v, 10))}
               />
+            )}
+          </Field>
 
-              <div>
-                <label id="token-expiry-label" htmlFor="token-expiry" className="block text-xs font-medium text-fg-soft mb-1">
-                  Expiration
-                </label>
-                <SelectDropdown
-                  variant="panel"
-                  fieldClassName="bg-canvas border-line rounded-lg px-3 py-2 text-fg"
-                  id="token-expiry"
-                  labelledBy="token-expiry-label"
-                  label="Expiration"
-                  options={EXPIRY_OPTIONS}
-                  value={expiresDays === null ? 'never' : String(expiresDays)}
-                  onChange={(v) => setExpiresDays(v === 'never' ? null : parseInt(v, 10))}
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsGenerateModalOpen(false)}
-                  className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg-soft rounded-lg transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !newTokenName.trim() || newTokenScopes.length === 0}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill rounded-lg transition cursor-pointer"
-                >
-                  {isSubmitting ? 'Generating...' : 'Create Token'}
-                </button>
-              </div>
-            </form>
-        </TokenDialog>
-      )}
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button onClick={() => setIsGenerateModalOpen(false)}>Cancel</Button>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={isSubmitting || !newTokenName.trim() || newTokenScopes.length === 0}
+            >
+              {isSubmitting ? 'Generating...' : 'Create Token'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Edit Token Modal (name and scopes) */}
-      {tokenToEdit && (
-        <TokenDialog
-          testId="edit-token-modal"
-          titleId={`${dialogIdBase}-edit`}
-          onClose={() => setTokenToEdit(null)}
-          panelClassName="max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] flex flex-col overscroll-contain"
-        >
-            <div className="shrink-0 px-5 py-4 border-b border-line flex items-center justify-between">
-              <h2 id={`${dialogIdBase}-edit`} className="text-sm font-semibold text-fg-strong flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-accent-500" />
-                <span>Edit API token</span>
-              </h2>
-              <button
-                type="button"
-                onClick={() => setTokenToEdit(null)}
-                className="text-fg-muted hover:text-fg p-1 rounded-md transition"
-                aria-label="Close dialog"
+      <Modal
+        isOpen={tokenToEdit !== null}
+        testId="edit-token-modal"
+        title="Edit API token"
+        icon={<Edit2 />}
+        onClose={() => setTokenToEdit(null)}
+        maxWidth="max-w-md"
+      >
+        {tokenToEdit && (
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            {modalError && <ModalError message={modalError} />}
+
+            <p className="text-[11px] text-fg-muted leading-relaxed">
+              Changes take effect straight away. The token string{' '}
+              <code className="font-mono text-fg-soft">{tokenToEdit.token_prefix}</code> stays the same, so
+              clients need no update.
+            </p>
+
+            <TextField
+              label="Name"
+              id="edit-token-name"
+              type="text"
+              required
+              maxLength={NAME_MAX_LENGTH}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              hint={
+                editScopesChanged && !editNameChanged
+                  ? `The name still says '${tokenToEdit.name}'. Rename it if it no longer fits.`
+                  : undefined
+              }
+            />
+
+            <TokenScopeChooser
+              idPrefix="edit-token"
+              selectedId={editPresetId}
+              onSelect={handleEditPresetSelect}
+              selection={editSelection}
+              onSelectionChange={setEditSelection}
+            />
+
+            {editGains.length > 0 && (
+              <div
+                data-testid="scope-gain-warning"
+                role="status"
+                className={`p-3 rounded-lg border text-xs flex items-start gap-2 leading-relaxed ${
+                  editGainsFullAccess || editGainsAssistantMaintenance
+                    ? 'bg-danger-950/50 border-danger-800 text-danger-200'
+                    : 'bg-warning-950/30 border-warning-800/60 text-warning-200'
+                }`}
               >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {modalError && (
-              <div role="alert" className="mx-5 mt-4 p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
-                <span>{modalError}</span>
+                <AlertTriangle
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    editGainsFullAccess || editGainsAssistantMaintenance ? 'text-danger-400' : 'text-warning-400'
+                  }`}
+                />
+                <div className="space-y-1">
+                  <p>
+                    This token gains: <span className="font-mono font-semibold">{editGains.join(', ')}</span>.
+                    Every app or assistant holding this token gets this access straight away.
+                  </p>
+                  {editGainsFullAccess && (
+                    <p className="font-semibold">
+                      Full access covers every action, including deleting expired logs, compacting the database
+                      and any action added in later versions.
+                    </p>
+                  )}
+                  {editGainsAssistantMaintenance && (
+                    <p className="font-semibold">
+                      An AI assistant holding this token can now start and end maintenance windows. Log text is
+                      untrusted and can try to steer an assistant.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
-            <form onSubmit={handleEditSubmit} className="p-5 space-y-4 overflow-y-auto">
-              <p className="text-[11px] text-fg-muted leading-relaxed">
-                Changes take effect straight away. The token string{' '}
-                <code className="font-mono text-fg-soft">{tokenToEdit.token_prefix}</code> stays the same, so
-                clients need no update.
-              </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button onClick={() => setTokenToEdit(null)}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={!canSaveEdit}>
+                {isSavingEdit ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
-              <div>
-                <label htmlFor="edit-token-name" className="block text-xs font-medium text-fg-soft mb-1">
-                  Name
-                </label>
-                <input
-                  id="edit-token-name"
-                  type="text"
-                  required
-                  maxLength={NAME_MAX_LENGTH}
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  aria-describedby={editScopesChanged && !editNameChanged ? 'edit-token-name-hint' : undefined}
-                  className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500"
-                />
-                {editScopesChanged && !editNameChanged && (
-                  <p id="edit-token-name-hint" className="mt-1 text-[11px] text-fg-muted">
-                    The name still says '{tokenToEdit.name}'. Rename it if it no longer fits.
-                  </p>
-                )}
-              </div>
+      {/* One-Time Raw Token Modal: the token cannot be shown again, so only Done or the close button end it */}
+      <Modal
+        isOpen={createdRawToken !== null}
+        testId="raw-token-modal"
+        title="Token Generated"
+        icon={<Check />}
+        onClose={() => setCreatedRawToken(null)}
+        closeOnEscape={false}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-warning-950/30 border border-warning-800/60 rounded-lg text-xs text-warning-200 space-y-1">
+            <div className="font-semibold flex items-center gap-1.5 text-warning-300">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>Important Security Notice</span>
+            </div>
+            <p className="text-[11px] text-warning-200/90 leading-relaxed">
+              Copy this token now. It cannot be recovered once this dialog closes.
+            </p>
+          </div>
 
-              <TokenScopeChooser
-                idPrefix="edit-token"
-                selectedId={editPresetId}
-                onSelect={handleEditPresetSelect}
-                selection={editSelection}
-                onSelectionChange={setEditSelection}
+          <div>
+            <label htmlFor="created-raw-token" className={LABEL_CLASS}>
+              Bearer Token
+            </label>
+            <div className="flex items-center gap-2">
+              <TextField
+                id="created-raw-token"
+                ref={tokenInputRef}
+                type="text"
+                readOnly
+                value={createdRawToken ?? ''}
+                mono
+                className="select-all"
               />
-
-              {editGains.length > 0 && (
-                <div
-                  data-testid="scope-gain-warning"
-                  role="status"
-                  className={`p-3 rounded-lg border text-xs flex items-start gap-2 leading-relaxed ${
-                    editGainsFullAccess || editGainsAssistantMaintenance
-                      ? 'bg-danger-950/50 border-danger-800 text-danger-200'
-                      : 'bg-warning-950/30 border-warning-800/60 text-warning-200'
-                  }`}
-                >
-                  <AlertTriangle
-                    className={`w-4 h-4 shrink-0 mt-0.5 ${
-                      editGainsFullAccess || editGainsAssistantMaintenance ? 'text-danger-400' : 'text-warning-400'
-                    }`}
-                  />
-                  <div className="space-y-1">
-                    <p>
-                      This token gains: <span className="font-mono font-semibold">{editGains.join(', ')}</span>.
-                      Every app or assistant holding this token gets this access straight away.
-                    </p>
-                    {editGainsFullAccess && (
-                      <p className="font-semibold">
-                        Full access covers every action, including deleting expired logs, compacting the database
-                        and any action added in later versions.
-                      </p>
-                    )}
-                    {editGainsAssistantMaintenance && (
-                      <p className="font-semibold">
-                        An AI assistant holding this token can now start and end maintenance windows. Log text is
-                        untrusted and can try to steer an assistant.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setTokenToEdit(null)}
-                  className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg-soft rounded-lg transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!canSaveEdit}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 disabled:opacity-50 text-on-fill rounded-lg transition cursor-pointer"
-                >
-                  {isSavingEdit ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </form>
-        </TokenDialog>
-      )}
-
-      {/* One-Time Raw Token Modal */}
-      {createdRawToken && (
-        <TokenDialog
-          testId="raw-token-modal"
-          titleId={`${dialogIdBase}-created`}
-          onClose={() => setCreatedRawToken(null)}
-          // The token cannot be shown again, so only Done or the close button end this dialog
-          closeOnEscape={false}
-          overlayClassName="bg-canvas/85"
-          panelClassName="max-w-md"
-        >
-            <div className="px-5 py-4 border-b border-line flex items-center justify-between">
-              <h2 id={`${dialogIdBase}-created`} className="text-sm font-semibold text-success-400 flex items-center gap-2">
-                <Check className="w-4 h-4 text-success-400" />
-                <span>Token Generated</span>
-              </h2>
-              <button
-                type="button"
-                onClick={() => setCreatedRawToken(null)}
-                className="text-fg-muted hover:text-fg p-1 rounded-md transition"
-                aria-label="Close dialog"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <CopyButton
+                text={createdRawToken ?? ''}
+                variant="button"
+                className="shrink-0"
+                copiedLabelClassName="text-success-400"
+                beforeCopy={selectRawToken}
+              />
             </div>
+          </div>
 
-            <div className="p-5 space-y-4">
-              <div className="p-3 bg-warning-950/30 border border-warning-800/60 rounded-lg text-xs text-warning-200 space-y-1">
-                <div className="font-semibold flex items-center gap-1.5 text-warning-300">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>Important Security Notice</span>
-                </div>
-                <p className="text-[11px] text-warning-200/90 leading-relaxed">
-                  Copy this token now. It cannot be recovered once this dialog closes.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-fg-muted uppercase tracking-wider mb-1">
-                  Bearer Token
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={tokenInputRef}
-                    type="text"
-                    readOnly
-                    value={createdRawToken}
-                    className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs font-mono text-fg-strong select-all"
-                  />
-                  <CopyButton
-                    text={createdRawToken}
-                    className="px-3 py-2 text-xs font-semibold bg-raised hover:bg-raised-strong text-fg border border-line-strong rounded-lg transition flex items-center gap-1.5 shrink-0 cursor-pointer min-h-[32px] touch-manipulation select-none active:bg-raised-hover"
-                    copiedLabelClassName="text-success-400"
-                    beforeCopy={selectRawToken}
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setCreatedRawToken(null)}
-                  className="px-4 py-1.5 text-xs font-semibold bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition cursor-pointer"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-        </TokenDialog>
-      )}
+          <div className="pt-2 flex justify-end">
+            <Button variant="primary" onClick={() => setCreatedRawToken(null)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Revoke Confirmation Modal */}
-      {tokenToRevoke && (
-        <TokenDialog
-          testId="revoke-token-modal"
-          titleId={`${dialogIdBase}-revoke`}
-          onClose={() => setTokenToRevoke(null)}
-          panelClassName="max-w-sm"
-        >
-            <div className="p-5 space-y-3">
-              <h2 id={`${dialogIdBase}-revoke`} className="text-sm font-semibold text-fg-strong flex items-center gap-2">
-                <Trash2 className="w-4 h-4 text-danger-400" />
-                <span>Revoke Token</span>
-              </h2>
-              <p className="text-xs text-fg-soft leading-relaxed">
-                Are you sure you want to revoke{' '}
-                <strong className="text-fg-max">{tokenToRevoke.name}</strong>? Any service using this
-                token will immediately fail authentication with HTTP 401 errors.
-              </p>
-            </div>
-            {modalError && (
-              <div role="alert" className="mx-5 mb-4 p-2.5 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-            <div className="px-5 py-3.5 bg-canvas/50 border-t border-line-subtle flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setTokenToRevoke(null)}
-                className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg-soft rounded-lg transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isRevoking}
-                onClick={handleConfirmRevoke}
-                className="px-3.5 py-1.5 text-xs font-semibold bg-danger-600 hover:bg-danger-500 text-on-fill rounded-lg transition cursor-pointer disabled:opacity-50"
-              >
-                {isRevoking ? 'Revoking...' : 'Yes, Revoke'}
-              </button>
-            </div>
-        </TokenDialog>
-      )}
+      <ConfirmDialog
+        isOpen={tokenToRevoke !== null}
+        testId="revoke-token-modal"
+        title="Revoke Token"
+        maxWidth="max-w-sm"
+        onCancel={() => setTokenToRevoke(null)}
+        onConfirm={handleConfirmRevoke}
+        confirmDisabled={isRevoking}
+        confirmLabel={isRevoking ? 'Revoking...' : 'Yes, Revoke'}
+      >
+        <p className="leading-relaxed">
+          Are you sure you want to revoke{' '}
+          <strong className="text-fg-max">{tokenToRevoke?.name}</strong>? Any service using this
+          token will immediately fail authentication with HTTP 401 errors.
+        </p>
+        {modalError && <ModalError message={modalError} />}
+      </ConfirmDialog>
     </div>
   );
 };

@@ -4,6 +4,8 @@ import { NotificationChannel, SystemSettings } from '../../types.ts';
 import { sendDailyDigest } from '../../api/notifications.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
+import { Button } from '../common/Button.tsx';
+import { CHECKBOX_CLASS, Field, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 
 export interface DailyDigestCardProps {
   settings: SystemSettings | null;
@@ -105,28 +107,28 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
           </p>
         </div>
 
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={handleSendDigestNow}
           disabled={isSendingDigest || isSavingSettings}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-raised hover:bg-raised-hover border border-line text-xs text-fg-soft hover:text-fg-max transition cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
+          className="self-start sm:self-auto"
           title="Dispatch a daily digest immediately using current 24-hour analytical rollup"
+          icon={<Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />}
         >
-          <Send className={`w-3 h-3 text-accent-400 ${isSendingDigest ? 'animate-pulse' : ''}`} />
-          <span>{isSendingDigest ? 'Sending...' : 'Send Digest Now'}</span>
-        </button>
+          {isSendingDigest ? 'Sending...' : 'Send Digest Now'}
+        </Button>
       </div>
 
       <div className="p-3.5 bg-canvas/60 rounded-lg border border-line-subtle space-y-3">
         {/* Enable checkbox */}
         <div>
-          <label className="flex items-start gap-2 text-xs select-none cursor-pointer text-fg">
+          <label className="flex items-start gap-2 text-xs select-none cursor-pointer text-fg-soft">
             <input
               type="checkbox"
               checked={digestEnabled}
               disabled={isSavingSettings}
               onChange={(e) => onDigestEnabledChange(e.target.checked)}
-              className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer mt-0.5 disabled:opacity-50"
+              className={`mt-0.5 ${CHECKBOX_CLASS}`}
             />
             <div>
               <span className="font-medium">Enable 24-hour daily digest rollup</span>
@@ -141,70 +143,63 @@ export const DailyDigestCard: React.FC<DailyDigestCardProps> = ({
 
         {/* Configuration options */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-          <div className="space-y-1 min-w-0">
-            <label id="digest-target-channel-label" htmlFor="digest-target-channel" className="block text-[11px] font-semibold text-fg-muted uppercase">
-              Target Channel
-            </label>
-            <SelectDropdown
-              variant="panel"
-              fieldClassName="bg-surface border-line rounded-sm px-3 py-2 text-fg"
-              id="digest-target-channel"
-              labelledBy="digest-target-channel-label"
-              label="Target Channel"
-              options={[
-                { value: '', label: hasActiveChannel ? 'All Enabled Channels' : 'None (History Only)' },
-                ...channels.map((ch) => ({
-                  value: String(ch.id),
-                  label: `Channel: ${ch.name}${ch.is_enabled ? '' : ' (Disabled)'}`,
-                })),
-              ]}
-              value={String(digestChannelId ?? '')}
-              disabled={!digestEnabled || !hasActiveChannel || isSavingSettings}
-              onChange={(v) => onDigestChannelIdChange(v ? Number(v) : null)}
-            />
-          </div>
-
-          <div className="space-y-1 min-w-0">
-            <label htmlFor="digest-schedule-time" className="block text-[11px] font-semibold text-fg-muted uppercase">
-              Schedule Time{' '}
-              {/* The digest runs on the server clock (TZ), not the browser's */}
-              <span className="normal-case font-mono">({serverTimezone || 'server time'})</span>
-            </label>
-            <input
-              type="text"
-              id="digest-schedule-time"
-              value={digestScheduleTime}
-              placeholder="HH:MM"
-              maxLength={5}
-              disabled={!digestEnabled || isSavingSettings}
-              onChange={(e) => {
-                onDigestScheduleTimeChange(e.target.value);
-                setScheduleTimeError(null);
-              }}
-              onBlur={() => {
-                const val = digestScheduleTime;
-                if (!val || val.trim() === '') {
-                  setScheduleTimeError(null);
-                  return;
-                }
-                if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(val)) {
-                  setScheduleTimeError('Enter a valid 24-hour time, e.g. 09:00 or 23:30.');
-                  return;
-                }
-                setScheduleTimeError(null);
-              }}
-              className={`w-full bg-surface border rounded px-3 py-2 text-xs text-fg placeholder-fg-faint focus:outline-hidden disabled:opacity-50 font-mono ${
-                scheduleTimeError
-                  ? 'border-danger-500 focus:border-danger-400'
-                  : 'border-line focus:border-accent-500'
-              }`}
-            />
-            {scheduleTimeError ? (
-              <p className="text-[11px] text-danger-400">{scheduleTimeError}</p>
-            ) : (
-              <p className="text-[11px] text-fg-muted">24-hour format (e.g. 09:00).</p>
+          <Field label="Target Channel" id="digest-target-channel" className="min-w-0">
+            {({ id, labelId }) => (
+              <SelectDropdown
+                variant="panel"
+                fieldClassName={SELECT_FIELD_CLASS}
+                id={id}
+                labelledBy={labelId}
+                label="Target Channel"
+                options={[
+                  { value: '', label: hasActiveChannel ? 'All Enabled Channels' : 'None (History Only)' },
+                  ...channels.map((ch) => ({
+                    value: String(ch.id),
+                    label: `Channel: ${ch.name}${ch.is_enabled ? '' : ' (Disabled)'}`,
+                  })),
+                ]}
+                value={String(digestChannelId ?? '')}
+                disabled={!digestEnabled || !hasActiveChannel || isSavingSettings}
+                onChange={(v) => onDigestChannelIdChange(v ? Number(v) : null)}
+              />
             )}
-          </div>
+          </Field>
+
+          <TextField
+            label={
+              <>
+                Schedule Time{' '}
+                {/* The digest runs on the server clock (TZ), not the browser's */}
+                <span className="font-mono">({serverTimezone || 'server time'})</span>
+              </>
+            }
+            hint="24-hour format (e.g. 09:00)."
+            error={scheduleTimeError}
+            className="min-w-0"
+            mono
+            type="text"
+            id="digest-schedule-time"
+            value={digestScheduleTime}
+            placeholder="HH:MM"
+            maxLength={5}
+            disabled={!digestEnabled || isSavingSettings}
+            onChange={(e) => {
+              onDigestScheduleTimeChange(e.target.value);
+              setScheduleTimeError(null);
+            }}
+            onBlur={() => {
+              const val = digestScheduleTime;
+              if (!val || val.trim() === '') {
+                setScheduleTimeError(null);
+                return;
+              }
+              if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(val)) {
+                setScheduleTimeError('Enter a valid 24-hour time, e.g. 09:00 or 23:30.');
+                return;
+              }
+              setScheduleTimeError(null);
+            }}
+          />
         </div>
 
         {digestLastRun && (

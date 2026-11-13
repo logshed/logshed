@@ -3,6 +3,9 @@ import { AlertCircle, Check, Lock } from 'lucide-react';
 import { changePassword } from '../../api/auth.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { PASSWORD_MIN_LENGTH } from '../../utils/fieldLimits.ts';
+import { Button } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
+import { TextField } from '../common/Field.tsx';
 
 /** Settings > Advanced: change the admin password, then sign out so the new one is used. */
 export const ChangePasswordCard: React.FC = () => {
@@ -44,11 +47,8 @@ export const ChangePasswordCard: React.FC = () => {
   };
 
   return (
-    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-      <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-        <Lock className="w-4 h-4 text-accent-500" />
-        <span>Change Admin Password</span>
-      </h3>
+    <Card>
+      <CardHeader icon={<Lock />} title="Change Admin Password" />
 
       {pwdMsg && (
         <div
@@ -67,61 +67,49 @@ export const ChangePasswordCard: React.FC = () => {
       )}
 
       <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-        <div>
-          <label htmlFor="current-password" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-            Current Password
-          </label>
-          <input
-            id="current-password"
-            type="password"
-            value={currentPwd}
-            onChange={(e) => setCurrentPwd(e.target.value)}
-            required
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
-          />
-        </div>
+        <TextField
+          label="Current Password"
+          id="current-password"
+          type="password"
+          value={currentPwd}
+          onChange={(e) => setCurrentPwd(e.target.value)}
+          required
+          mono
+        />
 
-        <div>
-          <label htmlFor="new-password" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-            New Password (min {PASSWORD_MIN_LENGTH} chars)
-          </label>
-          <input
-            id="new-password"
-            type="password"
-            value={newPwd}
-            onChange={(e) => setNewPwd(e.target.value)}
-            minLength={PASSWORD_MIN_LENGTH}
-            required
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
-          />
-        </div>
+        <TextField
+          label={`New Password (min ${PASSWORD_MIN_LENGTH} chars)`}
+          id="new-password"
+          type="password"
+          value={newPwd}
+          onChange={(e) => setNewPwd(e.target.value)}
+          minLength={PASSWORD_MIN_LENGTH}
+          required
+          mono
+        />
 
-        <div>
-          <label htmlFor="confirm-password" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-            Confirm New Password
-          </label>
-          <input
-            id="confirm-password"
-            type="password"
-            value={confirmPwd}
-            onChange={(e) => setConfirmPwd(e.target.value)}
-            minLength={PASSWORD_MIN_LENGTH}
-            required
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
-          />
-        </div>
+        <TextField
+          label="Confirm New Password"
+          id="confirm-password"
+          type="password"
+          value={confirmPwd}
+          onChange={(e) => setConfirmPwd(e.target.value)}
+          minLength={PASSWORD_MIN_LENGTH}
+          required
+          mono
+        />
 
         <div className="sm:col-span-3 flex justify-end pt-1">
-          <button
+          <Button
             type="submit"
             disabled={isChangingPwd || !currentPwd || newPwd.length < PASSWORD_MIN_LENGTH || newPwd !== confirmPwd}
-            className="w-full sm:w-auto justify-center bg-raised hover:bg-raised-strong disabled:opacity-50 text-fg border border-line-strong font-medium px-4 py-2.5 sm:py-2 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer min-h-[40px] sm:min-h-0"
+            icon={<Lock className="w-3.5 h-3.5" />}
+            className="w-full sm:w-auto"
           >
-            <Lock className="w-3.5 h-3.5" />
-            <span>{isChangingPwd ? 'Updating...' : 'Update Password'}</span>
-          </button>
+            {isChangingPwd ? 'Updating...' : 'Update Password'}
+          </Button>
         </div>
       </form>
-    </section>
+    </Card>
   );
 };

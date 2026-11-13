@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, ArrowUpCircle, Check, ExternalLink, Info } from 'lucide-react';
 import { VersionInfo } from '../../types.ts';
+import { Card, CardHeader } from '../common/Card.tsx';
 
 export interface AboutCardProps {
   versionInfo: VersionInfo | null;
@@ -10,18 +11,18 @@ export interface AboutCardProps {
 
 /** Settings > Application: the running version, whether an update is out, the license and links. */
 export const AboutCard: React.FC<AboutCardProps> = ({ versionInfo, checkForUpdates }) => (
-  <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-3">
-    <div className="flex items-center justify-between">
-      <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-        <Info className="w-4 h-4 text-accent-500" />
-        <span>About LogShed</span>
-      </h3>
-      {versionInfo && (
-        <span className="font-mono text-xs px-2 py-0.5 rounded-sm bg-canvas border border-line text-fg-soft">
-          v{versionInfo.current_version}
-        </span>
-      )}
-    </div>
+  <Card>
+    <CardHeader
+      icon={<Info />}
+      title="About LogShed"
+      actions={
+        versionInfo && (
+          <span className="font-mono text-xs px-2 py-0.5 rounded-sm bg-canvas border border-line text-fg-soft">
+            v{versionInfo.current_version}
+          </span>
+        )
+      }
+    />
 
     {/* Version & Update Status */}
     {versionInfo && (
@@ -103,5 +104,5 @@ export const AboutCard: React.FC<AboutCardProps> = ({ versionInfo, checkForUpdat
         <ExternalLink className="w-3 h-3" />
       </a>
     </div>
-  </section>
+  </Card>
 );

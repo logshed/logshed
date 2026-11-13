@@ -22,6 +22,11 @@ import {
 import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { DailyDigestCard } from './DailyDigestCard.tsx';
+import { Badge } from '../common/Badge.tsx';
+import { Button, IconButton } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
+import { Checkbox, LABEL_TEXT_CLASS, TextField } from '../common/Field.tsx';
+import { TableHead } from '../common/Table.tsx';
 
 /**
  * Notification targets, and the daily digest fields of the settings form: the digest values are
@@ -221,39 +226,29 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
   };
 
   return (
-    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-      {/* Header */}
-      <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3">
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            <Bell className="w-4 h-4 text-accent-500 shrink-0" />
-            <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider truncate">
-              Notification Targets
-            </h3>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[11px] px-1.5 py-0.5 rounded-sm bg-raised border border-line text-fg-muted font-mono whitespace-nowrap">
+    <Card>
+      <CardHeader
+        icon={<Bell />}
+        title={
+          <>
+            Notification Targets
+            <Badge code className="ml-2 align-middle normal-case tracking-normal">
               {channels.length} {channels.length === 1 ? 'target' : 'targets'}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <button
-            type="button"
+            </Badge>
+          </>
+        }
+        description="Dispatch real-time alerts across 80+ platforms (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest."
+        actions={
+          <Button
+            size="sm"
             onClick={handleOpenCreateModal}
-            className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:gap-1.5 rounded-sm bg-raised hover:bg-raised-hover border border-line text-xs text-fg-soft hover:text-fg-max transition cursor-pointer whitespace-nowrap"
             title="Configure a new notification target"
+            icon={<Plus className="w-3.5 h-3.5 text-accent-400" />}
           >
-            <Plus className="w-3.5 h-3.5 text-accent-400" />
-            <span>New Target</span>
-          </button>
-        </div>
-      </div>
-
-      <p className="text-xs text-fg-muted mt-0.5">
-        Dispatch real-time alerts across 80+ platforms (Discord, Gotify, Telegram, Ntfy, Pushover, Home Assistant, Slack, Email) using standard webhook URLs. Sensitive tokens are encrypted at rest.
-      </p>
+            New Target
+          </Button>
+        }
+      />
 
       {/* Feedback Banner */}
       {feedbackMsg && (
@@ -270,39 +265,35 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             <CheckCircle2 className="w-4 h-4 text-success-400 shrink-0 mt-0.5" />
           )}
           <span className="flex-1">{feedbackMsg.text}</span>
-          <button
-            type="button"
-            onClick={() => setFeedbackMsg(null)}
-            className="text-fg-muted hover:text-fg text-xs cursor-pointer ml-2"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setFeedbackMsg(null)} className="-my-1">
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Content Table */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-lg border border-line-subtle">
           {channels.length === 0 ? (
-            <div className="text-center py-6 text-fg-muted text-xs italic bg-canvas/40 rounded-lg border border-line-subtle">
+            <div className="text-center py-6 text-fg-muted text-xs italic bg-canvas/40">
               No notification targets configured. Add a target to receive alerts on Discord, Gotify, Telegram, or other services.
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-line text-fg-muted font-medium">
-                  <th className="pb-2 pl-2">Status</th>
-                  <th className="pb-2">Name</th>
-                  <th className="pb-2">Target URL (Masked)</th>
-                  <th className="pb-2 text-right pr-2">Actions</th>
-                </tr>
-              </thead>
+              <TableHead
+                columns={[
+                  { label: 'Status' },
+                  { label: 'Name' },
+                  { label: 'Target URL (Masked)' },
+                  { label: 'Actions', align: 'right' },
+                ]}
+              />
               <tbody className="divide-y divide-line-subtle">
                 {channels.map((channel) => (
                   <tr
                     key={channel.id}
                     className="hover:bg-raised/40 transition group"
                   >
-                    <td className="py-2 pl-2">
+                    <td className="py-2 px-4">
                       <button
                         type="button"
                         onClick={() => handleToggleStatus(channel)}
@@ -316,46 +307,39 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                         {channel.is_enabled ? 'Active' : 'Disabled'}
                       </button>
                     </td>
-                    <td className="py-2 font-mono text-fg">
+                    <td className="py-2 px-4 font-mono text-fg">
                       {channel.name}
                     </td>
-                    <td className="py-2 font-mono text-fg-muted max-w-[250px] truncate" title={channel.url}>
+                    <td className="py-2 px-4 font-mono text-fg-muted max-w-[250px] truncate" title={channel.url}>
                       {channel.url}
                     </td>
-                    <td className="py-2 text-right pr-2">
+                    <td className="py-2 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
+                        <IconButton
+                          size="sm"
                           onClick={() => handleRowTest(channel)}
                           disabled={testingChannelId === channel.id}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-accent-400 hover:bg-raised-strong rounded-sm transition cursor-pointer disabled:opacity-50"
                           title="Send test notification"
-                          aria-label={`Test ${channel.name}`}
+                          label={`Test ${channel.name}`}
                         >
                           <Send
                             className={`w-3.5 h-3.5 ${
                               testingChannelId === channel.id ? 'animate-pulse text-accent-400' : ''
                             }`}
                           />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(channel)}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-fg hover:bg-raised-strong rounded-sm transition cursor-pointer"
-                          title="Edit target"
-                          aria-label={`Edit ${channel.name}`}
-                        >
+                        </IconButton>
+                        <IconButton size="sm" onClick={() => handleOpenEditModal(channel)} title="Edit target" label={`Edit ${channel.name}`}>
                           <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
+                        </IconButton>
+                        <IconButton
+                          size="sm"
+                          variant="danger"
                           onClick={() => setChannelToDelete(channel)}
-                          className="w-8 h-8 sm:w-auto sm:h-auto sm:p-1 flex items-center justify-center text-fg-muted hover:text-danger-400 hover:bg-raised-strong rounded-sm transition cursor-pointer"
                           title="Delete target"
-                          aria-label={`Delete ${channel.name}`}
+                          label={`Delete ${channel.name}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        </IconButton>
                       </div>
                     </td>
                   </tr>
@@ -394,23 +378,19 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
             </div>
           )}
 
-          <div>
-            <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-              Target Name
-            </label>
-            <input
-              type="text"
-              required
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="e.g. Homelab Discord, Admin Telegram, Gotify Push"
-              className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
-            />
-          </div>
+          <TextField
+            label="Target Name"
+            type="text"
+            required
+            value={formName}
+            onChange={(e) => setFormName(e.target.value)}
+            placeholder="e.g. Homelab Discord, Admin Telegram, Gotify Push"
+            mono
+          />
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] font-semibold text-fg-muted uppercase">
+              <label htmlFor="notification-url" className={LABEL_TEXT_CLASS}>
                 Notification URL (Apprise Format)
               </label>
               <div className="flex items-center gap-2.5">
@@ -436,7 +416,8 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 </a>
               </div>
             </div>
-            <input
+            <TextField
+              id="notification-url"
               type="text"
               required
               value={formUrl}
@@ -445,7 +426,7 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
                 setTestResult(null);
               }}
               placeholder="discord://webhook_id/webhook_token or gotify://hostname/token"
-              className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
+              mono
             />
             <p className="text-[11px] text-fg-muted mt-1">
               Supports Discord (<code>discord://...</code>), Gotify (<code>gotify://...</code>), Telegram (<code>tgram://...</code>), Ntfy (<code>ntfy://...</code>), Pushover (<code>pover://...</code>), Slack (<code>slack://...</code>), and generic webhooks (<code>https://...</code>).
@@ -453,15 +434,11 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           </div>
 
           <div className="pt-1">
-            <label className="flex items-center gap-2 text-xs text-fg cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={formEnabled}
-                onChange={(e) => setFormEnabled(e.target.checked)}
-                className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
-              />
-              <span className="font-medium">Channel active (enabled for alerting)</span>
-            </label>
+            <Checkbox
+              label="Channel active (enabled for alerting)"
+              checked={formEnabled}
+              onChange={(e) => setFormEnabled(e.target.checked)}
+            />
           </div>
 
           {/* Test connection results */}
@@ -484,32 +461,25 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
 
           {/* Modal Actions */}
           <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-2 pt-3 border-t border-line-subtle">
-            <button
-              type="button"
+            <Button
               onClick={handleModalTest}
               disabled={isTesting || !formUrl.trim()}
-              className="w-full sm:w-auto px-3 py-2 bg-raised hover:bg-raised-hover border border-line rounded-lg text-xs text-fg-soft font-medium flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-40"
+              className="w-full sm:w-auto"
+              icon={<Send className={`w-3.5 h-3.5 text-accent-400 ${isTesting ? 'animate-spin' : ''}`} />}
             >
-              <Send className={`w-3.5 h-3.5 text-accent-400 ${isTesting ? 'animate-spin' : ''}`} />
-              <span>{isTesting ? 'Testing...' : 'Send Test Notification'}</span>
-            </button>
+              {isTesting ? 'Testing...' : 'Send Test Notification'}
+            </Button>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="px-3 py-2 text-xs text-fg-muted hover:text-fg cursor-pointer transition"
-              >
-                Cancel
-              </button>
-              <button
+              <Button onClick={() => setIsModalOpen(false)}>Cancel</Button>
+              <Button
                 type="submit"
+                variant="primary"
                 disabled={isSubmitting || !formName.trim() || !formUrl.trim()}
-                className="px-4 py-2 text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
+                icon={isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : undefined}
               >
-                {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                <span>{channelToEdit ? 'Save Changes' : 'Create Target'}</span>
-              </button>
+                {channelToEdit ? 'Save Changes' : 'Create Target'}
+              </Button>
             </div>
           </div>
         </form>
@@ -531,6 +501,6 @@ export const NotificationsCard: React.FC<NotificationsCardProps> = ({
           This will permanently remove the channel from alerting pipelines.
         </p>
       </ConfirmDialog>
-    </section>
+    </Card>
   );
 };

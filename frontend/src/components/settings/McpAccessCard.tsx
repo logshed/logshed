@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, Bot, Shield } from 'lucide-react';
 import { Key } from '../common/icons.ts';
+import { Badge } from '../common/Badge.tsx';
+import { Button } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
+import { CHECKBOX_CLASS, LABEL_TEXT_CLASS, TextField } from '../common/Field.tsx';
 import { updateSettings } from '../../api/settings.ts';
 import { SystemSettings } from '../../types.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
@@ -90,43 +94,35 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
   );
 
   return (
-    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-line-subtle">
-        <div>
-          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-            <Bot className="w-4 h-4 text-accent-500" />
-            <span>Model Context Protocol (MCP)</span>
-            {enableMcp ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-success-950/80 text-success-400 border border-success-800/80 normal-case tracking-normal">
-                Active
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-raised text-fg-muted border border-line normal-case tracking-normal">
-                Disabled
-              </span>
-            )}
-          </h3>
-          <p className="text-xs text-fg-muted mt-1 max-w-2xl leading-relaxed">
-            Expose LogShed tools and telemetry to AI assistants such as Claude Desktop, Cursor, and Windsurf
-            via standard MCP protocol.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 shrink-0 self-start sm:self-center">
-          <label htmlFor="enable-mcp" className="text-xs text-fg-soft font-medium cursor-pointer">
-            Enable Model Context Protocol
-          </label>
-          <input
-            id="enable-mcp"
-            type="checkbox"
-            aria-label="Enable Model Context Protocol"
-            checked={enableMcp}
-            disabled={isUpdatingMcp}
-            onChange={(e) => handleToggleMcp(e.target.checked)}
-            className="w-4 h-4 rounded-sm border-line-strong bg-raised text-accent-600 focus:ring-accent-500 focus:ring-offset-surface cursor-pointer disabled:opacity-50"
-          />
-        </div>
-      </div>
+    <Card>
+      <CardHeader
+        className="pb-4 border-b border-line-subtle"
+        icon={<Bot />}
+        title={
+          <>
+            Model Context Protocol (MCP)
+            <Badge tone={enableMcp ? 'success' : 'neutral'} className="ml-2 normal-case tracking-normal align-middle">
+              {enableMcp ? 'Active' : 'Disabled'}
+            </Badge>
+          </>
+        }
+        description="Expose LogShed tools and telemetry to AI assistants such as Claude Desktop, Cursor, and Windsurf via standard MCP protocol."
+        actions={
+          <div className="flex items-center gap-3">
+            <label htmlFor="enable-mcp" className="text-xs text-fg-soft font-medium cursor-pointer">
+              Enable Model Context Protocol
+            </label>
+            <input
+              id="enable-mcp"
+              type="checkbox"
+              checked={enableMcp}
+              disabled={isUpdatingMcp}
+              onChange={(e) => handleToggleMcp(e.target.checked)}
+              className={CHECKBOX_CLASS}
+            />
+          </div>
+        }
+      />
 
       {mcpErrorMsg && (
         <div className="p-3 rounded-lg border bg-danger-950/60 border-danger-800 text-danger-300 text-xs flex items-center gap-2">
@@ -145,11 +141,11 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
       )}
 
       {enableMcp ? (
-        <div className="space-y-5 duration-150">
+        <div className="space-y-5">
           {/* SSE Endpoint Field */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-fg-soft">
+              <label htmlFor="mcp-sse-url" className={LABEL_TEXT_CLASS}>
                 SSE Endpoint URL
               </label>
               <span className="text-[11px] text-fg-muted">
@@ -157,16 +153,19 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <input
+              <TextField
+                id="mcp-sse-url"
                 type="text"
                 readOnly
                 value={sseUrl}
-                className="flex-1 bg-canvas border border-line rounded-lg px-3 py-2 text-xs font-mono text-fg select-all focus:outline-hidden focus:border-accent-500"
+                mono
+                className="flex-1 select-all"
               />
               <CopyButton
                 text={sseUrl}
                 title="Copy SSE URL"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-fg bg-raised hover:bg-raised-strong border border-line-strong rounded-lg transition cursor-pointer shrink-0"
+                variant="button"
+                className="shrink-0"
                 copiedLabelClassName="text-success-400"
               />
             </div>
@@ -185,14 +184,13 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
               the assistant should start and end maintenance windows: log text is untrusted and can try to steer
               an assistant.
             </div>
-            <button
-              type="button"
+            <Button
               onClick={onGenerateToken}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-fg border border-line rounded-lg transition cursor-pointer shrink-0 self-start sm:self-auto"
+              className="shrink-0 self-start sm:self-auto"
+              icon={<Key className="w-3.5 h-3.5 text-accent-500" />}
             >
-              <Key className="w-3.5 h-3.5 text-accent-500" />
-              <span>Generate API Token</span>
-            </button>
+              Generate API Token
+            </Button>
           </div>
 
           {/* Configuration Snippets */}
@@ -232,6 +230,6 @@ export const McpAccessCard: React.FC<McpAccessCardProps> = ({ settings, onSettin
           MCP server is currently disabled. Toggle the switch above to activate MCP endpoints and view client configuration instructions.
         </div>
       )}
-    </section>
+    </Card>
   );
 };

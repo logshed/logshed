@@ -18,6 +18,9 @@ export function controlClass({ invalid = false, mono = false }: { invalid?: bool
   return `${CONTROL_BASE} ${invalid ? 'border-danger-600' : 'border-line'}${mono ? ' font-mono' : ''}`;
 }
 
+/** After a label's text, for a field that must be filled in. */
+export const REQUIRED_MARK = <span className="text-danger-400">*</span>;
+
 /** SelectDropdown's `fieldClassName` in a form, so a dropdown matches the text boxes beside it. */
 export const SELECT_FIELD_CLASS = 'bg-canvas border-line rounded-sm px-3 py-2 text-fg';
 

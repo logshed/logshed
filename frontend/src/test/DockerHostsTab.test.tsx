@@ -430,8 +430,8 @@ describe('DockerHostsTab row controls', () => {
     const enable = screen.getByRole('button', { name: 'Enable host Remote Worker' });
     expect(enable).toHaveAttribute('title', 'Enable host Remote Worker');
     // Disabled hosts are muted
-    expect(enable.className).toContain('text-fg-faint');
-    expect(disable.className).not.toContain('text-fg-faint');
+    expect(enable.querySelector('svg')!.getAttribute('class')).toContain('text-fg-faint');
+    expect(disable.querySelector('svg')!.getAttribute('class')).not.toContain('text-fg-faint');
   });
 
   it('shows a visible Test label on the row test button', async () => {
@@ -452,7 +452,7 @@ describe('DockerHostsTab row controls', () => {
     const row = screen.getByText('Remote Worker').closest('tr') as HTMLElement;
     for (const title of ['Edit Host', 'Delete Host']) {
       const btn = row.querySelector(`button[title="${title}"]`) as HTMLButtonElement;
-      expect(btn.className).toContain('w-8 h-8 sm:w-auto sm:h-auto sm:p-1');
+      expect(btn.className).toContain('max-md:min-w-8 max-md:min-h-8');
     }
     expect(row.querySelector('button[title="Edit Host"]')!.parentElement!.className).toContain('gap-1.5');
   });

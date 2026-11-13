@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertCircle, Check, RefreshCw, Save } from 'lucide-react';
+import { Button } from '../common/Button.tsx';
 
 export interface StickySaveBarProps {
   isDirty: boolean;
@@ -28,7 +29,7 @@ export const StickySaveBar: React.FC<StickySaveBarProps> = ({
   return (
     <aside
       aria-label="Unsaved changes bar"
-      className={`sticky bottom-4 z-30 bg-surface/95 backdrop-blur-md border rounded-xl p-3 sm:px-5 sm:py-3 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 ${saveInlineSuccess
+      className={`sticky bottom-4 z-30 bg-surface/95 backdrop-blur-md border rounded-xl p-3 sm:px-5 sm:py-3 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 ${saveInlineSuccess
           ? 'border-success-500/40'
           : saveInlineError
             ? 'border-danger-500/40'
@@ -65,26 +66,23 @@ export const StickySaveBar: React.FC<StickySaveBarProps> = ({
               <span>Saving...</span>
             </div>
           )}
-          <button
-            type="button"
-            onClick={onDiscard}
-            disabled={isSavingSettings}
-            className="px-3 py-1.5 text-xs text-fg-soft hover:text-fg-max bg-raised hover:bg-raised-hover border border-line rounded-lg transition cursor-pointer disabled:opacity-50"
-          >
+          <Button onClick={onDiscard} disabled={isSavingSettings}>
             Discard
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
+            variant="primary"
             disabled={isSavingSettings}
-            className="px-4 py-1.5 text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
+            icon={
+              isSavingSettings ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )
+            }
           >
-            {isSavingSettings ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Save className="w-3.5 h-3.5" />
-            )}
-            <span>Save Changes</span>
-          </button>
+            Save Changes
+          </Button>
         </div>
       )}
     </aside>

@@ -390,7 +390,7 @@ describe('NotificationsCard action buttons', () => {
     const edit = await screen.findByRole('button', { name: 'Edit Homelab Discord' });
     for (const name of ['Test Homelab Discord', 'Edit Homelab Discord', 'Delete Homelab Discord']) {
       const btn = screen.getByRole('button', { name });
-      expect(btn.className).toContain('w-8 h-8 sm:w-auto sm:h-auto sm:p-1');
+      expect(btn.className).toContain('max-md:min-w-8 max-md:min-h-8');
     }
     expect(edit.parentElement!.className).toContain('gap-1.5');
   });

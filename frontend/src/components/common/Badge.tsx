@@ -16,13 +16,13 @@ export function badgeClass(tone: BadgeTone = 'neutral'): string {
 
 export interface BadgeProps extends React.ComponentPropsWithRef<'span'> {
   tone?: BadgeTone;
-  /** Monospace upper case, for codes such as a scope or a protocol. */
+  /** Monospace, for a count or a code such as a scope or a protocol. */
   code?: boolean;
 }
 
 /** A small label that states something (a status, a count, a kind); it is not a control. */
 export const Badge: React.FC<BadgeProps> = ({ tone = 'neutral', code = false, className, children, ...rest }) => {
-  const look = `${badgeClass(tone)}${code ? ' font-mono uppercase' : ''}`;
+  const look = `${badgeClass(tone)}${code ? ' font-mono' : ''}`;
   return (
     <span className={className ? `${look} ${className}` : look} {...rest}>
       {children}

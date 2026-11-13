@@ -7,6 +7,9 @@ import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { ModelChainEditor } from '../ai/ModelChainEditor.tsx';
 import type { AiProviderConfig } from './useAiProviderConfig.ts';
+import { Button } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
+import { CHECKBOX_CLASS, Field, LABEL_CLASS, SELECT_FIELD_CLASS, TextArea, TextField } from '../common/Field.tsx';
 
 // Base URLs of common servers that accept OpenAI-style requests. Ollama and LM Studio run on the
 // Docker host, which the LogShed container reaches as host.docker.internal.
@@ -71,22 +74,18 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
   } = ai;
 
   return (
-    <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-            <Brain className="w-4 h-4 text-accent-500" />
-            <span>On-Demand AI Provider Configuration</span>
-          </h3>
-          <p className="text-xs text-fg-muted mt-0.5">
-            Fernet encryption secures API keys against exposure in database exports, disk clones, and backups.
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-success-950/60 border border-success-800 text-[11px] font-mono text-success-400 shrink-0 self-start sm:self-auto">
-          <Lock className="w-3 h-3 text-success-400" />
-          <span>Keys encrypted at rest</span>
-        </div>
-      </div>
+    <Card>
+      <CardHeader
+        icon={<Brain />}
+        title="On-Demand AI Provider Configuration"
+        description="Fernet encryption secures API keys against exposure in database exports, disk clones, and backups."
+        actions={
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-success-950/60 border border-success-800 text-[11px] font-mono text-success-400">
+            <Lock className="w-3 h-3 text-success-400" />
+            <span>Keys encrypted at rest</span>
+          </div>
+        }
+      />
 
       {/* AI Enablement Checkbox */}
       <div className="p-3 bg-canvas/80 border border-line-subtle rounded-lg flex items-start gap-3">
@@ -101,7 +100,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               loadModels(aiProvider);
             }
           }}
-          className="mt-0.5 w-4 h-4 rounded-sm border-line bg-surface text-accent-500 focus:ring-accent-500 focus:ring-offset-surface cursor-pointer"
+          className={`mt-0.5 ${CHECKBOX_CLASS}`}
         />
         <div className="flex-1">
           <label htmlFor="ai-enabled-checkbox" className="text-xs font-semibold text-fg cursor-pointer select-none">
@@ -125,51 +124,47 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label id="ai-provider-label" htmlFor="ai-provider" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-            AI Provider
-          </label>
-          <SelectDropdown
-            variant="panel"
-            fieldClassName="bg-canvas border-line rounded-sm px-3 py-2 font-mono text-fg"
-            id="ai-provider"
-            labelledBy="ai-provider-label"
-            label="AI Provider"
-            options={AI_PROVIDER_OPTIONS}
-            value={aiProvider}
-            onChange={(v) => handleProviderChange(v as any)}
-          />
-        </div>
+        <Field label="AI Provider" id="ai-provider">
+          {({ id, labelId }) => (
+            <SelectDropdown
+              variant="panel"
+              fieldClassName={SELECT_FIELD_CLASS}
+              id={id}
+              labelledBy={labelId}
+              label="AI Provider"
+              options={AI_PROVIDER_OPTIONS}
+              value={aiProvider}
+              onChange={(v) => handleProviderChange(v as any)}
+            />
+          )}
+        </Field>
 
-        <div>
-          <label className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-            API Key (Masked)
-          </label>
-          <input
-            type="password"
-            value={aiApiKey}
-            onChange={(e) => setAiApiKey(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                onApiKeyEnter();
-              }
-            }}
-            placeholder={hasApiKeyForProvider ? `Enter new API key or leave ${MASKED_SECRET} to preserve` : 'Enter API key'}
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
-          />
-        </div>
+        <TextField
+          label="API Key (Masked)"
+          id="ai-api-key"
+          mono
+          type="password"
+          value={aiApiKey}
+          onChange={(e) => setAiApiKey(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onApiKeyEnter();
+            }
+          }}
+          placeholder={hasApiKeyForProvider ? `Enter new API key or leave ${MASKED_SECRET} to preserve` : 'Enter API key'}
+        />
 
         {getAiProvider(aiProvider)?.customBaseUrl && (
           <div className="sm:col-span-2">
-            <label htmlFor="ai-base-url" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
+            <label htmlFor="ai-base-url" className={LABEL_CLASS}>
               Custom Base URL (Optional)
             </label>
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="sm:w-56 shrink-0">
                 <SelectDropdown
                   variant="panel"
-                  fieldClassName="bg-canvas border-line rounded-sm px-3 py-2 font-mono text-fg"
+                  fieldClassName={SELECT_FIELD_CLASS}
                   label="Base URL preset"
                   options={BASE_URL_PRESET_OPTIONS}
                   value={matchBaseUrlPreset(aiBaseUrl)}
@@ -179,13 +174,14 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
                   }}
                 />
               </div>
-              <input
+              <TextField
                 id="ai-base-url"
                 type="text"
                 value={aiBaseUrl}
                 onChange={(e) => setAiBaseUrl(e.target.value)}
                 placeholder="http://host.docker.internal:11434/v1"
-                className="w-full min-w-0 bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
+                mono
+                className="min-w-0"
               />
             </div>
             <p className="text-[11px] text-fg-subtle mt-1">
@@ -238,29 +234,28 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
         {/* Model Discovery & Ordering Section Header */}
         <div className="sm:col-span-2 pt-2 border-t border-line-subtle flex items-center justify-between">
           <div>
-            <label className="block text-[11px] font-semibold text-fg-soft uppercase tracking-wider">
+            <h4 className="text-xs font-semibold text-fg-soft">
               Model Selection & Failover Ordering
-            </label>
+            </h4>
             <p className="text-[11px] text-fg-muted">
               Select your default primary model and configure fallback models in priority order.{modelsCachedAt ? ` (Cache refreshed: ${formatLocalTimestamp(modelsCachedAt, true, serverTimezone)})` : ''}
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={handleRefreshModels}
             disabled={isLoadingModels}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-raised hover:bg-raised-hover border border-line text-xs text-fg-soft transition cursor-pointer disabled:opacity-50"
             title="Query provider API for active models"
+            icon={<RefreshCw className={`w-3.5 h-3.5 text-accent-400 ${isLoadingModels ? 'animate-spin' : ''}`} />}
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-accent-400 ${isLoadingModels ? 'animate-spin' : ''}`} />
-            <span>{isLoadingModels ? 'Fetching Models...' : 'Refresh Models'}</span>
-          </button>
+            {isLoadingModels ? 'Fetching Models...' : 'Refresh Models'}
+          </Button>
         </div>
 
         {/* Default Primary Model */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label id="ai-model-label" htmlFor="ai-model" className="block text-[11px] font-semibold text-fg-muted uppercase">
+            <label id="ai-model-label" htmlFor="ai-model" className="block text-xs font-medium text-fg-soft">
               Default Primary Model
             </label>
             {isCustomModel && (
@@ -287,7 +282,7 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
           {availableModels.length > 0 && !isCustomModel ? (
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-canvas border-line rounded-sm px-3 py-2 font-mono text-fg-strong"
+              fieldClassName={`${SELECT_FIELD_CLASS} font-mono`}
               id="ai-model"
               labelledBy="ai-model-label"
               label="Default Primary Model"
@@ -305,13 +300,13 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               }}
             />
           ) : (
-            <input
+            <TextField
               id="ai-model"
               type="text"
               value={aiModel}
               onChange={(e) => handlePrimaryModelChange(e.target.value)}
               placeholder={DEFAULT_PROVIDER_MODELS[aiProvider] ?? DEFAULT_PROVIDER_MODELS.openai_compatible}
-              className="w-full bg-canvas border border-line rounded-sm px-3 py-2 text-xs text-fg-strong placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono"
+              mono
             />
           )}
 
@@ -336,9 +331,9 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
         <div className="sm:col-span-2 pt-3 border-t border-line-subtle space-y-2">
           <div className="flex items-center justify-between">
             <div>
-              <label className="block text-[11px] font-semibold text-fg-soft uppercase tracking-wider">
+              <h4 className="text-xs font-semibold text-fg-soft">
                 AI System Instructions (LLM Persona)
-              </label>
+              </h4>
               <p className="text-[11px] text-fg-muted">
                 System instructions that establish the LLM's diagnostic persona, reasoning guidelines, and response structure.
               </p>
@@ -355,16 +350,18 @@ export const AiProviderCard: React.FC<AiProviderCardProps> = ({ ai, onApiKeyEnte
               </button>
             )}
           </div>
-          <textarea
+          <TextArea
+            aria-label="AI System Instructions (LLM Persona)"
             value={aiSystemPrompt}
             onChange={(e) => setAiSystemPrompt(e.target.value)}
             rows={7}
             placeholder="Enter system instructions..."
-            className="w-full bg-canvas border border-line rounded-lg p-3 text-xs text-fg placeholder-fg-subtle focus:outline-hidden focus:border-accent-500 font-mono leading-relaxed resize-y"
+            mono
+            className="leading-relaxed"
           />
         </div>
       </div>
       )}
-    </section>
+    </Card>
   );
 };

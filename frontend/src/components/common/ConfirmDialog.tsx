@@ -30,6 +30,7 @@ export interface ConfirmDialogProps {
   /** Layout classes of the column inside the notice look's warning box. */
   noticeClassName?: string;
   maxWidth?: string;
+  testId?: string;
   children: React.ReactNode;
 }
 
@@ -48,11 +49,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmVariant = 'danger',
   noticeClassName = 'space-y-2 flex-1',
   maxWidth = 'max-w-md',
+  testId,
   children,
 }) => {
   const styles = LOOKS[look];
   return (
-    <Modal isOpen={isOpen} onClose={onClose ?? onCancel} title={title} maxWidth={maxWidth}>
+    <Modal isOpen={isOpen} onClose={onClose ?? onCancel} title={title} maxWidth={maxWidth} testId={testId}>
       <div className={styles.body}>
         {look === 'notice' ? (
           <div className="flex items-start gap-3 p-3 bg-danger-950/30 border border-danger-800/60 rounded-lg text-fg">

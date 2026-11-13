@@ -1,9 +1,12 @@
 import React from 'react';
 import { Check, Copy } from 'lucide-react';
 import { useClipboard } from '../../utils/hooks.ts';
+import { buttonClass } from './Button.tsx';
 
-// ghost: the small grey button beside a block of text; link: accent text, beside a command to copy
+// ghost: the small grey button beside a block of text; link: accent text, beside a command to copy;
+// button: a secondary Button, beside a read-only field
 const LOOKS = {
+  button: buttonClass('secondary'),
   ghost:
     'inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-[11px] font-medium text-fg-muted hover:text-fg hover:bg-raised active:bg-raised-hover transition cursor-pointer min-h-[32px] touch-manipulation select-none',
   link: 'inline-flex items-center gap-1 text-[11px] font-medium text-accent-400 hover:text-accent-300 active:text-accent-200 cursor-pointer min-h-[32px] touch-manipulation select-none',

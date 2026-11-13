@@ -1,5 +1,6 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
+import { CHECKBOX_CLASS } from '../common/Field.tsx';
 import {
   CUSTOM_PRESET_ID,
   FULL_ACCESS_SCOPE,
@@ -41,7 +42,7 @@ const ScopeCheckbox: React.FC<ScopeCheckboxProps> = ({ id, label, description, c
       }}
       onChange={(e) => onChange(e.target.checked)}
       aria-describedby={description ? `${id}-desc` : undefined}
-      className="mt-0.5 shrink-0 rounded-sm border-line-strong bg-raised text-accent-600 focus:ring-accent-500 focus:ring-offset-surface cursor-pointer"
+      className={`mt-0.5 ${CHECKBOX_CLASS}`}
     />
     <div className="min-w-0">
       <label htmlFor={id} className="text-xs text-fg cursor-pointer wrap-break-word">
@@ -113,7 +114,7 @@ export const TokenScopeChooser: React.FC<TokenScopeChooserProps> = ({
                 value={choice.id}
                 checked={selectedId === choice.id}
                 onChange={() => onSelect(choice.id)}
-                className="mt-0.5 text-accent-500 focus:ring-accent-500"
+                className={`mt-0.5 ${CHECKBOX_CLASS}`}
               />
               <div>
                 <div className="font-semibold text-fg">{choice.name}</div>

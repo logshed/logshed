@@ -243,10 +243,10 @@ describe('HostAliasManager View logs action', () => {
     await screen.findByText('router.local');
     expect(screen.getAllByRole('button', { name: /^View logs for / })).toHaveLength(2);
     for (const btn of screen.getAllByTitle('Edit Alias')) {
-      expect(btn.className).toContain('w-8 h-8');
+      expect(btn.className).toContain('max-md:min-w-8 max-md:min-h-8');
     }
     for (const btn of screen.getAllByTitle('Delete Alias')) {
-      expect(btn.className).toContain('w-8 h-8');
+      expect(btn.className).toContain('max-md:min-w-8 max-md:min-h-8');
     }
   });
 });

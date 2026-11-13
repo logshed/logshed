@@ -551,7 +551,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
 
           {testResult && (
             <div
-              className={`p-2 rounded border text-xs flex items-center justify-between duration-100 ${
+              className={`p-2 rounded border text-xs flex items-center justify-between ${
                 testResult.error
                   ? 'bg-danger-950/40 border-danger-800/60 text-danger-300'
                   : testResult.matched

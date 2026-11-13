@@ -771,7 +771,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           <div
             role="status"
             aria-live="polite"
-            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-surface/95 border border-line text-fg-soft text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg duration-150"
+            className="absolute top-10 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-surface/95 border border-line text-fg-soft text-xs font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg"
           >
             <Loader2 className="w-3.5 h-3.5 animate-spin text-accent-400" />
             <span>Updating results...</span>

@@ -30,8 +30,9 @@ const VARIANTS: Record<ButtonVariant, string> = {
   ghost: 'border-transparent text-fg-muted hover:text-fg hover:bg-raised',
 };
 
+// Below md, a small button is at least 32 px tall, as icon buttons are, so it is easy to tap
 const SIZES: Record<ButtonSize, string> = {
-  sm: 'px-2.5 py-1 text-[11px]',
+  sm: 'px-2.5 py-1 text-[11px] max-md:min-h-8',
   md: 'px-3.5 py-1.5 text-xs',
   lg: 'px-4 py-2.5 text-sm',
 };
@@ -76,10 +77,10 @@ const ICON_VARIANTS: Record<IconButtonVariant, string> = {
   danger: 'border-transparent text-fg-muted hover:text-danger-400 hover:bg-raised',
 };
 
-// Below sm, every icon button is at least 32 px square, so it is easy to tap
+// Below md (where the tables become cards), every icon button is at least 32 px square, so it is easy to tap
 const ICON_SIZES: Record<ButtonSize, string> = {
-  sm: 'p-1 max-sm:min-w-8 max-sm:min-h-8',
-  md: 'p-1.5 max-sm:min-w-8 max-sm:min-h-8',
+  sm: 'p-1 max-md:min-w-8 max-md:min-h-8',
+  md: 'p-1.5 max-md:min-w-8 max-md:min-h-8',
   lg: 'p-2',
 };
 

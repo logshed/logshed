@@ -784,11 +784,14 @@ describe('SettingsPanel Component', () => {
         expect(screen.getByText('About LogShed')).toBeInTheDocument();
       });
 
-      // Verify responsive wrapping and button sizing
-      const tabContainer = tokensTab.closest('div.border-b');
-      expect(tabContainer).toHaveClass('flex-wrap');
+      // The bar is a named navigation landmark that wraps; only the shown tab is marked current
+      const tabBar = screen.getByRole('navigation', { name: 'Settings sections' });
+      expect(tabBar).toContainElement(tokensTab);
+      expect(tabBar).toHaveClass('flex-wrap');
       expect(tokensTab).toHaveClass('shrink-0');
-      expect(advancedTab).toHaveClass('shrink-0');
+      expect(appTab).toHaveAttribute('aria-current', 'page');
+      expect(tokensTab).not.toHaveAttribute('aria-current');
+      expect(advancedTab).not.toHaveAttribute('aria-current');
     });
 
     it('initializes on given initialSubTab prop', async () => {

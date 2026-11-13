@@ -9,6 +9,9 @@ import {
   Shield,
 } from 'lucide-react';
 import { Key } from '../common/icons.ts';
+import { Tabs } from '../common/Tabs.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
+import { Checkbox, Field, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 import { VersionInfo, SettingsSubTab } from '../../types.ts';
 import { fetchSettings, updateSettings, SettingsResponseData } from '../../api/settings.ts';
 import { fetchVersion } from '../../api/system.ts';
@@ -444,60 +447,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       )}
 
-      {/* Section Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-2">
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('app')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'app'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <Settings className="w-3.5 h-3.5 shrink-0" />
-          <span>Application</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('sources')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'sources'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <Server className="w-3.5 h-3.5 shrink-0" />
-          <span>Sources</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('tokens')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'tokens'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <Key className="w-3.5 h-3.5 shrink-0" />
-          <span>API & MCP Access</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('advanced')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'advanced'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <Shield className="w-3.5 h-3.5 shrink-0" />
-          <span>Advanced</span>
-        </button>
-      </div>
+      <Tabs
+        label="Settings sections"
+        active={activeSubTab}
+        onSelect={handleSubTabChange}
+        items={[
+          { id: 'app', label: 'Application', icon: <Settings /> },
+          { id: 'sources', label: 'Sources', icon: <Server /> },
+          { id: 'tokens', label: 'API & MCP Access', icon: <Key /> },
+          { id: 'advanced', label: 'Advanced', icon: <Shield /> },
+        ]}
+      />
 
       {/* Sub-tab 1: Application */}
       {activeSubTab === 'app' && (
@@ -505,45 +465,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {/* Settings Form: Logging & AI */}
           <form id="settings-form" onSubmit={handleSaveSettings} className="space-y-6">
         {/* Application Self-Logging Section */}
-        <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-                <FileText className="w-4 h-4 text-accent-500" />
-                <span>Internal Application Logging</span>
-              </h3>
-              <p className="text-xs text-fg-muted mt-0.5">
-                Configure minimum severity level for LogShed operational diagnostics captured into its database and stream.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-canvas border border-line-subtle text-[11px] font-mono text-fg-muted shrink-0 self-start sm:self-auto">
-              <span>Source: <code className="text-accent-400">logshed</code></span>
-            </div>
-          </div>
+        <Card>
+          <CardHeader
+            icon={<FileText />}
+            title="Internal Application Logging"
+            description="Configure minimum severity level for LogShed operational diagnostics captured into its database and stream."
+            actions={
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-canvas border border-line-subtle text-[11px] font-mono text-fg-muted">
+                <span>Source: <code className="text-accent-400">logshed</code></span>
+              </div>
+            }
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label id="internal-log-level-label" htmlFor="internal-log-level" className="block text-[11px] font-semibold text-fg-muted uppercase mb-1">
-                Internal Log Severity Threshold
-              </label>
-              <SelectDropdown
-                variant="panel"
-                fieldClassName="bg-canvas border-line rounded-sm px-3 py-2 font-mono text-fg"
-                id="internal-log-level"
-                labelledBy="internal-log-level-label"
-                label="Internal Log Severity Threshold"
-                options={INTERNAL_LOG_LEVEL_OPTIONS}
-                value={internalLogLevel}
-                onChange={setInternalLogLevel}
-              />
-            </div>
+            <Field label="Internal Log Severity Threshold" id="internal-log-level">
+              {({ id, labelId }) => (
+                <SelectDropdown
+                  variant="panel"
+                  fieldClassName={SELECT_FIELD_CLASS}
+                  id={id}
+                  labelledBy={labelId}
+                  label="Internal Log Severity Threshold"
+                  options={INTERNAL_LOG_LEVEL_OPTIONS}
+                  value={internalLogLevel}
+                  onChange={setInternalLogLevel}
+                />
+              )}
+            </Field>
             <div className="flex items-center text-xs text-fg-muted sm:pt-4">
               <span>
                 Logs at or above this level are captured into LogShed. Logs from alerting, notifications and AI analysis are stored but never trigger alert rules, so a rule cannot fire itself. Ingestion pipeline and live stream logs are not captured.
               </span>
             </div>
           </div>
-        </section>
+        </Card>
 
         {/* AI Provider Section */}
         <AiProviderCard ai={ai} onApiKeyEnter={handleApiKeyEnter} serverTimezone={serverTimezone} />
@@ -562,35 +517,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
 
         {/* Version Updates Section */}
-        <section className="bg-surface border border-line rounded-xl p-3.5 sm:p-5 shadow-md space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-                <ArrowUpCircle className="w-4 h-4 text-accent-500" />
-                <span>Version Updates</span>
-              </h3>
-              <p className="text-xs text-fg-muted mt-0.5">
-                Periodically check GitHub Container Registry for new stable releases and display notification badges
-              </p>
-            </div>
-          </div>
+        <Card>
+          <CardHeader
+            icon={<ArrowUpCircle />}
+            title="Version Updates"
+            description="Periodically check GitHub Container Registry for new stable releases and display notification badges"
+          />
 
           <div className="pt-1">
-            <label className="flex items-center gap-2.5 text-xs text-fg cursor-pointer select-none">
-              <input
-                type="checkbox"
-                aria-label="Check for new versions"
-                checked={checkForUpdates}
-                onChange={(e) => setCheckForUpdates(e.target.checked)}
-                className="rounded-sm bg-canvas border-line text-accent-600 focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
-              />
-              <span className="font-medium">Check for new versions</span>
-            </label>
-            <p className="text-xs text-fg-muted mt-1 pl-6.5">
+            <Checkbox
+              label="Check for new versions"
+              checked={checkForUpdates}
+              onChange={(e) => setCheckForUpdates(e.target.checked)}
+            />
+            <p className="text-xs text-fg-muted mt-1 pl-6">
               When disabled, LogShed will not query external registries or display update notifications.
             </p>
           </div>
-        </section>
+        </Card>
 
         {/* Sticky Action Bar: floats while scrolling form, locks into place above password section */}
         <StickySaveBar

@@ -45,7 +45,7 @@ export const SlideOver: React.FC<SlideOverProps> = ({
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className={`pointer-events-auto w-screen ${width} bg-surface border-l border-line shadow-2xl flex flex-col overscroll-contain outline-hidden duration-200 overflow-x-hidden`}
+            className={`pointer-events-auto w-screen ${width} bg-surface border-l border-line shadow-2xl flex flex-col overscroll-contain outline-hidden overflow-x-hidden`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
