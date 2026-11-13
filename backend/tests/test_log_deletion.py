@@ -446,6 +446,26 @@ async def test_delete_by_ids_with_filters_deletes_only_what_the_preview_counted(
     assert other[0] in remaining
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filters", [{"query": "Nginx"}, {"apps": ["nginx"], "pad_ids": 600}])
+async def test_delete_by_ids_with_a_search_or_many_ids_keeps_the_others(client: AsyncClient, auth_cookie: dict, filters):
+    """A full-text search narrows listed ids too, and more ids than one delete chunk go in one statement."""
+    client.cookies = auth_cookie
+    _seed_test_logs(get_db_path())
+    index_pending_logs(get_db_path())
+    every = (await client.get("/api/logs")).json()["logs"]
+    nginx = [log["id"] for log in every if log["app_name"] == "nginx"]
+    other = [log["id"] for log in every if log["app_name"] != "nginx"]
+    filters = dict(filters)
+    missing = list(range(10_000, 10_000 + filters.pop("pad_ids", 0)))
+    request = {"log_ids": [nginx[0], other[0], *missing], **filters}
+
+    assert (await client.post("/api/logs/delete/preview", json=request)).json()["matched_count"] == 1
+    assert (await client.post("/api/logs/delete", json=request)).json()["deleted_count"] == 1
+    remaining = {log["id"] for log in (await client.get("/api/logs")).json()["logs"]}
+    assert nginx[0] not in remaining and other[0] in remaining
+
+
 # ===================================================================
 # 4. Preview Endpoint
 # ===================================================================

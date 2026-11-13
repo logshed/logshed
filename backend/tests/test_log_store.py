@@ -27,7 +27,11 @@ STORE_MODULES = {
     "core/migrations.py",
     "core/backup.py",
 }
-_LOGS_SQL = re.compile(r"\b(FROM|INTO|UPDATE|JOIN|TABLE)\s+logs(_fts)?\b", re.IGNORECASE)
+# The table name may be quoted or carry a schema name ("logs", [logs], main.logs)
+_LOGS_SQL = re.compile(
+    r"\b(FROM|INTO|UPDATE|JOIN|TABLE|ON)\s+([\w]+\.)?[\"`\[]?logs(_fts)?\b[\"`\]]?",
+    re.IGNORECASE,
+)
 
 
 def _code_strings(tree: ast.AST) -> list[str]:
@@ -60,9 +64,15 @@ def test_only_the_store_runs_sql_on_logs():
 
 
 def test_the_guard_finds_sql_in_plain_and_f_strings():
-    tree = ast.parse('def f(w):\n    """Read FROM logs here."""\n    a = "SELECT 1 FROM logs"\n    b = f"UPDATE logs SET x = {w}"\n')
+    tree = ast.parse(
+        'def f(w):\n    """Read FROM logs here."""\n    a = "SELECT 1 FROM logs"\n    b = f"UPDATE logs SET x = {w}"\n'
+        '    c = "CREATE INDEX i ON logs(x)"\n    d = \'SELECT * FROM "logs_fts"\'\n    e = "DELETE FROM main.logs"\n'
+    )
     found = [t for t in _code_strings(tree) if _LOGS_SQL.search(t)]
-    assert found == ["SELECT 1 FROM logs", "UPDATE logs SET x = "]
+    assert sorted(found) == sorted([
+        "SELECT 1 FROM logs", "UPDATE logs SET x = ", "CREATE INDEX i ON logs(x)",
+        'SELECT * FROM "logs_fts"', "DELETE FROM main.logs",
+    ])
 
 
 @pytest.fixture
@@ -162,6 +172,45 @@ def test_full_text_search_and_count(db):
         assert (total, [r["message"] for r in rows]) == (1, ["disk failure"])
         assert log_store.count(conn, LogFilter(), group_by="severity") == (2, "severity", {"error": 1, "info": 1}, False)
         assert log_store.count_matching(conn, LogFilter(query="good")) == 1
+
+
+def _window_spy(monkeypatch) -> list[int]:
+    """Record the lowest rowid each full-text attempt of log_store.search matched from."""
+    attempts: list[int] = []
+    real_run = log_store.run_newest_first
+
+    def _counting(conn, run_params, run, oldest_needed, matches, needed):
+        def _run(p):
+            attempts.append(p["fts_min_rowid"])
+            return run(p)
+        return real_run(conn, run_params, _run, oldest_needed, matches, needed)
+
+    monkeypatch.setattr(log_store, "run_newest_first", _counting)
+    return attempts
+
+
+@pytest.mark.parametrize("page", [{"fetch": 3, "offset": 2}, {"fetch": 4, "before": True}])
+def test_search_answered_from_the_newest_rows_matches_a_search_of_every_row(db, monkeypatch, page):
+    """With a page and a capped count that fit in the newest rows, the first window is accepted."""
+    store_logs(db, *[_row(_ts(i % 60, day=1 + i // 60), message=f"timeout {i}") for i in range(500)])
+    index_pending_logs(db)
+    log_filter = LogFilter(query="timeout")
+    with open_db(db, sqlite3.Row) as conn:
+        _, top = log_store.search(conn, log_filter, fetch=10, count_limit=100)
+        kwargs = dict(page)
+        if kwargs.pop("before", False):
+            kwargs["before"] = (top[1]["timestamp"], top[1]["id"])
+
+        monkeypatch.setattr("app.services.log_query.NEWEST_FIRST_WINDOWS", ())
+        everything = log_store.search(conn, log_filter, count_limit=5, **kwargs)
+        monkeypatch.setattr("app.services.log_query.NEWEST_FIRST_WINDOWS", (50, 200))
+        attempts = _window_spy(monkeypatch)
+        windowed = log_store.search(conn, log_filter, count_limit=5, **kwargs)
+
+    assert [r["id"] for r in windowed[1]] == [r["id"] for r in everything[1]]
+    assert windowed[0] == everything[0] == 5
+    # Answered from the newest 50 rows, with no wider attempt
+    assert attempts == [top[0]["id"] - 49]
 
 
 def test_get_many_is_oldest_first_and_skips_missing_ids(db):

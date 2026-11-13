@@ -22,7 +22,7 @@ from app.core.security import (
 )
 from app.core.sse import sse_manager
 from app.main import create_app
-from app.services import log_query
+from app.services import log_query, log_store
 from app.services.alert_evaluator import init_alert_evaluator
 from app.services.drop_filter import init_drop_filter
 from app.services.fts_indexer import index_pending_logs
@@ -198,7 +198,7 @@ class TestTheThreePathsAgree:
         full_v1 = (await client.get("/api/v1/logs", params=params, headers=token_headers)).json()
 
         attempts: list[int] = []
-        real_run = log_query.run_newest_first
+        real_run = log_store.run_newest_first
 
         def _counting(conn, run_params, run, oldest_needed, matches, needed):
             def _run(p):
@@ -207,7 +207,7 @@ class TestTheThreePathsAgree:
             return real_run(conn, run_params, _run, oldest_needed, matches, needed)
 
         monkeypatch.setattr(log_query, "NEWEST_FIRST_WINDOWS", (50, 200))
-        monkeypatch.setattr(log_query, "run_newest_first", _counting)
+        monkeypatch.setattr(log_store, "run_newest_first", _counting)
         windowed_ui = (await client.get("/api/logs", params=params)).json()
         windowed_v1 = (await client.get("/api/v1/logs", params=params, headers=token_headers)).json()
 
@@ -215,7 +215,7 @@ class TestTheThreePathsAgree:
         assert windowed_v1 == full_v1
         # Both answered from the newest 50 rows: the page and the capped total fit in them only
         # when the cap does, so the web UI (cap 1,001) widens to every row and REST does too
-        assert all(a in (351, 201, 0) for a in attempts)
+        assert attempts and all(a in (351, 201, 0) for a in attempts)
         assert [log["id"] for log in windowed_ui["logs"]] == list(range(400, 390, -1))
 
     @pytest.mark.asyncio
