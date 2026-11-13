@@ -1,5 +1,6 @@
 import React from 'react';
 import { Plus, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { buttonClass } from '../common/Button.tsx';
 
 export interface PresetCardProps {
   name: string;
@@ -63,7 +64,7 @@ export const PresetCard: React.FC<PresetCardProps> = ({
         type="button"
         onClick={onInstall}
         disabled={isInstalling}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-accent-400 bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/30 transition cursor-pointer disabled:opacity-50 shrink-0"
+        className={`${buttonClass('soft', 'md')} shrink-0`}
       >
         {isInstalling ? (
           <>

@@ -7,6 +7,7 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle2,
+  X,
 } from 'lucide-react';
 import {
   AlertPreset,
@@ -56,6 +57,9 @@ import { useMaintenance } from './useMaintenance.ts';
 import { useAlertHistory } from './useAlertHistory.ts';
 
 import { type AlertViewTab, pathToAlertSubTab, alertSubTabToPath } from './alertRoutes.ts';
+import { Badge } from '../common/Badge.tsx';
+import { IconButton } from '../common/Button.tsx';
+import { Tabs } from '../common/Tabs.tsx';
 export { type AlertViewTab, pathToAlertSubTab, alertSubTabToPath, parseIncidentIdFromUrl } from './alertRoutes.ts';
 
 const SplitCountBadge: React.FC<{ active: number; total: number; title?: string }> = ({ active, total, title }) => (
@@ -413,93 +417,64 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
             {feedbackMsg.isError ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
             <span>{feedbackMsg.text}</span>
           </div>
-          <button
-            onClick={() => setFeedbackMsg(null)}
-            className="text-fg-muted hover:text-fg cursor-pointer ml-4"
-          >
-            &times;
-          </button>
+          <IconButton label="Dismiss" size="sm" onClick={() => setFeedbackMsg(null)} className="ml-4">
+            <X className="w-3.5 h-3.5" />
+          </IconButton>
         </div>
       )}
 
-      {/* Section Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-2">
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('rules')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'rules'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <Bell className="w-3.5 h-3.5 shrink-0" />
-          <span>Alert Rules</span>
-          <SplitCountBadge
-            active={enabledRulesCount}
-            total={rules.length}
-            title={`${enabledRulesCount} of ${rules.length} rules active`}
-          />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('drop-rules')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'drop-rules'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <FilterX className="w-3.5 h-3.5 shrink-0" />
-          <span>Drop Rules</span>
-          <SplitCountBadge
-            active={enabledDropRulesCount}
-            total={dropRules.length}
-            title={`${enabledDropRulesCount} of ${dropRules.length} drop rules active`}
-          />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('history')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'history'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <History className="w-3.5 h-3.5 shrink-0" />
-          <span>History</span>
-          <SimpleCountBadge
-            count={historyTotal}
-            title={`${historyTotal} total history records`}
-          />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSubTabChange('maintenance')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 border ${
-            activeSubTab === 'maintenance'
-              ? 'bg-raised text-accent-400 border-line-strong shadow-xs'
-              : 'text-fg-muted hover:text-fg hover:bg-surface border-line hover:border-line-strong'
-          }`}
-        >
-          <Clock className="w-3.5 h-3.5 shrink-0" />
-          <span>Maintenance</span>
-          {isMaintenanceActiveNow ? (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-semibold bg-warning-500/20 text-warning-300 border border-warning-500/40 animate-pulse">
-              Active
-            </span>
-          ) : (
-            <SimpleCountBadge
-              count={maintenance.schedules?.length || 0}
-              title={`${maintenance.schedules?.length || 0} recurring schedules`}
-            />
-          )}
-        </button>
-      </div>
+      <Tabs
+        label="Rules & History sections"
+        active={activeSubTab}
+        onSelect={handleSubTabChange}
+        items={[
+          {
+            id: 'rules',
+            label: 'Alert Rules',
+            icon: <Bell />,
+            extra: (
+              <SplitCountBadge
+                active={enabledRulesCount}
+                total={rules.length}
+                title={`${enabledRulesCount} of ${rules.length} rules active`}
+              />
+            ),
+          },
+          {
+            id: 'drop-rules',
+            label: 'Drop Rules',
+            icon: <FilterX />,
+            extra: (
+              <SplitCountBadge
+                active={enabledDropRulesCount}
+                total={dropRules.length}
+                title={`${enabledDropRulesCount} of ${dropRules.length} drop rules active`}
+              />
+            ),
+          },
+          {
+            id: 'history',
+            label: 'History',
+            icon: <History />,
+            extra: <SimpleCountBadge count={historyTotal} title={`${historyTotal} total history records`} />,
+          },
+          {
+            id: 'maintenance',
+            label: 'Maintenance',
+            icon: <Clock />,
+            extra: isMaintenanceActiveNow ? (
+              <Badge tone="warning" className="font-semibold animate-pulse">
+                Active
+              </Badge>
+            ) : (
+              <SimpleCountBadge
+                count={maintenance.schedules?.length || 0}
+                title={`${maintenance.schedules?.length || 0} recurring schedules`}
+              />
+            ),
+          },
+        ]}
+      />
 
       {/* TAB 1: Alert Rules */}
       {activeSubTab === 'rules' && (

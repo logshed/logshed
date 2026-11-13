@@ -4,6 +4,8 @@ import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { DAYS_OF_WEEK } from '../../utils/maintenanceSchedule.ts';
 import type { ScheduleFields } from './useMaintenance.ts';
+import { buttonClass } from '../common/Button.tsx';
+import { CHECKBOX_CLASS, controlClass, LABEL_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 
 export interface ScheduleEditorModalProps {
   /** The schedule to edit, or null to add one. */
@@ -52,7 +54,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
       <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
         {/* Name */}
         <div>
-          <label className="block text-fg-soft font-medium mb-1">Schedule Name</label>
+          <label className={LABEL_CLASS}>Schedule Name</label>
           <input
             type="text"
             required
@@ -60,13 +62,13 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
             value={scheduleFormName}
             onChange={(e) => setScheduleFormName(e.target.value)}
             placeholder="e.g. Weekly Server Maintenance"
-            className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
+            className={controlClass()}
           />
         </div>
 
         {/* Recurrence Selection */}
         <div>
-          <label className="block text-fg-soft font-medium mb-1">Recurrence</label>
+          <label className={LABEL_CLASS}>Recurrence</label>
           <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
@@ -107,10 +109,10 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         {/* Weekly Day of Week Picker */}
         {scheduleFormRecurrence === 'weekly' && (
           <div>
-            <label id="schedule-day-of-week-label" htmlFor="schedule-day-of-week" className="block text-fg-soft font-medium mb-1">Day of the Week</label>
+            <label id="schedule-day-of-week-label" htmlFor="schedule-day-of-week" className={LABEL_CLASS}>Day of the Week</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-canvas border-line rounded-lg px-3 py-2 text-fg"
+              fieldClassName={SELECT_FIELD_CLASS}
               id="schedule-day-of-week"
               labelledBy="schedule-day-of-week-label"
               label="Day of the Week"
@@ -124,7 +126,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         {/* Monthly Day of Month Picker */}
         {scheduleFormRecurrence === 'monthly' && (
           <div>
-            <label className="block text-fg-soft font-medium mb-1">Day of the Month (1 - 31)</label>
+            <label className={LABEL_CLASS}>Day of the Month (1 - 31)</label>
             <input
               type="number"
               min="1"
@@ -132,7 +134,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Day of the Month"
               value={scheduleFormDayOfMonth}
               onChange={(e) => setScheduleFormDayOfMonth(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
-              className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
+              className={controlClass()}
             />
           </div>
         )}
@@ -140,18 +142,18 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         {/* Start Time & Duration */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-fg-soft font-medium mb-1">Start Time (24h)</label>
+            <label className={LABEL_CLASS}>Start Time (24h)</label>
             <input
               type="time"
               required
               aria-label="Start Time"
               value={scheduleFormStartTime}
               onChange={(e) => setScheduleFormStartTime(e.target.value)}
-              className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
+              className={controlClass()}
             />
           </div>
           <div>
-            <label className="block text-fg-soft font-medium mb-1">Duration (minutes)</label>
+            <label className={LABEL_CLASS}>Duration (minutes)</label>
             <input
               type="number"
               required
@@ -160,7 +162,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
               aria-label="Duration in minutes"
               value={scheduleFormDuration}
               onChange={(e) => setScheduleFormDuration(Number(e.target.value))}
-              className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-fg focus:border-accent-500 focus:outline-hidden"
+              className={controlClass()}
             />
           </div>
         </div>
@@ -191,7 +193,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
             id="schedule-enabled-check"
             checked={scheduleFormEnabled}
             onChange={(e) => setScheduleFormEnabled(e.target.checked)}
-            className="rounded-sm border-line bg-canvas text-accent-500 focus:ring-accent-500 focus:ring-offset-surface"
+            className={CHECKBOX_CLASS}
           />
           <label htmlFor="schedule-enabled-check" className="text-fg-soft select-none cursor-pointer">
             Enable this maintenance schedule
@@ -209,7 +211,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
           </button>
           <button
             type="submit"
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
+            className={buttonClass('primary', 'md')}
           >
             {scheduleToEdit ? 'Save Changes' : 'Create Schedule'}
           </button>

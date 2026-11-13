@@ -14,6 +14,9 @@ import { CopyButton } from '../../common/CopyButton.tsx';
 import { formatScheduleRecurrence } from '../../../utils/maintenanceSchedule.ts';
 import { ScheduleEditorModal } from '../ScheduleEditorModal.tsx';
 import type { ScheduleFields } from '../useMaintenance.ts';
+import { buttonClass } from '../../common/Button.tsx';
+import { controlClass } from '../../common/Field.tsx';
+import { Card } from '../../common/Card.tsx';
 
 export { formatScheduleRecurrence } from '../../../utils/maintenanceSchedule.ts';
 
@@ -78,7 +81,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Card 1: On-Demand Maintenance */}
-      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+      <Card padding="flush">
         <div className="px-5 py-4 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
@@ -118,7 +121,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <button
                 type="button"
                 onClick={onClearMaintenance}
-                className="px-4 py-2 text-xs font-medium bg-raised hover:bg-raised-strong text-warning-300 hover:text-fg-max border border-line-strong rounded-lg transition cursor-pointer self-start sm:self-auto"
+                className={`${buttonClass('secondary', 'md')} self-start sm:self-auto`}
               >
                 Clear All
               </button>
@@ -139,7 +142,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                     key={hours}
                     type="button"
                     onClick={() => onSetPreset(hours)}
-                    className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-hover text-fg hover:text-fg-max border border-line hover:border-line-strong rounded-lg transition cursor-pointer"
+                    className={buttonClass('secondary', 'md')}
                   >
                     {hours} {hours === 1 ? 'Hour' : 'Hours'}
                   </button>
@@ -159,13 +162,13 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   value={customUntil}
                   onChange={(e) => setCustomUntil(e.target.value)}
                   min={toLocalDatetimeInputString(new Date().toISOString(), serverTimezone)}
-                  className="bg-canvas border border-line rounded-lg text-xs text-fg px-3 py-1.5 focus:border-accent-500 focus:outline-hidden"
+                  className={controlClass()}
                 />
                 <button
                   type="button"
                   onClick={onApplyCustomWindow}
                   disabled={!customUntil}
-                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap self-start sm:self-auto"
+                  className={`${buttonClass('primary', 'md')} self-start sm:self-auto`}
                 >
                   Set Window
                 </button>
@@ -219,7 +222,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         <button
                           type="button"
                           onClick={() => onDisableSession(sess.session_id)}
-                          className="px-2.5 py-1 text-xs font-medium bg-raised hover:bg-raised-hover text-danger-400 hover:text-danger-300 border border-line hover:border-line-strong rounded-sm transition cursor-pointer"
+                          className={buttonClass('danger-soft', 'sm')}
                         >
                           Stop Session
                         </button>
@@ -231,10 +234,10 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
             </div>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Card 2: Recurring Scheduled Windows */}
-      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+      <Card padding="flush">
         <div className="px-5 py-4 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
@@ -248,7 +251,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           <button
             type="button"
             onClick={onOpenAddScheduleModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
+            className={`${buttonClass('primary', 'md')} self-start sm:self-auto shrink-0`}
           >
             <Plus className="w-4 h-4" />
             <span>Add Schedule</span>
@@ -266,7 +269,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <button
                 type="button"
                 onClick={onOpenAddScheduleModal}
-                className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-raised hover:bg-raised-hover text-fg border border-line rounded-lg transition cursor-pointer"
+                className={`${buttonClass('secondary', 'md')} mt-4`}
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create First Schedule</span>
@@ -349,10 +352,10 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
             </div>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Card 3: External Automation & API Snippets */}
-      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+      <Card padding="flush">
         <div className="px-5 py-4 border-b border-line">
           <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
             <Terminal className="w-4 h-4 text-accent-500" />
@@ -406,7 +409,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
             </pre>
           </div>
         </div>
-      </div>
+      </Card>
 
       {editor && (
         <ScheduleEditorModal

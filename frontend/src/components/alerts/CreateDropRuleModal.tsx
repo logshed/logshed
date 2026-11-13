@@ -10,6 +10,8 @@ import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
+import { buttonClass } from '../common/Button.tsx';
+import { CHECKBOX_CLASS, controlClass, LABEL_CLASS, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 
 const SEVERITY_RANGE_OPTIONS: SelectOption[] = [
   { value: '', label: 'Any severity' },
@@ -318,7 +320,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       <form onSubmit={handleSubmit} className="space-y-4 text-xs font-sans">
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-fg-soft font-medium">
+            <label className={LABEL_TEXT_CLASS}>
               Rule Name <span className="text-danger-400">*</span>
             </label>
             <a
@@ -340,12 +342,12 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             maxLength={NAME_MAX_LENGTH}
             required
             autoFocus
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-1.5 text-fg focus:outline-hidden focus:border-accent-500"
+            className={controlClass()}
           />
         </div>
 
         <div>
-          <label className="block text-fg-soft font-medium mb-1">
+          <label className={LABEL_CLASS}>
             Message Pattern <span className="text-fg-muted font-normal text-[11px]">(Optional if Host or App is selected)</span>
           </label>
           <input
@@ -354,7 +356,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             onChange={(e) => setMessagePattern(e.target.value)}
             placeholder="e.g. DHCPACK, query\s+from\b, probe, or * to match all messages"
             maxLength={MESSAGE_PATTERN_MAX_LENGTH}
-            className="w-full bg-canvas border border-line rounded-sm px-3 py-1.5 text-fg font-mono focus:outline-hidden focus:border-accent-500"
+            className={controlClass({ mono: true })}
           />
           <span className="text-[11px] text-fg-muted mt-1 block">
             Case-insensitive match string. Use * or leave empty to drop all messages matching the selected host or app.
@@ -367,7 +369,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             id="modal-is-regex-checkbox"
             checked={isRegex}
             onChange={(e) => setIsRegex(e.target.checked)}
-            className="rounded-sm bg-canvas border-line text-accent-500 focus:ring-accent-500/20"
+            className={CHECKBOX_CLASS}
           />
           <label htmlFor="modal-is-regex-checkbox" className="text-fg-soft cursor-pointer">
             Interpret message pattern as Regular Expression
@@ -377,7 +379,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Host / IP Filter */}
           <div>
-            <span id="modal-host-label" className="block text-fg-soft font-medium mb-1">
+            <span id="modal-host-label" className={LABEL_CLASS}>
               Hosts or IPs (Optional)
             </span>
             <MultiSelectDropdown
@@ -416,7 +418,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
 
           {/* Application or Container Filter */}
           <div>
-            <span id="modal-app-label" className="block text-fg-soft font-medium mb-1">
+            <span id="modal-app-label" className={LABEL_CLASS}>
               Apps or Containers (Optional)
             </span>
             <MultiSelectDropdown
@@ -447,12 +449,12 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
         </div>
 
         <div>
-          <label id="modal-severity-select-label" htmlFor="modal-severity-select" className="block text-fg-soft font-medium mb-1">
+          <label id="modal-severity-select-label" htmlFor="modal-severity-select" className={LABEL_CLASS}>
             Severity Range (Optional)
           </label>
           <SelectDropdown
             variant="panel"
-            fieldClassName="bg-canvas border-line rounded-sm px-3 py-1.5 font-mono text-fg"
+            fieldClassName={`${SELECT_FIELD_CLASS} font-mono`}
             id="modal-severity-select"
             labelledBy="modal-severity-select-label"
             label="Severity Range (Optional)"
@@ -471,7 +473,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             id="modal-is-enabled-checkbox"
             checked={isEnabled}
             onChange={(e) => setIsEnabled(e.target.checked)}
-            className="rounded-sm bg-canvas border-line text-accent-500 focus:ring-accent-500/20"
+            className={CHECKBOX_CLASS}
           />
           <label htmlFor="modal-is-enabled-checkbox" className="text-fg-soft cursor-pointer">
             {ruleToEdit ? 'Rule active' : 'Rule enabled immediately upon creation'}
@@ -486,7 +488,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               type="button"
               onClick={handleTestPattern}
               disabled={isTesting || !hasFilterCriteria || !sampleMessage.trim()}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-sm bg-raised hover:bg-raised-strong text-fg-soft border border-line transition disabled:opacity-50 cursor-pointer text-[11px]"
+              className={buttonClass('secondary', 'sm')}
             >
               <Play className="w-3 h-3 text-accent-400" />
               <span>{isTesting ? 'Testing...' : 'Dry-Run Test'}</span>
@@ -500,7 +502,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               value={sampleMessage}
               onChange={(e) => setSampleMessage(e.target.value)}
               placeholder="Paste a representative log line here..."
-              className="w-full bg-surface border border-line-subtle rounded-sm px-2.5 py-1.5 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
+              className={controlClass({ mono: true })}
             />
           </div>
 
@@ -512,7 +514,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                 value={sampleSource}
                 onChange={(e) => setSampleSource(e.target.value)}
                 placeholder="e.g. 192.168.1.50"
-                className="w-full bg-surface border border-line-subtle rounded-sm px-2 py-1 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
+                className={controlClass({ mono: true })}
               />
             </div>
             <div>
@@ -522,7 +524,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
                 value={sampleApp}
                 onChange={(e) => setSampleApp(e.target.value)}
                 placeholder="e.g. dnsmasq"
-                className="w-full bg-surface border border-line-subtle rounded-sm px-2 py-1 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
+                className={controlClass({ mono: true })}
               />
             </div>
             <div>
@@ -599,14 +601,14 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             <button
               type="button"
               onClick={handleCloseAttempt}
-              className="px-3 py-1.5 rounded-sm text-fg-muted hover:text-fg hover:bg-raised transition cursor-pointer"
+              className={buttonClass('ghost', 'md')}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting || !hasFilterCriteria || sourceListTooLong || appListTooLong}
-              className="px-3 py-1.5 rounded-sm bg-accent-700 hover:bg-accent-600 text-on-fill font-medium transition disabled:opacity-50 cursor-pointer"
+              className={buttonClass('primary', 'md')}
             >
               {isSubmitting
                 ? ruleToEdit

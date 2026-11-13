@@ -33,6 +33,8 @@ import { splitPatternList } from '../../../utils/patternList.ts';
 import { DropPresetsModal } from '../DropPresetsModal.tsx';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
 import { useFlash } from '../../../utils/hooks.ts';
+import { buttonClass } from '../../common/Button.tsx';
+import { Card } from '../../common/Card.tsx';
 
 export interface DropRulesTabProps {
   onRulesChange?: (rules: DropRule[]) => void;
@@ -150,7 +152,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
   const totalDropped = rules.reduce((acc, r) => acc + (r.dropped_count || 0), 0);
 
   return (
-    <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+    <Card padding="flush">
       {/* Header */}
       <div className="px-5 py-4 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -183,7 +185,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
           <button
             type="button"
             onClick={() => setIsPresetsModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer whitespace-nowrap"
+            className={buttonClass('secondary', 'md')}
             title="Browse and install pre-configured drop rule presets"
           >
             <Zap className="w-3.5 h-3.5 text-accent-500" />
@@ -193,7 +195,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
           <button
             type="button"
             onClick={handleExportAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer whitespace-nowrap"
+            className={buttonClass('secondary', 'md')}
             title="Export all drop rules"
           >
             <Download className="w-3.5 h-3.5" />
@@ -210,7 +212,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer whitespace-nowrap"
+            className={buttonClass('secondary', 'md')}
             title="Import drop rules from JSON file"
           >
             <Upload className="w-3.5 h-3.5" />
@@ -223,7 +225,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
               setRuleToEdit(null);
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition shadow-xs cursor-pointer whitespace-nowrap"
+            className={buttonClass('primary', 'md')}
             title="Create a new ingestion drop rule"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -260,7 +262,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
             <button
               type="button"
               onClick={() => setIsPresetsModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer"
+              className={buttonClass('secondary', 'md')}
             >
               <Zap className="w-3.5 h-3.5 text-accent-500" />
               <span>Browse Presets</span>
@@ -271,7 +273,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
                 setRuleToEdit(null);
                 setIsModalOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
+              className={buttonClass('primary', 'md')}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Create Drop Rule</span>
@@ -485,7 +487,7 @@ export const DropRulesTab: React.FC<DropRulesTabProps> = ({ onRulesChange }) => 
         onInstallPreset={handleInstallPreset}
         installingPresetId={installingPresetId}
       />
-    </div>
+    </Card>
   );
 };
 

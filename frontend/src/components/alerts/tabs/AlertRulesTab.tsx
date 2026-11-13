@@ -18,6 +18,8 @@ import { formatLocalTimestamp, formatMaintenanceTime } from '../../../utils/form
 import { useServerTimezone } from '../../../utils/hooks.ts';
 import { useReorderableList } from '../../../utils/useReorderableList.ts';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
+import { buttonClass } from '../../common/Button.tsx';
+import { Card } from '../../common/Card.tsx';
 
 export interface AlertRulesTabProps {
   rules: AlertRule[];
@@ -104,7 +106,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <button
                 type="button"
                 onClick={onClearMaintenance}
-                className="px-3 py-1.5 text-xs font-medium bg-raised hover:bg-raised-strong text-warning-300 hover:text-fg-max border border-line-strong rounded-lg transition cursor-pointer"
+                className={buttonClass('secondary', 'md')}
               >
                 Clear
               </button>
@@ -120,7 +122,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
         </div>
       )}
 
-      <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+      <Card padding="flush">
         <div className="px-5 py-4 border-b border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
@@ -135,7 +137,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             <button
               type="button"
               onClick={onOpenPresetsModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer whitespace-nowrap"
+              className={buttonClass('secondary', 'md')}
               title="Browse and install pre-configured alert presets"
             >
               <Zap className="w-3.5 h-3.5 text-accent-500" />
@@ -145,7 +147,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             <button
               type="button"
               onClick={onExportAll}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer whitespace-nowrap"
+              className={buttonClass('secondary', 'md')}
               title="Export all alert rules"
             >
               <Download className="w-3.5 h-3.5" />
@@ -162,7 +164,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer whitespace-nowrap"
+              className={buttonClass('secondary', 'md')}
               title="Import alert rules from JSON file"
             >
               <Upload className="w-3.5 h-3.5" />
@@ -172,7 +174,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             <button
               type="button"
               onClick={onOpenCreateModal}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition shadow-xs cursor-pointer whitespace-nowrap"
+              className={buttonClass('primary', 'md')}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Alert Rule</span>
@@ -193,7 +195,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <button
                 type="button"
                 onClick={onOpenPresetsModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-fg-soft bg-raised hover:bg-raised-hover hover:text-fg-max border border-line transition cursor-pointer"
+                className={buttonClass('secondary', 'md')}
               >
                 <Zap className="w-3.5 h-3.5 text-accent-500" />
                 <span>Browse Presets</span>
@@ -201,7 +203,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
               <button
                 type="button"
                 onClick={onOpenCreateModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer"
+                className={buttonClass('primary', 'md')}
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create Alert Rule</span>
@@ -347,7 +349,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
             })}
           </div>
         )}
-      </div>
+      </Card>
 
       {rules.some((r) => r.ai_enrichment) && (
         <div className="p-3 bg-warning-950/30 border border-warning-800/40 rounded-xl flex items-start gap-2.5 text-warning-200/90 text-xs leading-relaxed">
@@ -372,7 +374,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
           <button
             type="button"
             onClick={onNavigateToSettings}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised-hover border border-line rounded-lg text-xs font-medium text-fg hover:text-fg-max transition cursor-pointer shrink-0 self-start sm:self-auto"
+            className={`${buttonClass('secondary', 'md')} shrink-0 self-start sm:self-auto`}
           >
             <span>Configure in Settings</span>
             <ExternalLink className="w-3.5 h-3.5 text-accent-400" />

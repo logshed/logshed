@@ -21,6 +21,8 @@ import {
   maintenanceTypeLabel,
   MAINTENANCE_RULE_NAME,
 } from '../../../utils/maintenanceHistory.ts';
+import { buttonClass } from '../../common/Button.tsx';
+import { Card } from '../../common/Card.tsx';
 
 export interface AlertHistoryTabProps {
   historyItems: AlertHistoryItem[];
@@ -53,7 +55,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
   const endItem = Math.min(offset + historyItems.length, historyTotal);
 
   return (
-    <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-xs">
+    <Card padding="flush">
       <div className="px-5 py-4 border-b border-line flex items-center justify-between">
         <div>
           <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
@@ -68,7 +70,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
           <button
             type="button"
             onClick={onClearAllHistory}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-danger-400 hover:text-danger-300 bg-danger-950/30 hover:bg-danger-900/30 rounded-sm border border-danger-800/40 transition cursor-pointer"
+            className={buttonClass('danger-soft', 'md')}
           >
             <Trash2 className="w-3 h-3" />
             <span>Clear All</span>
@@ -173,7 +175,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                     <button
                       type="button"
                       onClick={() => onSelectHistoryItem(item)}
-                      className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded-sm transition cursor-pointer"
+                      className={buttonClass('soft', 'sm')}
                     >
                       View
                     </button>
@@ -269,7 +271,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
                   <button
                     type="button"
                     onClick={() => onSelectHistoryItem(item)}
-                    className="px-2 py-0.5 text-[11px] font-mono text-accent-400 bg-accent-950/50 hover:bg-accent-900/60 border border-accent-800/80 rounded-sm transition cursor-pointer"
+                    className={buttonClass('soft', 'sm')}
                     title="View details"
                   >
                     View
@@ -323,7 +325,7 @@ export const AlertHistoryTab: React.FC<AlertHistoryTabProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 };
 

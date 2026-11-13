@@ -5,6 +5,8 @@ import { testAlertRule } from '../../api/alerts.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
+import { buttonClass } from '../common/Button.tsx';
+import { controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 
 export interface AlertTestModalProps {
   isOpen: boolean;
@@ -116,7 +118,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         </p>
 
         <div className="space-y-1">
-          <label className="block text-fg-soft font-medium">Active Pattern</label>
+          <label className={LABEL_TEXT_CLASS}>Active Pattern</label>
           <div className="p-2 bg-raised rounded-sm font-mono text-fg-soft border border-line">
             {rule?.match_pattern || '(No pattern filter)'}
           </div>
@@ -124,7 +126,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label htmlFor="test-sample-app" className="block text-fg-soft font-medium">Sample App</label>
+            <label htmlFor="test-sample-app" className={LABEL_TEXT_CLASS}>Sample App</label>
             {/* Before the input: space-y-* spaces every child but the last, and a datalist is never shown */}
             {availableApps.length > 0 && (
               <datalist id="test-sample-apps-list">
@@ -139,14 +141,14 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
               list="test-sample-apps-list"
               value={testSampleApp}
               onChange={(e) => setTestSampleApp(e.target.value)}
-              className="w-full bg-raised border border-line rounded-sm px-2.5 py-1.5 text-fg"
+              className={controlClass()}
             />
           </div>
           <div className="space-y-1">
-            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className="block text-fg-soft font-medium">Sample Severity</label>
+            <label id="test-sample-severity-label" htmlFor="test-sample-severity" className={LABEL_TEXT_CLASS}>Sample Severity</label>
             <SelectDropdown
               variant="panel"
-              fieldClassName="bg-raised border-line rounded-sm px-2.5 py-1.5 text-fg"
+              fieldClassName={SELECT_FIELD_CLASS}
               id="test-sample-severity"
               labelledBy="test-sample-severity-label"
               label="Sample Severity"
@@ -158,13 +160,13 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         </div>
 
         <div className="space-y-1">
-          <label htmlFor="test-sample-message" className="block text-fg-soft font-medium">Sample Message</label>
+          <label htmlFor="test-sample-message" className={LABEL_TEXT_CLASS}>Sample Message</label>
           <textarea
             id="test-sample-message"
             rows={3}
             value={testSampleMessage}
             onChange={(e) => setTestSampleMessage(e.target.value)}
-            className="w-full bg-raised border border-line rounded-sm p-2 text-fg font-mono text-xs focus:outline-hidden focus:border-accent-500"
+            className={controlClass({ mono: true })}
           />
           <p className="text-[11px] text-fg-muted">
             Enter a sample log line payload to evaluate pattern matching and IP extraction.
@@ -213,7 +215,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             type="button"
             onClick={handleRunTest}
             disabled={isTesting}
-            className="px-4 py-1.5 rounded-lg text-xs font-medium text-on-fill bg-accent-700 hover:bg-accent-600 transition cursor-pointer flex items-center gap-1.5"
+            className={buttonClass('primary', 'md')}
           >
             {isTesting ? (
               <RefreshCw className="w-3 h-3 animate-spin" />
