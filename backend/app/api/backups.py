@@ -128,7 +128,7 @@ def _schema_version(conn: sqlite3.Connection) -> int:
 @router.post("", response_model=BackupJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_backup_now(user: dict = Depends(get_current_user)) -> BackupJobResponse:
     """
-    Start a backup (VACUUM INTO, so logging carries on). 400 with the figures when the disk has too
+    Start a backup of the database and every day file (VACUUM INTO and read snapshots, so logging carries on). 400 with the figures when the disk has too
     little room for the copy and the archive; 409 while a prune, Compact or backup runs.
     """
     global _task
@@ -136,7 +136,7 @@ async def create_backup_now(user: dict = Depends(get_current_user)) -> BackupJob
     folder = db_backup.backups_dir(db_path)
 
     def _check_space() -> None:
-        db_backup.check_backup_space(folder, db_backup.backup_space_needed(db_path, db_backup.METHOD_VACUUM_INTO))
+        db_backup.check_backup_space(folder, db_backup.backup_space_needed(db_path, db_backup.METHOD_VACUUM_INTO, day_files=True))
 
     try:
         await asyncio.to_thread(_check_space)
@@ -157,6 +157,7 @@ async def create_backup_now(user: dict = Depends(get_current_user)) -> BackupJob
                 method=db_backup.METHOD_VACUUM_INTO,
                 progress_cb=_progress,
                 cancel=_cancel,
+                day_files=True,
             )
         except db_backup.BackupCancelled:
             _update_job(state="failed", error="The backup stopped because LogShed is shutting down.", finished_at=_now_iso())

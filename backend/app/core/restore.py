@@ -1,10 +1,13 @@
 """
 Restoring a backup archive (core/backup.py) in place of the database, for a stopped LogShed.
 
-One pass over the archive: the database file is streamed out to a temporary file beside the
-database, then the manifest (written last) is read and checked against it. Only when the copy
-passes `PRAGMA integrity_check` is the current database moved aside (never deleted) and the copy
-renamed into its place, so a failure at any point leaves the current database as it was.
+One pass over the archive: the database file and any day files of logs are streamed out to
+temporary files beside the database, then the manifest (written last) is read and checked against
+them. Only when every copy passes `PRAGMA integrity_check` are the current database and every day
+file beside it moved into a `before-restore-<time>` folder (never deleted) and the copies renamed
+into their places, so a failure at any point leaves the data folder as it was. After a restore the
+folder matches the archive: a day file the archive does not hold would carry log ids that the
+restored database hands out again.
 """
 
 import contextlib
@@ -21,14 +24,15 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from app.core import backup as db_backup
-from app.core import instance_lock, lifecycle
+from app.core import day_files, instance_lock, lifecycle
 from app.core.session_epoch import bump_session_epoch, read_session_epoch
 
 logger = logging.getLogger(__name__)
 
 # Room a restore leaves on the disk beyond the database it writes (SQLite's own files, the log).
 RESTORE_MARGIN_BYTES = 256 * 1024**2
-ASIDE_SUFFIX = ".before-restore-"
+# The folder beside the database that holds what a restore replaced
+ASIDE_PREFIX = "before-restore-"
 
 
 class RestoreError(RuntimeError):
@@ -46,6 +50,8 @@ class RestoreResult:
     aside_bytes: int
     database_bytes: int
     marker_removed: bool = False
+    day_files: int = 0
+    day_files_aside: int = 0
 
 
 Say = Callable[[str], None]
@@ -67,26 +73,50 @@ def _db_members_ok(member: tarfile.TarInfo) -> bool:
     return member.isfile() and "/" not in member.name and not member.name.startswith(".") and member.name.endswith(".db")
 
 
-def _extract(archive: Path, tmp: Path, say: Say) -> tuple[dict, str]:
-    """Stream the database out of the archive into `tmp`; return the manifest and the database's name."""
-    db_name: Optional[str] = None
-    manifest: Optional[dict] = None
+@dataclass
+class _Extracted:
+    manifest: dict
+    db_name: str
+    db_tmp: Path
+    # day file name -> its temporary copy
+    days: dict[str, Path]
+
+
+def _day_tmp(db_tmp: Path, name: str) -> Path:
+    return db_tmp.with_name(f"{db_tmp.name}.{name}.tmp")
+
+
+def _extract(archive: Path, tmp: Path, say: Say, extracted: "_Extracted") -> None:
+    """
+    Stream the database and its day files out of the archive: the database into `tmp`, each day file
+    beside it under a temporary name, recorded in `extracted` as they are written (so the caller can
+    delete them if this stops part way), with the manifest.
+    """
+    written = 0
     try:
         with tarfile.open(archive, "r|gz") as tar:
             for member in tar:
                 if member.name == db_backup.MANIFEST_NAME and member.isfile():
                     f = tar.extractfile(member)
-                    manifest = json.loads(f.read(1024 * 1024)) if f else None
+                    extracted.manifest = json.loads(f.read(1024 * 1024)) if f else None
                     continue
-                if db_name is not None or not _db_members_ok(member):
+                if not _db_members_ok(member):
                     raise RestoreError(f"{archive.name} is not a LogShed backup: it holds {member.name!r}.")
+                is_day = day_files.day_from_file_name(member.name) is not None
+                if (is_day and member.name in extracted.days) or (not is_day and extracted.db_name):
+                    raise RestoreError(f"{archive.name} is not a LogShed backup: it holds {member.name!r} twice.")
                 _check_space(tmp.parent, member.size)
-                db_name = member.name
+                written += member.size
+                target = tmp
+                if is_day:
+                    target = extracted.days[member.name] = _day_tmp(tmp, member.name)
+                else:
+                    extracted.db_name = member.name
                 say(f"Extracting {member.name} ({db_backup.format_bytes(member.size)})...")
                 source = tar.extractfile(member)
                 if source is None:
                     raise RestoreError(f"{archive.name} is not a LogShed backup.")
-                with open(tmp, "wb") as out:
+                with open(target, "wb") as out:
                     shutil.copyfileobj(source, out, db_backup.CHUNK_BYTES)
                     out.flush()
                     os.fsync(out.fileno())
@@ -95,18 +125,28 @@ def _extract(archive: Path, tmp: Path, say: Say) -> tuple[dict, str]:
         if isinstance(e, OSError) and e.errno is not None:
             raise RestoreError(f"Could not read {archive.name} or write the restored copy: {e}.") from e
         raise RestoreError(f"{archive.name} is not a readable backup archive (it may be damaged or cut short): {e}.") from e
-    if db_name is None or not isinstance(manifest, dict):
+    if not extracted.db_name or not isinstance(extracted.manifest, dict):
         raise RestoreError(f"{archive.name} is not a LogShed backup: it has no database or no manifest.")
-    return manifest, db_name
 
 
 def _check_space(folder: Path, size: int) -> None:
     free = shutil.disk_usage(folder).free
     if free < size + RESTORE_MARGIN_BYTES:
         raise RestoreError(
-            f"Not enough free space in {folder} to restore: the database is {db_backup.format_bytes(size)} "
+            f"Not enough free space in {folder} to restore: the next file in the archive is {db_backup.format_bytes(size)} "
             f"and {db_backup.format_bytes(free)} is free (it needs {db_backup.format_bytes(size + RESTORE_MARGIN_BYTES)})."
         )
+
+
+def _check_day_files(extracted: _Extracted) -> None:
+    """Every day file in the archive is in the manifest with its size and day, and the other way round."""
+    entries = [f for f in extracted.manifest.get("files") or [] if isinstance(f, dict) and f.get("role") == "day"]
+    named = {f.get("name"): f for f in entries}
+    if set(named) != set(extracted.days) or len(named) != len(entries):
+        raise RestoreError("The archive's manifest does not list the day files it holds: the archive is damaged.")
+    for name, entry in named.items():
+        if entry.get("day") != day_files.day_from_file_name(name) or entry.get("size_bytes") != extracted.days[name].stat().st_size:
+            raise RestoreError(f"{name} in the archive is not what its manifest records: the archive is damaged.")
 
 
 def _check_manifest(manifest: dict, db_name: str, extracted: Path, latest_schema: int) -> dict:
@@ -132,6 +172,22 @@ def _check_manifest(manifest: dict, db_name: str, extracted: Path, latest_schema
             f"this image understands schema {latest_schema} at most. Restore it with that version's image."
         )
     return entry
+
+
+def _check_day_file(name: str, extracted: Path, say: Say) -> None:
+    say(f"Checking {name}...")
+    try:
+        with contextlib.closing(sqlite3.connect(f"{extracted.resolve().as_uri()}?mode=ro", uri=True)) as conn:
+            layout = conn.execute("PRAGMA user_version;").fetchone()[0]
+            result = [row[0] for row in conn.execute("PRAGMA integrity_check;").fetchmany(5)]
+    except sqlite3.Error as e:
+        raise RestoreError(f"{name} in the archive is damaged: {e}.") from e
+    if result != ["ok"]:
+        raise RestoreError(f"{name} in the archive is damaged: " + "; ".join(result) + ".")
+    if not 1 <= layout <= day_files.LAYOUT_VERSION:
+        raise RestoreError(
+            f"{name} in the archive is in layout {layout}, which this image does not read; restore it with the version that made it."
+        )
 
 
 def _check_database(extracted: Path, schema: int, say: Say) -> None:
@@ -163,23 +219,40 @@ def _app_is_using(db_path: Path) -> bool:
     return False
 
 
-def _move_aside(db_path: Path, stamp: str) -> tuple[Optional[Path], int]:
-    """Move the current database (with its WAL) aside, keeping every byte of it. Returns its new path and size."""
-    if not db_path.exists():
-        return None, 0
+def _move_file(path: Path, folder: Path) -> int:
+    """Move a database file (checkpointed first, with its WAL) into `folder`; returns the bytes moved."""
+    if not path.exists():
+        return 0
     with contextlib.suppress(sqlite3.Error):
         # Fold the WAL into the main file, so the copy kept aside is one complete file
-        with contextlib.closing(sqlite3.connect(str(db_path), timeout=5, isolation_level=None)) as conn:
+        with contextlib.closing(sqlite3.connect(str(path), timeout=5, isolation_level=None)) as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-    aside = db_path.with_name(f"{db_path.name}{ASIDE_SUFFIX}{stamp}")
-    size = db_path.stat().st_size
-    os.replace(db_path, aside)
-    wal = db_path.with_name(db_path.name + "-wal")
+    folder.mkdir(mode=0o750, exist_ok=True)
+    size = path.stat().st_size
+    os.replace(path, folder / path.name)
+    wal = path.with_name(path.name + "-wal")
     if wal.exists():
         size += wal.stat().st_size
-        os.replace(wal, aside.with_name(aside.name + "-wal"))
-    db_path.with_name(db_path.name + "-shm").unlink(missing_ok=True)
-    return aside, size
+        os.replace(wal, folder / wal.name)
+    path.with_name(path.name + "-shm").unlink(missing_ok=True)
+    return size
+
+
+def _current_day_files(db_path: Path) -> list[Path]:
+    return sorted(p for p in db_path.parent.iterdir() if p.is_file() and day_files.day_from_file_name(p.name))
+
+
+def _move_aside(db_path: Path, stamp: str) -> tuple[Optional[Path], int, int]:
+    """
+    Move the current database and every day file beside it into `before-restore-<stamp>`, keeping
+    every byte. Returns the folder (None when there was nothing to move), its size and the day files moved.
+    """
+    folder = db_path.with_name(f"{ASIDE_PREFIX}{stamp}")
+    size = _move_file(db_path, folder)
+    days = _current_day_files(db_path)
+    for path in days:
+        size += _move_file(path, folder)
+    return (folder if folder.exists() else None), size, len(days)
 
 
 def _end_sessions(restored: Path, current: Path) -> None:
@@ -217,35 +290,50 @@ def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = 
     try:
         if _app_is_using(db_path):
             raise RestoreError(f"Another program is using {db_path}. Stop LogShed first, then run the restore again.")
-        # A copy left by a restore that was killed (SIGKILL, or a container removed part way)
-        for stale in db_path.parent.glob(".restore-*.db.tmp*"):
+        # Copies left by a restore that was killed (SIGKILL, or a container removed part way)
+        for stale in db_path.parent.glob(".restore-*.tmp*"):
             stale.unlink(missing_ok=True)
             say(f"Deleted {stale.name}, left by an interrupted restore.")
         owner = db_backup._owner_to_apply(db_path if db_path.exists() else db_path.parent)
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         tmp = db_path.with_name(f".restore-{stamp}.db.tmp")
+        extracted = _Extracted({}, "", tmp, {})
         try:
-            manifest, db_name = _extract(archive, tmp, say)
-            entry = _check_manifest(manifest, db_name, tmp, latest_schema)
+            _extract(archive, tmp, say, extracted)
+            manifest = extracted.manifest
+            entry = _check_manifest(manifest, extracted.db_name, tmp, latest_schema)
+            _check_day_files(extracted)
             schema = manifest["schema_version"]
             _check_database(tmp, schema, say)
+            for name, path in sorted(extracted.days.items()):
+                _check_day_file(name, path, say)
             _end_sessions(tmp, db_path)
-            os.chmod(tmp, 0o640)
-            db_backup._give_to(tmp, owner)
-            # The two renames happen together: a stop request in between would leave no database
+            for path in (tmp, *extracted.days.values()):
+                os.chmod(path, 0o640)
+                db_backup._give_to(path, owner)
+            # The renames happen together: a stop request in between would leave the folder half restored
             blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
             try:
-                aside, aside_bytes = _move_aside(db_path, stamp)
+                aside, aside_bytes, days_aside = _move_aside(db_path, stamp)
+                if aside is not None:
+                    db_backup._give_to(aside, owner)
+                for name, path in extracted.days.items():
+                    os.replace(path, db_path.with_name(name))
                 os.replace(tmp, db_path)
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+            # A process that restores and then reads (tests, or a future in-process restore) reopens every file
+            from app.services import day_store
+            day_store.forget_connections()
+            day_store.forget_id_blocks()
             # A failed upgrade's marker described the database just replaced
             marker_removed = lifecycle.marker_path(db_path).exists()
             lifecycle.clear_marker(db_path)
         finally:
-            tmp.unlink(missing_ok=True)
-            for suffix in ("-wal", "-shm"):
-                tmp.with_name(tmp.name + suffix).unlink(missing_ok=True)
+            for path in (tmp, *extracted.days.values()):
+                path.unlink(missing_ok=True)
+                for suffix in ("-wal", "-shm"):
+                    path.with_name(path.name + suffix).unlink(missing_ok=True)
         logger.info(f"Restored {archive.name} into {db_path}.")
         return RestoreResult(
             archive=archive,
@@ -257,6 +345,8 @@ def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = 
             aside_bytes=aside_bytes,
             database_bytes=db_path.stat().st_size,
             marker_removed=marker_removed,
+            day_files=len(extracted.days),
+            day_files_aside=days_aside,
         )
     finally:
         instance_lock.release(lock_fd)

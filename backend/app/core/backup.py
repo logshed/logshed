@@ -10,6 +10,10 @@ name, then `manifest.json`, written last because the sizes are known only after 
 `"format": 1` is a contract: restore code must keep reading it. The secret key is never included,
 because archives can be downloaded, and the key would decrypt the secrets stored in the database.
 
+With day_files (manual backups), the archive also holds every day file of logs the catalogue lists
+(`logs-YYYY-MM-DD-UTC.db`, role "day" with its "day" in the manifest), before the database:
+    "files": [{"name": "logs-2026-11-12-UTC.db", "role": "day", "day": "2026-11-12", "size_bytes"}, ...,
+              {"name": "logs.db", "role": "main", "size_bytes"}]
 Three ways to copy the database:
 - locked stream: checkpoint the WAL, take the write lock, and compress the database file straight
   into the archive. Needs only the archive's size on disk, but holds every writer off, so it runs
@@ -203,8 +207,15 @@ def find_backup(folder: Path, filename: str) -> Optional[Path]:
     return candidate
 
 
-def backup_space_needed(db_path: Path, method: str) -> int:
-    """Bytes a backup of the database by `method` needs on the disk while it runs (its copy and archive)."""
+def backup_space_needed(db_path: Path, method: str, day_files: bool = False) -> int:
+    """
+    Bytes a backup of the database by `method` needs on the disk while it runs (its copy and archive).
+    With day_files, also their archive and a copy of the largest (today's is copied before archiving).
+    """
+    if day_files:
+        total, largest = day_files_bytes(db_path)
+        method = METHOD_VACUUM_INTO if method == METHOD_LOCKED_STREAM else method
+        return backup_space_needed(db_path, method) + largest + _compressed_estimate(total)
     if method == METHOD_WITHOUT_LOGS:
         copy_size = _size_without_logs(db_path)
         return copy_size + _compressed_estimate(copy_size)
@@ -336,14 +347,19 @@ class _ProgressReader:
         label: str,
         progress_cb: Optional[ProgressCallback],
         cancel: Optional[threading.Event] = None,
+        log_total: Optional[int] = None,
+        log_offset: int = 0,
     ):
         self._f = fileobj
         self._cancel = cancel
         self._total = total
         self._done = 0
+        # The figures logged: the whole archive's, when this file is one of several
+        self._log_total = log_total or total
+        self._log_offset = log_offset
         self._label = label
         self._cb = progress_cb
-        self._next_log = 10
+        self._next_log = (log_offset * 100 // self._log_total // 10 + 1) * 10
 
     def read(self, size: int = -1) -> bytes:
         if self._cancel is not None and self._cancel.is_set():
@@ -352,12 +368,61 @@ class _ProgressReader:
         self._done += len(data)
         if self._cb is not None:
             self._cb(self._done, self._total)
-        if self._total >= PROGRESS_LOG_MIN_BYTES:
-            percent = self._done * 100 // self._total
+        if self._log_total >= PROGRESS_LOG_MIN_BYTES:
+            done = self._log_offset + self._done
+            percent = done * 100 // self._log_total
             if self._next_log <= percent < 100:
-                logger.info(f"{self._label}: {percent}% ({format_bytes(self._done)} of {format_bytes(self._total)})")
+                logger.info(f"{self._label}: {percent}% ({format_bytes(done)} of {format_bytes(self._log_total)})")
                 self._next_log = (percent // 10 + 1) * 10
         return data
+
+
+class _ArchiveWriter:
+    """
+    A gzip tar written file by file (each streamed with no uncompressed copy), then the manifest.
+    Progress is counted over every file: `total` is the bytes of all of them, as known at the start.
+    """
+
+    def __init__(self, tmp_path: Path, manifest: dict, label: str, total: int,
+                 progress_cb: Optional[ProgressCallback], cancel: Optional[threading.Event] = None):
+        self._tar = tarfile.open(tmp_path, "w:gz", compresslevel=GZIP_LEVEL, copybufsize=CHUNK_BYTES)
+        self._manifest = manifest
+        self._label = label
+        self._total = max(total, 1)
+        self._done = 0
+        self._cb = progress_cb
+        self._cancel = cancel
+        self._created = int(time.time())
+        self.entries: list[dict] = []
+
+    def add(self, source: Path, entry: dict) -> None:
+        size = source.stat().st_size
+        info = tarfile.TarInfo(entry["name"])
+        info.size = size
+        info.mtime = self._created
+        info.mode = 0o640
+        offset = self._done
+        self._total = max(self._total, offset + size)
+        cb = (lambda done, _total: self._cb(offset + done, self._total)) if self._cb else None
+        with open(source, "rb") as f:
+            self._tar.addfile(info, fileobj=_ProgressReader(f, size, self._label, cb, self._cancel, self._total, offset))
+        self._done += size
+        entry["size_bytes"] = size
+        self.entries.append(entry)
+
+    def finish(self) -> None:
+        self._manifest["files"] = self.entries
+        body = json.dumps(self._manifest, indent=2).encode("utf-8")
+        minfo = tarfile.TarInfo(MANIFEST_NAME)
+        minfo.size = len(body)
+        minfo.mtime = self._created
+        minfo.mode = 0o640
+        self._tar.addfile(minfo, fileobj=io.BytesIO(body))
+        self._tar.close()
+
+    def abandon(self) -> None:
+        with contextlib.suppress(Exception):
+            self._tar.close()
 
 
 def _write_archive(
@@ -371,23 +436,13 @@ def _write_archive(
     cancel: Optional[threading.Event] = None,
 ) -> None:
     """Stream `db_file` into a new gzip tar at `tmp_path`, then the manifest, with no uncompressed copy."""
-    size = db_file.stat().st_size
-    created = time.time()
-    with tarfile.open(tmp_path, "w:gz", compresslevel=GZIP_LEVEL, copybufsize=CHUNK_BYTES) as tar:
-        info = tarfile.TarInfo(member_name)
-        info.size = size
-        info.mtime = int(created)
-        info.mode = 0o640
-        with open(db_file, "rb") as f:
-            tar.addfile(info, fileobj=_ProgressReader(f, size, label, progress_cb, cancel))
-        file_entry["size_bytes"] = size
-        manifest["files"] = [file_entry]
-        body = json.dumps(manifest, indent=2).encode("utf-8")
-        minfo = tarfile.TarInfo(MANIFEST_NAME)
-        minfo.size = len(body)
-        minfo.mtime = int(created)
-        minfo.mode = 0o640
-        tar.addfile(minfo, fileobj=io.BytesIO(body))
+    writer = _ArchiveWriter(tmp_path, manifest, label, db_file.stat().st_size, progress_cb, cancel)
+    try:
+        writer.add(db_file, {**file_entry, "name": member_name})
+        writer.finish()
+    except BaseException:
+        writer.abandon()
+        raise
 
 
 def _wal_is_empty(db_path: Path) -> bool:
@@ -486,6 +541,85 @@ def _copy_without_logs(
         conn.execute("DETACH DATABASE src;")
 
 
+def _listed_day_files(db_copy: Path) -> list[str]:
+    """The days whose files a database's catalogue lists as holding logs ('open' or 'sealed'), oldest first."""
+    with contextlib.closing(sqlite3.connect(f"{db_copy.resolve().as_uri()}?mode=ro", uri=True)) as conn:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'log_files'").fetchone() is None:
+            return []
+        return [
+            r[0] for r in conn.execute(
+                "SELECT day FROM log_files WHERE state IN ('open', 'sealed') AND day != 'legacy' ORDER BY day"
+            )
+        ]
+
+
+@contextlib.contextmanager
+def _day_file_copy(path: Path, scratch: Path, cancel: Optional[threading.Event]):
+    """
+    A consistent copy of a day file to archive, while the app may write it. When its WAL is empty
+    (a sealed file, checkpointed when sealed), the file itself inside a read transaction: a checkpoint
+    cannot write into a database file while a reader reads it without the WAL, so the file stays as it
+    was until the copy is done. Otherwise (today's file) a VACUUM INTO copy at `scratch`, deleted after.
+    Yields (path to stream, its highest log id), or None when the file is gone.
+    """
+    if not path.exists():
+        yield None
+        return
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, isolation_level=None, timeout=5.0)
+    try:
+        conn.execute("BEGIN;")
+        conn.execute("SELECT COUNT(*) FROM sqlite_master;").fetchone()
+        if _wal_is_empty(path):
+            yield path, conn.execute("SELECT MAX(id) FROM logs;").fetchone()[0]
+            return
+        conn.execute("COMMIT;")
+        _stop_when_set(conn, cancel)
+        try:
+            conn.execute("VACUUM INTO ?;", (str(scratch),))
+        except sqlite3.OperationalError:
+            if cancel is not None and cancel.is_set():
+                raise BackupCancelled() from None
+            raise
+        with contextlib.closing(sqlite3.connect(f"{scratch.resolve().as_uri()}?mode=ro", uri=True)) as copy:
+            top = copy.execute("SELECT MAX(id) FROM logs;").fetchone()[0]
+        yield scratch, top
+    finally:
+        with contextlib.suppress(sqlite3.Error):
+            if conn.in_transaction:
+                conn.execute("COMMIT;")
+        conn.close()
+        scratch.unlink(missing_ok=True)
+
+
+def _match_catalogue(db_copy: Path, archived: list[str], top_id: Optional[int]) -> None:
+    """
+    Make the copied database's catalogue list exactly the day files archived beside it, and its next
+    log id follow every id in them: ids given out after the database was copied may be in a day file
+    copied later, and a restore must not give them out again.
+    """
+    with contextlib.closing(sqlite3.connect(str(db_copy), isolation_level=None)) as conn:
+        conn.execute("BEGIN;")
+        placeholders = ",".join("?" * len(archived))
+        keep = f"AND day NOT IN ({placeholders})" if archived else ""
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(f"DELETE FROM log_files WHERE day != 'legacy' {keep};", archived)
+        if top_id is not None:
+            conn.execute("UPDATE log_id_state SET next_id = MAX(next_id, ?) WHERE id = 1;", (top_id + 1,))
+        conn.execute("COMMIT;")
+
+
+def day_files_bytes(db_path: Path) -> tuple[int, int]:
+    """(total, largest) bytes of the day files beside a database, each with its -wal."""
+    total = largest = 0
+    for f in db_path.parent.glob("logs-*-UTC.db"):
+        size = f.stat().st_size
+        with contextlib.suppress(FileNotFoundError):
+            size += f.with_name(f.name + "-wal").stat().st_size
+        total += size
+        largest = max(largest, size)
+    return total, largest
+
+
 def _size_without_logs(db_path: Path, omitted: tuple[str, ...] = LOG_TABLES) -> int:
     """Bytes of every table and index outside the omitted tables, from dbstat (the database size if unavailable)."""
     with contextlib.closing(sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)) as conn:
@@ -506,6 +640,38 @@ def _size_without_logs(db_path: Path, omitted: tuple[str, ...] = LOG_TABLES) -> 
             return db_path.stat().st_size
 
 
+def _write_with_day_files(
+    db_path: Path, tmp: Path, db_copy: Path, manifest: dict, entry: dict, label: str,
+    progress_cb: Optional[ProgressCallback], cancel: Optional[threading.Event], scratch: Path,
+) -> None:
+    """The archive of a database copy and the day files its catalogue lists: day files first, then the database."""
+    from app.core import day_files as day_files_mod
+
+    days = _listed_day_files(db_copy)
+    total = db_copy.stat().st_size + day_files_bytes(db_path)[0]
+    writer = _ArchiveWriter(tmp, manifest, label, total, progress_cb, cancel)
+    try:
+        archived: list[str] = []
+        top_id: Optional[int] = None
+        for day in days:
+            path = day_files_mod.day_path(db_path, day)
+            with _day_file_copy(path, scratch, cancel) as found:
+                if found is None:
+                    continue
+                source, file_top = found
+                writer.add(source, {"name": path.name, "role": "day", "day": day})
+            archived.append(day)
+            if file_top is not None:
+                top_id = file_top if top_id is None else max(top_id, file_top)
+        if days:
+            _match_catalogue(db_copy, archived, top_id)
+        writer.add(db_copy, {**entry, "name": db_path.name})
+        writer.finish()
+    except BaseException:
+        writer.abandon()
+        raise
+
+
 def create_backup(
     db_path: Union[str, Path],
     kind: str,
@@ -516,9 +682,14 @@ def create_backup(
     progress_cb: Optional[ProgressCallback] = None,
     now: Optional[datetime.datetime] = None,
     cancel: Optional[threading.Event] = None,
+    day_files: bool = False,
 ) -> BackupResult:
     """
     Make one archive in the backups folder and return it.
+
+    With `day_files`, the archive also holds every day file the database's catalogue lists, copied
+    while logging carries on (_day_file_copy); the database is then copied by VACUUM INTO (or without
+    logs) even when `method` is the locked stream, so its catalogue can be made to match them.
 
     `kind` is `pre-v<from>-to-v<to>` or `manual-v<schema>`. `extra_space` is space the caller needs
     afterwards (a migration's own needs), kept out of what the backup may use. Expired archives and
@@ -532,13 +703,15 @@ def create_backup(
     folder = backups_dir(db_path)
     owner = _owner_to_apply(db_path)
     prune_backups(folder)
+    if day_files and method == METHOD_LOCKED_STREAM:
+        method = METHOD_VACUUM_INTO
 
     if method == METHOD_LOCKED_STREAM:
         # Checkpoint first, so the size is the main file's full size.
         with contextlib.closing(sqlite3.connect(str(db_path), timeout=5.0)) as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     db_size = db_path.stat().st_size
-    check_backup_space(folder, backup_space_needed(db_path, method) + extra_space)
+    check_backup_space(folder, backup_space_needed(db_path, method, day_files) + extra_space)
 
     _ensure_dir(folder, owner)
     now = now or datetime.datetime.now(datetime.timezone.utc)
@@ -582,7 +755,10 @@ def create_backup(
                 raise
             os.chmod(copy, 0o640)
             _give_to(copy, owner)
-            _write_archive(tmp, copy, db_path.name, manifest, entry, label, progress_cb, cancel)
+            if day_files:
+                _write_with_day_files(db_path, tmp, copy, manifest, entry, label, progress_cb, cancel, folder / f"{name}.day.tmp")
+            else:
+                _write_archive(tmp, copy, db_path.name, manifest, entry, label, progress_cb, cancel)
         os.chmod(tmp, 0o640)
         _give_to(tmp, owner)
         os.replace(tmp, final)

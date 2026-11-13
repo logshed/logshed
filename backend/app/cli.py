@@ -184,8 +184,8 @@ def _seed_logs_locked(count: int, days: int, db_path: str, log_store) -> int:
 
 def backup_database(db_path: str | None = None) -> int:
     """
-    Make a manual backup of a database that may be in use. It copies with VACUUM INTO, a read
-    snapshot, so the running app keeps writing; a prune or Compact at the same time only costs
+    Make a manual backup of a database that may be in use, with every day file of logs. It copies with
+    VACUUM INTO and read snapshots, so the running app keeps writing; a prune or Compact at the same time only costs
     disk space. Prints the archive's path, size and expiry date. Returns the exit status.
     """
     from contextlib import closing
@@ -202,7 +202,7 @@ def backup_database(db_path: str | None = None) -> int:
         schema = get_user_version(conn)
     try:
         result = db_backup.create_backup(
-            path, kind=f"manual-v{schema}", schema_version=schema, method=db_backup.METHOD_VACUUM_INTO
+            path, kind=f"manual-v{schema}", schema_version=schema, method=db_backup.METHOD_VACUUM_INTO, day_files=True
         )
     except db_backup.BackupSpaceError as e:
         print(
@@ -222,8 +222,8 @@ def backup_database(db_path: str | None = None) -> int:
 
 def restore_database(archive: str, db_path: str | None = None) -> int:
     """
-    Put a backup archive in place of the database, for a stopped LogShed. The current database is
-    moved aside and kept. Prints what it does; returns the exit status.
+    Put a backup archive in place of the database and its day files, for a stopped LogShed. The
+    current database and day files are moved into a folder beside them and kept. Prints what it does; returns the exit status.
     """
     from pathlib import Path
 
@@ -255,10 +255,13 @@ def restore_database(archive: str, db_path: str | None = None) -> int:
             "This backup was made without the logs (before an upgrade that does not change them): it brings back "
             "the settings, rules and history, and holds no logs."
         )
+    if result.day_files:
+        print(f"It holds {result.day_files} day {'file' if result.day_files == 1 else 'files'} of logs.")
     if result.aside is not None:
+        days = f" and {result.day_files_aside} day {'file' if result.day_files_aside == 1 else 'files'}" if result.day_files_aside else ""
         print(
-            f"The database it replaced is kept as {result.aside} ({db_backup.format_bytes(result.aside_bytes)}). "
-            "Delete it once LogShed runs as you expect."
+            f"The database{days} it replaced are kept in {result.aside} ({db_backup.format_bytes(result.aside_bytes)}). "
+            "Delete that folder once LogShed runs as you expect."
         )
     if result.marker_removed:
         print("The failed upgrade's marker (.migration_failed) was removed: the next start runs the upgrade again.")

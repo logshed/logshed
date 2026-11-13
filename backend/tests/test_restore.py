@@ -91,14 +91,14 @@ def test_restore_puts_the_backup_in_place_and_keeps_the_old_database(db, capsys)
     assert cli.restore_database(archive.name, str(db)) == 0
 
     assert _get(db, "marker") == "in the backup" and _get(db, "later") is None
-    (aside,) = [p for p in db.parent.iterdir() if p.name.startswith("logs.db.before-restore-")]
-    assert _get(aside, "later") == "only in the old database"
+    (folder,) = [p for p in db.parent.iterdir() if p.name.startswith("before-restore-")]
+    assert folder.is_dir() and _get(folder / "logs.db", "later") == "only in the old database"
     assert not db.with_name("logs.db-wal").exists() or db.with_name("logs.db-wal").stat().st_size == 0
     assert _leftovers(db) == []
     assert archive.exists()
     out = capsys.readouterr().out
     assert f"Restored {archive.name}" in out and f"schema {LATEST}" in out
-    assert f"kept as {aside}" in out and "Delete it once" in out
+    assert f"kept in {folder}" in out and "Delete that folder once" in out
 
 
 def test_restore_of_an_archive_from_the_next_schema_while_it_is_known(db, monkeypatch):

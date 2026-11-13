@@ -732,6 +732,8 @@ class MigrationNeeds:
 
     extra_space: Callable[[int], int] = _no_extra_space
     backup_without_logs: bool = False
+    # The step changes the day files of logs, so the backup before it holds them too (no step does yet)
+    touches_day_files: bool = False
 
 
 # Room v4 writes beyond the database: three small catalogue tables and the re-encrypted secrets
@@ -930,6 +932,7 @@ def _backup_before_migrations(
     """
     target = pending[-1]
     method, extra = backup_plan(db_path, pending)
+    day_files = any(MIGRATION_NEEDS.get(v, MigrationNeeds()).touches_day_files for v in pending)
     try:
         return db_backup.create_backup(
             db_path,
@@ -940,6 +943,7 @@ def _backup_before_migrations(
             extra_space=extra,
             progress_cb=(lambda done, total: progress("backup", done, total)) if progress else None,
             cancel=cancel,
+            day_files=day_files,
         )
     except (db_backup.BackupError, OSError, sqlite3.Error) as e:
         logger.warning(f"The backup before upgrading from schema {current_version} to {target} failed: {e}")
