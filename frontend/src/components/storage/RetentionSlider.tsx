@@ -4,6 +4,8 @@ import { fetchPrunePreview, triggerManualPrune, triggerVacuum } from '../../api/
 import { formatBytes } from '../../utils/formatters.ts';
 import { PrunePreview, PruneResponse, VacuumResponse } from '../../types.ts';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
+import { Button } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
 import { PrunePreviewModal, PrunePreviewMode } from './PrunePreviewModal.tsx';
 import { useFlash } from '../../utils/hooks.ts';
 
@@ -208,16 +210,16 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
   }, [max, min]);
 
   return (
-    <div className="bg-surface border border-line rounded-xl p-5 shadow-md space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-          <Clock className="w-4 h-4 text-accent-500" />
-          <span>Log Retention Policy</span>
-        </h3>
-        <span className="font-mono text-xs text-accent-400 font-bold">
-          {days} Day{days === 1 ? '' : 's'}
-        </span>
-      </div>
+    <Card>
+      <CardHeader
+        icon={<Clock />}
+        title="Log Retention Policy"
+        actions={
+          <span className="font-mono text-xs text-accent-400 font-bold">
+            {days} Day{days === 1 ? '' : 's'}
+          </span>
+        }
+      />
 
       {errorMsg && (
         <div className="p-3 bg-danger-950/60 border border-danger-800 rounded-lg flex items-start gap-2 text-xs text-danger-300">
@@ -274,7 +276,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           value={days}
           disabled={retentionOverridden}
           onChange={(e) => !retentionOverridden && setDays(parseInt(e.target.value, 10))}
-          className={`w-full accent-accent-500 bg-canvas h-2 rounded-lg ${
+          className={`w-full accent-accent-500 h-2 rounded-lg ${
             retentionOverridden ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
           }`}
         />
@@ -321,63 +323,45 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
 
       {/* Action Buttons */}
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line-subtle">
-        <button
+        <Button
+          variant="primary"
           onClick={handleSave}
           disabled={isSaving || days === retentionDays || retentionOverridden}
-          className={`font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition ${
-            isSaving || days === retentionDays || retentionOverridden
-              ? 'opacity-40 cursor-not-allowed bg-raised text-fg-subtle border border-line'
-              : 'bg-accent-700 hover:bg-accent-600 text-on-fill cursor-pointer shadow-md'
-          }`}
+          icon={
+            saveSuccess ? (
+              <Check className="w-3.5 h-3.5 text-success-400" />
+            ) : isSaving ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Clock className="w-3.5 h-3.5" />
+            )
+          }
         >
-          {saveSuccess ? (
-            <Check className="w-3.5 h-3.5 text-success-400" />
-          ) : isSaving ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Clock className="w-3.5 h-3.5" />
-          )}
-          <span>{saveSuccess ? 'Saved!' : 'Save Retention Policy'}</span>
-        </button>
+          {saveSuccess ? 'Saved!' : 'Save Retention Policy'}
+        </Button>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <button
+          <Button
+            variant="soft"
             onClick={() => setIsVacuumModalOpen(true)}
             disabled={isCompacting || isPruning}
             title="Repack SQLite database file and return freelist space to host filesystem."
-            className="bg-accent-950/80 hover:bg-accent-900 text-accent-300 border border-accent-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
+            className="whitespace-normal text-left"
+            icon={isCompacting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
           >
-            {isCompacting ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Compacting database... Ingestion writes temporarily paused</span>
-              </>
-            ) : (
-              <>
-                <Database className="w-3.5 h-3.5" />
-                <span>Compact Database</span>
-              </>
-            )}
-          </button>
+            {isCompacting ? 'Compacting database... Ingestion writes temporarily paused' : 'Compact Database'}
+          </Button>
 
-          <button
+          <Button
+            variant="danger-soft"
             onClick={handlePruneNow}
             disabled={isPruning || isCompacting || isLoadingPreview}
             title="Show what is older than the configured retention policy, then purge those logs and history entries, compact the search index, and checkpoint the SQLite WAL."
-            className="bg-danger-950/80 hover:bg-danger-900 text-danger-300 border border-danger-800 font-medium px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:cursor-not-allowed"
+            className="whitespace-normal text-left"
+            icon={isPruning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
           >
-            {isPruning ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Purging & Compacting Index...</span>
-              </>
-            ) : (
-              <>
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Purge Expired Logs & History Now</span>
-              </>
-            )}
-          </button>
+            {isPruning ? 'Purging & Compacting Index...' : 'Purge Expired Logs & History Now'}
+          </Button>
           <div
             className="text-fg-subtle hover:text-fg-soft transition cursor-help p-0.5"
             title="Pruning runs automatically once every 24 hours. SQLite automatically reuses free database pages for incoming logs without requiring an exclusive offline VACUUM. Lowering retention shows what would be deleted and lets you delete it now or at the next daily cleanup. Click 'Purge Expired Logs & History Now' to review and immediately purge older logs and history entries, compact the search index, and checkpoint the WAL. Click 'Compact Database' to repack the database file and return freelist space to the host filesystem."
@@ -473,7 +457,7 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
           </div>
         </div>
       </ConfirmDialog>
-    </div>
+    </Card>
   );
 };
 

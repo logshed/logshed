@@ -100,7 +100,7 @@ describe('RetentionSlider Component', () => {
 
     const saveBtn = screen.getByRole('button', { name: /Save Retention Policy/i });
     expect(saveBtn).toBeDisabled();
-    expect(saveBtn.className).toContain('opacity-40');
+    expect(saveBtn.className).toContain('disabled:opacity-50');
 
     // Change to 7 days
     const preset7Btn = screen.getByRole('button', { name: '7 Days' });

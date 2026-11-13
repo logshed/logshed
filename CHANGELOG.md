@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Drop rule errors stay on screen**: On Rules > Drop Rules, an error that came less than three seconds after a success message (for example a failed status change just after a delete) disappeared when the success message's timer ran out. Errors now stay until you close them or another message replaces them.
 - **Key icon the right way round**: The key icon (on the API & MCP Access tab, its token cards and the MCP card) is drawn as it was before 1.4.0, with the ring at the bottom left; a library update had mirrored it.
 - **No zoom when typing on an iPhone**: Text boxes on phones and tablets use 16 px text, so iOS Safari no longer zooms the page when you tap one (the AI follow-up box stayed zoomed after you finished typing). Pinch zoom still works.
+- **Storage page in Firefox**: The retention slider is drawn in LogShed's blue and dark grey, as in other browsers, instead of Firefox's grey and white control, and on a phone the "Mount: /data" label no longer touches the card title.
 
 ## [1.3.1] - 2026-11-12
 

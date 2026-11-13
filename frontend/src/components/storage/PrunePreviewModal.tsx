@@ -1,6 +1,7 @@
 import React from 'react';
 import { Trash2, Clock, RefreshCw } from 'lucide-react';
 import { Modal } from '../common/Modal.tsx';
+import { Button } from '../common/Button.tsx';
 import { PrunePreview } from '../../types.ts';
 import { formatLocalTimestamp } from '../../utils/formatters.ts';
 import { useServerTimezone } from '../../utils/hooks.ts';
@@ -105,36 +106,28 @@ export const PrunePreviewModal: React.FC<PrunePreviewModalProps> = ({
         )}
 
         <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-line-subtle">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
-          >
+          <Button onClick={onCancel} disabled={busy}>
             {nothingToDelete && mode === 'purge' ? 'Close' : 'Cancel'}
-          </button>
+          </Button>
           {mode === 'save' && (
-            <button
-              type="button"
+            <Button
               onClick={onDeleteLater}
               disabled={busy}
               title={`Saves the new retention. The next daily cleanup runs ${describeNextCleanup(preview.next_cleanup_at)}.`}
-              className="px-3 py-1.5 text-xs bg-raised hover:bg-raised-strong text-fg border border-line-strong font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              icon={<Clock className="w-3.5 h-3.5" />}
             >
-              <Clock className="w-3.5 h-3.5" />
-              <span>Delete at Next Daily Cleanup</span>
-            </button>
+              Delete at Next Daily Cleanup
+            </Button>
           )}
           {!nothingToDelete && (
-            <button
-              type="button"
+            <Button
+              variant="danger"
               onClick={onDeleteNow}
               disabled={busy}
-              className="px-4 py-1.5 text-xs bg-danger-700 hover:bg-danger-600 text-on-fill font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+              icon={busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
             >
-              {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-              <span>{mode === 'save' ? 'Save and Delete Now' : 'Delete Now'}</span>
-            </button>
+              {mode === 'save' ? 'Save and Delete Now' : 'Delete Now'}
+            </Button>
           )}
         </div>
 

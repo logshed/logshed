@@ -1,6 +1,7 @@
 import React from 'react';
 import { Database, HardDrive, FileText } from 'lucide-react';
 import { StorageMetricsResponse } from '../../types.ts';
+import { Card, CardHeader } from '../common/Card.tsx';
 
 interface StorageCardProps {
   metrics: StorageMetricsResponse | null;
@@ -32,17 +33,15 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
       : 0);
 
   return (
-    <div className="bg-surface border border-line rounded-xl p-5 shadow-md">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-          <Database className="w-4 h-4 text-accent-500" />
-          <span>Current Storage Footprint</span>
-        </h3>
-        <span className="font-mono text-[11px] text-fg-muted">Mount: /data</span>
-      </div>
+    <Card>
+      <CardHeader
+        icon={<Database />}
+        title="Current Storage Footprint"
+        actions={<span className="font-mono text-[11px] text-fg-muted">Mount: /data</span>}
+      />
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-canvas p-3 rounded-lg border border-line-subtle">
           <span className="text-[11px] text-fg-muted font-medium block mb-1 flex items-center gap-1.5">
             <Database className="w-3.5 h-3.5 text-accent-400" />
@@ -99,6 +98,6 @@ export const StorageCard: React.FC<StorageCardProps> = ({ metrics }) => {
           />
         </div>
       </div>
-    </div>
+    </Card>
   );
 };

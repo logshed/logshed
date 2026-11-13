@@ -15,6 +15,9 @@ import { previewDeleteLogs, deleteLogs, fetchLogFacets } from '../../api/logs.ts
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { fromLocalDatetimeInputString, timeInputZoneLabel } from '../../utils/formatters.ts';
 import { useServerTimezone } from '../../utils/hooks.ts';
+import { Button } from '../common/Button.tsx';
+import { Card, CardHeader } from '../common/Card.tsx';
+import { TextField } from '../common/Field.tsx';
 
 interface DeleteLogsCardProps {
   onLogsDeleted?: () => void;
@@ -202,19 +205,12 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
     (isHighRisk && confirmText.trim().toUpperCase() !== 'DELETE');
 
   return (
-    <div className="bg-surface border border-line rounded-xl p-4 sm:p-5 shadow-md overflow-hidden min-w-0 max-w-full space-y-4">
-      {/* Header with blue accent icon and no manual purge label */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-          <Trash2 className="w-4 h-4 text-accent-500" />
-          <span>Targeted Log Deletion</span>
-        </h3>
-      </div>
-
-      <p className="text-xs text-fg-muted leading-relaxed">
-        Permanently delete specific logs by host, application, time period, or text search query.
-        Deleted logs are purged from the database and search index.
-      </p>
+    <Card className="min-w-0 max-w-full">
+      <CardHeader
+        icon={<Trash2 />}
+        title="Targeted Log Deletion"
+        description="Permanently delete specific logs by host, application, time period, or text search query. Deleted logs are purged from the database and search index."
+      />
 
       {/* Messages */}
       {errorMsg && (
@@ -302,22 +298,22 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             <div className="flex flex-col sm:flex-row gap-3 w-full min-w-0 max-w-full pt-1">
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
                 <span className="text-[11px] text-fg-muted block font-mono">From ({zoneLabel}):</span>
-                <input
+                <TextField
                   type="datetime-local"
                   aria-label={`From (${zoneLabel})`}
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
-                  className="w-full min-w-0 max-w-full block bg-surface border border-line rounded-lg px-2.5 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
+                  mono
                 />
               </div>
               <div className="flex-1 min-w-0 max-w-full space-y-1 overflow-hidden">
                 <span className="text-[11px] text-fg-muted block font-mono">To ({zoneLabel}):</span>
-                <input
+                <TextField
                   type="datetime-local"
                   aria-label={`To (${zoneLabel})`}
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
-                  className="w-full min-w-0 max-w-full block bg-surface border border-line rounded-lg px-2.5 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono box-border scheme-dark"
+                  mono
                 />
               </div>
             </div>
@@ -330,13 +326,14 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
             <Search className="w-3.5 h-3.5 text-accent-500" />
             <span>Search Text (Optional)</span>
           </label>
-          <input
+          <TextField
             id="delete-card-query"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g. timeout, connection reset, error"
-            className="w-full min-w-0 max-w-full bg-surface border border-line rounded-lg px-3 py-1.5 text-xs text-fg focus:outline-hidden focus:border-accent-500 font-mono box-border"
+            mono
+            className="min-w-0"
           />
         </div>
       </div>
@@ -407,38 +404,26 @@ export const DeleteLogsCard: React.FC<DeleteLogsCardProps> = ({ onLogsDeleted })
 
       {/* Action Buttons */}
       <div className="flex items-center justify-between pt-1">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={handleResetFilters}
           disabled={isDeleting}
-          className="px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-raised rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+          icon={<RotateCcw className="w-3.5 h-3.5" />}
         >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset Criteria</span>
-        </button>
+          Reset Criteria
+        </Button>
 
-        <button
-          type="button"
+        <Button
+          variant="danger"
           onClick={handleDelete}
           disabled={isDeleteDisabled}
-          className="px-4 py-2 text-xs bg-danger-600 hover:bg-danger-500 text-on-fill font-medium rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          icon={isDeleting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
         >
-          {isDeleting ? (
-            <>
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              <span>Deleting Logs...</span>
-            </>
-          ) : (
-            <>
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>
-                Delete Matching Logs{' '}
-                {matchedCount !== null && matchedCount > 0 ? `(${matchedCount.toLocaleString()})` : ''}
-              </span>
-            </>
-          )}
-        </button>
+          {isDeleting
+            ? 'Deleting Logs...'
+            : `Delete Matching Logs ${matchedCount !== null && matchedCount > 0 ? `(${matchedCount.toLocaleString()})` : ''}`.trim()}
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 };

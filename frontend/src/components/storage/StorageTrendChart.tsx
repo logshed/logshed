@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { TrendingUp } from 'lucide-react';
 import { StorageMetricsSnapshot } from '../../types.ts';
+import { Card, CardHeader } from '../common/Card.tsx';
 import { cleanIsoString, formatBytes } from '../../utils/formatters.ts';
 
 interface StorageTrendChartProps {
@@ -68,15 +69,12 @@ function formatTrendTooltip(ms: number): string {
 export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history }) => {
   if (!history || history.length === 0) {
     return (
-      <div className="bg-surface border border-line rounded-xl p-5 shadow-md">
-        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider mb-4 flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-accent-500" />
-          <span>30-Day Storage & Volume Trend</span>
-        </h3>
+      <Card>
+        <CardHeader icon={<TrendingUp />} title="30-Day Storage & Volume Trend" />
         <div className="h-48 flex items-center justify-center text-fg-muted font-mono text-xs">
           No historical storage metrics recorded yet. Metrics are sampled hourly.
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -99,14 +97,12 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
   const domain = maxTime > minTime ? [minTime, maxTime] : [minTime - HOUR_MS / 2, maxTime + HOUR_MS / 2];
 
   return (
-    <div className="bg-surface border border-line rounded-xl p-5 shadow-md">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-accent-500" />
-          <span>30-Day Storage & Volume Trend</span>
-        </h3>
-        <span className="text-[11px] font-mono text-fg-muted">Hourly Snapshots</span>
-      </div>
+    <Card>
+      <CardHeader
+        icon={<TrendingUp />}
+        title="30-Day Storage & Volume Trend"
+        actions={<span className="text-[11px] font-mono text-fg-muted">Hourly Snapshots</span>}
+      />
 
       <div className="h-56 w-full" data-testid="storage-trend-chart">
         <ResponsiveContainer width="100%" height="100%">
@@ -166,6 +162,6 @@ export const StorageTrendChart: React.FC<StorageTrendChartProps> = ({ history })
           </AreaChart>
         </ResponsiveContainer>
       </div>
-    </div>
+    </Card>
   );
 };

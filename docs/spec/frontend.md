@@ -102,6 +102,7 @@ Unsaved changes detection and browser exit guards prevent accidental loss of for
 * **Current Storage Card:** Dual-metric display showing active Database Footprint (MB/GB) alongside a visual progress bar for Available Mount Disk Space.
 * **30-Day Storage Trend Chart:** Compact line and area chart (via `recharts`) plotting database disk footprint and total log volume over the past 30 days.
 * **Maintenance Actions:** Manual trigger for log purge, FTS5 index compaction, WAL truncation, and SQLite vacuum with real-time UI updates.
+* **Retention slider:** a native range input in `accent-500` (`accent-color`); Firefox ignores `accent-color` on a range, so `index.css` draws its track, filled part and thumb (`::-moz-range-*`) the same way.
 
 ### 3.5 Settings Panel (`/settings`)
 * **Application Settings:** Encrypted API key management (Google Gemini, Anthropic Claude, OpenAI / custom OpenAI-compatible endpoint like Ollama/vLLM), dynamic model discovery with 24-hour cache, multi-model failover configuration, custom system prompt, retention slider (1 to 30 days, capped by `MAX_RETENTION_DAYS`), internal log level, and GHCR release update check toggle.
