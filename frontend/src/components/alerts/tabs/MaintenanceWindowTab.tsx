@@ -152,7 +152,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <span className="block text-xs font-medium text-fg-muted">
                 Specific End Time <span className="font-mono">({timeInputZoneLabel(serverTimezone)})</span>:
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <input
                   type="datetime-local"
                   aria-label={`Maintenance window end time (${timeInputZoneLabel(serverTimezone)})`}
@@ -165,7 +165,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                   type="button"
                   onClick={onApplyCustomWindow}
                   disabled={!customUntil}
-                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="px-3.5 py-1.5 text-xs font-medium bg-accent-700 hover:bg-accent-600 text-on-fill rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap self-start sm:self-auto"
                 >
                   Set Window
                 </button>

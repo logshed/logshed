@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Unknown AI providers refused**: Saving settings with an AI provider LogShed does not support (through the API; the web interface only offers supported ones) was accepted and stored, and AI analysis then failed with "Unsupported AI provider". The save is now refused with `422` and the list of supported providers, and nothing is stored. Model names are not checked: any model, including one on your own server, can still be entered.
 - **Drop rule errors stay on screen**: On Rules > Drop Rules, an error that came less than three seconds after a success message (for example a failed status change just after a delete) disappeared when the success message's timer ran out. Errors now stay until you close them or another message replaces them.
 - **Key icon the right way round**: The key icon (on the API & MCP Access tab, its token cards and the MCP card) is drawn as it was before 1.4.0, with the ring at the bottom left; a library update had mirrored it.
+- **No zoom when typing on an iPhone**: Text boxes on phones and tablets use 16 px text, so iOS Safari no longer zooms the page when you tap one (the AI follow-up box stayed zoomed after you finished typing). Pinch zoom still works.
 
 ## [1.3.1] - 2026-11-12
 
