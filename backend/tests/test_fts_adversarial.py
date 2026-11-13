@@ -20,6 +20,7 @@ from app.core.pipeline import QueueConsumer, get_queue
 from app.core.sse import sse_manager
 from app.services.fts_indexer import FTSIndexWorker, index_pending_batch, index_pending_logs
 from app.services.retention import execute_prune
+from tests.db_helpers import count_logs, fts_matches, open_db
 
 
 def _make_entry(i: int, message: str = "adversarial log", timestamp: str | None = None) -> dict:
@@ -83,14 +84,9 @@ class TestAdversarialFTSLatency:
         indexed_count = 0
         deadline = start_time + 3.0
         while time.monotonic() < deadline:
-            conn = get_connection(db_path)
-            row = conn.execute(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?",
-                (unique_token,),
-            ).fetchone()
-            conn.close()
-            if row and row[0] == total_logs:
-                indexed_count = row[0]
+            matched = fts_matches(db_path, unique_token)
+            if matched == total_logs:
+                indexed_count = matched
                 break
             await asyncio.sleep(0.02)
 
@@ -132,14 +128,9 @@ class TestAdversarialFTSLatency:
         indexed_count = 0
         deadline = start_time + 2.0
         while time.monotonic() < deadline:
-            conn = get_connection(db_path)
-            row = conn.execute(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?",
-                (unique_token,),
-            ).fetchone()
-            conn.close()
-            if row and row[0] == total_logs:
-                indexed_count = row[0]
+            matched = fts_matches(db_path, unique_token)
+            if matched == total_logs:
+                indexed_count = matched
                 break
             await asyncio.sleep(0.02)
 
@@ -176,14 +167,9 @@ class TestAdversarialFTSLatency:
         deadline = start_time + 10.0
         indexed_count = 0
         while time.monotonic() < deadline:
-            conn = get_connection(db_path)
-            row = conn.execute(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?",
-                (unique_token,),
-            ).fetchone()
-            conn.close()
-            if row and row[0] == total_logs:
-                indexed_count = row[0]
+            matched = fts_matches(db_path, unique_token)
+            if matched == total_logs:
+                indexed_count = matched
                 break
             await asyncio.sleep(0.05)
 
@@ -198,12 +184,12 @@ class TestAdversarialFTSLatency:
 
         assert indexed_count == total_logs
 
-        # Verify state integrity
-        conn = get_connection(db_path)
-        last_id = conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
-        max_log_id = conn.execute("SELECT MAX(id) FROM logs").fetchone()[0]
-        conn.close()
-        assert last_id == max_log_id == total_logs
+        # Verify state integrity: every day file is indexed up to its last row
+        for day_file in db_path.parent.glob("logs-*-UTC.db"):
+            with open_db(day_file, connect=sqlite3.connect) as conn:
+                last_id = conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
+                assert last_id == conn.execute("SELECT MAX(id) FROM logs").fetchone()[0]
+        assert count_logs(db_path) == total_logs
 
 
 # ===================================================================

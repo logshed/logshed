@@ -23,6 +23,7 @@ from app.core.security import (
     reset_crypto_cache,
 )
 from app.main import create_app
+from tests.db_helpers import stored_logs
 
 
 @pytest.fixture(autouse=True)
@@ -770,8 +771,6 @@ class TestIngestBearerSchemeCase:
 
 def _store_through_consumer(entries: list[dict]) -> dict[str, dict]:
     """Write queued entries with the real QueueConsumer insert and read them back by message."""
-    import sqlite3
-
     from app.core.config import get_db_path
     from app.core.pipeline import QueueConsumer
 
@@ -780,12 +779,7 @@ def _store_through_consumer(entries: list[dict]) -> dict[str, dict]:
         consumer._insert_batch(entries)
     finally:
         consumer._close_conn()
-    conn = sqlite3.connect(str(get_db_path()))
-    conn.row_factory = sqlite3.Row
-    try:
-        return {r["message"]: dict(r) for r in conn.execute("SELECT * FROM logs")}
-    finally:
-        conn.close()
+    return {r["message"]: r for r in stored_logs(get_db_path())}
 
 
 @pytest.mark.usefixtures("isolated_filters")

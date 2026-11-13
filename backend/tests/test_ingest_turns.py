@@ -16,7 +16,7 @@ from app.models import LogDeleteRequest
 from app.services.fts_indexer import index_pending_logs
 from app.services.log_deletion import execute_delete_logs
 from app.services.retention import execute_prune
-from tests.db_helpers import open_db
+from tests.db_helpers import count_logs, open_db
 
 ROWS = 12_000  # three chunks of 5,000 at most
 
@@ -40,8 +40,7 @@ def db(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _count(db_file: Path) -> int:
-    with open_db(db_file) as conn:
-        return conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+    return count_logs(db_file)
 
 
 def _wait_for(condition, timeout: float = 10.0) -> None:

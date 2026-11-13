@@ -14,6 +14,7 @@ from typing import Optional, Union
 
 from app.core.migrations import get_connection
 from app.core.pipeline import wait_for_ingest_write
+from app.services import day_store
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def index_pending_batch(conn: sqlite3.Connection, batch_size: int = 1000) -> int
 
 def index_pending_logs(db_path: Union[str, Path], batch_size: int = 5000) -> int:
     """
-    Synchronously index all pending logs from logs table into logs_fts.
+    Synchronously index all pending logs, in the legacy logs table and in every open day file.
     Drains unindexed rows in batches and returns the total number of indexed rows.
     Useful for testing, maintenance, and clean shutdown draining.
     """
@@ -76,13 +77,27 @@ def index_pending_logs(db_path: Union[str, Path], batch_size: int = 5000) -> int
     conn = get_connection(db_path)
     try:
         while True:
-            indexed = index_pending_batch(conn, batch_size=batch_size)
+            indexed = index_pending_chunk(conn, batch_size=batch_size)
             total_indexed += indexed
             if indexed < batch_size:
                 break
         return total_indexed
     finally:
         conn.close()
+
+
+def _has_legacy_logs(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'logs'").fetchone() is not None
+
+
+def index_pending_chunk(conn: sqlite3.Connection, batch_size: int) -> int:
+    """
+    One indexing batch in the legacy logs table (while it exists) and one in each open day file
+    with unindexed rows. Returns how many rows it indexed in all; batch_size or more means more
+    may be waiting.
+    """
+    indexed = index_pending_batch(conn, batch_size=batch_size) if _has_legacy_logs(conn) else 0
+    return indexed + day_store.index_pending_all(conn, batch_size)
 
 
 # Incremental logs_fts compaction: pages written per merge step, and the most steps per run
@@ -294,7 +309,7 @@ class FTSIndexWorker:
     def _index_pending_chunk(self, batch_size: int) -> int:
         """Synchronously index one batch chunk using the persistent worker connection."""
         conn = self._get_connection()
-        return index_pending_batch(conn, batch_size=batch_size)
+        return index_pending_chunk(conn, batch_size=batch_size)
 
     async def stop(self) -> None:
         """Signal graceful shutdown, drain pending unindexed logs, and close connection."""

@@ -12,6 +12,7 @@ the day-file connections the search uses, through ``use_interrupt``.
 """
 
 import contextlib
+import datetime
 import os
 import sqlite3
 import threading
@@ -65,16 +66,37 @@ def use_interrupt(check: Optional[Callable[[], bool]]) -> Iterator[None]:
         _local.interrupt = previous
 
 
+def _build(path: Path) -> None:
+    """
+    Make a day file with its layout under a temporary name, then rename it into place, so a
+    reader never opens a file without its tables. WAL mode is stored in the file, so every
+    later connection gets it without asking (asking needs a lock a reader should not wait for).
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    conn = sqlite3.connect(str(tmp))
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        day_files.create_layout(conn)
+    finally:
+        conn.close()
+    try:
+        os.link(tmp, path)
+    except FileExistsError:
+        pass
+    finally:
+        for name in (tmp, Path(f"{tmp}-wal"), Path(f"{tmp}-shm")):
+            with contextlib.suppress(FileNotFoundError):
+                name.unlink()
+
+
 def _open(path: Path, create: bool) -> sqlite3.Connection:
-    uri = f"file:{path}?mode={'rwc' if create else 'rw'}"
-    conn = sqlite3.connect(uri, uri=True, check_same_thread=True)
+    if create and not path.exists():
+        _build(path)
+    conn = sqlite3.connect(f"file:{path}?mode=rw", uri=True, check_same_thread=True)
     try:
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA busy_timeout=5000;")
-        if create:
-            day_files.create_layout(conn)
+        conn.execute("PRAGMA synchronous=NORMAL;")
         day_files.check_layout(conn, path)
     except BaseException:
         conn.close()
@@ -253,7 +275,8 @@ def _main_write_conn(db_path: Path) -> sqlite3.Connection:
                     conn.close()
         cache = _local.main = {}
         _local.main_generation = _generation
-    key = str(db_path)
+    # By inode too: a logs.db replaced at the same path (a restore) gets a new connection
+    key = (str(db_path), os.stat(db_path).st_ino)
     conn = cache.get(key)
     if conn is None:
         conn = sqlite3.connect(f"file:{db_path}?mode=rw", uri=True, check_same_thread=True)
@@ -291,9 +314,11 @@ def next_ids(conn: sqlite3.Connection, count: int) -> int:
 
 
 def forget_id_blocks() -> None:
-    """Drop the reserved id blocks (the next write reserves a new one); for restores and tests."""
+    """Drop the reserved id blocks and the days known to be listed (the next write checks again); for restores and tests."""
     with _id_lock:
         _id_blocks.clear()
+    with _listed_lock:
+        _listed_days.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -324,26 +349,79 @@ def _name_ids(day_conn: sqlite3.Connection, table: str, names: set[str]) -> dict
     return found
 
 
+# Days this process knows are in the catalogue, so ingest writes logs.db only on a day's first write
+_listed_days: set[tuple[str, int, str]] = set()
+_listed_lock = threading.Lock()
+
+
 def _open_day(conn: sqlite3.Connection, db_path: Path, day: str) -> sqlite3.Connection:
     """The day's file, with its catalogue entry; both are made on the day's first write."""
-    write = _main_write_conn(db_path)
-    with write:
-        write.execute(
-            "INSERT OR IGNORE INTO log_files (day, file_name, layout, state, row_count) VALUES (?, ?, ?, 'open', 0)",
-            (day, day_files.file_name(day), day_files.LAYOUT_VERSION),
-        )
-    day_conn = connection(day_files.day_path(db_path, day), create=True)
+    key = (str(db_path), os.stat(db_path).st_ino, day)
+    if key not in _listed_days:
+        write = _main_write_conn(db_path)
+        with write:
+            write.execute(
+                "INSERT OR IGNORE INTO log_files (day, file_name, layout, state, row_count) VALUES (?, ?, ?, 'open', 0)",
+                (day, day_files.file_name(day), day_files.LAYOUT_VERSION),
+            )
+        with _listed_lock:
+            _listed_days.add(key)
+    path = day_files.day_path(db_path, day)
+    is_new = not path.exists()
+    day_conn = connection(path, create=True)
     assert day_conn is not None
+    if is_new:
+        _give_to_database_owner(db_path, path)
     return day_conn
 
 
+def _give_to_database_owner(db_path: Path, path: Path) -> None:
+    """
+    A day file made by a command run as root (docker exec) goes to logs.db's owner, as backups
+    do, so the web process (which runs as PUID) can write it.
+    """
+    from app.core.backup import _give_to, _owner_to_apply
+
+    owner = _owner_to_apply(db_path)
+    if owner is None:
+        return
+    for name in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        if name.exists():
+            _give_to(name, owner)
+
+
+def _read_us(value: Any) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        return iso_to_us(str(value))
+    except (ValueError, OverflowError):
+        return None
+
+
 def stored_values(entry: dict) -> tuple:
-    """(ts, received_us, day) of an entry, read from its UTC ISO timestamp and received_at."""
-    received = entry.get("received_at") or entry.get("timestamp")
-    received_us = iso_to_us(str(received))
+    """
+    (ts, received_us, day) of an entry, read from its UTC ISO timestamp and received_at. A time
+    that cannot be read never stops a log being stored: a missing or unreadable received_at is
+    now, and a missing or unreadable timestamp is the received time.
+    """
+    received = entry.get("received_at")
     stamp = entry.get("timestamp")
-    ts = iso_to_us(str(stamp)) if stamp else received_us
-    return ts, received_us, day_files.day_of_us(received_us)
+    received_us = _read_us(received)
+    if received_us is None:
+        received, received_us = stamp, _read_us(stamp)
+    if received_us is None:
+        received = None
+        received_us = iso_to_us(datetime.datetime.now(datetime.timezone.utc).isoformat())
+    ts = received_us if stamp == received else _read_us(stamp)
+    if ts is None:
+        ts = received_us
+    # The day of a UTC ISO time is its first ten characters (what ingest gives); others are worked out
+    if isinstance(received, str) and received.endswith("+00:00") and received[10:11] == "T":
+        day = received[:10]
+    else:
+        day = day_files.day_of_us(received_us)
+    return ts, received_us, day
 
 
 def write_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
@@ -351,8 +429,10 @@ def write_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
     Store entries (dicts with the row fields) in the day files of their received_at day, give
     each its id ("id"), and commit each file's rows in one transaction. A batch that spans
     midnight writes two files. If a file's write fails, the entries of files already written
-    keep their ids, the failed ones lose theirs, and the error is raised.
+    keep their ids, the failed ones lose theirs, and the error is raised. Entries that already
+    have an id were stored by an earlier attempt and are skipped, so a retry stores each once.
     """
+    entries = [e for e in entries if e.get("id") is None]
     if not entries:
         return
     db_path = main_path(conn)
@@ -388,13 +468,14 @@ def _insert(day_conn: sqlite3.Connection, rows: list[tuple[dict, int, int]]) -> 
         chunk = rows[i:i + INSERT_CHUNK_ROWS]
         params: list = []
         for entry, ts, received_us in chunk:
-            message = entry.get("message") or ""
-            raw, raw_kind = day_files.split_raw(message, entry.get("raw", ""))
+            # As in the legacy table: a field left out takes its default, an explicit None fails NOT NULL
+            message = entry.get("message", "")
+            raw, raw_kind = day_files.split_raw(message or "", entry.get("raw", ""))
             params.extend((
                 entry["id"],
                 ts,
                 received_us,
-                entry.get("source_ip") or "",
+                entry.get("source_ip", ""),
                 hosts[entry.get("source_alias") or ""],
                 apps[entry.get("app_name") or ""],
                 entry.get("source_kind", 0),
@@ -479,3 +560,215 @@ def columns(include_raw: bool = True, alias: str = "logs") -> str:
 def names_in(table: str, placeholders: str) -> str:
     """SQL selecting the ids of names in a lookup table (hosts or apps)."""
     return f"(SELECT id FROM {table} WHERE name IN ({placeholders}))"
+
+
+def write_rows_one_by_one(
+    conn: sqlite3.Connection, entries: list[dict], repair: Callable[[dict], None]
+) -> tuple[list[dict], list[tuple[dict, Exception]]]:
+    """
+    Store entries one at a time, each in a savepoint, in one transaction per day file: a row
+    that fails with UnicodeEncodeError is repaired (repair changes the entry in place) and tried
+    once more, and a row that still fails is skipped. A busy or locked file (OperationalError)
+    rolls that file back and is raised; files committed before it keep their rows and ids, so
+    a retry (write_rows) stores only the rest. Returns the stored entries and the skipped ones
+    with their errors.
+    """
+    pending = [e for e in entries if e.get("id") is None]
+    stored: list[dict] = [e for e in entries if e.get("id") is not None]
+    skipped: list[tuple[dict, Exception]] = []
+    if not pending:
+        return stored, skipped
+    db_path = main_path(conn)
+    if db_path is None:
+        raise RuntimeError("Day files need a database file")
+    by_day: dict[str, list[tuple[dict, int, int]]] = {}
+    for entry in pending:
+        try:
+            ts, received_us, day = stored_values(entry)
+        except (ValueError, OverflowError, TypeError) as error:
+            skipped.append((entry, error))
+            continue
+        by_day.setdefault(day, []).append((entry, ts, received_us))
+    first = next_ids(conn, sum(len(rows) for rows in by_day.values()))
+    next_id = first
+    for day in sorted(by_day):
+        day_conn = _open_day(conn, db_path, day)
+        if day_conn.in_transaction:
+            day_conn.rollback()
+        day_conn.execute("BEGIN IMMEDIATE")
+        file_stored: list[dict] = []
+        try:
+            for row in by_day[day]:
+                entry = row[0]
+                entry["id"] = next_id
+                next_id += 1
+                day_conn.execute("SAVEPOINT log_row")
+                try:
+                    try:
+                        _insert(day_conn, [row])
+                    except UnicodeEncodeError:
+                        repair(entry)
+                        _insert(day_conn, [row])
+                    file_stored.append(entry)
+                except sqlite3.OperationalError:
+                    raise
+                except Exception as row_error:
+                    day_conn.execute("ROLLBACK TO log_row")
+                    entry.pop("id", None)
+                    skipped.append((entry, row_error))
+                day_conn.execute("RELEASE log_row")
+            day_conn.execute("COMMIT")
+        except BaseException:
+            with contextlib.suppress(Exception):
+                day_conn.execute("ROLLBACK")
+            for entry, _ts, _received in by_day[day]:
+                entry.pop("id", None)
+            raise
+        stored.extend(file_stored)
+    return stored, skipped
+
+
+def open_day_connections(conn: sqlite3.Connection, states: tuple[str, ...] = ("open", "sealed")) -> list[tuple[str, sqlite3.Connection]]:
+    """(day, connection) of every day file in the catalogue in these states that exists, newest first."""
+    db_path = main_path(conn)
+    if db_path is None or not has_catalogue(conn):
+        return []
+    found = []
+    for day, state in catalogue_days(conn):
+        if day == day_files.LEGACY_DAY or state not in states:
+            continue
+        day_conn = connection(day_files.day_path(db_path, day))
+        if day_conn is not None:
+            found.append((day, day_conn))
+    return found
+
+
+def index_pending_all(conn: sqlite3.Connection, batch_size: int) -> int:
+    """One indexing batch in each day file that has rows not yet in its full-text index."""
+    indexed = 0
+    for _day, day_conn in open_day_connections(conn, ("open",)):
+        if has_unindexed(day_conn):
+            indexed += index_pending(day_conn, batch_size)
+    return indexed
+
+
+def delete_file(conn: sqlite3.Connection, day: str) -> None:
+    """
+    Delete a day file and its catalogue entry: the entry is marked 'deleting', every thread's
+    connections are dropped, the file, its -wal and -shm are deleted, then the entry. A crash in
+    between leaves the entry 'deleting', and the next call (or start-up) finishes it.
+    """
+    db_path = main_path(conn)
+    if db_path is None:
+        return
+    write = _main_write_conn(db_path)
+    with write:
+        write.execute("UPDATE log_files SET state = 'deleting' WHERE day = ?", (day,))
+    with _listed_lock:
+        _listed_days.difference_update({k for k in _listed_days if k[0] == str(db_path) and k[2] == day})
+    forget_connections()
+    path = day_files.day_path(db_path, day)
+    for name in (Path(f"{path}-wal"), Path(f"{path}-shm"), path):
+        with contextlib.suppress(FileNotFoundError):
+            name.unlink()
+    write = _main_write_conn(db_path)
+    with write:
+        write.execute("DELETE FROM log_files WHERE day = ?", (day,))
+
+
+def _reindex(day_conn: sqlite3.Connection, ids: list[int]) -> None:
+    """Replace the full-text rows of these ids (those already indexed) with their current text."""
+    if not ids:
+        return
+    last = day_conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
+    indexed = [i for i in ids if i <= last]
+    if not indexed:
+        return
+    placeholders = ",".join("?" * len(indexed))
+    day_conn.execute(f"DELETE FROM logs_fts WHERE rowid IN ({placeholders})", indexed)
+    day_conn.execute(
+        f"""
+        INSERT INTO logs_fts(rowid, app_name, source_alias, message)
+        SELECT logs.id, apps.name, hosts.name, logs.message
+        FROM logs JOIN apps ON apps.id = logs.app_id JOIN hosts ON hosts.id = logs.host_id
+        WHERE logs.id IN ({placeholders})
+        """,
+        indexed,
+    )
+
+
+def _unindex(day_conn: sqlite3.Connection, ids: list[int]) -> None:
+    """Remove the full-text rows of these ids (those already indexed)."""
+    last = day_conn.execute("SELECT last_indexed_id FROM fts_index_state WHERE id = 1").fetchone()[0]
+    indexed = [i for i in ids if i <= last]
+    if indexed:
+        placeholders = ",".join("?" * len(indexed))
+        day_conn.execute(f"DELETE FROM logs_fts WHERE rowid IN ({placeholders})", indexed)
+
+
+def _name_id(day_conn: sqlite3.Connection, table: str, name: str) -> Optional[int]:
+    row = day_conn.execute(f"SELECT id FROM {table} WHERE name = ?", (name,)).fetchone()
+    return row[0] if row else None
+
+
+def set_names(
+    day_conn: sqlite3.Connection,
+    column: str,
+    where_sql: str,
+    params: tuple,
+    target: str,
+    batch_size: int,
+    pause: Callable[[], None],
+) -> int:
+    """
+    Set host_id or app_id (column) to target's id on the rows where_sql selects, newest id first,
+    batch_size rows per commit, re-indexing their full-text rows. Returns how many changed.
+    """
+    table = "hosts" if column == "host_id" else "apps"
+    ids = sorted((r[0] for r in day_conn.execute(f"SELECT id FROM logs WHERE {where_sql}", params)), reverse=True)
+    if not ids:
+        return 0
+    changed = 0
+    for i in range(0, len(ids), batch_size):
+        chunk = ids[i:i + batch_size]
+        placeholders = ",".join("?" * len(chunk))
+        with day_conn:
+            target_id = _name_ids(day_conn, table, {target})[target]
+            cursor = day_conn.execute(f"UPDATE logs SET {column} = ? WHERE id IN ({placeholders})", (target_id, *chunk))
+            changed += max(cursor.rowcount, 0)
+            _reindex(day_conn, chunk)
+        pause()
+    return changed
+
+
+def delete_rows(
+    day_conn: sqlite3.Connection,
+    where_sql: str,
+    params: dict[str, Any],
+    batch_size: int,
+    between_batches: Callable[[], None],
+) -> int:
+    """Delete the rows where_sql selects (and their full-text rows), batch_size per commit; returns how many."""
+    deleted = 0
+    while True:
+        with day_conn:
+            ids = [r[0] for r in day_conn.execute(f"SELECT logs.id FROM logs {where_sql} LIMIT {int(batch_size)}", params)]
+            if not ids:
+                return deleted
+            _unindex(day_conn, ids)
+            placeholders = ",".join("?" * len(ids))
+            deleted += day_conn.execute(f"DELETE FROM logs WHERE id IN ({placeholders})", ids).rowcount
+        between_batches()
+
+
+def delete_ids(day_conn: sqlite3.Connection, log_ids: list[int], between_batches: Callable[[], None], chunk_size: int = 500) -> int:
+    """Delete the rows with these ids (and their full-text rows), a chunk per commit; returns how many."""
+    deleted = 0
+    for i in range(0, len(log_ids), chunk_size):
+        chunk = log_ids[i:i + chunk_size]
+        with day_conn:
+            _unindex(day_conn, chunk)
+            placeholders = ",".join("?" * len(chunk))
+            deleted += day_conn.execute(f"DELETE FROM logs WHERE id IN ({placeholders})", chunk).rowcount
+        between_batches()
+    return deleted

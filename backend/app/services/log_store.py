@@ -13,12 +13,14 @@ Helpers the store builds on: ``log_query`` turns a ``LogFilter`` into SQL and ru
 searches newest first, and ``fts_indexer`` keeps the full-text index up to date.
 """
 
+import contextlib
+import datetime
 import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from app.core.day_files import RAW_SQL, iso_sql, iso_to_us
+from app.core.day_files import RAW_SQL, day_start_us, iso_sql, iso_to_us
 from app.core.utils import DOCKER_ALIASES_SQL, format_severity_label
 from app.services import day_store
 from app.services.log_query import (
@@ -59,11 +61,22 @@ def row_values(entry: dict) -> list:
     ]
 
 
+def _writes_day_files(conn: sqlite3.Connection) -> bool:
+    """True from schema 4 on: new logs go to day files. Older schemas (in tests) write the logs table."""
+    return day_store.has_catalogue(conn)
+
+
 def insert_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
     """
-    Store entries (dicts with the row fields) in multi-row INSERTs and set each entry's "id".
-    Does not commit: the caller commits or rolls back the whole batch.
+    Store entries (dicts with the row fields) and set each entry's "id". From schema 4 the rows
+    go to the day file of their received_at day (UTC), each file's rows committed together;
+    entries that already have an id (stored by an earlier attempt) are skipped, so a batch can
+    be retried after a failure part way. On an older schema they go to the logs table in
+    multi-row INSERTs, and the caller commits or rolls back the whole batch.
     """
+    if _writes_day_files(conn):
+        day_store.write_rows(conn, entries)
+        return
     cursor = conn.cursor()
     for i in range(0, len(entries), INSERT_CHUNK_ROWS):
         chunk = entries[i:i + INSERT_CHUNK_ROWS]
@@ -81,8 +94,51 @@ def insert_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
             entry["id"] = row_id
 
 
-def insert_row(conn: sqlite3.Connection, entry: dict) -> int:
-    """Store one entry and return its id. Does not commit."""
+def insert_rows_one_by_one(
+    conn: sqlite3.Connection, entries: list[dict], repair: Callable[[dict], None]
+) -> tuple[list[dict], list[tuple[dict, Exception]]]:
+    """
+    Store entries one at a time, each in its own savepoint, so one bad row does not stop the
+    rest: a row that fails with UnicodeEncodeError is repaired (repair changes the entry in
+    place) and tried once more, and a row that still fails is skipped. A busy or locked database
+    (OperationalError) rolls back and is raised; with day files, the files committed before it
+    keep their rows and ids, so a retry with insert_rows stores each row once. Returns the
+    stored entries and the skipped entries with their errors.
+    """
+    if _writes_day_files(conn):
+        return day_store.write_rows_one_by_one(conn, entries, repair)
+    stored: list[dict] = []
+    skipped: list[tuple[dict, Exception]] = []
+    try:
+        if conn.in_transaction:
+            conn.rollback()
+        conn.execute("BEGIN IMMEDIATE")
+        for entry in entries:
+            conn.execute("SAVEPOINT log_row")
+            try:
+                try:
+                    entry["id"] = _insert_one(conn, entry)
+                except UnicodeEncodeError:
+                    repair(entry)
+                    entry["id"] = _insert_one(conn, entry)
+                stored.append(entry)
+            except sqlite3.OperationalError:
+                raise
+            except Exception as row_error:
+                conn.execute("ROLLBACK TO log_row")
+                skipped.append((entry, row_error))
+            conn.execute("RELEASE log_row")
+        conn.commit()
+    except BaseException:
+        with contextlib.suppress(Exception):
+            conn.rollback()
+        for entry in stored:
+            entry.pop("id", None)
+        raise
+    return stored, skipped
+
+
+def _insert_one(conn: sqlite3.Connection, entry: dict) -> int:
     rows = conn.execute(
         f"INSERT INTO logs ({_INSERT_COLUMNS}) VALUES {_ROW_PLACEHOLDER} RETURNING id", row_values(entry)
     ).fetchall()
@@ -99,11 +155,22 @@ def relabel_host(
     batch_size: int = 1000,
 ) -> int:
     """
-    Set the host name of stored logs from source_ip to target_alias, newest first, in batches of
-    batch_size committed separately. With only_alias, only rows named only_alias change;
-    otherwise every row not already named target_alias, except rows named one of keep_aliases.
-    Returns the number of rows changed.
+    Set the host name of stored logs from source_ip to target_alias, newest first (day files from
+    the newest, then the legacy table), in batches of batch_size committed separately. With
+    only_alias, only rows named only_alias change; otherwise every row not already named
+    target_alias, except rows named one of keep_aliases. Returns the number of rows changed.
     """
+    total = 0
+    if only_alias is not None:
+        day_sql, day_params = "source_ip = ? AND host_id = (SELECT id FROM hosts WHERE name = ?)", (source_ip, only_alias)
+    else:
+        kept = (target_alias, *keep_aliases)
+        day_sql = f"source_ip = ? AND host_id NOT IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(kept))}))"
+        day_params = (source_ip, *kept)
+    for _day, day_conn in day_store.open_day_connections(conn):
+        total += day_store.set_names(day_conn, "host_id", day_sql, day_params, target_alias, batch_size, _pause)
+    if not _has_legacy_table(conn):
+        return total
     if only_alias is not None:
         alias_sql, alias_params = "+source_alias = ?", (only_alias,)
     elif keep_aliases:
@@ -112,7 +179,16 @@ def relabel_host(
         alias_params = (target_alias, *keep_aliases)
     else:
         alias_sql, alias_params = "+source_alias != ? OR +source_alias IS NULL", (target_alias,)
-    return _keyset_alias_backfill(conn, source_ip, alias_sql, alias_params, target_alias, batch_size)
+    return total + _keyset_alias_backfill(conn, source_ip, alias_sql, alias_params, target_alias, batch_size)
+
+
+def _pause() -> None:
+    """A moment between relabel batches, so ingest and readers get the files in between."""
+    time.sleep(0.005)
+
+
+def _has_legacy_table(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'logs'").fetchone() is not None
 
 
 def _keyset_alias_backfill(
@@ -177,6 +253,17 @@ def relabel_docker_app(
     in batches committed separately. With source_alias, only that Docker host's rows change;
     otherwise rows under any Docker host name, so syslog rows from a shared address keep theirs.
     """
+    if source_alias:
+        hosts_sql, host_params = "host_id = (SELECT id FROM hosts WHERE name = ?)", (source_alias,)
+    else:
+        names = docker_aliases(conn)
+        hosts_sql = f"host_id IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(names))}))"
+        host_params = tuple(names)
+    day_sql = f"source_ip = ? AND app_id = (SELECT id FROM apps WHERE name = ?) AND {hosts_sql}"
+    for _day, day_conn in day_store.open_day_connections(conn):
+        day_store.set_names(day_conn, "app_id", day_sql, (source_ip, raw_name, *host_params), target_name, batch_size, _pause)
+    if not _has_legacy_table(conn):
+        return
     cursor = conn.cursor()
     if source_alias:
         update_query = """
@@ -233,18 +320,58 @@ def delete(
     named by id are deleted only when they also match the filter's other criteria: the same
     logs count_matching counts. Returns how many went.
     """
+    found = _parts_for(conn, log_filter)
+    if not _only_legacy(found):
+        return _delete_in_parts(conn, found, log_filter, batch_size, between_batches)
     if log_filter.log_ids and log_filter == LogFilter(log_ids=log_filter.log_ids):
         return _delete_ids(conn, log_filter.log_ids, between_batches)
 
     where_sql, params = build_where(conn, log_filter)
+    return _delete_legacy_where(conn, where_sql, params, log_filter.query, batch_size, between_batches)
+
+
+def _delete_in_parts(
+    conn: sqlite3.Connection,
+    found: list[day_store.Part],
+    log_filter: LogFilter,
+    batch_size: int,
+    between_batches: Callable[[], None],
+) -> int:
+    """delete() over several parts (or a day file), each part in its own batches."""
+    by_ids = bool(log_filter.log_ids) and log_filter == LogFilter(log_ids=log_filter.log_ids)
+    query = _PartQuery.prepare(conn, log_filter)
+    deleted = 0
+    for part in found:
+        if by_ids:
+            ids = [i for i in log_filter.log_ids if part.min_id <= i <= part.max_id]  # type: ignore[operator]
+            if part.legacy:
+                deleted += _delete_ids(conn, tuple(ids), between_batches)
+            else:
+                deleted += day_store.delete_ids(part.conn, ids, between_batches)
+            continue
+        where_sql, params = query.where(part)
+        if part.legacy:
+            deleted += _delete_legacy_where(conn, where_sql, params, log_filter.query, batch_size, between_batches)
+        else:
+            deleted += execute_with_fts_fallback(
+                lambda p, c=part.conn, w=where_sql: day_store.delete_rows(c, w, p, batch_size, between_batches),
+                params,
+                log_filter.query,
+                empty=0,
+            )
+    return deleted
+
+
+def _delete_legacy_where(
+    conn: sqlite3.Connection,
+    where_sql: str,
+    params: dict[str, Any],
+    query: Optional[str],
+    batch_size: int,
+    between_batches: Callable[[], None],
+) -> int:
     cursor = conn.cursor()
-    delete_sql = f"""
-        DELETE FROM logs WHERE id IN (
-            SELECT id FROM logs
-            {where_sql}
-            LIMIT :batch_limit
-        )
-    """
+    delete_sql = f"DELETE FROM logs WHERE id IN (SELECT id FROM logs {where_sql} LIMIT :batch_limit)"
 
     def _delete_batches(run_params: dict[str, Any]) -> int:
         deleted = 0
@@ -257,7 +384,7 @@ def delete(
                 return deleted
             between_batches()
 
-    return execute_with_fts_fallback(_delete_batches, params, log_filter.query, empty=0)
+    return execute_with_fts_fallback(_delete_batches, params, query, empty=0)
 
 
 def _delete_ids(conn: sqlite3.Connection, log_ids: tuple[int, ...], between_batches: Callable[[], None]) -> int:
@@ -285,7 +412,26 @@ def delete_everything(conn: sqlite3.Connection, batch_size: int, between_batches
     so the trigger does not fire for the rows still to be deleted. Logs that arrive meanwhile
     have higher ids: they are kept, and the indexer, starting again from 0, finds only them
     once the old rows are gone. If the delete stops halfway, the indexer indexes the rows left.
+
+    Day files of days before yesterday (UTC) are deleted whole. Today's and yesterday's may still
+    receive a batch that was waiting in the ingest queue, so their rows stored when the delete
+    starts are deleted row by row.
     """
+    deleted = 0
+    if _writes_day_files(conn):
+        yesterday = (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)).isoformat()
+        for part in day_store.parts(conn):
+            if part.legacy:
+                continue
+            if part.day < yesterday:
+                deleted += part.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+                day_store.delete_file(conn, part.day)
+            else:
+                deleted += day_store.delete_rows(
+                    part.conn, "WHERE logs.id <= :last", {"last": part.max_id}, batch_size, between_batches
+                )
+    if not _has_legacy_table(conn):
+        return deleted
     conn.execute("BEGIN IMMEDIATE")
     with conn:
         last_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM logs").fetchone()[0]
@@ -294,7 +440,6 @@ def delete_everything(conn: sqlite3.Connection, batch_size: int, between_batches
             "UPDATE fts_index_state SET last_indexed_id = 0, updated_at = datetime('now') WHERE id = 1"
         )
 
-    deleted = 0
     while True:
         cursor = conn.execute(
             "DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE id <= ? ORDER BY id LIMIT ?)",
@@ -316,9 +461,28 @@ _PRUNABLE_WHERE = """
 """
 
 
+def _expired_days(conn: sqlite3.Connection, cutoff_iso: str) -> list[tuple[str, int]]:
+    """(day, rows) of the day files whose whole UTC day is older than the cutoff, oldest first."""
+    cutoff_us = iso_to_us(cutoff_iso)
+    expired = []
+    for part in reversed(day_store.parts(conn)):
+        if not part.legacy and day_start_us(part.day) + _DAY_US <= cutoff_us:
+            expired.append((part.day, part.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]))
+    return sorted(expired)
+
+
+_DAY_US = 86_400_000_000
+
+
 def count_prunable(conn: sqlite3.Connection, cutoff_iso: str) -> int:
-    """How many logs prune(cutoff_iso) would delete now."""
-    return conn.execute(f"SELECT COUNT(*) FROM logs WHERE {_PRUNABLE_WHERE}", {"cutoff": cutoff_iso}).fetchone()[0]
+    """
+    How many logs prune(cutoff_iso) would delete now: those of the day files whose whole day is
+    older than the cutoff, and the legacy rows older than it.
+    """
+    total = sum(rows for _day, rows in _expired_days(conn, cutoff_iso)) if _writes_day_files(conn) else 0
+    if _has_legacy_table(conn):
+        total += conn.execute(f"SELECT COUNT(*) FROM logs WHERE {_PRUNABLE_WHERE}", {"cutoff": cutoff_iso}).fetchone()[0]
+    return total
 
 
 def prune(
@@ -328,12 +492,21 @@ def prune(
     batch_size: int = 5000,
 ) -> int:
     """
-    Delete the logs older than cutoff_iso (UTC ISO), a batch per commit, calling between_batches
-    after each one. Returns how many went.
+    Delete the logs older than cutoff_iso (UTC ISO): every day file whose whole UTC day is older
+    than the cutoff, at once, so a log is kept up to a day longer than the cutoff asks and its
+    space comes back at once; then the legacy rows older than the cutoff, a batch per commit,
+    calling between_batches after each one. Returns how many went.
     """
+    total = 0
+    if _writes_day_files(conn):
+        for day, rows in _expired_days(conn, cutoff_iso):
+            day_store.delete_file(conn, day)
+            total += rows
+            between_batches()
+    if not _has_legacy_table(conn):
+        return total
     cursor = conn.cursor()
     delete_query = f"DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE {_PRUNABLE_WHERE} LIMIT :batch)"
-    total = 0
     while True:
         cursor.execute(delete_query, {"cutoff": cutoff_iso, "batch": batch_size})
         count = cursor.rowcount

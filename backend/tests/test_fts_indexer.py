@@ -13,6 +13,7 @@ import pytest
 
 from app.core import pipeline as pipeline_mod
 from app.core.migrations import get_connection, run_migrations
+from tests.db_helpers import fts_matches, stored_logs
 from app.core.pipeline import QueueConsumer, get_queue
 from app.core.sse import sse_manager
 import app.services.fts_indexer as fts_indexer_mod
@@ -77,14 +78,9 @@ class TestFTSIndexWorkerCatchUpLatency:
         indexed_count = 0
         deadline = start_time + 2.0
         while time.monotonic() < deadline:
-            conn = get_connection(db_path)
-            row = conn.execute(
-                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?",
-                (unique_token,),
-            ).fetchone()
-            conn.close()
-            if row and row[0] == 50:
-                indexed_count = row[0]
+            matched = fts_matches(db_path, unique_token)
+            if matched == 50:
+                indexed_count = matched
                 break
             await asyncio.sleep(0.02)
 
@@ -311,15 +307,13 @@ class TestChunkedBatchInsertsWithReturningID:
             assert isinstance(entry["id"], int), f"Entry {i} id is not int"
             assert entry["id"] == i + 1, f"Expected id {i + 1}, got {entry['id']}"
 
-        # 2. Verify all records exist in SQLite logs table
-        conn = get_connection(db_path)
-        rows = conn.execute("SELECT id, message FROM logs ORDER BY id ASC").fetchall()
-        conn.close()
+        # 2. Verify all records are stored
+        rows = stored_logs(db_path)
 
         assert len(rows) == total_records
         for i, row in enumerate(rows):
-            assert row[0] == i + 1
-            assert f"chunked_insert_test item {i}" in row[1]
+            assert row["id"] == i + 1
+            assert f"chunked_insert_test item {i}" in row["message"]
 
     @pytest.mark.asyncio
     async def test_chunked_inserts_via_queue_and_sse_broadcast(self, db_path: Path):

@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 
 from app.core.migrations import run_migrations
-from app.services import log_store
+from app.services import day_store, log_store
 from app.services.fts_indexer import index_pending_logs
 from app.services.log_query import LogFilter
-from tests.db_helpers import open_db, store_logs
+from tests.db_helpers import open_db, store_logs, stored_logs
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
@@ -131,11 +131,20 @@ def test_insert_rows_over_one_chunk(db):
         assert log_store.count_rows(conn, after_id=entries[-4]["id"]) == 3
 
 
-def test_insert_row_returns_its_id(db):
+def test_rows_stored_one_by_one_skip_a_bad_row_and_repair_a_fixable_one(db):
+    bad = _row(_ts(2))
+    bad["message"] = None
+    fixable = _row(_ts(3), message="disk \udcff full")
+
+    def _repair(entry):
+        for key in ("message", "raw"):
+            entry[key] = entry[key].encode("utf-8", "replace").decode("utf-8")
+
     with open_db(db, sqlite3.Row) as conn:
-        first = log_store.insert_row(conn, _row(_ts(1)))
-        second = log_store.insert_row(conn, _row(_ts(2)))
-    assert second == first + 1
+        stored, skipped = log_store.insert_rows_one_by_one(conn, [_row(_ts(1)), bad, fixable], _repair)
+    assert [e["id"] for e in stored] == [stored[0]["id"], stored[0]["id"] + 2]
+    assert [e is bad for e, _error in skipped] == [True] and "id" not in bad
+    assert [r["message"] for r in stored_logs(db)] == ["m", "disk ? full"]
 
 
 def test_search_pages_by_offset_and_by_position_agree(db):
@@ -249,7 +258,7 @@ def test_relabel_host_changes_all_but_the_kept_names(db):
     )
     with open_db(db, sqlite3.Row) as conn:
         changed = log_store.relabel_host(conn, "10.0.0.5", "nas", keep_aliases=("dockerhost",), batch_size=1)
-        names = {r[0]: r[1] for r in conn.execute("SELECT id, source_alias FROM logs")}
+    names = {r["id"]: r["source_alias"] for r in stored_logs(db)}
     assert changed == 2
     assert [names[i] for i in ids] == ["nas", "nas", "dockerhost", ""]
 
@@ -258,15 +267,15 @@ def test_relabel_host_only_one_name(db):
     ids = store_logs(db, _row(_ts(1), ip="docker", alias="a"), _row(_ts(2), ip="docker", alias="b"))
     with open_db(db, sqlite3.Row) as conn:
         assert log_store.relabel_host(conn, "docker", "c", only_alias="a") == 1
-        names = [conn.execute("SELECT source_alias FROM logs WHERE id = ?", (i,)).fetchone()[0] for i in ids]
-    assert names == ["c", "b"]
+    names = {r["id"]: r["source_alias"] for r in stored_logs(db)}
+    assert [names[i] for i in ids] == ["c", "b"]
 
 
 def test_relabel_host_every_other_name(db):
     store_logs(db, _row(_ts(1), ip="docker", alias="a"), _row(_ts(2), ip="docker", alias="b"))
     with open_db(db, sqlite3.Row) as conn:
         assert log_store.relabel_host(conn, "docker", "b") == 1
-        assert {r[0] for r in conn.execute("SELECT source_alias FROM logs")} == {"b"}
+    assert {r["source_alias"] for r in stored_logs(db)} == {"b"}
 
 
 def test_relabel_docker_app_spares_syslog_rows_from_the_same_address(db):
@@ -277,7 +286,7 @@ def test_relabel_docker_app_spares_syslog_rows_from_the_same_address(db):
     )
     with open_db(db, sqlite3.Row) as conn:
         log_store.relabel_docker_app(conn, "abc123", "web", source_ip="10.0.0.9", batch_size=1)
-        apps = sorted((r[0], r[1]) for r in conn.execute("SELECT source_alias, app_name FROM logs"))
+    apps = sorted((r["source_alias"], r["app_name"]) for r in stored_logs(db))
     assert apps == [("docker", "web"), ("nas", "abc123")]
 
 
@@ -305,15 +314,43 @@ def test_delete_everything_keeps_rows_written_after_it_starts(db):
         assert [r[0] for r in conn.execute("SELECT id FROM logs")] == late
 
 
-def test_prune_deletes_only_indexed_rows_older_than_the_cutoff(db):
-    store_logs(db, _row(_ts(1, day=1)), _row(_ts(1, day=2)))
+def _legacy_rows(db, *rows: dict) -> None:
+    """Rows in the legacy logs table, as 1.3.x stored them."""
+    with open_db(db) as conn:
+        for row in rows:
+            conn.execute(
+                "INSERT INTO logs (timestamp, received_at, source_ip, source_alias, app_name, severity, message, raw) "
+                "VALUES (:timestamp, :received_at, :source_ip, :source_alias, :app_name, :severity, :message, :raw)",
+                row,
+            )
+
+
+def test_prune_deletes_only_indexed_legacy_rows_older_than_the_cutoff(db):
+    _legacy_rows(db, _row(_ts(1, day=1)), _row(_ts(1, day=2)))
     index_pending_logs(db)
-    store_logs(db, _row(_ts(2, day=1)))  # old but not indexed yet
+    _legacy_rows(db, _row(_ts(2, day=1)))  # old but not indexed yet
     cutoff = "2026-11-02T00:00:00+00:00"
     with open_db(db, sqlite3.Row) as conn:
         assert log_store.count_prunable(conn, cutoff) == 1
         assert log_store.prune(conn, cutoff, lambda: None, batch_size=1) == 1
         assert log_store.count_rows(conn) == 2
+
+
+def test_prune_deletes_whole_day_files_once_their_day_is_past_the_cutoff(db):
+    store_logs(db, _row(_ts(1, day=1)), _row(_ts(59, day=1)), _row(_ts(1, day=2)), _row(_ts(1, day=3)))
+    files = sorted(p.name for p in db.parent.glob("logs-*-UTC.db"))
+    assert files == ["logs-2026-11-01-UTC.db", "logs-2026-11-02-UTC.db", "logs-2026-11-03-UTC.db"]
+    with open_db(db, sqlite3.Row) as conn:
+        # 2 November is not over at the cutoff: its file stays whole, with its 10:01 log
+        cutoff = "2026-11-02T12:00:00+00:00"
+        assert log_store.count_prunable(conn, cutoff) == 2
+        assert log_store.prune(conn, cutoff, lambda: None) == 2
+        assert log_store.count_rows(conn) == 2
+        assert [d for d, _state in day_store.catalogue_days(conn)] == ["legacy", "2026-11-03", "2026-11-02"]
+    assert sorted(p.name for p in db.parent.glob("logs-*-UTC.db*")) == [
+        "logs-2026-11-02-UTC.db", "logs-2026-11-02-UTC.db-shm", "logs-2026-11-02-UTC.db-wal",
+        "logs-2026-11-03-UTC.db", "logs-2026-11-03-UTC.db-shm", "logs-2026-11-03-UTC.db-wal",
+    ]
 
 
 def test_seen_names(db):

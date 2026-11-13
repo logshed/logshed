@@ -36,3 +36,42 @@ def store_logs(db_path, *entries: dict) -> list[int]:
     with open_db(db_path) as conn:
         log_store.insert_rows(conn, rows)
     return [row["id"] for row in rows]
+
+
+def stored_logs(db_path) -> list[dict]:
+    """Every stored log (in day files and the legacy table) as a dict of its row fields, by id."""
+    import sqlite3
+
+    from app.services import log_store
+    from app.services.log_query import LogFilter
+
+    with open_db(db_path, sqlite3.Row) as conn:
+        total = log_store.count_rows(conn)
+        _, rows = log_store.search(conn, LogFilter(), fetch=max(total, 1), count_limit=max(total, 1))
+    return sorted((dict(r) for r in rows), key=lambda r: r["id"])
+
+
+def count_logs(db_path) -> int:
+    """How many logs are stored, in day files and the legacy table."""
+    from app.services import log_store
+
+    with open_db(db_path) as conn:
+        return log_store.count_rows(conn)
+
+
+def fts_matches(db_path, term: str) -> int:
+    """
+    How many rows match a full-text term in the legacy logs_fts and every day file's, read
+    directly (a search through the store would wake the indexer itself).
+    """
+    import sqlite3
+    from pathlib import Path
+
+    total = 0
+    with open_db(db_path) as conn:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'logs_fts'").fetchone():
+            total += conn.execute("SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?", (term,)).fetchone()[0]
+    for day_file in sorted(Path(db_path).parent.glob("logs-*-UTC.db")):
+        with open_db(day_file, connect=lambda p: sqlite3.connect(p)) as conn:
+            total += conn.execute("SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH ?", (term,)).fetchone()[0]
+    return total

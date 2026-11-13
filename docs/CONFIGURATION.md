@@ -254,7 +254,8 @@ All persistent application data is stored under the `/data` directory:
 
 | Path | Description |
 |---|---|
-| `/data/logs.db` | Primary SQLite database holding ingested logs, alert rules, drop rules, and settings. |
+| `/data/logs.db` | Primary SQLite database holding alert rules, drop rules, settings, history and the list of log files; after an upgrade from 1.3.x, also the logs received before the upgrade, until retention removes them. |
+| `/data/logs-YYYY-MM-DD-UTC.db` | The logs LogShed received on that day (UTC), one file per day, each with its own `-wal` and `-shm` files while in use. Retention deletes a day's file whole once the whole day is past the retention setting. |
 | `/data/logs.db-wal` | SQLite Write-Ahead Log file for concurrent writes and non-blocking reads. |
 | `/data/logs.db-shm` | SQLite shared-memory index file for WAL checkpointing. |
 | `/data/.secret_key` | Auto-generated 256-bit encryption key used to encrypt sensitive settings at rest (file mode `0600`). Anyone holding a backup of `/data` also holds this key. To keep the key out of `/data` backups, set `LOGSHED_SECRET_KEY` instead (see above) and store the value separately. It may be a symbolic link to a key file (a mounted secret, for example): LogShed reads the key through it. If the file exists but cannot be read, or is not a regular file (a dangling link or a directory, for example), LogShed stops at start-up with an error naming it rather than replace the key. An empty file is replaced, unless it is reached through a link: then LogShed stops with an error and leaves the link alone. |
@@ -281,7 +282,8 @@ LogShed creates its files with `umask 027`: the `PUID` user can read and write t
 
 - Backup tools that run as root, such as Unraid's Appdata Backup plugin or a root `rsync` or cron job, are not affected.
 - A backup tool that runs as another user can read the database if that user is in the `PGID` group, or if the tool runs as the `PUID` user. To include `.secret_key`, run it as `PUID` or as root.
-- Stop the container before copying, so `logs.db` and `logs.db-wal` are copied in a consistent state.
+- Copy every file in `/data`, not only `logs.db`: the logs are in the `logs-*-UTC.db` files beside it.
+- Stop the container before copying, so the database files and their `-wal` files are copied in a consistent state.
 
 ### Database Backups
 

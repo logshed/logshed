@@ -12,7 +12,8 @@ import pytest
 import sqlite3
 from unittest.mock import patch
 from app.api.deps import run_db_query
-from app.core.migrations import get_connection, run_migrations
+from app.core.migrations import run_migrations
+from tests.db_helpers import stored_logs
 from app.core import pipeline as pipeline_mod
 from app.core.pipeline import (
     InternalLogHandler,
@@ -503,9 +504,7 @@ class TestQueueConsumer:
         await consumer.stop()
         await consumer_task
 
-        conn = get_connection(db_path)
-        count = conn.execute("SELECT COUNT(*) FROM logs WHERE message LIKE 'consumer_test_%'").fetchone()[0]
-        conn.close()
+        count = sum(1 for r in stored_logs(db_path) if r["message"].startswith("consumer_test_"))
         assert count == 100
 
     @pytest.mark.asyncio
@@ -527,12 +526,9 @@ class TestQueueConsumer:
             assert received_entry["id"] > 0
             assert received_entry["message"] == "test_log_with_id_broadcast"
 
-            conn = get_connection(db_path)
-            row = conn.execute("SELECT id, message FROM logs WHERE id = ?", (received_entry["id"],)).fetchone()
-            conn.close()
+            row = next((r for r in stored_logs(db_path) if r["id"] == received_entry["id"]), None)
             assert row is not None
-            assert row[0] == received_entry["id"]
-            assert row[1] == "test_log_with_id_broadcast"
+            assert row["message"] == "test_log_with_id_broadcast"
 
             await consumer.stop()
             await consumer_task
@@ -574,9 +570,7 @@ class TestQueueConsumer:
         assert attempts == 3
         assert get_dropped_count() == 0
 
-        conn = get_connection(db_path)
-        count = conn.execute("SELECT COUNT(*) FROM logs WHERE message LIKE 'retry_test_%'").fetchone()[0]
-        conn.close()
+        count = sum(1 for r in stored_logs(db_path) if r["message"].startswith("retry_test_"))
         assert count == 5
 
     @pytest.mark.asyncio
@@ -772,11 +766,10 @@ class TestQueueConsumer:
         await consumer.stop()
         await consumer_task
 
-        conn = get_connection(db_path)
-        rows = conn.execute(
-            "SELECT message, timestamp FROM logs ORDER BY timestamp DESC, id DESC"
-        ).fetchall()
-        conn.close()
+        rows = [
+            (r["message"], r["timestamp"])
+            for r in sorted(stored_logs(db_path), key=lambda r: (r["timestamp"], r["id"]), reverse=True)
+        ]
 
         assert len(rows) == 2
         # The 17:29 log MUST sort before the 18:11+01:00 (17:11 UTC) log
@@ -806,9 +799,7 @@ class TestQueueConsumer:
         assert q.empty()
 
         # All 150 items must be safely committed to SQLite
-        conn = get_connection(db_path)
-        count = conn.execute("SELECT COUNT(*) FROM logs WHERE message LIKE 'shutdown_drain_msg_%'").fetchone()[0]
-        conn.close()
+        count = sum(1 for r in stored_logs(db_path) if r["message"].startswith("shutdown_drain_msg_"))
         assert count == 150
         assert get_dropped_count() == 0
 
@@ -828,9 +819,7 @@ class TestQueueConsumer:
         await consumer.stop()
 
         assert q.empty()
-        conn = get_connection(db_path)
-        count = conn.execute("SELECT COUNT(*) FROM logs WHERE message LIKE 'unstarted_drain_msg_%'").fetchone()[0]
-        conn.close()
+        count = sum(1 for r in stored_logs(db_path) if r["message"].startswith("unstarted_drain_msg_"))
         assert count == 30
         assert get_dropped_count() == 0
 
@@ -856,9 +845,7 @@ class TestQueueConsumer:
         for _ in range(50):
             await asyncio.sleep(0.02)
             elapsed = time.monotonic() - start_time
-            conn = get_connection(db_path)
-            row = conn.execute("SELECT id FROM logs WHERE message = 'low_latency_single_log'").fetchone()
-            conn.close()
+            row = next((r for r in stored_logs(db_path) if r["message"] == "low_latency_single_log"), None)
             if row is not None:
                 found = True
                 break
@@ -901,11 +888,7 @@ class TestQueueConsumer:
         assert attempts >= 2
         assert q.empty()
 
-        conn = get_connection(db_path)
-        count = conn.execute(
-            "SELECT COUNT(*) FROM logs WHERE message LIKE 'transient_lock_msg_%'"
-        ).fetchone()[0]
-        conn.close()
+        count = sum(1 for r in stored_logs(db_path) if r["message"].startswith("transient_lock_msg_"))
 
         assert count == 25
         assert get_dropped_count() == 0
@@ -956,11 +939,7 @@ class TestQueueConsumer:
         await consumer_task
 
         assert q.empty()
-        conn = get_connection(db_path)
-        count = conn.execute(
-            "SELECT COUNT(*) FROM logs WHERE message LIKE 'concurrent_stop_msg_%'"
-        ).fetchone()[0]
-        conn.close()
+        count = sum(1 for r in stored_logs(db_path) if r["message"].startswith("concurrent_stop_msg_"))
         assert count == 40
 
     @pytest.mark.asyncio
@@ -1290,11 +1269,7 @@ class TestFutureTimestampWindow:
             consumer._insert_batch(entries)
         finally:
             consumer._close_conn()
-        conn = get_connection(db_path)
-        try:
-            return {row[0]: row[1] for row in conn.execute("SELECT message, timestamp FROM logs")}
-        finally:
-            conn.close()
+        return {row["message"]: row["timestamp"] for row in stored_logs(db_path)}
 
     def test_window_is_five_minutes(self):
         assert pipeline_mod.MAX_FUTURE_TIMESTAMP_SKEW_SECONDS == 300
@@ -1410,11 +1385,7 @@ class TestQueueConsumerRowsThatCannotBeStored:
 
     @staticmethod
     def _messages(db_path: Path) -> list[str]:
-        conn = get_connection(db_path)
-        try:
-            return [row[0] for row in conn.execute("SELECT message FROM logs ORDER BY id")]
-        finally:
-            conn.close()
+        return [row["message"] for row in stored_logs(db_path)]
 
     @pytest.mark.asyncio
     async def test_lone_surrogates_are_replaced_and_the_whole_batch_is_stored(self, db_path: Path):
@@ -1430,11 +1401,8 @@ class TestQueueConsumerRowsThatCannotBeStored:
 
         assert stored is True
         assert self._messages(db_path) == ["before", "disk \ufffd full", "after"]
-        conn = get_connection(db_path)
-        try:
-            assert conn.execute("SELECT app_name, raw FROM logs WHERE message LIKE 'disk%'").fetchone() == ("a\ufffdpp", "r\ufffd")
-        finally:
-            conn.close()
+        [disk] = [r for r in stored_logs(db_path) if r["message"].startswith("disk")]
+        assert (disk["app_name"], disk["raw"]) == ("a\ufffdpp", "r\ufffd")
         assert all(isinstance(entry.get("id"), int) for entry in batch)
         await asyncio.to_thread(consumer._close_conn)
 

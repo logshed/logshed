@@ -41,7 +41,7 @@ from app.services.storage_metrics import (
     record_metrics,
     sample_storage_metrics,
 )
-from tests.db_helpers import open_db
+from tests.db_helpers import open_db, stored_logs
 
 
 @pytest.fixture(autouse=True)
@@ -411,16 +411,28 @@ class TestRetentionAndPruneWorker:
         await worker.stop()
         await task
 
+    def test_seed_logs_refuses_while_logshed_runs(self, tmp_path: Path, capsys):
+        from app.core import instance_lock
+
+        db_file = tmp_path / "logs.db"
+        running = instance_lock.acquire(db_file, exclusive=False)
+        try:
+            with pytest.raises(SystemExit) as stopped:
+                seed_logs(count=5, db_path=str(db_file))
+        finally:
+            instance_lock.release(running)
+        assert stopped.value.code == 1
+        assert "stop it" in capsys.readouterr().err
+        assert not list(tmp_path.glob("logs-*-UTC.db"))
+
     def test_seed_logs_utility(self, tmp_path: Path):
         db_file = tmp_path / "logs.db"
         inserted = seed_logs(count=100, days=45, db_path=str(db_file))
         assert inserted == 100
 
-        with open_db(db_file) as conn:
-            count = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
-            assert count == 100
-            min_ts, max_ts = conn.execute("SELECT MIN(timestamp), MAX(timestamp) FROM logs").fetchone()
-            assert min_ts < max_ts
+        rows = stored_logs(db_file)
+        assert len(rows) == 100
+        assert min(r["timestamp"] for r in rows) < max(r["timestamp"] for r in rows)
 
     @pytest.mark.asyncio
     async def test_storage_metrics_worker_exception_backoff(self, tmp_path: Path):
@@ -644,11 +656,8 @@ class TestRetentionAndPruneWorker:
                 })
 
         # Exiting lifespan triggers the shutdown sequence including queue draining
-        with open_db(db_file) as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM logs WHERE app_name = 'lifespan_test'"
-            ).fetchone()[0]
-            assert count == 15
+        count = sum(1 for r in stored_logs(db_file) if r["app_name"] == "lifespan_test")
+        assert count == 15
 
     @pytest.mark.asyncio
     async def test_lifespan_graceful_shutdown_drains_even_if_collector_stop_raises(
@@ -688,11 +697,8 @@ class TestRetentionAndPruneWorker:
                     "raw": f"faulty_collector_msg_{i}",
                 })
 
-        with open_db(db_file) as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM logs WHERE app_name = 'faulty_collector_test'"
-            ).fetchone()[0]
-            assert count == 8
+        count = sum(1 for r in stored_logs(db_file) if r["app_name"] == "faulty_collector_test")
+        assert count == 8
 
 
 # ===================================================================
@@ -1706,10 +1712,9 @@ class TestDatabaseVacuum:
 
             # Check that log was NOT inserted into db while paused
             await asyncio.sleep(0.1)
-            with open_db(db_file) as conn:
-                count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
-                assert count == 0
-                assert queue.qsize() == 1
+            count = sum(1 for r in stored_logs(db_file) if r["app_name"] == "test-app")
+            assert count == 0
+            assert queue.qsize() == 1
 
             # Resume writes
             consumer.resume_writes()
@@ -1718,14 +1723,12 @@ class TestDatabaseVacuum:
             # Wait for consumer to drain buffered log to database
             for _ in range(20):
                 await asyncio.sleep(0.05)
-                with open_db(db_file) as conn:
-                    count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
-                    if count == 1:
-                        break
+                count = sum(1 for r in stored_logs(db_file) if r["app_name"] == "test-app")
+                if count == 1:
+                    break
 
-            with open_db(db_file) as conn:
-                count = conn.execute("SELECT COUNT(*) FROM logs WHERE app_name = 'test-app'").fetchone()[0]
-                assert count == 1
+            count = sum(1 for r in stored_logs(db_file) if r["app_name"] == "test-app")
+            assert count == 1
         finally:
             await consumer.stop()
             task.cancel()

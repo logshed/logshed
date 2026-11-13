@@ -258,6 +258,13 @@ def wait_for_ingest_write() -> None:
     _ingest_write_idle.wait(INGEST_TURN_TIMEOUT)
 
 
+def _replace_entry_surrogates(entry: dict) -> None:
+    """Put U+FFFD in place of lone surrogates in an entry's text, so SQLite can store it."""
+    for key, value in entry.items():
+        if isinstance(value, str):
+            entry[key] = replace_surrogates(value)
+
+
 def _takes_ingest_turn(fn):
     """Mark the ingest write as pending while the decorated method runs (in a worker thread)."""
     @functools.wraps(fn)
@@ -1228,44 +1235,20 @@ class QueueConsumer:
     def _insert_rows_separately(self, batch: list[dict]) -> tuple[list[dict], list[tuple[dict, Exception]]]:
         """
         Synchronous: store a batch that failed as a whole one row at a time, each in its own
-        savepoint inside one transaction. A row with lone surrogates is stored with U+FFFD in their
-        place; a row that still fails is skipped. A busy or locked database (OperationalError) rolls
-        the whole transaction back and is raised, so the normal retry stores each row once.
+        savepoint (log_store.insert_rows_one_by_one). A row with lone surrogates is stored with
+        U+FFFD in their place; a row that still fails is skipped. A busy or locked database
+        (OperationalError) is raised, and the normal retry stores each row once.
         Returns the stored entries and the skipped entries with their errors.
         """
         conn = self._get_connection()
-        stored: list[dict] = []
-        skipped: list[tuple[dict, Exception]] = []
+        self._normalize_timestamps(batch)
         try:
-            self._normalize_timestamps(batch)
-            if conn.in_transaction:
-                conn.rollback()
-            conn.execute("BEGIN IMMEDIATE")
-            for entry in batch:
-                conn.execute("SAVEPOINT log_row")
-                try:
-                    try:
-                        entry["id"] = log_store.insert_row(conn, entry)
-                    except UnicodeEncodeError:
-                        for key, value in entry.items():
-                            if isinstance(value, str):
-                                entry[key] = replace_surrogates(value)
-                        entry["id"] = log_store.insert_row(conn, entry)
-                    stored.append(entry)
-                except sqlite3.OperationalError:
-                    raise
-                except Exception as row_error:
-                    conn.execute("ROLLBACK TO log_row")
-                    skipped.append((entry, row_error))
-                conn.execute("RELEASE log_row")
-            conn.commit()
+            stored, skipped = log_store.insert_rows_one_by_one(conn, batch, _replace_entry_surrogates)
         except Exception:
             try:
                 conn.rollback()
             except Exception:
                 self._close_conn()
-            for entry in stored:
-                entry.pop("id", None)
             raise
         if stored:
             self._notify_fts_indexer()

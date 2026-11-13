@@ -104,9 +104,25 @@ def seed_logs(
 
     Returns:
         Number of logs inserted.
+
+    LogShed must be stopped: the web process is the only writer of log files while it runs, so
+    log ids follow the order rows are stored in (the full-text indexer relies on that).
     """
+    from app.core import instance_lock
     from app.services import log_store
 
+    try:
+        lock_fd = instance_lock.acquire(db_path, exclusive=True)
+    except instance_lock.InstanceLockBusy:
+        print("LogShed is running on this database: stop it before seeding logs.", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        return _seed_logs_locked(count, days, db_path, log_store)
+    finally:
+        instance_lock.release(lock_fd)
+
+
+def _seed_logs_locked(count: int, days: int, db_path: str, log_store) -> int:
     run_migrations(db_path)
 
     sample_sources = [

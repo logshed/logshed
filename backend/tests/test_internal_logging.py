@@ -29,7 +29,7 @@ from app.main import (
     create_app,
     get_internal_log_handler,
 )
-from tests.db_helpers import open_db
+from tests.db_helpers import open_db, stored_logs
 
 
 @pytest.fixture(autouse=True)
@@ -548,10 +548,7 @@ class TestInternalLogHandler:
             await consumer.stop()
 
             # Query database
-            with open_db(db_file) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT source_alias, app_name, severity, message FROM logs")
-                rows = cursor.fetchall()
+            rows = [(r["source_alias"], r["app_name"], r["severity"], r["message"]) for r in stored_logs(db_file)]
 
             assert len(rows) == 1
             assert rows[0][0] == "logshed"
@@ -566,7 +563,6 @@ class TestInternalLogHandler:
     async def test_internal_ai_and_retention_logs_persist_end_to_end(self, tmp_path: Path):
         """AI analysis and prune logs reach SQLite at INFO, and only the AI log is marked to skip alert rules."""
         from app.core.pipeline import QueueConsumer
-        from app.core.migrations import get_connection
 
         db_file = tmp_path / "internal_ai_logs.db"
         run_migrations(db_file)
@@ -587,9 +583,7 @@ class TestInternalLogHandler:
             await consumer.stop()
             await consumer_task
 
-            conn = get_connection(db_file)
-            rows = conn.execute("SELECT app_name, severity, message FROM logs ORDER BY id").fetchall()
-            conn.close()
+            rows = [(r["app_name"], r["severity"], r["message"]) for r in stored_logs(db_file)]
 
             assert ("ai_engine", 6) == rows[0][:2]
             assert "attempting model" in rows[0][2]
@@ -618,10 +612,7 @@ class TestInternalLogHandler:
 
             await consumer.stop()
 
-            with open_db(db_file) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT source_alias, app_name, severity, message FROM logs ORDER BY id ASC")
-                rows = cursor.fetchall()
+            rows = [(r["source_alias"], r["app_name"], r["severity"], r["message"]) for r in stored_logs(db_file)]
 
             assert len(rows) == 2
             assert rows[0][1] == "docker_collector"

@@ -305,3 +305,16 @@ def test_a_search_stops_when_its_client_goes_away(layouts):
         with pytest.raises(sqlite3.OperationalError, match="interrupt"):
             log_store.search(conn, LogFilter(query="timeout OR disk OR full"), fetch=900, count_limit=100000)
     assert calls
+
+
+def test_a_new_day_file_appears_whole_in_wal_mode(tmp_path):
+    """The file is built under a temporary name, so a reader never opens it without its tables."""
+    path = tmp_path / "logs-2026-11-13-UTC.db"
+    conn = day_store.connection(path, create=True)
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0] == 0
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(".")) == []
+    # A second builder finds the file there and keeps it
+    day_store._build(path)
+    assert conn.execute("SELECT COUNT(*) FROM fts_index_state").fetchone()[0] == 1
+    day_store.close_thread_connections()
