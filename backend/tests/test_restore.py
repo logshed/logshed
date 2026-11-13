@@ -301,3 +301,14 @@ def test_run_as_root_gives_the_database_to_its_owner(db, monkeypatch):
     assert [c for c in calls if c[0].startswith(".restore-")] and all(c[1:] == (1000, 1000) for c in calls)
     assert db.stat().st_mode & 0o777 == 0o640
 
+
+
+def test_restore_removes_a_failed_upgrade_marker_and_a_stale_copy(db, capsys):
+    archive = _backup(db)
+    lifecycle.marker_path(db).write_text("{}")
+    stale = db.with_name(".restore-20260101T000000Z.db.tmp")
+    stale.write_bytes(b"x" * 1000)
+    assert cli.restore_database(str(archive), str(db)) == 0
+    out = capsys.readouterr().out
+    assert not lifecycle.marker_path(db).exists() and "next start runs the upgrade again" in out
+    assert not stale.exists() and "left by an interrupted restore" in out

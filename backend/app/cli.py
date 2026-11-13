@@ -12,10 +12,12 @@ with a new Argon2id password hash.
 import argparse
 import datetime
 import getpass
+import signal
 import sqlite3
 import sys
 
 from app.core.migrations import (
+    MIGRATIONS,
     DatabaseNewerThanAppError,
     MigrationBackupError,
     get_connection,
@@ -43,8 +45,19 @@ def reset_admin(password: str, db_path: str = _DEFAULT_DB_PATH) -> None:
         password: The new plaintext password to hash and store.
         db_path: Path to the SQLite database.
     """
-    # Ensure the database and schema exist
-    run_migrations(db_path)
+    # A new database gets its schema. An existing one is left at its schema: admin_auth exists from
+    # schema 1 on, and running an upgrade here would bypass recovery mode (a second process backing
+    # up and migrating while LogShed waits, or a failed upgrade blocking the password reset).
+    conn = get_connection(db_path)
+    try:
+        version = get_user_version(conn)
+    finally:
+        conn.close()
+    latest = MIGRATIONS[-1][0]
+    if version > latest:
+        raise DatabaseNewerThanAppError(version, latest, db_path)
+    if version == 0:
+        run_migrations(db_path)
 
     password_hash = hash_password(password)
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -213,12 +226,20 @@ def restore_database(archive: str, db_path: str | None = None) -> int:
 
     path = Path(db_path) if db_path else get_db_path()
     latest = MIGRATIONS[-1][0]
+
+    def _stop(signum, frame):
+        # SystemExit runs the restore's clean-up; the default SIGTERM action would leave its copy behind
+        raise SystemExit(f"Error: the restore was stopped (signal {signum}). Nothing was changed.")
+
+    previous = signal.signal(signal.SIGTERM, _stop)
     try:
         source = restore.resolve_archive(archive, path)
         result = restore.restore_backup(source, path, latest, say=lambda text: print(text, flush=True))
     except restore.RestoreError as e:
         print(f"Error: {e} Nothing was changed.", file=sys.stderr)
         return 1
+    finally:
+        signal.signal(signal.SIGTERM, previous)
     print(f"Restored {result.archive.name} into {path}.")
     print(f"It is a schema {result.schema_version} database, backed up by LogShed {result.app_version}.")
     if result.omitted_tables:
@@ -231,6 +252,8 @@ def restore_database(archive: str, db_path: str | None = None) -> int:
             f"The database it replaced is kept as {result.aside} ({db_backup.format_bytes(result.aside_bytes)}). "
             "Delete it once LogShed runs as you expect."
         )
+    if result.marker_removed:
+        print("The failed upgrade's marker (.migration_failed) was removed: the next start runs the upgrade again.")
     if result.schema_version < latest:
         print(
             f"This image upgrades it to schema {latest} when it starts (backing it up first). To run it as it is, "

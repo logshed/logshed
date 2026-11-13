@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import sqlite3
 import tarfile
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from app.core import backup as db_backup
-from app.core import instance_lock
+from app.core import instance_lock, lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class RestoreResult:
     aside: Optional[Path]
     aside_bytes: int
     database_bytes: int
+    marker_removed: bool = False
 
 
 Say = Callable[[str], None]
@@ -195,6 +197,10 @@ def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = 
     try:
         if _app_is_using(db_path):
             raise RestoreError(f"Another program is using {db_path}. Stop LogShed first, then run the restore again.")
+        # A copy left by a restore that was killed (SIGKILL, or a container removed part way)
+        for stale in db_path.parent.glob(".restore-*.db.tmp*"):
+            stale.unlink(missing_ok=True)
+            say(f"Deleted {stale.name}, left by an interrupted restore.")
         owner = db_backup._owner_to_apply(db_path if db_path.exists() else db_path.parent)
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         tmp = db_path.with_name(f".restore-{stamp}.db.tmp")
@@ -205,8 +211,16 @@ def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = 
             _check_database(tmp, schema, say)
             os.chmod(tmp, 0o640)
             db_backup._give_to(tmp, owner)
-            aside, aside_bytes = _move_aside(db_path, stamp)
-            os.replace(tmp, db_path)
+            # The two renames happen together: a stop request in between would leave no database
+            blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
+            try:
+                aside, aside_bytes = _move_aside(db_path, stamp)
+                os.replace(tmp, db_path)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+            # A failed upgrade's marker described the database just replaced
+            marker_removed = lifecycle.marker_path(db_path).exists()
+            lifecycle.clear_marker(db_path)
         finally:
             tmp.unlink(missing_ok=True)
             for suffix in ("-wal", "-shm"):
@@ -221,6 +235,7 @@ def restore_backup(archive: Path, db_path: Path, latest_schema: int, say: Say = 
             aside=aside,
             aside_bytes=aside_bytes,
             database_bytes=db_path.stat().st_size,
+            marker_removed=marker_removed,
         )
     finally:
         instance_lock.release(lock_fd)

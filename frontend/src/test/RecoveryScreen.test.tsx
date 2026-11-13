@@ -170,6 +170,25 @@ describe('StartupGate and RecoveryScreen', () => {
     expect(await screen.findByText('LogShed is not in recovery mode.')).toBeInTheDocument();
   });
 
+  it('says when a run across several schemas stopped part way, and that going back needs the backup', async () => {
+    vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue({ ...FAILED, upgrade: { ...FAILED.upgrade!, from_schema: 2 } });
+    vi.spyOn(backupsApi, 'fetchRecovery').mockResolvedValue({ ...DETAILS, from_schema: 2, current_schema: 3 });
+    renderGate();
+    expect(await screen.findByText(/Your database is now at schema 3: the steps up to it finished/)).toBeInTheDocument();
+    expect(screen.queryByText(/unchanged/)).not.toBeInTheDocument();
+    expect(screen.getByText(/The version you ran before cannot run on schema 3/)).toHaveTextContent('restore the backup made before this upgrade');
+    expect(screen.getByText(/Runs the upgrade again, backing up the database first/)).toBeInTheDocument();
+  });
+
+  it('follows the upgrade when another tab already retried it', async () => {
+    const health = vi.spyOn(systemApi, 'fetchHealth').mockResolvedValueOnce(FAILED);
+    health.mockResolvedValue({ status: 'upgrading', upgrade: { stage: 'migrate', done: 0, total: 1, from_schema: 3, target_schema: 4 } });
+    vi.spyOn(backupsApi, 'fetchRecovery').mockResolvedValue({ status: 'upgrading', backup_available: false });
+    renderGate();
+    expect(await screen.findByText('Upgrading the database from schema 3 to 4 (step 1 of 1)')).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+  });
+
   it('words the progress as the status page does', () => {
     expect(upgradeProgressText({ stage: 'backup', done: 512 * 1024 ** 2, total: 2 * 1024 ** 3, from_schema: 2, target_schema: 3 })).toBe(
       'Backing up the database: 512 MB of 2 GB (25%)'

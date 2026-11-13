@@ -45,7 +45,15 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
 
   const loadDetails = useCallback(async () => {
     try {
-      setDetails(await fetchRecovery());
+      const next = await fetchRecovery();
+      if (next.status === 'recovery') {
+        setDetails(next);
+      } else {
+        // Another tab already retried: follow the upgrade (or open LogShed if it is done)
+        const current = await fetchHealth();
+        if (current.status === 'upgrading' || current.status === 'migration_failed') setHealth(current);
+        else window.location.reload();
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Could not load what went wrong.');
     }
@@ -80,7 +88,10 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
     try {
       await retryUpgrade(skipBackup);
       setDetails(null);
-      setHealth({ status: 'upgrading', upgrade: { stage: skipBackup ? 'migrate' : 'backup', from_schema: 0, target_schema: 0 } });
+      setHealth({
+        status: 'upgrading',
+        upgrade: { stage: skipBackup ? 'migrate' : 'backup', from_schema: details?.current_schema ?? 0, target_schema: details?.target_schema ?? 0 },
+      });
     } catch (err: any) {
       setErrorMsg(err.message || 'Could not start the upgrade.');
     } finally {
@@ -129,6 +140,8 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
   const d = details;
   const failedAt = d?.failed_at ? formatLocalTimestamp(d.failed_at, true, d.server_timezone ?? undefined) : '';
   const backupStage = (d?.stage ?? stage) === 'backup';
+  // A run across several schemas can stop part way: the steps before the failed one stay committed
+  const moved = Boolean(d && d.current_schema != null && d.current_schema !== d.from_schema);
   // The server reuses the backup only while the database is still at the schema it holds
   const backupReused = Boolean(d?.backup_available && d.current_schema === d.from_schema);
 
@@ -143,8 +156,12 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
               {failedAt && <> ({failedAt})</>}. {stoppedSentence(d.stage)}
             </p>
             <p>
-              <strong className="text-fg">Your database is unchanged at schema {d.current_schema}.</strong> LogShed is not
-              receiving or storing logs until you retry the upgrade or go back to the version you ran before.
+              <strong className="text-fg">
+                {moved
+                  ? `Your database is now at schema ${d.current_schema}: the steps up to it finished, and the next one was rolled back.`
+                  : `Your database is unchanged at schema ${d.current_schema}.`}
+              </strong>{' '}
+              LogShed is not receiving or storing logs until you retry the upgrade or go back to the version you ran before.
             </p>
             {d.error && (
               <div>
@@ -215,9 +232,9 @@ export const RecoveryScreen: React.FC<{ initialHealth: HealthResponse }> = ({ in
           <div className="space-y-1.5">
             <p className="text-fg font-medium">Or go back to the version you ran before</p>
             <p className="text-fg-muted">
-              Set the container's image tag to the version you ran before this upgrade and start it again. That works while
-              the database is still at schema {d?.current_schema ?? health.upgrade?.from_schema}, as it is now. See "Going
-              back to an older version" in the configuration guide.
+              {moved
+                ? `The version you ran before cannot run on schema ${d?.current_schema}. Stop the container, restore the backup made before this upgrade with the restore command ("Restoring a backup" in the configuration guide), then start the version you ran before.`
+                : `Set the container's image tag to the version you ran before this upgrade and start it again. That works while the database is still at schema ${d?.current_schema ?? health.upgrade?.from_schema}, as it is now. See "Going back to an older version" in the configuration guide.`}
             </p>
           </div>
         </div>

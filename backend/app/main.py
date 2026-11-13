@@ -10,7 +10,9 @@ import hashlib
 import html
 import json
 import logging
+import os
 import re
+import signal
 import sqlite3
 import sys
 from contextlib import asynccontextmanager
@@ -636,9 +638,21 @@ async def _stop_services(db_path) -> None:
 
 # --- Start-up through the upgrade path (core/lifecycle.py) ---
 
-_upgrade_task: Optional[asyncio.Task] = None
+# Every upgrade task started (at start-up and by each retry); shutdown waits for all of them
+_upgrade_tasks: list[asyncio.Task] = []
 # Bounded so a slow notification channel cannot hold recovery mode's start (the send carries on).
 RECOVERY_NOTIFY_TIMEOUT = 30.0
+
+
+def recovery_state_sentence(marker: dict) -> str:
+    """Where the database is after a failed upgrade, and the way back from there."""
+    current, start = marker.get("current_schema"), marker.get("from_schema")
+    if current == start:
+        return f"The database is unchanged at schema {current}, so the version you ran before can still run on it."
+    return (
+        f"The database is now at schema {current}: the steps up to it finished, and the next one was rolled back. "
+        "The version you ran before cannot run on it; to go back, restore the backup made before the upgrade."
+    )
 
 
 async def _notify_recovery(marker: dict) -> None:
@@ -649,9 +663,8 @@ async def _notify_recovery(marker: dict) -> None:
     title = "LogShed upgrade stopped"
     body = (
         f"LogShed {marker.get('app_version')} could not upgrade its database from schema {marker.get('from_schema')} "
-        f"to {marker.get('target_schema')}: {stage} failed. The database is unchanged at schema "
-        f"{marker.get('current_schema')}. LogShed is not receiving or storing logs until you act: open LogShed "
-        "to see the error and retry, or go back to the version you ran before."
+        f"to {marker.get('target_schema')}: {stage} failed. {recovery_state_sentence(marker)} LogShed is not "
+        "receiving or storing logs until you act: open LogShed to see the error and retry."
     )
     try:
         await asyncio.wait_for(get_notifier().send_notification(title, body), timeout=RECOVERY_NOTIFY_TIMEOUT)
@@ -702,15 +715,17 @@ async def _upgrade_then_start(db_path, backup: Optional[bool], reused_backup: Op
     try:
         await _start_services(db_path)
     except Exception:
-        logger.exception("Starting LogShed after the database upgrade failed")
+        # At a normal start this error stops LogShed; do the same here rather than run without ingestion
+        logger.exception("Starting LogShed after the database upgrade failed, so LogShed stops")
+        os.kill(os.getpid(), signal.SIGTERM)
+        return
     lifecycle.set_ready()
     logger.info("The database upgrade is complete and LogShed is running.")
 
 
 def _begin_upgrade(db_path, from_schema: int, backup: Optional[bool] = None, reused_backup: Optional[str] = None) -> None:
-    global _upgrade_task
     lifecycle.set_upgrading(from_schema, _latest_schema())
-    _upgrade_task = asyncio.create_task(_upgrade_then_start(db_path, backup, reused_backup))
+    _upgrade_tasks.append(asyncio.create_task(_upgrade_then_start(db_path, backup, reused_backup)))
 
 
 def _retry_choice(db_path, marker: dict, skip_backup: bool) -> tuple[int, Optional[bool], Optional[str]]:
@@ -752,8 +767,6 @@ async def lifespan(app: FastAPI):
     Sets up database schema, master encryption keys, and starts background workers. An existing
     database with an upgrade pending (or a failed one) takes the upgrade path (core/lifecycle.py).
     """
-    global _upgrade_task
-
     db_path = get_db_path()
     # Held while LogShed runs, so the restore command cannot replace the database under it
     try:
@@ -808,9 +821,10 @@ async def lifespan(app: FastAPI):
             yield
         finally:
             lifecycle.cancel_event().set()
-            task, _upgrade_task = _upgrade_task, None
-            if task is not None:
-                # The task stops at the backup's next chunk or before the next step, so this wait is short
+            tasks = list(_upgrade_tasks)
+            _upgrade_tasks.clear()
+            # A task stops at the backup's next chunk or before the next step, so this wait is short
+            for task in tasks:
                 try:
                     await task
                 except BaseException:
@@ -1150,7 +1164,7 @@ def create_app() -> FastAPI:
     # Full-text searches wake the FTS indexer from the shared query path
     # (app.services.log_query.execute_with_fts_fallback), which MCP calls also pass through.
 
-    # CSRF protection for mutating endpoints (innermost of the three)
+    # CSRF protection for mutating endpoints (inside CORS and the security headers, outside the lifecycle check)
     # Innermost: the CSRF check still applies to the routes recovery mode lets through
     app.add_middleware(LifecycleMiddleware)
     app.add_middleware(CSRFMiddleware)

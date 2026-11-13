@@ -267,3 +267,23 @@ async def test_only_one_retry_runs_when_two_arrive_together():
         lifecycle.reset()
     assert sorted(results) == [False, True]
     assert len(calls) == 1 and calls[0][1]["target_schema"] == 4
+
+
+async def test_a_backup_that_outlives_the_shutdown_wait_stays_cancelled(env, client, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+    real = db_backup._vacuum_into
+
+    def stubborn(db_path, copy_path, cancel=None):
+        started.set()
+        release.wait(5)
+        real(db_path, copy_path, cancel)
+
+    monkeypatch.setattr(db_backup, "_vacuum_into", stubborn)
+    assert (await client.post("/api/system/backups")).status_code == 202
+    await asyncio.to_thread(started.wait, 5)
+    await backups_api.stop_backup_job(timeout=0.05)
+    assert backups_api._cancel.is_set()
+    release.set()
+    job = await _finished_job(client)
+    assert job["state"] == "failed" and "shutting down" in job["error"]
+    assert list(db_backup.backups_dir(env).glob("*")) == []

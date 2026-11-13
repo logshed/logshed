@@ -277,6 +277,8 @@ async def test_retry_backs_up_again_when_the_failed_run_moved_the_schema(env, tm
         _signed_in(client)
         assert (await client.post("/api/system/recovery/retry", headers=CSRF)).status_code == 200
         await _wait_for(lifecycle.is_ready)
+    title, body = env.send.await_args.args[:2]
+    assert "now at schema 3" in body and "restore the backup" in body and "unchanged" not in body
     names = _archives(env.folder)
     assert len(names) == 2
     assert any(n.startswith("logshed-backup-pre-v2-to-v4-") for n in names)
@@ -403,3 +405,60 @@ def test_the_log_says_why_no_backup_was_made(env, monkeypatch, caplog):
         run_migrations(env.db, backup=False)
     assert "without a new backup, as asked" in caplog.text
     assert "turned off" not in caplog.text
+
+
+async def test_a_failed_service_start_after_the_upgrade_stops_logshed(env, monkeypatch):
+    _with_v4(monkeypatch, _create_v4)
+    env.started.side_effect = RuntimeError("could not create the presets folder")
+    kills = []
+    monkeypatch.setattr(main_mod.os, "kill", lambda pid, sig: kills.append(sig))
+    async with _running():
+        await _wait_for(lambda: bool(kills))
+        assert not lifecycle.is_ready()
+    assert kills == [main_mod.signal.SIGTERM]
+
+
+async def test_recovery_works_when_the_marker_cannot_be_written(env, monkeypatch):
+    _with_v4(monkeypatch, _failing_v4)
+
+    def unwritable(*args):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(lifecycle, "write_marker", unwritable)
+    async with _running() as client:
+        await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
+        env.send.assert_awaited_once()
+        _signed_in(client)
+        assert "failed on purpose" in (await client.get("/api/system/recovery")).json()["error"]
+    assert not lifecycle.marker_path(env.db).exists()
+
+
+async def test_recovery_lets_through_only_what_the_screen_needs(env, monkeypatch):
+    _with_v4(monkeypatch, _failing_v4)
+    async with _running() as client:
+        await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
+        _signed_in(client)
+        closed = [
+            ("GET", "/api/logs"), ("HEAD", "/api/logs"), ("GET", "/api/logs/stream"), ("POST", "/mcp"),
+            ("POST", "/api/v1/mcp"), ("GET", "/api/v1/logs"), ("GET", "/api/system/recovery/"),
+            ("POST", "/api/system/backups"), ("GET", "/api/system/storage"), ("POST", "/api/auth/setup"),
+        ]
+        for method, path in closed:
+            response = await client.request(method, path, headers=CSRF)
+            assert response.status_code == 503, (method, path, response.status_code)
+        for method, path in [("GET", "/api/health"), ("GET", "/api/auth/status"), ("GET", "/api/system/recovery")]:
+            assert (await client.request(method, path)).status_code == 200, path
+
+
+async def test_the_space_figure_counts_what_the_pending_steps_need(env, monkeypatch):
+    _with_v4(monkeypatch, _failing_v4)
+    monkeypatch.setattr(db_backup.shutil, "disk_usage", lambda p: DiskUsage(50 * GiB, 50 * GiB, 0))
+    monkeypatch.setattr(
+        migrations_mod, "MIGRATION_NEEDS", {4: migrations_mod.MigrationNeeds(extra_space=lambda size: 7 * GiB)}
+    )
+    async with _running() as client:
+        await _wait_for(lambda: lifecycle.status() == lifecycle.RECOVERY)
+        _signed_in(client)
+        details = (await client.get("/api/system/recovery")).json()
+    plain = db_backup.backup_space_needed(env.db, db_backup.METHOD_LOCKED_STREAM)
+    assert details["backup_needed_bytes"] == plain + 7 * GiB

@@ -8,13 +8,14 @@ the web UI then follows /api/health until LogShed is ready or back in recovery.
 
 import asyncio
 import shutil
+import sqlite3
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user
 from app.core import backup as db_backup
-from app.core import lifecycle
+from app.core import lifecycle, migrations
 from app.core.config import get_db_path
 from app.core.utils import get_server_timezone_name
 from app.models import MessageResponse, RecoveryResponse
@@ -47,8 +48,12 @@ def _recovery_details(db_path: Path) -> RecoveryResponse:
         response.disk_total_bytes = usage.total
         response.backup_floor_bytes = db_backup.free_space_floor(usage.total)
         response.database_size_bytes = db_path.stat().st_size
-        response.backup_needed_bytes = db_backup.backup_space_needed(db_path, db_backup.METHOD_LOCKED_STREAM)
-    except OSError:
+        current = lifecycle.read_user_version(db_path)
+        pending = migrations.pending_steps(current)
+        if pending:
+            method, extra = migrations.backup_plan(db_path, pending)
+            response.backup_needed_bytes = db_backup.backup_space_needed(db_path, method) + extra
+    except (OSError, sqlite3.Error):
         pass
     return response
 

@@ -142,3 +142,29 @@ class TestNewerDatabase:
         err = capsys.readouterr().err
         assert "newer version of LogShed" in err and "Traceback" not in err
         assert db.read_bytes() == before
+
+
+def test_reset_admin_leaves_a_pending_upgrade_to_the_app(tmp_path, monkeypatch, capsys):
+    """In recovery mode (or with an upgrade pending) the password reset must not run the upgrade itself."""
+    import sqlite3
+
+    import app.core.migrations as migrations_mod
+    from app.core.migrations import MIGRATIONS, run_migrations
+
+    db = tmp_path / "logs.db"
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS[:2])
+    run_migrations(db)
+
+    def failing_v3(conn):
+        raise RuntimeError("v3 fails")
+
+    monkeypatch.setattr(migrations_mod, "MIGRATIONS", MIGRATIONS[:2] + [(3, failing_v3)])
+    monkeypatch.setattr("app.cli.MIGRATIONS", migrations_mod.MIGRATIONS, raising=False)
+    reset_admin("newpassword789", str(db))
+
+    assert "reset successfully" in capsys.readouterr().out
+    conn = sqlite3.connect(db)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM admin_auth").fetchone()[0] == 1
+    conn.close()
+    assert not (tmp_path / "backups").exists()

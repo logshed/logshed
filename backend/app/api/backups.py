@@ -84,9 +84,9 @@ async def stop_backup_job(timeout: float = 10.0) -> None:
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
     except Exception:
+        # Left set if the job outlives the wait: it still stops at its next chunk. A new job clears it.
         pass
     finally:
-        _cancel.clear()
         _task = None
 
 
@@ -169,6 +169,7 @@ async def create_backup_now(user: dict = Depends(get_current_user)) -> BackupJob
             )
 
     try:
+        _cancel.clear()
         task = start_exclusive("backup", _work)
     except OperationInProgressError as e:
         raise operation_conflict(e.active)

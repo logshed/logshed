@@ -787,6 +787,19 @@ def _backup_wanted(conn: sqlite3.Connection) -> bool:
     return resolve_backup_before_migration(stored)
 
 
+def backup_plan(db_path: Path, pending: list[int]) -> tuple[str, int]:
+    """The backup method and the extra space the pending steps need (MIGRATION_NEEDS)."""
+    needs = [MIGRATION_NEEDS.get(v, MigrationNeeds()) for v in pending]
+    without_logs = all(n.backup_without_logs for n in needs)
+    db_size = db_path.stat().st_size
+    extra = sum(n.extra_space(db_size) for n in needs)
+    return (db_backup.METHOD_WITHOUT_LOGS if without_logs else db_backup.METHOD_LOCKED_STREAM), extra
+
+
+def pending_steps(current_version: int) -> list[int]:
+    return [v for v, _ in MIGRATIONS if v > current_version]
+
+
 def _backup_before_migrations(
     db_path: Path,
     current_version: int,
@@ -799,17 +812,14 @@ def _backup_before_migrations(
     made, and lets BackupCancelled through when `cancel` stops it.
     """
     target = pending[-1]
-    needs = [MIGRATION_NEEDS.get(v, MigrationNeeds()) for v in pending]
-    without_logs = all(n.backup_without_logs for n in needs)
-    db_size = db_path.stat().st_size
-    extra = sum(n.extra_space(db_size) for n in needs)
+    method, extra = backup_plan(db_path, pending)
     try:
         return db_backup.create_backup(
             db_path,
             kind=f"pre-v{current_version}-to-v{target}",
             schema_version=current_version,
             target_schema=target,
-            method=db_backup.METHOD_WITHOUT_LOGS if without_logs else db_backup.METHOD_LOCKED_STREAM,
+            method=method,
             extra_space=extra,
             progress_cb=(lambda done, total: progress("backup", done, total)) if progress else None,
             cancel=cancel,
