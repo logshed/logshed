@@ -170,3 +170,32 @@ async def test_former_docker_aliases_go_with_the_legacy_table(client, headers, e
         assert load_former_docker_aliases(conn) == []
     resp = await client.post("/api/aliases", json={"ip": IP, "alias": "old-nas"}, headers=headers)
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sealed", [False, True])
+async def test_a_deleted_docker_hosts_logs_stay_listed_as_docker_once_the_legacy_table_is_gone(
+    client, headers, env, sealed
+):
+    from app.core import day_files
+    from app.services import day_store
+
+    day = "2026-11-13"
+    stamp = f"{day}T10:00:00+00:00"
+    container = {**_row("container line", "nas-docker", KIND_DOCKER, app="web"), "timestamp": stamp, "received_at": stamp}
+    store_logs(env, container)
+    with open_db(env) as conn:
+        assert log_store.drop_empty_legacy(conn)
+        if sealed:
+            day_conn = day_store.connection(day_files.day_path(env, day))
+            while day_store.index_pending(day_conn, 5000):
+                pass
+            assert day_store.seal(conn, day)
+    # No Docker host is called nas-docker any more, and its address has a syslog alias
+    resp = await client.post("/api/aliases", json={"ip": IP, "alias": "nas"}, headers=headers)
+    assert resp.status_code == 200
+
+    facets = (await client.get("/api/logs/facets", headers=headers)).json()
+    assert "nas-docker" in facets["sources"]
+    assert facets["host_to_apps"]["nas-docker"] == ["web"]
+    assert "web" not in facets["host_to_apps"].get("nas", [])

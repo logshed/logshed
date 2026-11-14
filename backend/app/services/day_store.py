@@ -771,26 +771,30 @@ class Figures:
     sources: list[tuple[str, str, str]]
 
 
-def distinct_sources(day_conn: sqlite3.Connection, limit: Optional[int] = None) -> list[tuple[str, str, str]]:
+def distinct_sources(day_conn: sqlite3.Connection, limit: Optional[int] = None) -> list[tuple[str, str, str, int]]:
     """
-    A day file's distinct (address, app name, host name), in the order of idx_logs_ip_app_host,
-    at most limit of them: one index seek each (the next host of the same address and app, else
-    the next app of the address, else the next address), whatever the number of rows. A row-value
-    range, (source_ip, app_id, host_id) > (...), uses only the index's first column and read every
-    row of the current address up to the position (1.2 s on a 536k-row file with 2 addresses).
+    A day file's distinct (address, app name, host name, source kind), in the order of
+    idx_logs_ip_app_host, at most limit of them: one index seek each (the next kind of the same
+    address, app and host, else the next host of the address and app, else the next app of the
+    address, else the next address), whatever the number of rows. A row-value range,
+    (source_ip, app_id, host_id) > (...), uses only the index's first column and read every row of
+    the current address up to the position (1.2 s on a 536k-row file with 2 addresses).
     """
     return [
-        (r[0], r[1], r[2])
+        (r[0], r[1], r[2], r[3])
         for r in day_conn.execute(
             """
-            WITH RECURSIVE t(ip, app, host) AS (
+            WITH RECURSIVE t(ip, app, host, kind) AS (
                 SELECT * FROM (
-                    SELECT source_ip, app_id, host_id FROM logs ORDER BY source_ip, app_id, host_id LIMIT 1
+                    SELECT source_ip, app_id, host_id, source_kind FROM logs
+                    ORDER BY source_ip, app_id, host_id, source_kind LIMIT 1
                 )
                 UNION ALL
-                SELECT nxt.source_ip, nxt.app_id, nxt.host_id
+                SELECT nxt.source_ip, nxt.app_id, nxt.host_id, nxt.source_kind
                 FROM t
                 JOIN logs nxt ON nxt.id = COALESCE(
+                    (SELECT id FROM logs WHERE source_ip = t.ip AND app_id = t.app AND host_id = t.host
+                        AND source_kind > t.kind ORDER BY source_ip, app_id, host_id, source_kind LIMIT 1),
                     (SELECT id FROM logs WHERE source_ip = t.ip AND app_id = t.app AND host_id > t.host
                         ORDER BY source_ip, app_id, host_id LIMIT 1),
                     (SELECT id FROM logs WHERE source_ip = t.ip AND app_id > t.app
@@ -800,7 +804,7 @@ def distinct_sources(day_conn: sqlite3.Connection, limit: Optional[int] = None) 
                 )
                 LIMIT ?
             )
-            SELECT t.ip, (SELECT name FROM apps WHERE apps.id = t.app), (SELECT name FROM hosts WHERE hosts.id = t.host)
+            SELECT t.ip, (SELECT name FROM apps WHERE apps.id = t.app), (SELECT name FROM hosts WHERE hosts.id = t.host), t.kind
             FROM t
             """,
             (-1 if limit is None else limit,),
@@ -854,8 +858,8 @@ def _write_figures(write: sqlite3.Connection, day: str, found: Figures, size: in
     )
     write.execute("DELETE FROM log_file_sources WHERE day = ?", (day,))
     write.executemany(
-        "INSERT INTO log_file_sources (day, source_ip, app, host) VALUES (?, ?, ?, ?)",
-        [(day, ip, app or "", host or "") for ip, app, host in found.sources],
+        "INSERT INTO log_file_sources (day, source_ip, app, host, source_kind) VALUES (?, ?, ?, ?, ?)",
+        [(day, ip, app or "", host or "", kind) for ip, app, host, kind in found.sources],
     )
 
 

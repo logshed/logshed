@@ -8,6 +8,7 @@ import sqlite3
 from typing import Any
 
 from app.api.deps import run_db_query
+from app.core.day_files import KIND_DOCKER
 from app.core.utils import AliasIndex, load_former_docker_aliases, load_taken_host_names
 from app.models import LogFacetsResponse
 from app.services import log_store
@@ -131,11 +132,11 @@ class _FacetSets:
         self.apps.update(seen.apps)
         # Hosts from logs, even if they logged without app_name
         for alias, ip in seen.aliases:
-            self._add_host(_canonical_host(alias, ip, alias_index))
+            self._add_host(_canonical_host(alias, ip, alias_index, seen.host_kinds))
         for ip in seen.bare_ips:
             self._add_host(aliases_map.get(ip, ip))
         for raw_alias, app, ip in pairs:
-            canonical_host = _canonical_host(raw_alias, ip, alias_index)
+            canonical_host = _canonical_host(raw_alias, ip, alias_index, seen.host_kinds)
             if not canonical_host:
                 continue
             self.sources.add(canonical_host)
@@ -191,12 +192,22 @@ class _FacetSets:
         }
 
 
-def _canonical_host(raw_alias: str, ip: str, alias_index: AliasIndex) -> str:
+def _canonical_host(
+    raw_alias: str, ip: str, alias_index: AliasIndex, host_kinds: dict[str, frozenset[int]]
+) -> str:
     """
     The name a log's host is listed under: Docker logs keep their Docker host name ("docker"
     when they have none); syslog logs take the alias configured for their address or name.
+    A host name whose rows in day files all record their kind is Docker when any of them is; a
+    name only legacy rows carry, or with day-file rows of unknown kind (0), is classed by the
+    Docker host names.
     """
-    if alias_index.is_docker(raw_alias, ip):
+    kinds = host_kinds.get(raw_alias)
+    if kinds and 0 not in kinds:
+        is_docker = KIND_DOCKER in kinds
+    else:
+        is_docker = alias_index.is_docker(raw_alias, ip)
+    if is_docker:
         return raw_alias or "docker"
     aliases_map = alias_index.alias_by_ip
     return (ip and aliases_map.get(ip)) or aliases_map.get(raw_alias) or raw_alias or ip

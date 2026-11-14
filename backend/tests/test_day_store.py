@@ -168,7 +168,7 @@ def _plain(value):
     return value
 
 
-_DAY_FILE_ONLY = {"source_kind", "reported_host", "host_self_reported"}
+_DAY_FILE_ONLY = {"source_kind", "reported_host", "host_self_reported", "host_kinds"}
 
 
 def _without_kind(value):

@@ -66,7 +66,7 @@ CREATE TABLE logs (
 CREATE INDEX idx_logs_time_sev ON logs(ts DESC, severity);
 CREATE INDEX idx_logs_app_time ON logs(app_id, ts DESC);
 CREATE INDEX idx_logs_host_time ON logs(host_id, ts DESC);
-CREATE INDEX idx_logs_ip_app_host ON logs(source_ip, app_id, host_id);
+CREATE INDEX idx_logs_ip_app_host ON logs(source_ip, app_id, host_id, source_kind);
 CREATE VIRTUAL TABLE logs_fts USING fts5(app_name, source_alias, message, content='', contentless_delete=1);
 CREATE TABLE fts_index_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),

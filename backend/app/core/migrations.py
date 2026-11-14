@@ -661,7 +661,8 @@ CREATE TABLE IF NOT EXISTS log_file_sources (
     source_ip TEXT NOT NULL,
     app TEXT NOT NULL,
     host TEXT NOT NULL,
-    PRIMARY KEY (day, source_ip, app, host)
+    source_kind INTEGER NOT NULL,
+    PRIMARY KEY (day, source_ip, app, host, source_kind)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS log_id_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),

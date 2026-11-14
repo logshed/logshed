@@ -17,7 +17,7 @@ import contextlib
 import datetime
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us
@@ -1257,6 +1257,9 @@ class SeenNames:
     alias_apps: list[tuple[str, str, str]]
     # (app_name, source_ip) of logs with no alias; empty when bare_ips is
     bare_ip_apps: list[tuple[str, str]]
+    # The source kinds of each host name's rows in day files (day_files.KIND_*, 0 unknown); a name
+    # only legacy rows carry is not listed, and is classed by name
+    host_kinds: dict[str, frozenset[int]] = field(default_factory=dict)
 
 
 def seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> SeenNames:
@@ -1299,7 +1302,12 @@ def seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> Se
         for alias, app, ip in seen.alias_apps:
             alias_apps[(alias, app)] = min(alias_apps.get((alias, app), ip), ip)
     bare_ips = sorted({ip for seen in results for ip in seen.bare_ips})[:scan_limit]
+    host_kinds: dict[str, set[int]] = {}
+    for seen in results:
+        for host, kinds in seen.host_kinds.items():
+            host_kinds.setdefault(host, set()).update(kinds)
     return SeenNames(
+        host_kinds={host: frozenset(kinds) for host, kinds in host_kinds.items()},
         aliases=sorted(aliases.items())[:scan_limit],
         bare_ips=bare_ips,
         apps=sorted({app for seen in results for app in seen.apps})[:scan_limit],
@@ -1359,7 +1367,7 @@ def _sealed_seen(
     """
     walk_limit = _walk_limit(scan_limit, pair_limit)
     triples = conn.execute(
-        "SELECT source_ip, app, host FROM log_file_sources WHERE day = ? LIMIT ?", (part.day, walk_limit)
+        "SELECT source_ip, app, host, source_kind FROM log_file_sources WHERE day = ? LIMIT ?", (part.day, walk_limit)
     ).fetchall()
     if len(triples) >= walk_limit or (not triples and part.row_count):
         return None
@@ -1375,7 +1383,10 @@ def _seen_from_triples(
     alias_apps: dict[tuple[str, str], str] = {}
     bare_ip_apps: set[tuple[str, str]] = set()
     first_pair: dict[str, tuple[str, str]] = {}
-    for ip, app, host in triples:
+    host_kinds: dict[str, set[int]] = {}
+    for ip, app, host, kind in triples:
+        if host:
+            host_kinds.setdefault(host, set()).add(kind)
         if app:
             apps.add(app)
         if host:
@@ -1394,6 +1405,7 @@ def _seen_from_triples(
         apps=sorted(apps)[:scan_limit],
         alias_apps=[(a, app, ip) for (a, app), ip in sorted(alias_apps.items())][:pair_limit],
         bare_ip_apps=sorted(bare_ip_apps)[:pair_limit] if bare_ips else [],
+        host_kinds={host: frozenset(kinds) for host, kinds in host_kinds.items()},
     )
     return seen, (first_pair if complete else None)
 
