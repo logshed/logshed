@@ -35,6 +35,10 @@ ID_BLOCK = 100_000
 
 # Rows per multi-row INSERT (12 parameters each)
 INSERT_CHUNK_ROWS = 500
+# The most (address, app, host) a seal lists per day file. The Console's lists use a stored list only
+# when it is shorter than their walk's limit (21,004), so more would only grow logs.db (a day of
+# scans from thousands of addresses); a test keeps this at least that limit
+SOURCES_STORED_LIMIT = 25_000
 
 _DAY_US = 86_400_000_000
 
@@ -705,7 +709,7 @@ class Figures:
     max_ts: Optional[int]
     # (hour start in epoch seconds, host, app, severity) -> count
     counts: dict[tuple[int, str, str, int], int]
-    # Every distinct (address, app, host) of the file, for the Console's host and app lists
+    # The file's distinct (address, app, host) in index order, at most SOURCES_STORED_LIMIT, for the host and app lists
     sources: list[tuple[str, str, str]]
 
 
@@ -767,7 +771,7 @@ def figures(day_conn: sqlite3.Connection) -> Figures:
     for hour, host, app, severity, cnt in rows:
         key = (hour, host, app, severity)
         counts[key] = counts.get(key, 0) + cnt
-    return Figures(bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], counts, distinct_sources(day_conn))
+    return Figures(bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], counts, distinct_sources(day_conn, SOURCES_STORED_LIMIT))
 
 
 def _write_figures(write: sqlite3.Connection, day: str, found: Figures, size: int, seal: bool) -> None:

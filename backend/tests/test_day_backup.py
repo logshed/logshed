@@ -279,3 +279,4 @@ def test_the_copied_file_list_keeps_no_counts_for_files_left_out(db, tmp_path):
     with closing(sqlite3.connect(copy)) as conn:
         assert [r[0] for r in conn.execute("SELECT day FROM log_files WHERE day != 'legacy'")] == [D1]
         assert {r[0] for r in conn.execute("SELECT DISTINCT day FROM log_file_counts")} == {D1}
+        assert {r[0] for r in conn.execute("SELECT DISTINCT day FROM log_file_sources")} == {D1}

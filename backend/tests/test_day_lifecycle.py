@@ -209,6 +209,19 @@ class TestSealing:
         assert fallback == from_files
         assert opened == [day_files.file_name(D2)]
 
+    def test_a_stored_list_at_its_cap_is_never_read_as_complete(self, three_days, monkeypatch):
+        """The seal lists at most SOURCES_STORED_LIMIT sources; a list that long makes the lists walk the file."""
+        from app.services import log_facets
+
+        assert log_store._walk_limit(log_facets._FACET_SCAN_LIMIT, log_facets._FACET_PAIR_LIMIT) <= day_store.SOURCES_STORED_LIMIT
+        monkeypatch.setattr(day_store, "SOURCES_STORED_LIMIT", 1)
+        _seal_all(three_days)
+        with open_db(three_days) as conn:
+            assert conn.execute("SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM log_file_sources GROUP BY day)").fetchone()[0] == 1
+        with mock.patch.object(log_store, "_walk_limit", lambda *a: 1):
+            _seen, opened = self._seen_opening(three_days)
+        assert sorted(opened) == sorted(day_files.file_name(d) for d in (D1, D2, D3))
+
     def test_a_relabel_in_a_sealed_day_rewrites_its_listed_sources(self, three_days):
         _seal_all(three_days)
         with open_db(three_days) as conn:
