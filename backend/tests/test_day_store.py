@@ -424,3 +424,37 @@ def test_error_figures_and_the_digest_read_only_the_time_range_of_a_sealed_day(t
     for plan in plans:
         assert any("idx_logs_time_sev" in step for step in plan), plan
     day_store.close_thread_connections()
+
+
+def test_one_app_filter_reads_the_app_index_in_time_order(tmp_path: Path):
+    """A page filtered to one app reads idx_logs_app_time newest first instead of sorting all of the app's rows."""
+    from app.services.log_query import build_day_where
+
+    path = tmp_path / "logs.db"
+    run_migrations(path)
+    start = datetime.datetime(2026, 11, 13, tzinfo=datetime.timezone.utc)
+    rows = []
+    for i in range(3000):
+        stamp = (start + datetime.timedelta(seconds=i)).isoformat()
+        rows.append({"timestamp": stamp, "received_at": stamp, "source_ip": "10.0.0.1", "source_alias": "host1",
+                     "app_name": f"app{i % 3}", "severity": 6, "message": f"line {i}", "raw": f"line {i}"})
+    with open_db(path) as conn:
+        day_store.write_rows(conn, rows)
+    day_conn = sqlite3.connect(day_files.day_path(path, "2026-11-13"))
+    try:
+        where, params = build_day_where(LogFilter.parse(apps=["app1"]), [])
+        sql = f"SELECT logs.id FROM logs {where} ORDER BY logs.ts DESC, logs.id DESC LIMIT 50"
+        plan = " | ".join(r[3] for r in day_conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+        assert "idx_logs_app_time" in plan
+        assert "USE TEMP B-TREE FOR ORDER BY" not in plan, plan
+    finally:
+        day_conn.close()
+
+    # The same rows as the form for several apps, with a name that matches nothing beside it
+    with open_db(path, sqlite3.Row) as conn:
+        one = log_store.search(conn, LogFilter.parse(apps=["app1"]), fetch=100, offset=0, count_limit=2000)
+        two = log_store.search(conn, LogFilter.parse(apps=["app1", "absent"]), fetch=100, offset=0, count_limit=2000)
+        none = log_store.search(conn, LogFilter.parse(apps=["absent"]), fetch=100, offset=0, count_limit=2000)
+    assert one[0] == two[0] == 1000
+    assert [r["id"] for r in one[1]] == [r["id"] for r in two[1]]
+    assert none[0] == 0 and not none[1]
