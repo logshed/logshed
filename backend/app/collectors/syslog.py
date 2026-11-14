@@ -726,6 +726,9 @@ TCP_RESUME_BYTES = 1024 * 1024
 # tens of milliseconds, and every web request waits that long
 PARSE_SLICE = 500
 PARSE_SLICE_SECONDS = 0.005
+# A full parse queue logs its first dropped datagram, then at most one line per this many seconds
+# with the count since: a line per datagram would add a log storm of LogShed's own to the flood
+UDP_DROP_WARNING_INTERVAL = 10.0
 # When the ingest queue is full, the worker waits this long for room (TCP senders are paused
 # meanwhile). If none comes, entries that do not fit are lost as before, and the worker waits
 # again only once the ingest queue is below half full, so a long stall blocks senders once.
@@ -763,6 +766,9 @@ class SyslogParseQueue:
         self._wakeup: Optional[asyncio.Future] = None
         self._closing = False
         self._close_task: Optional[asyncio.Task] = None
+        # Datagrams dropped since the last warning, and when that warning was logged (None before the first)
+        self._unlogged_drops = 0
+        self._drop_warned_at: Optional[float] = None
         # Set when the ingest queue stayed full for INGEST_ROOM_WAIT: entries are lost until it has room again
         self._ingest_overflowing = False
 
@@ -781,12 +787,33 @@ class SyslogParseQueue:
         """Queue a datagram, or drop and count it when the queue is full. Returns True if queued."""
         if len(self._items) >= self.max_items or self._bytes + len(data) > self.max_bytes:
             increment_dropped_count(1)
-            logger.warning(
-                f"Syslog parse queue full ({len(self._items)} messages, {self._bytes} bytes). UDP packet dropped."
-            )
+            self._unlogged_drops += 1
+            self._log_udp_drops(first=self._drop_warned_at is None)
             return False
+        if self._unlogged_drops:
+            self._log_udp_drops(first=False)
         self._put(data, source_ip)
         return True
+
+    def _log_udp_drops(self, first: bool) -> None:
+        """Log the datagrams dropped since the last line, at most once per UDP_DROP_WARNING_INTERVAL."""
+        now = time.monotonic()
+        if not first and now - self._drop_warned_at < UDP_DROP_WARNING_INTERVAL:
+            return
+        if first:
+            logger.warning(
+                f"Syslog parse queue full ({len(self._items)} messages, {self._bytes} bytes). UDP packet dropped; "
+                f"further drops are summarized every {UDP_DROP_WARNING_INTERVAL:g} s."
+            )
+        else:
+            count = self._unlogged_drops
+            packets = "UDP packet" if count == 1 else "UDP packets"
+            logger.warning(
+                f"Syslog parse queue full: {count:,} more {packets} dropped in the last {now - self._drop_warned_at:.0f} s "
+                f"({len(self._items)} messages, {self._bytes} bytes queued now)."
+            )
+        self._unlogged_drops = 0
+        self._drop_warned_at = now
 
     def put_tcp(self, frame: bytes, source_ip: str) -> bool:
         """

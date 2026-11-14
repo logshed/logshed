@@ -2078,6 +2078,47 @@ class TestSyslogSharedParseQueue:
         assert max(frames_between) == 2, order
 
     @pytest.mark.asyncio
+    async def test_udp_drops_in_a_flood_log_a_summary_not_a_line_each(self, db_path: Path, monkeypatch, caplog):
+        """A full parse queue logs its first drop, then at most one summary per interval with the count."""
+        import logging
+        import app.collectors.syslog as syslog_mod
+        from app.collectors.syslog import SyslogParseQueue
+        from app.core.pipeline import get_dropped_count
+
+        clock = [1000.0]
+        monkeypatch.setattr(syslog_mod.time, "monotonic", lambda: clock[0])
+        shared = SyslogParseQueue(KeyedMultilineAssembler(), AliasCache(db_path, preload=False), max_items=0)
+        initial_drops = get_dropped_count()
+        caplog.set_level(logging.WARNING, logger="app.collectors.syslog")
+
+        def warnings() -> list[str]:
+            return [r.getMessage() for r in caplog.records if "UDP" in r.getMessage()]
+
+        for _ in range(1000):
+            shared.put_udp(b"x", "10.0.0.1")
+        assert get_dropped_count() == initial_drops + 1000
+        assert len(warnings()) == 1
+        assert "summarized every 10 s" in warnings()[0]
+
+        # Within the interval nothing more; after it, one line with every drop since the first
+        clock[0] += syslog_mod.UDP_DROP_WARNING_INTERVAL - 0.1
+        shared.put_udp(b"x", "10.0.0.1")
+        assert len(warnings()) == 1
+        clock[0] += 0.2
+        shared.put_udp(b"x", "10.0.0.1")
+        assert len(warnings()) == 2
+        assert "1,001 more UDP packets dropped" in warnings()[1]
+
+        # Drops that end inside an interval are reported by the next datagram that fits
+        shared.put_udp(b"x", "10.0.0.1")
+        shared.max_items = 10
+        clock[0] += syslog_mod.UDP_DROP_WARNING_INTERVAL
+        assert shared.put_udp(b"x", "10.0.0.1")
+        assert len(warnings()) == 3
+        assert "1 more UDP packet dropped" in warnings()[2]
+        await shared.close()
+
+    @pytest.mark.asyncio
     async def test_full_ingest_queue_waits_then_loses_until_half_empty(self, db_path: Path, monkeypatch):
         import app.collectors.syslog as syslog_mod
         import app.core.pipeline as pipeline_mod
