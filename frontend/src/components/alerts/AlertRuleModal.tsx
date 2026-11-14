@@ -24,6 +24,9 @@ export interface AlertRulePrefill {
 
 const EMPTY_APPS: string[] = [];
 
+/** Text that reads like a regular expression: an operator, or a backslash code such as \d or \b. */
+const LOOKS_LIKE_REGEX = /[*+?[\](){}^$|]|\\[dDwWsSbB.]/;
+
 const RULE_TYPE_OPTIONS: SelectOption[] = [
   { value: 'threshold', label: 'Threshold (Sliding Window)' },
   { value: 'pattern', label: 'Pattern (Immediate Match)' },
@@ -79,6 +82,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const [formFilterHosts, setFormFilterHosts] = useState<string[]>([]);
   const [formFilterSeverity, setFormFilterSeverity] = useState<number | ''>('');
   const [formMatchPattern, setFormMatchPattern] = useState<string>('');
+  const [formIsRegex, setFormIsRegex] = useState<boolean>(false);
   const [formThresholdCount, setFormThresholdCount] = useState<number | ''>(1);
   const [formWindowSeconds, setFormWindowSeconds] = useState<number | ''>(60);
   const [formCooldownSeconds, setFormCooldownSeconds] = useState<number | ''>(300);
@@ -111,6 +115,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           : ''
       );
       setFormMatchPattern(ruleToEdit.match_pattern || '');
+      setFormIsRegex(Boolean(ruleToEdit.is_regex));
       setFormThresholdCount(ruleToEdit.threshold_count);
       setFormWindowSeconds(ruleToEdit.window_seconds);
       setFormCooldownSeconds(ruleToEdit.cooldown_seconds);
@@ -125,6 +130,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormFilterHosts(initialFilterHosts);
       setFormFilterSeverity('');
       setFormMatchPattern('');
+      setFormIsRegex(false);
       setFormThresholdCount(1);
       setFormWindowSeconds(60);
       setFormCooldownSeconds(300);
@@ -163,6 +169,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         hostPattern !== joinPatternList(splitPatternList(ruleToEdit.filter_host)) ||
         formFilterSeverity !== initialSeverity ||
         formMatchPattern !== (ruleToEdit.match_pattern || '') ||
+        formIsRegex !== Boolean(ruleToEdit.is_regex) ||
         formThresholdCount !== ruleToEdit.threshold_count ||
         formWindowSeconds !== ruleToEdit.window_seconds ||
         formCooldownSeconds !== ruleToEdit.cooldown_seconds ||
@@ -182,6 +189,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         hostPattern !== joinPatternList(initialFilterHosts) ||
         formFilterSeverity !== '' ||
         formMatchPattern !== '' ||
+        formIsRegex !== false ||
         formThresholdCount !== 1 ||
         formWindowSeconds !== 60 ||
         formCooldownSeconds !== 300 ||
@@ -203,6 +211,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
     formFilterApps,
     formFilterSeverity,
     formMatchPattern,
+    formIsRegex,
     formThresholdCount,
     formWindowSeconds,
     formCooldownSeconds,
@@ -247,6 +256,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           filter_host: filterHostPayload,
           filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
           match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
+          is_regex: formIsRegex,
           threshold_count: (formRuleType === 'threshold' || formRuleType === 'rate') ? finalThreshold : 1,
           window_seconds: finalWindow,
           cooldown_seconds: finalCooldown,
@@ -265,6 +275,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           filter_host: filterHostPayload,
           filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
           match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
+          is_regex: formIsRegex,
           threshold_count: (formRuleType === 'threshold' || formRuleType === 'rate') ? finalThreshold : 1,
           window_seconds: finalWindow,
           cooldown_seconds: finalCooldown,
@@ -531,18 +542,41 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
 
         {/* Match Pattern */}
         <div className="space-y-1">
-          <label htmlFor={`${fieldId}-pattern`} className={LABEL_TEXT_CLASS}>Match Pattern (Regex or Substring)</label>
+          <label htmlFor={`${fieldId}-pattern`} className={LABEL_TEXT_CLASS}>Match Pattern</label>
           <input
             id={`${fieldId}-pattern`}
             type="text"
             value={formMatchPattern}
             onChange={(e) => setFormMatchPattern(e.target.value)}
-            placeholder="e.g. Failed password|authentication failure"
+            placeholder={formIsRegex ? 'e.g. Failed password|authentication failure' : 'e.g. Failed password'}
             className={controlClass({ mono: true })}
           />
+          <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+            <input
+              type="checkbox"
+              checked={formIsRegex}
+              onChange={(e) => setFormIsRegex(e.target.checked)}
+              className={CHECKBOX_CLASS}
+            />
+            <span className="text-fg-soft">Match as a regular expression</span>
+          </label>
           <p className="text-[11px] text-fg-muted">
-            Matches against log message text using regular expression search or case-insensitive keyword search.
+            {formIsRegex
+              ? 'Searched in the log message as a case-insensitive regular expression. Write \\\\ for a backslash.'
+              : 'Found anywhere in the log message as plain text, ignoring letter case. Every character means itself.'}
           </p>
+          {!formIsRegex && LOOKS_LIKE_REGEX.test(formMatchPattern) && (
+            <p className="text-[11px] text-fg-muted" data-testid="alert-rule-regex-hint">
+              This looks like a regular expression.{' '}
+              <button
+                type="button"
+                onClick={() => setFormIsRegex(true)}
+                className="text-accent-400 hover:text-accent-300 underline cursor-pointer"
+              >
+                Match as a regular expression
+              </button>
+            </p>
+          )}
           {referenceMessage && (
             <p
               className="text-[11px] text-fg-muted font-mono truncate select-text"

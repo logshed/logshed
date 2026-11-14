@@ -715,6 +715,22 @@ def _add_column(conn: sqlite3.Connection, table: str, column: str, definition: s
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
 
 
+def _store_alert_pattern_choice(conn: sqlite3.Connection) -> None:
+    """Add alert_rules.is_regex, set for each rule from how its pattern has been read so far."""
+    from app.core.regex_validator import alert_pattern_looks_like_regex
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(alert_rules);").fetchall()}
+    if "is_regex" in columns:
+        return
+    conn.execute("ALTER TABLE alert_rules ADD COLUMN is_regex BOOLEAN NOT NULL DEFAULT 0;")
+    regex_ids = [
+        (rule_id,)
+        for rule_id, pattern in conn.execute("SELECT id, match_pattern FROM alert_rules;").fetchall()
+        if alert_pattern_looks_like_regex(pattern)
+    ]
+    conn.executemany("UPDATE alert_rules SET is_regex = 1 WHERE id = ?;", regex_ids)
+
+
 def migrate_v4(conn: sqlite3.Connection) -> None:
     """
     Execute Migration 4 (LogShed 1.4.0):
@@ -723,13 +739,16 @@ def migrate_v4(conn: sqlite3.Connection) -> None:
       are added, and the logs table so far is listed as the legacy entry. No day file is made
       and no log row is touched: the first write after start-up makes the day's file;
     - reported_hosts lists the host names syslog senders reported and are shown by;
-    - alert rules can be limited to hosts (alert_rules.filter_host, NULL for every host).
+    - alert rules can be limited to hosts (alert_rules.filter_host, NULL for every host);
+    - alert rules store whether their pattern is a regular expression (alert_rules.is_regex), set
+      for existing rules from how their pattern was read until now.
     """
     logger.info("Running migration v4...")
     _reencrypt_stored_secrets(conn)
     _run_script(conn, LOG_CATALOGUE_SCHEMA)
     _register_legacy_logs(conn)
     _add_column(conn, "alert_rules", "filter_host", "TEXT")
+    _store_alert_pattern_choice(conn)
 
 
 MIGRATIONS = [

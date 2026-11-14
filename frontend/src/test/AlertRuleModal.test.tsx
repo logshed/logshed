@@ -435,7 +435,7 @@ describe('AlertRuleModal prefill from a log', () => {
     renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: message });
 
     expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx');
-    expect(screen.getByPlaceholderText('e.g. Failed password|authentication failure')).toHaveValue('');
+    expect(screen.getByLabelText('Match Pattern')).toHaveValue('');
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
     await waitFor(() =>
@@ -554,5 +554,81 @@ describe('AlertRuleModal host filter', () => {
     renderModal({ prefill: { name: 'Many', filterHosts: Array.from({ length: 30 }, (_, i) => `host-number-${i}`) } });
     expect(screen.getByRole('alert')).toHaveTextContent('The host list is longer than 255 characters.');
     expect(screen.getByRole('button', { name: 'Create Rule' })).toBeDisabled();
+  });
+});
+
+describe('AlertRuleModal regex or plain text', () => {
+  const onClose = vi.fn();
+  const onSuccess = vi.fn();
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  const renderModal = (props: Partial<React.ComponentProps<typeof AlertRuleModal>> = {}) =>
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={[]}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        {...props}
+      />
+    );
+
+  const regexBox = () => screen.getByRole('checkbox', { name: 'Match as a regular expression' });
+
+  it('starts a new rule as plain text and saves a Windows path as it is', async () => {
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRule, id: 9 });
+    renderModal();
+    expect(regexBox()).not.toBeChecked();
+    fireEvent.change(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike'), { target: { value: 'Temp' } });
+    fireEvent.change(screen.getByLabelText('Match Pattern'), { target: { value: 'C:\\Temp' } });
+    expect(screen.queryByTestId('alert-rule-regex-hint')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ match_pattern: 'C:\\Temp', is_regex: false }))
+    );
+  });
+
+  it('offers regex matching when the text looks like a regular expression', async () => {
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRule, id: 9 });
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike'), { target: { value: 'Auth' } });
+    fireEvent.change(screen.getByLabelText('Match Pattern'), { target: { value: 'Failed (password|publickey)' } });
+    expect(screen.getByTestId('alert-rule-regex-hint')).toHaveTextContent('This looks like a regular expression.');
+    fireEvent.click(screen.getByRole('button', { name: 'Match as a regular expression' }));
+    expect(regexBox()).toBeChecked();
+    expect(screen.queryByTestId('alert-rule-regex-hint')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() => expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ is_regex: true })));
+  });
+
+  it('gives the hint for backslash codes but not for plain words', () => {
+    renderModal();
+    const field = screen.getByLabelText('Match Pattern');
+    fireEvent.change(field, { target: { value: 'out of memory' } });
+    expect(screen.queryByTestId('alert-rule-regex-hint')).toBeNull();
+    fireEvent.change(field, { target: { value: 'error \\d+' } });
+    expect(screen.getByTestId('alert-rule-regex-hint')).toBeInTheDocument();
+  });
+
+  it('shows the choice of a rule it edits and saves a change to it', async () => {
+    const updateSpy = vi.spyOn(alertsApi, 'updateAlertRule').mockResolvedValue({ ...mockRule, is_regex: false });
+    renderModal({ ruleToEdit: { ...mockRule, is_regex: true } });
+    expect(regexBox()).toBeChecked();
+    fireEvent.click(regexBox());
+    fireEvent.click(screen.getByRole('button', { name: 'Update Rule' }));
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledWith(42, expect.objectContaining({ is_regex: false })));
+  });
+
+  it('counts a changed choice as an unsaved change', () => {
+    renderModal({ ruleToEdit: { ...mockRule, is_regex: false } });
+    fireEvent.click(regexBox());
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
   });
 });

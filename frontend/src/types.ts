@@ -528,6 +528,7 @@ export interface AlertRule {
   filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
+  is_regex?: boolean;
   threshold_count: number;
   window_seconds: number;
   cooldown_seconds: number;
@@ -548,6 +549,7 @@ export interface AlertRuleCreate {
   filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
+  is_regex?: boolean;
   threshold_count?: number;
   window_seconds?: number;
   cooldown_seconds?: number;
@@ -563,6 +565,7 @@ export interface AlertRuleUpdate {
   filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
+  is_regex?: boolean;
   threshold_count?: number;
   window_seconds?: number;
   cooldown_seconds?: number;
@@ -577,6 +580,7 @@ export interface AlertTestRequest {
   filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
+  is_regex?: boolean | null;
   sample_message: string;
   sample_app?: string | null;
   sample_host?: string | null;
@@ -600,6 +604,7 @@ export interface AlertPreset {
   filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
+  is_regex?: boolean;
   threshold_count: number;
   window_seconds: number;
   cooldown_seconds: number;

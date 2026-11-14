@@ -99,6 +99,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         filter_host: rule.filter_host ?? null,
         filter_severity: rule.filter_severity ?? null,
         match_pattern: rule.match_pattern,
+        is_regex: rule.is_regex ?? null,
         sample_message: testSampleMessage,
         sample_app: testSampleApp.trim() || null,
         sample_host: testSampleHost.trim() || null,

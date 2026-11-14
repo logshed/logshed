@@ -47,7 +47,7 @@ from app.services import alert_history
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.services.maintenance_service import MaintenanceSessionLimitError
-from app.core.regex_validator import check_regex_safety, validate_regex_pattern
+from app.core.regex_validator import alert_pattern_looks_like_regex, check_regex_safety, validate_regex_pattern
 from app.core.utils import normalize_pattern_list, parse_iso_to_epoch, parse_iso_to_utc_datetime
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ _ALERT_RULE_COLUMNS = """
     id, name, rule_type, channel_id, filter_app, filter_severity,
     match_pattern, threshold_count, window_seconds, cooldown_seconds,
     ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-    suppress_until, display_order, created_at, filter_host
+    suppress_until, display_order, created_at, filter_host, is_regex
 """
 
 
@@ -81,6 +81,7 @@ async def _fetch_alert_rule_row(rule_id: int) -> Any:
 def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
     """Map a raw database row tuple from alert_rules (_ALERT_RULE_COLUMNS) into an AlertRuleResponse."""
     filter_host = r[17] if len(r) > 17 else None
+    is_regex = bool(r[18]) if len(r) > 18 else alert_pattern_looks_like_regex(r[6])
     if len(r) > 16:
         display_order = r[15]
         created_at = str(r[16])
@@ -97,6 +98,7 @@ def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
         filter_host=filter_host,
         filter_severity=r[5],
         match_pattern=r[6],
+        is_regex=is_regex,
         threshold_count=r[7] or 1,
         window_seconds=r[8] or 60,
         cooldown_seconds=r[9] or 300,
@@ -260,7 +262,7 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
 _ALERT_EXPORT_COLUMNS = """
     name, rule_type, filter_app, filter_severity, match_pattern,
     threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
-    display_order, filter_host
+    display_order, filter_host, is_regex
 """
 
 
@@ -273,6 +275,7 @@ def _row_to_alert_export_item(r: Any) -> AlertRuleExportItem:
         filter_host=r["filter_host"],
         filter_severity=r["filter_severity"],
         match_pattern=r["match_pattern"],
+        is_regex=bool(r["is_regex"]),
         threshold_count=r["threshold_count"] or 1,
         window_seconds=r["window_seconds"] or 60,
         cooldown_seconds=r["cooldown_seconds"] or 300,
@@ -297,10 +300,10 @@ def _insert_alert_rule(conn: sqlite3.Connection, rule: dict[str, Any], created_a
     cur = conn.execute(
         """
         INSERT INTO alert_rules
-        (name, rule_type, channel_id, filter_app, filter_host, filter_severity, match_pattern,
+        (name, rule_type, channel_id, filter_app, filter_host, filter_severity, match_pattern, is_regex,
          threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
          is_enabled, trigger_count, display_order, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """,
         (
             rule["name"],
@@ -310,6 +313,7 @@ def _insert_alert_rule(conn: sqlite3.Connection, rule: dict[str, Any], created_a
             rule.get("filter_host"),
             rule["filter_severity"],
             rule["match_pattern"],
+            int(rule["is_regex"]),
             rule["threshold_count"],
             rule["window_seconds"],
             rule["cooldown_seconds"],
@@ -452,7 +456,11 @@ async def import_alert_rules(
             errors.append(length_error)
             continue
 
-        if match_pattern:
+        # Files from LogShed 1.3.x have no choice: their patterns are read as 1.3.x read them
+        raw_is_regex = raw_item.get("is_regex")
+        is_regex = alert_pattern_looks_like_regex(match_pattern) if raw_is_regex is None else bool(raw_is_regex)
+
+        if match_pattern and is_regex:
             is_safe, err_str = check_regex_safety(match_pattern)
             if not is_safe:
                 errors.append(f"Rule '{name}': regex safety check failed: {err_str}")
@@ -492,6 +500,7 @@ async def import_alert_rules(
             "filter_host": filter_host,
             "filter_severity": filter_severity,
             "match_pattern": match_pattern,
+            "is_regex": is_regex,
             "threshold_count": threshold_count,
             "window_seconds": window_seconds,
             "cooldown_seconds": cooldown_seconds,
@@ -522,8 +531,11 @@ async def create_alert_rule(
     user: dict = Depends(get_current_user),
 ) -> AlertRuleResponse:
     """Create a new alert rule and update the evaluation engine."""
-    if rule_in.match_pattern:
-        validate_regex_pattern(rule_in.match_pattern)
+    match_pattern = rule_in.match_pattern.strip() if rule_in.match_pattern else None
+    # A client that leaves the choice out gets the pattern read as before 1.4.0
+    is_regex = alert_pattern_looks_like_regex(match_pattern) if rule_in.is_regex is None else rule_in.is_regex
+    if match_pattern and is_regex:
+        validate_regex_pattern(match_pattern)
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rule = {
@@ -533,7 +545,8 @@ async def create_alert_rule(
         "filter_app": rule_in.filter_app.strip() if rule_in.filter_app else None,
         "filter_host": normalize_pattern_list(rule_in.filter_host),
         "filter_severity": rule_in.filter_severity,
-        "match_pattern": rule_in.match_pattern.strip() if rule_in.match_pattern else None,
+        "match_pattern": match_pattern,
+        "is_regex": is_regex,
         "threshold_count": rule_in.threshold_count,
         "window_seconds": rule_in.window_seconds,
         "cooldown_seconds": rule_in.cooldown_seconds,
@@ -580,7 +593,15 @@ async def update_alert_rule(
     new_host = normalize_pattern_list(rule_in.filter_host) if "filter_host" in fields else row[17]
     new_sev = rule_in.filter_severity if "filter_severity" in fields else row[5]
     new_pat = (rule_in.match_pattern.strip() if rule_in.match_pattern else None) if "match_pattern" in fields else row[6]
-    if "match_pattern" in fields and new_pat:
+    if "is_regex" in fields and rule_in.is_regex is not None:
+        new_is_regex = rule_in.is_regex
+    elif "match_pattern" in fields:
+        # A new pattern sent without the choice is read as before 1.4.0, as on create
+        new_is_regex = alert_pattern_looks_like_regex(new_pat)
+    else:
+        new_is_regex = bool(row[18])
+    # A plain text pattern is never run as a regular expression, so only a regex is checked
+    if ("match_pattern" in fields or "is_regex" in fields) and new_pat and new_is_regex:
         validate_regex_pattern(new_pat)
     new_thresh = rule_in.threshold_count if "threshold_count" in fields and rule_in.threshold_count is not None else row[7]
     new_win = rule_in.window_seconds if "window_seconds" in fields and rule_in.window_seconds is not None else row[8]
@@ -622,7 +643,7 @@ async def update_alert_rule(
             """
             UPDATE alert_rules
             SET name = ?, rule_type = ?, channel_id = ?, filter_app = ?, filter_host = ?,
-                filter_severity = ?, match_pattern = ?, threshold_count = ?,
+                filter_severity = ?, match_pattern = ?, is_regex = ?, threshold_count = ?,
                 window_seconds = ?, cooldown_seconds = ?, ai_enrichment = ?,
                 is_enabled = ?, suppress_until = ?
             WHERE id = ?
@@ -635,6 +656,7 @@ async def update_alert_rule(
                 new_host,
                 new_sev,
                 new_pat,
+                int(new_is_regex),
                 new_thresh,
                 new_win,
                 new_cool,
@@ -707,8 +729,10 @@ async def test_alert_pattern(
         # Check the pattern first, so a pattern that saving would refuse never builds a rule
         # (building one logs a warning meant for stored rules)
         regex_error = None
-        if payload.match_pattern and payload.match_pattern.strip() and payload.match_pattern.strip() != "*":
-            is_safe, err = check_regex_safety(payload.match_pattern.strip())
+        test_pattern = (payload.match_pattern or "").strip()
+        is_regex = alert_pattern_looks_like_regex(test_pattern) if payload.is_regex is None else payload.is_regex
+        if is_regex and test_pattern and test_pattern != "*":
+            is_safe, err = check_regex_safety(test_pattern)
             if not is_safe:
                 regex_error = err
 
@@ -734,6 +758,7 @@ async def test_alert_pattern(
                 filter_host=payload.filter_host,
                 filter_severity=payload.filter_severity,
                 match_pattern=payload.match_pattern,
+                is_regex=is_regex,
                 threshold_count=1,
                 window_seconds=60,
                 cooldown_seconds=0,
@@ -762,11 +787,18 @@ async def test_alert_pattern(
 # Alert Presets
 # ---------------------------------------------------------------------------
 
+def _preset_is_regex(preset: dict[str, Any]) -> bool:
+    """A preset's own is_regex, or else what its pattern looks like (presets written before the choice)."""
+    if preset.get("is_regex") is not None:
+        return bool(preset["is_regex"])
+    return alert_pattern_looks_like_regex(preset.get("match_pattern"))
+
+
 @router.get("/presets", response_model=list[AlertPresetResponse])
 async def list_alert_presets(user: dict = Depends(get_current_user)) -> list[AlertPresetResponse]:
     """Retrieve all available 1-click alert presets."""
     presets = get_alert_presets()
-    return [AlertPresetResponse(**p) for p in presets]
+    return [AlertPresetResponse(**{**p, "is_regex": _preset_is_regex(p)}) for p in presets]
 
 
 @router.post("/presets/{preset_id}/install", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
@@ -786,7 +818,8 @@ async def install_preset(
         )
 
     # Custom presets in the data directory are user-written, so they get the same checks as a new rule
-    if preset.get("match_pattern"):
+    is_regex = _preset_is_regex(preset)
+    if preset.get("match_pattern") and is_regex:
         validate_regex_pattern(preset["match_pattern"])
 
     channel_id = payload.channel_id if payload else None
@@ -799,6 +832,7 @@ async def install_preset(
         "filter_host": normalize_pattern_list(preset.get("filter_host")),
         "filter_severity": preset.get("filter_severity"),
         "match_pattern": preset.get("match_pattern"),
+        "is_regex": is_regex,
         "threshold_count": preset["threshold_count"],
         "window_seconds": preset["window_seconds"],
         "cooldown_seconds": preset["cooldown_seconds"],

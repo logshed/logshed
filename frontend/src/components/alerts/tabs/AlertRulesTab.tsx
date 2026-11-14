@@ -260,7 +260,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                       )}
                       {rule.match_pattern && (
                         <span className="truncate max-w-xs">
-                          Pattern: <code className="font-mono text-accent-400 text-[11px]">{rule.match_pattern}</code>
+                          {rule.is_regex ? 'Regex' : 'Text'}: <code className="font-mono text-accent-400 text-[11px]">{rule.match_pattern}</code>
                         </span>
                       )}
                       <span>

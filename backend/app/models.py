@@ -1050,6 +1050,11 @@ class AlertRuleCreate(BaseModel):
     )
     filter_severity: Optional[int] = Field(None, ge=0, le=7, description="Maximum severity threshold (0-7, lower is more critical)")
     match_pattern: Optional[str] = Field(None, max_length=1000, description="Regex or keyword pattern to match against log messages")
+    is_regex: Optional[bool] = Field(
+        None,
+        description="Whether match_pattern is a regular expression (else case-insensitive plain text); "
+        "left out, LogShed decides from the pattern as before 1.4.0",
+    )
     threshold_count: int = Field(1, ge=1, le=100000, description="Occurrences or logs/sec needed within window to trigger")
     window_seconds: int = Field(60, ge=1, le=86400, description="Sliding window duration in seconds")
     cooldown_seconds: int = Field(300, ge=5, le=86400, description="Cooldown dampening duration in seconds")
@@ -1066,6 +1071,7 @@ class AlertRuleUpdate(BaseModel):
     filter_host: Optional[str] = Field(None, max_length=255)
     filter_severity: Optional[int] = Field(None, ge=0, le=7)
     match_pattern: Optional[str] = Field(None, max_length=1000)
+    is_regex: Optional[bool] = None
     threshold_count: Optional[int] = Field(None, ge=1, le=100000)
     window_seconds: Optional[int] = Field(None, ge=1, le=86400)
     cooldown_seconds: Optional[int] = Field(None, ge=5, le=86400)
@@ -1084,6 +1090,7 @@ class AlertRuleResponse(BaseModel):
     filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
+    is_regex: bool = False
     threshold_count: int = 1
     window_seconds: int = 60
     cooldown_seconds: int = 300
@@ -1103,6 +1110,7 @@ class AlertTestRequest(BaseModel):
     filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
+    is_regex: Optional[bool] = None
     sample_message: str = Field(..., description="Sample message text to test")
     sample_app: Optional[str] = Field(None, description="Sample app name")
     sample_host: Optional[str] = Field(None, description="Sample host name or IP address")
@@ -1128,6 +1136,7 @@ class AlertPresetResponse(BaseModel):
     filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
+    is_regex: bool = False
     threshold_count: int = 1
     window_seconds: int = 60
     cooldown_seconds: int = 300
@@ -1144,6 +1153,7 @@ class AlertRuleExportItem(BaseModel):
     filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
+    is_regex: bool = False
     threshold_count: int = 1
     window_seconds: int = 60
     cooldown_seconds: int = 300

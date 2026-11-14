@@ -23,6 +23,7 @@ from app.core.pipeline import MAX_FUTURE_TIMESTAMP_SKEW_SECONDS, SKIP_ALERT_RULE
 from app.core.redactor import redact
 from app.core.regex_validator import (
     RuleTimeoutTracker,
+    alert_pattern_looks_like_regex,
     compile_user_pattern,
     describe_rule_timeout_limit,
     user_pattern_search,
@@ -44,11 +45,6 @@ from app.services.rate_window import RateSnapshot, RateWindow
 from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
-
-# Characters that make an alert pattern a regular expression; anything else is plain text
-_REGEX_METACHARS_BEFORE_BACKSLASH = frozenset("*+?[](){}^$|")
-_REGEX_METACHARS = _REGEX_METACHARS_BEFORE_BACKSLASH | {"\\"}
-
 
 # A threshold window keeps whole entries only for its newest matches: the alert dispatch reads the
 # newest as the notification sample and at most this many as AI context; older ones keep the light record.
@@ -146,6 +142,7 @@ class CompiledAlertRule:
         suppress_until: Optional[str] = None,
         display_order: int = 0,
         filter_host: Optional[str] = None,
+        is_regex: Optional[bool] = None,
     ):
         self.id = id
         self.name = name
@@ -181,7 +178,8 @@ class CompiledAlertRule:
 
         self.compiled_regex: Optional[regex.Pattern] = None
         self._match_pattern_lower: Optional[str] = None
-        self._has_regex_metachars: bool = False
+        # Whether the pattern is a regular expression (else case-insensitive plain text)
+        self.is_regex: bool = False
         # Set once when the pattern fails validation or compilation; such a rule never matches
         self._invalid: bool = False
         # Set by AlertEvaluator so pattern timeouts count towards disabling the rule automatically
@@ -190,31 +188,22 @@ class CompiledAlertRule:
         if self.match_pattern and self.match_pattern.strip() and self.match_pattern.strip() != "*":
             clean_pat = self.match_pattern.strip()
             self._match_pattern_lower = clean_pat.lower()
-            self._has_regex_metachars = any(c in _REGEX_METACHARS for c in clean_pat)
-            if self._has_regex_metachars:
+            # A rule stored without the choice reads its pattern as rules did before it had one
+            self.is_regex = alert_pattern_looks_like_regex(clean_pat) if is_regex is None else bool(is_regex)
+            if self.is_regex:
                 try:
                     self.compiled_regex = compile_user_pattern(clean_pat, re.IGNORECASE)
                 except Exception as exc:
                     self.compiled_regex = None
-                    if not any(c in _REGEX_METACHARS_BEFORE_BACKSLASH for c in clean_pat):
-                        # Only a backslash made this a regex (such as C:\Temp): keep matching it as text
-                        logger.warning(
-                            "Alert rule %s (%s) pattern '%s' is not a valid regular expression; "
-                            "matching it as plain text (%s)",
-                            self.id,
-                            self.name,
-                            clean_pat,
-                            exc,
-                        )
-                        self._has_regex_metachars = False
-                    else:
-                        logger.warning(
-                            "Alert rule %s pattern '%s' failed regex validation: %s",
-                            self.id,
-                            clean_pat,
-                            exc,
-                        )
-                        self._invalid = True
+                    logger.warning(
+                        "Alert rule %s pattern '%s' failed regex validation: %s",
+                        self.id,
+                        clean_pat,
+                        exc,
+                    )
+                    self._invalid = True
+        else:
+            self.is_regex = bool(is_regex)
 
     def _recompute_suppress_epoch(self) -> None:
         """Parse suppress_until ISO string into a UTC epoch timestamp."""
@@ -259,7 +248,7 @@ class CompiledAlertRule:
             if actual_sev > self.filter_severity:
                 return False
 
-        # 4. Message pattern check (prioritize substring matching when no regex metacharacters)
+        # 4. Message pattern check (a regular expression, or else case-insensitive plain text)
         if self._match_pattern_lower:
             if self._invalid:
                 return False
@@ -267,7 +256,7 @@ class CompiledAlertRule:
             message = str(entry.get("message") or "")
             raw = str(entry.get("raw") or "")
 
-            if not self._has_regex_metachars:
+            if not self.is_regex:
                 pat_lower = self._match_pattern_lower
                 if pat_lower not in message.lower() and (
                     # Scanning identical text again cannot change the result
@@ -351,7 +340,7 @@ class AlertEvaluator:
                 SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                        match_pattern, threshold_count, window_seconds, cooldown_seconds,
                        ai_enrichment, is_enabled, trigger_count, last_triggered_at, suppress_until,
-                       display_order, filter_host
+                       display_order, filter_host, is_regex
                 FROM alert_rules
                 WHERE is_enabled = 1
                 ORDER BY display_order ASC, id ASC
@@ -390,6 +379,7 @@ class AlertEvaluator:
                 suppress_until=r[14],
                 display_order=r[15],
                 filter_host=r[16],
+                is_regex=r[17],
             )
             if rule.compiled_regex is not None:
                 rule.on_pattern_timeout = self._make_timeout_callback(rule)

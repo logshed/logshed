@@ -175,6 +175,13 @@ describe('AlertTestModal Component', () => {
     expect(screen.getByLabelText('Sample Host')).toHaveValue('');
   });
 
+  it('sends the rule\'s regex choice', async () => {
+    const testSpy = vi.spyOn(alertsApi, 'testAlertRule').mockResolvedValue({ matched: true });
+    render(<AlertTestModal isOpen={true} rule={{ ...mockRule, is_regex: false }} availableApps={[]} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run Test' }));
+    await waitFor(() => expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({ is_regex: false })));
+  });
+
   it('offers all 8 severities for the sample', () => {
     render(<AlertTestModal isOpen={true} rule={mockRule} availableApps={[]} onClose={onClose} />);
     expect(optionLabels(screen.getByLabelText('Sample Severity'))).toEqual([

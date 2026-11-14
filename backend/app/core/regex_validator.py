@@ -379,6 +379,31 @@ def check_regex_safety(pattern: Optional[str]) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+# Characters that made an alert pattern a regular expression before alert rules stored the choice
+_ALERT_REGEX_METACHARS = frozenset("*+?[](){}^$|")
+
+
+def alert_pattern_looks_like_regex(pattern: Optional[str]) -> bool:
+    """
+    Whether an alert rule pattern was a regular expression before rules stored the choice: it was
+    when it held one of * + ? [ ] ( ) { } ^ $ | or a backslash, except that a pattern with only a
+    backslash that is not a valid regular expression (such as C:\\Temp) matched as plain text.
+    Rules stored before the choice, and rules created without it, are read this way.
+    """
+    clean = (pattern or "").strip()
+    if not clean or clean == "*":
+        return False
+    if any(c in _ALERT_REGEX_METACHARS for c in clean):
+        return True
+    if "\\" not in clean:
+        return False
+    try:
+        regex.compile(clean, regex.VERSION0)
+    except regex.error:
+        return False
+    return True
+
+
 def validate_regex_pattern(pattern: Optional[str]) -> None:
     """
     Validate a user-supplied regular expression pattern.

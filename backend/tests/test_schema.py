@@ -272,6 +272,7 @@ class TestSchemaIntegrity:
             "filter_host",
             "filter_severity",
             "match_pattern",
+            "is_regex",
             "threshold_count",
             "window_seconds",
             "cooldown_seconds",
@@ -1583,3 +1584,30 @@ class TestAlertRuleScopeUpgrade:
         row = conn.execute("SELECT name, filter_app, filter_host FROM alert_rules").fetchone()
         conn.close()
         assert tuple(row) == ("disk", "smartd", None)
+
+    def test_v3_rules_get_the_regex_choice_their_pattern_had(self, tmp_path: Path):
+        p = tmp_path / "v3_patterns.db"
+        _make_v3(p)
+        conn = get_connection(p)
+        patterns = {
+            "words": "out of memory",
+            "alternation": "failed (password|key)",
+            "escape": r"error \d+",
+            "windows path": r"C:\Temp",
+            "empty": None,
+            "star": "*",
+        }
+        for name, pattern in patterns.items():
+            conn.execute(
+                "INSERT INTO alert_rules (name, rule_type, match_pattern, created_at) VALUES (?, 'pattern', ?, datetime('now'))",
+                (name, pattern),
+            )
+        conn.commit()
+        conn.close()
+
+        run_migrations(p)
+
+        conn = get_connection(p)
+        stored = dict(conn.execute("SELECT name, is_regex FROM alert_rules").fetchall())
+        conn.close()
+        assert stored == {"words": 0, "alternation": 1, "escape": 1, "windows path": 0, "empty": 0, "star": 0}

@@ -61,6 +61,7 @@ function ruleFromPreset(id: number, presetId: string, extra: Partial<AlertRule>)
   return {
     id, name: p.name, rule_type: p.rule_type as AlertRule['rule_type'], channel_id: 1,
     filter_app: p.filter_app, filter_host: null, filter_severity: p.filter_severity, match_pattern: p.match_pattern,
+    is_regex: /[*+?[\](){}^$|\\]/.test(p.match_pattern || ''),
     threshold_count: p.threshold_count, window_seconds: p.window_seconds, cooldown_seconds: p.cooldown_seconds,
     ai_enrichment: p.ai_enrichment, is_enabled: true, trigger_count: 0, display_order: id - 1,
     last_triggered_at: null, suppress_until: null, created_at: ago(35 * DAY), ...extra,
@@ -73,17 +74,17 @@ export const alertRules = new Collection<AlertRule>([
   ruleFromPreset(3, 'critical_severity', { channel_id: 2 }),
   {
     id: 4, name: 'UPS on battery', rule_type: 'pattern', channel_id: 1, filter_app: 'upsmon', filter_host: null, filter_severity: null,
-    match_pattern: 'on battery', threshold_count: 1, window_seconds: 60, cooldown_seconds: 900, ai_enrichment: false,
+    match_pattern: 'on battery', is_regex: false, threshold_count: 1, window_seconds: 60, cooldown_seconds: 900, ai_enrichment: false,
     is_enabled: true, trigger_count: 0, display_order: 3, last_triggered_at: null, suppress_until: null, created_at: ago(20 * DAY),
   },
   {
     id: 5, name: 'SSH login storm on the router', rule_type: 'threshold', channel_id: 2, filter_app: 'sshd', filter_host: 'opnsense', filter_severity: null,
-    match_pattern: 'Invalid user', threshold_count: 20, window_seconds: 300, cooldown_seconds: 3600, ai_enrichment: true,
+    match_pattern: 'Invalid user', is_regex: false, threshold_count: 20, window_seconds: 300, cooldown_seconds: 3600, ai_enrichment: true,
     is_enabled: true, trigger_count: 0, display_order: 4, last_triggered_at: null, suppress_until: null, created_at: ago(9 * DAY),
   },
   {
     id: 6, name: 'Jellyfin transcoding errors', rule_type: 'pattern', channel_id: 2, filter_app: 'jellyfin', filter_host: null, filter_severity: 3,
-    match_pattern: 'FFmpeg exited', threshold_count: 1, window_seconds: 60, cooldown_seconds: 1800, ai_enrichment: false,
+    match_pattern: 'FFmpeg exited', is_regex: false, threshold_count: 1, window_seconds: 60, cooldown_seconds: 1800, ai_enrichment: false,
     is_enabled: false, trigger_count: 0, display_order: 5, last_triggered_at: null, suppress_until: null, created_at: ago(5 * DAY),
   },
 ]);
@@ -161,10 +162,11 @@ export function matchesRule(rule: AlertRule, log: LogEntry): boolean {
   if (rule.filter_severity !== null && rule.filter_severity !== undefined && log.severity > rule.filter_severity) return false;
   if (!rule.match_pattern) return rule.filter_severity !== null && rule.filter_severity !== undefined && rule.threshold_count <= 1;
   if (rule.rule_type === 'threshold' && rule.threshold_count > 1) return false;
+  if (!rule.is_regex) return log.message.toLowerCase().includes(rule.match_pattern.toLowerCase());
   try {
     return new RegExp(rule.match_pattern, 'i').test(log.message);
   } catch {
-    return log.message.toLowerCase().includes(rule.match_pattern.toLowerCase());
+    return false;
   }
 }
 

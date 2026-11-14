@@ -96,31 +96,33 @@ Restricts rule evaluation to logs at the chosen syslog severity level or more se
 
 Choosing `Error (3) and more severe` matches Emergency (0), Alert (1), Critical (2), and Error (3). If left empty, all severity levels are permitted.
 
-#### 7. Match Pattern (Regex or Substring)
-A case-insensitive keyword substring or regular expression pattern matched against the log message text and raw payload.
-- Case-insensitive substring matching: `failed password`
-- Regular expression matching: `Failed (password|publickey) for .* from (?P<ip>\d+\.\d+\.\d+\.\d+)`
-- Leave empty or enter `*` to match all log entries satisfying the host, app and severity filters.
+#### 7. Match Pattern and "Match as a regular expression"
+Text matched against the log message and the raw line, ignoring letter case. The checkbox under the field says how it is read:
+- **Plain text** (the checkbox off, the start for a new rule): the text is found anywhere in the message, and every character means itself. `failed password`, `C:\Temp` and `disk (sda)` match exactly those characters.
+- **Regular expression** (the checkbox on): `Failed (password|publickey) for .* from (?P<ip>\d+\.\d+\.\d+\.\d+)`. When plain text looks like a regular expression (it has one of `* + ? [ ] ( ) { } ^ $ |`, or a code such as `\d` or `\b`), the dialog offers **Match as a regular expression** under the field.
+- Leave the pattern empty or enter `*` to match all log entries satisfying the host, app and severity filters, either way.
 
-**How LogShed decides between regex and plain text:** a pattern is treated as a regular expression when it contains at least one of `* + ? [ ] ( ) { } ^ $ | \`. Otherwise it is matched as case-insensitive plain text.
+**Regular expressions:**
 - Backslash codes work as in any regular expression: `\bKilled` matches "Killed" at the start of a word, `error \d+` matches "error " followed by digits, and `foo\.bar` matches a literal dot.
-- **To match a literal backslash, write `\\`** (for example `C:\\Temp` to match `C:\Temp`). A single backslash starts an escape code, so `C:\temp` means "C:", a tab and "emp".
-- Every pattern in a new or edited alert rule is checked as a regular expression when you save it, plain text included. A new rule with the pattern `C:\Temp` is refused with an error because `\T` is not a valid escape; write `C:\\Temp` instead. Only rules that were stored earlier get a fallback: if such a stored pattern turns out not to be a valid regular expression, LogShed logs a warning naming the rule each time the rules load and keeps matching it as plain text.
-- Patterns that are prone to catastrophic backtracking, such as `(a|a)+` or `(.*a){20}`, are refused when you save or import a rule. Rules saved earlier keep running under the time limit below.
+- **To match a literal backslash, write `\\`** (for example `C:\\Temp` to match `C:\Temp`), or match the text as plain text. A single backslash starts an escape code, so `C:\temp` means "C:", a tab and "emp".
+- A regular expression is checked when you save or import the rule: `C:\Temp` as a regular expression is refused because `\T` is not a valid escape. Plain text is never run as a regular expression, so it is not checked.
+- Patterns that are prone to catastrophic backtracking, such as `(a|a)+` or `(.*a){20}`, are refused when you save or import a rule as a regular expression. Rules saved earlier keep running under the time limit below.
+
+**Rules made before 1.4.0** keep matching as they did: the upgrade sets the checkbox on for each pattern LogShed read as a regular expression (one with any of `* + ? [ ] ( ) { } ^ $ | \`), and off for the rest, including a stored `C:\Temp` that was matched as plain text because it is not a valid regular expression. Rule files exported from 1.3.x, and API requests that leave `is_regex` out, are read the same way.
 
 **Time limit and automatic disabling:** each match attempt is stopped after 50 ms (`USER_REGEX_TIMEOUT_MS`) and counts as no match, with a warning in the LogShed log that names the rule. A rule whose pattern times out 20 times within 5 minutes is **disabled automatically**: it is saved as disabled (it shows as off in the rules list), and LogShed logs an error naming the rule and the reason. Simplify the pattern (for example, anchor it or replace `.*` with a narrower class), then switch the rule on again. This applies to alert rules and to drop rules alike.
 
-#### 7. Threshold Count & Window Duration (seconds)
+#### 8. Threshold Count & Window Duration (seconds)
 *Appears when Rule Type is set to Threshold or Rate Spike.*
 - **Threshold Count**: Minimum number of matching events (for Threshold rules) or target logs per second (for Rate Spike rules).
 - **Window Duration**: Duration in seconds for the sliding time window (for example, `30` or `60` seconds).
 
-#### 8. Cooldown Flap Dampening (seconds)
+#### 9. Cooldown Flap Dampening (seconds)
 Defines how long LogShed must suppress duplicate notifications after an alert fires.
 - Prevents alert fatigue and notification flood during ongoing incidents.
 - For example, a cooldown of `300` seconds ensures you receive one notification immediately when the incident begins, without receiving hundreds of repeat messages while the issue continues.
 
-#### 9. AI Root-Cause Incident Enrichment
+#### 10. AI Root-Cause Incident Enrichment
 When enabled, LogShed automatically masks sensitive data (passwords, tokens, API keys, IPs) from triggering logs and requests root-cause diagnosis from your configured Large Language Model (Gemini, OpenAI, or local Ollama).
 - Appends diagnosis summary and root cause insights to the incident record.
 - In notification messages, a concise summary is included along with a link to review the full remediation steps in the LogShed UI.

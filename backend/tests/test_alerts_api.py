@@ -851,7 +851,7 @@ class TestAlertRunTestBackslashCodes:
         assert miss.json()["matched"] is False
 
     @pytest.mark.asyncio
-    async def test_invalid_backslash_pattern_reports_error_without_rule_warning(
+    async def test_invalid_backslash_pattern_as_regex_reports_error_without_rule_warning(
         self, client: AsyncClient, auth_headers: dict, caplog
     ):
         import logging
@@ -859,14 +859,23 @@ class TestAlertRunTestBackslashCodes:
         caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
         res = await client.post(
             "/api/alerts/test",
-            json={"rule_type": "pattern", "match_pattern": r"C:\Temp", "sample_message": r"C:\Temp"},
+            json={"rule_type": "pattern", "match_pattern": r"C:\Temp", "is_regex": True, "sample_message": r"C:\Temp"},
             headers=auth_headers,
         )
         assert res.status_code == 200
-        # Saving this pattern is refused, so Run Test reports the syntax error too
+        # Saving this pattern as a regex is refused, so Run Test reports the syntax error too
         assert res.json()["matched"] is False
         assert "invalid regex syntax" in res.json()["error"].lower()
-        assert not [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]
+        assert not [r for r in caplog.records if "failed regex validation" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_backslash_pattern_without_the_choice_is_plain_text(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/test",
+            json={"rule_type": "pattern", "match_pattern": r"C:\Temp", "sample_message": r"copied C:\Temp\a"},
+            headers=auth_headers,
+        )
+        assert res.json() == {"matched": True, "extracted_ip": None, "error": None}
 
 
 class TestAlertRuleHostFilterApi:
@@ -963,3 +972,124 @@ class TestAlertRuleHostFilterApi:
         (rule,) = get_alert_evaluator()._rules
         assert rule.matches({"source_alias": "nas", "message": "disk"})
         assert not rule.matches({"source_alias": "router", "message": "disk"})
+
+
+class TestAlertRuleRegexChoiceApi:
+    """Alert rules store whether their pattern is a regular expression; plain text is never checked as one."""
+
+    @pytest.mark.asyncio
+    async def test_plain_text_rule_saves_a_windows_path(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules",
+            json={"name": "Temp", "match_pattern": r"C:\Temp", "is_regex": False},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201, res.text
+        assert res.json()["is_regex"] is False
+        listed = (await client.get("/api/alerts/rules", headers=auth_headers)).json()
+        assert listed[0]["is_regex"] is False
+
+    @pytest.mark.asyncio
+    async def test_regex_rule_with_invalid_syntax_is_refused(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules",
+            json={"name": "Temp", "match_pattern": r"C:\Temp", "is_regex": True},
+            headers=auth_headers,
+        )
+        assert res.status_code == 400
+        assert "invalid regex syntax" in res.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_unsafe_pattern_is_fine_as_plain_text(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules",
+            json={"name": "Odd", "match_pattern": "(a|a)+$", "is_regex": False},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "pattern, expected",
+        [("Failed login", False), ("failed (password|key)", True), (r"error \d+", True), (r"C:\Temp", False)],
+    )
+    async def test_left_out_the_choice_follows_the_pattern(
+        self, client: AsyncClient, auth_headers: dict, pattern: str, expected: bool
+    ):
+        res = await client.post("/api/alerts/rules", json={"name": "Guess", "match_pattern": pattern}, headers=auth_headers)
+        assert res.status_code == 201, res.text
+        assert res.json()["is_regex"] is expected
+
+    @pytest.mark.asyncio
+    async def test_switching_to_regex_checks_the_stored_pattern(self, client: AsyncClient, auth_headers: dict):
+        created = (
+            await client.post(
+                "/api/alerts/rules", json={"name": "T", "match_pattern": r"C:\Temp", "is_regex": False}, headers=auth_headers
+            )
+        ).json()
+        res = await client.put(f"/api/alerts/rules/{created['id']}", json={"is_regex": True}, headers=auth_headers)
+        assert res.status_code == 400
+        res = await client.put(f"/api/alerts/rules/{created['id']}", json={"name": "T2"}, headers=auth_headers)
+        assert res.json()["is_regex"] is False
+        res = await client.put(
+            f"/api/alerts/rules/{created['id']}", json={"match_pattern": r"C:\\Temp", "is_regex": True}, headers=auth_headers
+        )
+        assert res.status_code == 200
+        assert res.json()["is_regex"] is True
+
+    @pytest.mark.asyncio
+    async def test_export_and_import_keep_the_choice(self, client: AsyncClient, auth_headers: dict):
+        await client.post(
+            "/api/alerts/rules", json={"name": "Text", "match_pattern": "a.b", "is_regex": False}, headers=auth_headers
+        )
+        await client.post(
+            "/api/alerts/rules", json={"name": "Regex", "match_pattern": "a.b", "is_regex": True}, headers=auth_headers
+        )
+        bundle = (await client.get("/api/alerts/rules/export", headers=auth_headers)).json()
+        assert {r["name"]: r["is_regex"] for r in bundle["alert_rules"]} == {"Text": False, "Regex": True}
+
+        for rule in bundle["alert_rules"]:
+            rule["name"] += " copy"
+        res = await client.post("/api/alerts/rules/import", json=bundle, headers=auth_headers)
+        assert res.json()["imported"] == 2
+        listed = {r["name"]: r["is_regex"] for r in (await client.get("/api/alerts/rules", headers=auth_headers)).json()}
+        assert listed["Text copy"] is False and listed["Regex copy"] is True
+
+    @pytest.mark.asyncio
+    async def test_import_of_a_1_3_file_reads_patterns_as_1_3_did(self, client: AsyncClient, auth_headers: dict):
+        old_file = {
+            "alert_rules": [
+                {"name": "Words", "match_pattern": "out of memory"},
+                {"name": "Alternation", "match_pattern": "fail(ed|ure)"},
+            ]
+        }
+        res = await client.post("/api/alerts/rules/import", json=old_file, headers=auth_headers)
+        assert res.json()["imported"] == 2
+        listed = {r["name"]: r["is_regex"] for r in (await client.get("/api/alerts/rules", headers=auth_headers)).json()}
+        assert listed == {"Words": False, "Alternation": True}
+
+    @pytest.mark.asyncio
+    async def test_import_skips_the_regex_check_for_plain_text(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules/import",
+            json={"name": "Plain", "match_pattern": "(a|a)+$", "is_regex": False},
+            headers=auth_headers,
+        )
+        assert res.json()["imported"] == 1
+
+    @pytest.mark.asyncio
+    async def test_test_endpoint_follows_the_choice(self, client: AsyncClient, auth_headers: dict):
+        base = {"rule_type": "pattern", "match_pattern": "a.b", "sample_message": "axb"}
+        text = await client.post("/api/alerts/test", json={**base, "is_regex": False}, headers=auth_headers)
+        regex_res = await client.post("/api/alerts/test", json={**base, "is_regex": True}, headers=auth_headers)
+        assert text.json()["matched"] is False
+        assert regex_res.json()["matched"] is True
+
+    @pytest.mark.asyncio
+    async def test_presets_say_whether_their_pattern_is_a_regex(self, client: AsyncClient, auth_headers: dict):
+        presets = (await client.get("/api/alerts/presets", headers=auth_headers)).json()
+        by_id = {p["id"]: p for p in presets}
+        assert by_id["ssh_bruteforce"]["is_regex"] is True
+        res = await client.post("/api/alerts/presets/ssh_bruteforce/install", headers=auth_headers)
+        assert res.status_code == 201
+        assert res.json()["is_regex"] is True

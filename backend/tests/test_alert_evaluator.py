@@ -184,7 +184,7 @@ class TestCompiledAlertRule:
             ai_enrichment=False,
             is_enabled=True,
         )
-        assert getattr(rule_literal, "_has_regex_metachars", False) is False
+        assert rule_literal.is_regex is False
         assert rule_literal.compiled_regex is None
         assert rule_literal.matches({"message": "Encountered ERROR 500 in service"}) is True
         assert rule_literal.matches({"message": "Encountered ERROR 404 in service"}) is False
@@ -204,7 +204,7 @@ class TestCompiledAlertRule:
             ai_enrichment=False,
             is_enabled=True,
         )
-        assert getattr(rule_regex, "_has_regex_metachars", False) is True
+        assert rule_regex.is_regex is True
         assert rule_regex.compiled_regex is not None
         assert rule_regex.matches({"message": "Encountered ERROR 500 in service"}) is True
         assert rule_regex.matches({"message": "Encountered ERROR 400 in service"}) is True
@@ -225,7 +225,7 @@ class TestCompiledAlertRule:
             ai_enrichment=False,
             is_enabled=True,
         )
-        assert getattr(rule_vulnerable, "_has_regex_metachars", False) is True
+        assert rule_vulnerable.is_regex is True
         assert rule_vulnerable.compiled_regex is None
         assert rule_vulnerable.matches({"message": "aaaaaaaaaaaaa!"}) is False
 
@@ -2254,7 +2254,7 @@ class TestAlertRuleUserRegexEngine:
 
 
 class TestAlertPatternBackslashCodes:
-    """A backslash makes an alert pattern a regular expression."""
+    """Without a stored choice, a backslash makes an alert pattern a regular expression."""
 
     def _rule(self, pattern: str, rule_id: int = 21, name: str = "Backslash") -> CompiledAlertRule:
         return CompiledAlertRule(
@@ -2279,21 +2279,17 @@ class TestAlertPatternBackslashCodes:
         assert rule.matches({"message": "worker exit code 137"}) is True
         assert rule.matches({"message": "worker exit code 1"}) is False
 
-    def test_invalid_regex_falls_back_to_plain_text_with_one_warning(self, caplog):
+    def test_without_the_choice_an_invalid_backslash_pattern_is_plain_text(self, caplog):
+        """A rule stored before the regex choice, such as C:\\Temp, keeps matching as text, now without a warning."""
         import logging
 
         caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
         rule = self._rule(r"C:\Temp", rule_id=22, name="Windows path")
-        warnings = [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]
-        assert len(warnings) == 1
-        assert "22" in warnings[0].getMessage() and "Windows path" in warnings[0].getMessage()
+        assert rule.is_regex is False
         assert rule.matches({"message": r"copied C:\Temp\file.txt"}) is True
         assert rule.matches({"message": r"copied C:\temp\file.txt"}) is True
         assert rule.matches({"message": "copied D:/other"}) is False
-        for _ in range(3):
-            rule.matches({"message": r"C:\Temp"})
-        warnings = [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]
-        assert len(warnings) == 1
+        assert not caplog.records
 
     def test_plain_words_still_match_as_text(self, caplog):
         import logging
@@ -2316,6 +2312,60 @@ class TestAlertPatternBackslashCodes:
         assert rule.compiled_regex is not None
         assert rule.matches({"message": "C:\temp"}) is True
         assert rule.matches({"message": r"C:\temp"}) is False
+
+
+class TestAlertRuleRegexChoice:
+    """A rule's stored choice decides how its pattern is read; without one, LogShed guesses as before."""
+
+    def _rule(self, pattern: str, is_regex) -> CompiledAlertRule:
+        return CompiledAlertRule(
+            id=31, name="Choice", rule_type="pattern", channel_id=None, filter_app=None,
+            filter_severity=None, match_pattern=pattern, threshold_count=1, window_seconds=60,
+            cooldown_seconds=60, ai_enrichment=False, is_enabled=True, is_regex=is_regex,
+        )
+
+    def test_plain_text_matches_regex_characters_literally(self):
+        rule = self._rule(r"C:\Temp (x86)", is_regex=False)
+        assert rule.compiled_regex is None
+        assert rule.matches({"message": r"wrote C:\TEMP (X86)\a.log"}) is True
+        assert rule.matches({"message": "wrote C:Temp x86"}) is False
+
+    def test_plain_text_with_a_dot_or_bar_is_not_a_pattern(self):
+        rule = self._rule("a|b", is_regex=False)
+        assert rule.matches({"message": "a"}) is False
+        assert rule.matches({"message": "x a|b y"}) is True
+
+    def test_regex_choice_runs_words_as_a_regular_expression(self):
+        rule = self._rule("disk.full", is_regex=True)
+        assert rule.compiled_regex is not None
+        assert rule.matches({"message": "DISK-FULL"}) is True
+
+    def test_an_invalid_regular_expression_never_matches(self, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="app.services.alert_evaluator")
+        rule = self._rule(r"C:\Temp", is_regex=True)
+        assert rule.matches({"message": r"C:\Temp"}) is False
+        assert any("failed regex validation" in r.getMessage() for r in caplog.records)
+
+    def test_star_alone_matches_every_log_either_way(self):
+        for choice in (True, False):
+            assert self._rule("*", is_regex=choice).matches({"message": "anything"}) is True
+
+    def test_evaluator_reads_the_stored_choice(self, tmp_path: Path):
+        db_file = tmp_path / "choice.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            "INSERT INTO alert_rules (name, rule_type, match_pattern, is_regex, created_at) VALUES "
+            "('text', 'pattern', 'a.b', 0, datetime('now')), ('regex', 'pattern', 'a.b', 1, datetime('now'))"
+        )
+        conn.commit()
+        conn.close()
+        rules = {rule.name: rule for rule in AlertEvaluator(db_file)._rules}
+        assert rules["text"].matches({"message": "axb"}) is False
+        assert rules["text"].matches({"message": "a.b"}) is True
+        assert rules["regex"].matches({"message": "axb"}) is True
 
 
 class TestAlertRuleTimeoutAutoDisable:
@@ -2342,8 +2392,8 @@ class TestAlertRuleTimeoutAutoDisable:
         conn = get_connection(db_file)
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO alert_rules (name, rule_type, match_pattern, threshold_count, window_seconds, "
-            "cooldown_seconds, is_enabled, created_at) VALUES (?, 'threshold', ?, 1000, 60, 0, 1, ?)",
+            "INSERT INTO alert_rules (name, rule_type, match_pattern, is_regex, threshold_count, window_seconds, "
+            "cooldown_seconds, is_enabled, created_at) VALUES (?, 'threshold', ?, 1, 1000, 60, 0, 1, ?)",
             ("Slow rule", "slow(x|y)", now_iso),
         )
         slow_id = cur.lastrowid
