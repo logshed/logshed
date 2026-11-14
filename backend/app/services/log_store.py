@@ -1221,11 +1221,17 @@ def _day_seen(
             UNION ALL
             SELECT nxt.source_ip, nxt.app_id, nxt.host_id
             FROM t
-            JOIN logs nxt ON nxt.id = (
-                SELECT id FROM logs
-                WHERE (source_ip, app_id, host_id) > (t.ip, t.app, t.host)
-                ORDER BY source_ip, app_id, host_id
-                LIMIT 1
+            -- The next triple by equality seeks (next host, else next app, else next address),
+            -- one B-tree seek each: a row-value range uses only the index's first column, so it
+            -- read every row of the current address up to the position (1.2 s on a 536k-row file
+            -- with 2 addresses)
+            JOIN logs nxt ON nxt.id = COALESCE(
+                (SELECT id FROM logs WHERE source_ip = t.ip AND app_id = t.app AND host_id > t.host
+                    ORDER BY source_ip, app_id, host_id LIMIT 1),
+                (SELECT id FROM logs WHERE source_ip = t.ip AND app_id > t.app
+                    ORDER BY source_ip, app_id, host_id LIMIT 1),
+                (SELECT id FROM logs WHERE source_ip > t.ip
+                    ORDER BY source_ip, app_id, host_id LIMIT 1)
             )
             LIMIT ?
         )

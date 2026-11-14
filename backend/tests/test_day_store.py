@@ -330,3 +330,40 @@ def test_a_new_day_file_appears_whole_in_wal_mode(tmp_path):
     day_store._build(path)
     assert conn.execute("SELECT COUNT(*) FROM fts_index_state").fetchone()[0] == 1
     day_store.close_thread_connections()
+
+
+def test_the_facet_walk_seeks_each_distinct_source_once(tmp_path):
+    """
+    The facet walk reads one index entry per distinct (address, app, host), not every row of an
+    address: on a busy file from few addresses, a row-value range read most of the file per step.
+    SQLite's instruction count stands in for time, so the check does not depend on the machine.
+    """
+    day_store.forget_id_blocks()
+    path = tmp_path / "logs.db"
+    run_migrations(path)
+    received = datetime.datetime(2026, 11, 13, 1, tzinfo=datetime.timezone.utc)
+    senders = [("10.0.0.1", "nas", "smartd"), ("10.0.0.1", "nas", "nginx"), ("10.0.0.1", "", "cron"),
+               ("10.0.0.2", "router", "filterlog"), ("10.0.0.2", "router", "dhcpd"), ("10.0.0.2", "ap", "hostapd")]
+    rows = []
+    for i in range(20_000):
+        ip, alias, app = senders[i % len(senders)]
+        stamp = (received + datetime.timedelta(seconds=i)).isoformat()
+        rows.append({"timestamp": stamp, "received_at": stamp, "source_ip": ip, "source_alias": alias,
+                     "app_name": app, "message": f"line {i}", "raw": f"line {i}"})
+    with open_db(path) as conn:
+        day_store.write_rows(conn, rows)
+    day_conn = day_store.connection(day_files.day_path(path, "2026-11-13"))
+    steps = []
+    day_conn.set_progress_handler(lambda: steps.append(1), 1000)
+    try:
+        seen, first_pair = log_store._day_seen(day_conn, 502, 10000)
+    finally:
+        day_conn.set_progress_handler(None, 0)
+    assert first_pair is not None
+    assert sorted((ip, app, host) for host, app, ip in seen.alias_apps) == sorted(
+        (ip, app, alias) for ip, alias, app in senders if alias
+    )
+    assert seen.bare_ip_apps == [("cron", "10.0.0.1")]
+    # Six seeks and their name lookups take a few thousand instructions; reading the rows took hundreds of thousands
+    assert len(steps) < 20, f"{len(steps) * 1000} instructions"
+    day_store.close_thread_connections()
