@@ -537,6 +537,7 @@ def note_reported_hosts(conn: sqlite3.Connection, entries: list[dict]) -> None:
         (e["reported_host"], e.get("source_ip") or "")
         for e in entries
         if e.get("reported_host") and e.get("id") is not None and e.get("source_alias") == e["reported_host"]
+        and not e.get(day_files.REPORTED_HIDDEN_KEY)
     }
     if not pairs:
         return
@@ -562,6 +563,19 @@ def note_reported_hosts(conn: sqlite3.Connection, entries: list[dict]) -> None:
         _reported_written.clear()
     for name, ip in due:
         _reported_written[(str(db_path), name, ip)] = now
+
+
+def remember_reported_hosts(conn: sqlite3.Connection, pairs: list[tuple[str, str]]) -> None:
+    """Add (name, address) pairs to reported_hosts as seen now (names shown again after an alias went)."""
+    if not pairs:
+        return
+    now = int(time.time() * 1_000_000)
+    conn.executemany(
+        "INSERT INTO reported_hosts (name, source_ip, last_seen_us) VALUES (?, ?, ?)"
+        " ON CONFLICT(name, source_ip) DO UPDATE SET last_seen_us = excluded.last_seen_us",
+        [(name, ip, now) for name, ip in pairs],
+    )
+    conn.commit()
 
 
 def forget_reported_hosts(conn: sqlite3.Connection, where_sql: str, params: tuple) -> None:
@@ -614,6 +628,14 @@ def _today() -> str:
     return datetime.datetime.now(datetime.timezone.utc).date().isoformat()
 
 
+def _reported_id(entry: dict, hosts: dict[str, int]) -> Optional[int]:
+    """reported_host_id of an entry: its reported name's id, negated while hidden (day_files.REPORTED_HIDDEN_KEY)."""
+    name = entry.get("reported_host")
+    if not name:
+        return None
+    return -hosts[name] if entry.get(day_files.REPORTED_HIDDEN_KEY) else hosts[name]
+
+
 def _insert(day_conn: sqlite3.Connection, rows: list[tuple[dict, int, int]]) -> None:
     host_names = {e.get("source_alias") or "" for e, _t, _r in rows}
     # The HOSTNAME a syslog sender reported, where its address has no alias (None otherwise)
@@ -635,7 +657,7 @@ def _insert(day_conn: sqlite3.Connection, rows: list[tuple[dict, int, int]]) -> 
                 hosts[entry.get("source_alias") or ""],
                 apps[entry.get("app_name") or ""],
                 entry.get("source_kind", 0),
-                hosts[entry["reported_host"]] if entry.get("reported_host") else None,
+                _reported_id(entry, hosts),
                 entry.get("facility", 1),
                 entry.get("severity", 6),
                 message,
@@ -1010,7 +1032,7 @@ def columns(include_raw: bool = True, alias: str = "logs") -> str:
     # alias and no configured host used the name)
     return cols + (
         f", {alias}.source_kind AS source_kind,"
-        f" (SELECT name FROM hosts WHERE hosts.id = {alias}.reported_host_id) AS reported_host,"
+        f" (SELECT name FROM hosts WHERE hosts.id = abs({alias}.reported_host_id)) AS reported_host,"
         f" {alias}.reported_host_id IS NOT NULL AND {alias}.reported_host_id = {alias}.host_id AS host_self_reported"
     )
 

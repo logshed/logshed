@@ -192,7 +192,7 @@ async def delete_alias(
     def _run_batch_delete(conn):
         try:
             _batch_update_log_aliases(conn, ip, ip, batch_size=1000)
-            follow_reported_names(conn, freed=previous[0])
+            follow_reported_names(conn, freed=previous[0], unaliased_ip=ip)
         except Exception as exc:
             logger.error(f"Background retroactive alias reversion failed for {ip}: {exc}")
 

@@ -15,6 +15,7 @@ searches newest first, and ``fts_indexer`` keeps the full-text index up to date.
 
 import contextlib
 import datetime
+import ipaddress
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -226,18 +227,75 @@ def _host_ids_named(day_conn: sqlite3.Connection, name: str) -> list[int]:
     return [r[0] for r in day_conn.execute("SELECT id, name FROM hosts") if r[1].lower() == folded]
 
 
-def clear_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
-    """Forget the names an address reported, once it has a configured alias. Returns rows changed."""
+def hide_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
+    """
+    An address got a configured alias: the names it reported are kept, hidden (the hosts id
+    negated, day_files.REPORTED_HIDDEN_KEY), so deleting the alias can show them again. Its rows
+    are named by the alias already (relabel_host). Returns the number of rows changed.
+    """
     if not _writes_day_files(conn):
         return 0
     day_store.forget_reported_hosts(conn, "source_ip = ?", (source_ip,))
     total = 0
     for day, day_conn in day_store.open_day_connections(conn):
         total += day_store.update_in_batches(
-            day_conn, "reported_host_id = NULL", "source_ip = ? AND reported_host_id IS NOT NULL",
+            day_conn, "reported_host_id = -reported_host_id", "source_ip = ? AND reported_host_id > 0",
             (source_ip,), batch_size, _pause, reindex=False,
         )
     return total
+
+
+def show_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
+    """
+    An address's alias was deleted (its rows are named by the address again, relabel_host): the
+    names it reported are no longer hidden, and each row whose reported name no configured host
+    uses is shown by it again, as new logs from the address are. Returns the rows renamed.
+    """
+    if not _writes_day_files(conn):
+        return 0
+    taken = load_taken_host_names(conn)
+    total = 0
+    shown: set[str] = set()
+    for day, day_conn in day_store.open_day_connections(conn):
+        hidden = [
+            (r[0], r[1]) for r in day_conn.execute(
+                "SELECT hosts.id, hosts.name FROM hosts WHERE -hosts.id IN"
+                " (SELECT DISTINCT reported_host_id FROM logs WHERE source_ip = ? AND reported_host_id < 0)",
+                (source_ip,),
+            )
+        ]
+        if not hidden:
+            continue
+        day_store.update_in_batches(
+            day_conn, "reported_host_id = -reported_host_id", "source_ip = ? AND reported_host_id < 0",
+            (source_ip,), batch_size, _pause, reindex=False,
+        )
+        free = [(host_id, name) for host_id, name in hidden if name.lower() not in taken and not _is_address(name)]
+        if not free:
+            continue
+        where = f"source_ip = ? AND reported_host_id IN ({','.join('?' * len(free))}) AND host_id IS NOT reported_host_id"
+        try:
+            changed = day_store.update_in_batches(
+                day_conn, "host_id = reported_host_id", where, (source_ip, *(i for i, _n in free)),
+                batch_size, _pause, reindex=True,
+            )
+        except BaseException:
+            day_store.refresh_figures(conn, day)
+            raise
+        if changed:
+            day_store.refresh_figures(conn, day)
+            shown.update(name for _i, name in free)
+        total += changed
+    day_store.remember_reported_hosts(conn, [(name, source_ip) for name in sorted(shown)])
+    return total
+
+
+def _is_address(name: str) -> bool:
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return True
 
 
 def withdraw_reported_name(

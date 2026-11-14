@@ -81,7 +81,7 @@ def _row(message: str, hostname: str, ip: str = PRINTER_IP, env: Path | None = N
     return {
         "timestamp": TS, "source_ip": ip, "source_kind": KIND_SYSLOG, "app_name": "app", "facility": 1,
         "severity": 6, "message": message, "raw": message,
-        "source_alias": named["source_alias"], "reported_host": named.get("reported_host"),
+        **{k: v for k, v in named.items() if k != "hostname"},
     }
 
 
@@ -104,8 +104,10 @@ def test_a_free_name_is_shown_and_a_taken_one_is_not(env):
     assert _named(env, "TrueNAS")["reported_host"] == "TrueNAS"
     assert _named(env, "docker")["source_alias"] == PRINTER_IP
     assert _named(env, "logshed")["source_alias"] == PRINTER_IP
-    # An address with an alias is named by it, and keeps no reported name
-    assert _named(env, "printer-hp", ip=NAS_IP) == {"hostname": "printer-hp", "source_alias": "truenas"}
+    # An address with an alias is named by it, and keeps the reported name hidden
+    assert _named(env, "printer-hp", ip=NAS_IP) == {
+        "hostname": "printer-hp", "reported_host": "printer-hp", "_reported_hidden": True, "source_alias": "truenas",
+    }
 
 
 @pytest.mark.asyncio
@@ -151,8 +153,43 @@ async def test_making_the_reported_name_the_alias_ends_the_self_reported_mark(cl
     assert resp.status_code == 200
 
     log = (await _logs(client, headers))["job done"]
-    assert (log["source_alias"], log["reported_host"], log["host_self_reported"]) == ("printer-hp", None, False)
+    assert (log["source_alias"], log["reported_host"], log["host_self_reported"]) == ("printer-hp", "printer-hp", False)
     assert (await _facets(client, headers))["self_reported_sources"] == {}
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_alias_shows_the_reported_names_again(client, headers, env):
+    store_logs(env, _row("job done", "printer-hp", env=env))
+    resp = await client.post("/api/aliases", json={"ip": PRINTER_IP, "alias": "office-printer"}, headers=headers)
+    assert resp.status_code == 200
+    # Logs that arrive while the alias exists keep the reported name too, hidden
+    later = _row("paper low", "printer-hp", env=env)
+    assert later["source_alias"] == "office-printer"
+    store_logs(env, later)
+    logs = await _logs(client, headers)
+    assert [(logs[m]["source_alias"], logs[m]["host_self_reported"]) for m in ("job done", "paper low")] == [
+        ("office-printer", False)
+    ] * 2
+
+    resp = await client.delete(f"/api/aliases/{PRINTER_IP}", headers=headers)
+    assert resp.status_code == 200
+    logs = await _logs(client, headers)
+    # As new logs from the address will be: shown by the reported name, marked as self-reported
+    assert [(logs[m]["source_alias"], logs[m]["host_self_reported"]) for m in ("job done", "paper low")] == [
+        ("printer-hp", True)
+    ] * 2
+    assert _named(env, "printer-hp")["source_alias"] == "printer-hp"
+    assert (await _facets(client, headers))["self_reported_sources"] == {"printer-hp": [PRINTER_IP]}
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_name_another_host_took_meanwhile_stays_on_the_address(client, headers, env):
+    store_logs(env, _row("job done", "printer-hp", env=env))
+    assert (await client.post("/api/aliases", json={"ip": PRINTER_IP, "alias": "office"}, headers=headers)).status_code == 200
+    assert (await client.post("/api/aliases", json={"ip": "10.0.0.9", "alias": "printer-hp"}, headers=headers)).status_code == 200
+    assert (await client.delete(f"/api/aliases/{PRINTER_IP}", headers=headers)).status_code == 200
+    log = (await _logs(client, headers))["job done"]
+    assert (log["source_alias"], log["reported_host"], log["host_self_reported"]) == (PRINTER_IP, "printer-hp", False)
 
 
 @pytest.mark.asyncio

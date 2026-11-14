@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from app.core.config import get_syslog_udp_receive_buffer_bytes
-from app.core.day_files import KIND_SYSLOG
+from app.core.day_files import KIND_SYSLOG, REPORTED_HIDDEN_KEY
 from app.core.migrations import get_connection
 from app.core.pipeline import (
     MAX_FUTURE_TIMESTAMP_SKEW_SECONDS,
@@ -921,19 +921,22 @@ def _is_ip_address(name: str) -> bool:
 
 def name_syslog_host(parsed: dict[str, Any], source_ip: str, alias_cache: "AliasCache") -> None:
     """
-    Set the host name of a parsed message: its address's alias when it has one. An address with
-    no alias keeps the HOSTNAME its device sent as reported_host, and is shown by it (marked as
-    self-reported) unless a configured host already uses that name, so a device cannot pose as
-    another host; otherwise by its address. In-memory lookups only.
+    Set the host name of a parsed message, and keep the HOSTNAME its device sent as
+    reported_host. An address with an alias is named by it, and the reported name is kept
+    hidden (REPORTED_HIDDEN_KEY), to be shown again if the alias is deleted. An address with no
+    alias is shown by the reported name (marked as self-reported) unless a configured host
+    already uses that name, so a device cannot pose as another host; otherwise by its address.
+    In-memory lookups only.
     """
     source_alias = alias_cache.resolve(source_ip)
-    if source_alias == source_ip:
-        hostname = parsed.get("hostname")
-        if hostname and hostname not in ("-", "unknown") and hostname != source_ip:
-            parsed["reported_host"] = hostname
-            # Another address is taken too: host filters by an alias also match its address
-            if not alias_cache.is_taken(hostname) and not _is_ip_address(hostname):
-                source_alias = hostname
+    hostname = parsed.get("hostname")
+    if hostname and hostname not in ("-", "unknown") and hostname != source_ip:
+        parsed["reported_host"] = hostname
+        if source_alias != source_ip:
+            parsed[REPORTED_HIDDEN_KEY] = True
+        # Another address is taken too: host filters by an alias also match its address
+        elif not alias_cache.is_taken(hostname) and not _is_ip_address(hostname):
+            source_alias = hostname
     parsed["source_alias"] = source_alias
 
 
@@ -975,8 +978,10 @@ async def dispatch_syslog_message(
                         if "source_alias" in parent:
                             parsed["source_alias"] = parent["source_alias"]
                         parsed.pop("reported_host", None)
-                        if "reported_host" in parent:
-                            parsed["reported_host"] = parent["reported_host"]
+                        parsed.pop(REPORTED_HIDDEN_KEY, None)
+                        for key in ("reported_host", REPORTED_HIDDEN_KEY):
+                            if key in parent:
+                                parsed[key] = parent[key]
 
         await assembler.feed(stream_key, parsed)
     except Exception as e:

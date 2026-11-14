@@ -154,3 +154,23 @@ describe('Self-reported host names', () => {
     expect(docker.source_alias).toBe('172.17.0.4');
   });
 });
+
+describe('Self-reported host names after an alias is deleted', () => {
+  // A log stored while 172.17.0.4 had the alias office-printer
+  const aliasedLog: ProcessedLogEntry = { ...reportedLog, source_alias: 'office-printer', host_self_reported: false };
+
+  it('shows the reported name again, marked, when no configured host uses it', () => {
+    const row = diffSources({ '172.17.0.4': 'office-printer' }, {}, [], [], []).remapRow(aliasedLog);
+    expect([row.source_alias, row.host_self_reported]).toEqual(['printer-hp', true]);
+  });
+
+  it('falls back to the address when another host uses the name', () => {
+    const row = diffSources({ '172.17.0.4': 'office-printer' }, { '10.0.0.9': 'printer-hp' }, [], [], []).remapRow(aliasedLog);
+    expect([row.source_alias, row.host_self_reported]).toEqual(['172.17.0.4', false]);
+  });
+
+  it('falls back to the address for a log with no reported name', () => {
+    const row = diffSources({ '172.17.0.4': 'office-printer' }, {}, [], [], []).remapRow({ ...aliasedLog, reported_host: null });
+    expect(row.source_alias).toBe('172.17.0.4');
+  });
+});

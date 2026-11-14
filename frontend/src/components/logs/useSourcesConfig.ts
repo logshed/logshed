@@ -50,6 +50,11 @@ function loadAliasesAndEndpoints(action: 'load' | 'reload') {
   ]);
 }
 
+/** An IPv4 or IPv6 address, which the server never shows as a reported host name. */
+function looksLikeAddress(name: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(name) || (name.includes(':') && /^[0-9a-f:.]+$/i.test(name));
+}
+
 /**
  * Works out which host names changed between two alias lists and Docker host lists, and how each
  * row already shown is renamed. Docker rows keep their Docker host name and never take a syslog alias.
@@ -173,9 +178,15 @@ export function diffSources(
       // A configured host now uses the name the device reported: shown by its address, as the server does
       return { ...log, source_alias: log.source_ip, host_self_reported: false };
     } else if (previousAliases[log.source_ip]) {
-      // Alias was removed; revert to raw IP matching backend behavior
-      if (log.source_alias !== log.source_ip) {
-        return { ...log, source_alias: log.source_ip };
+      // Alias was removed: as the server does, the name the device reported comes back (marked as
+      // self-reported) unless a configured host uses it; otherwise the address
+      const reported = log.reported_host;
+      if (reported && reported !== log.source_ip && !takenNames.has(reported.toLowerCase()) && !looksLikeAddress(reported)) {
+        if (log.source_alias !== reported || !log.host_self_reported) {
+          return { ...log, source_alias: reported, host_self_reported: true };
+        }
+      } else if (log.source_alias !== log.source_ip || log.host_self_reported) {
+        return { ...log, source_alias: log.source_ip, host_self_reported: false };
       }
     }
     return log;

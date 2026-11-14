@@ -38,6 +38,11 @@ KIND_DOCKER = 2
 KIND_INGEST = 3
 KIND_INTERNAL = 4
 
+# An entry key: its reported_host is kept but not shown, as its address has an alias. Stored as
+# the negated hosts id in reported_host_id, so it is never equal to host_id. A private key (_),
+# so the live stream leaves it out.
+REPORTED_HIDDEN_KEY = "_reported_hidden"
+
 # The names the API gives source_kind; 0 (or a legacy row, which has no column) is unknown
 KIND_NAMES = {KIND_SYSLOG: "syslog", KIND_DOCKER: "docker", KIND_INGEST: "ingest", KIND_INTERNAL: "internal"}
 

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 
-from app.core.day_files import KIND_NAMES
+from app.core.day_files import KIND_NAMES, REPORTED_HIDDEN_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,14 @@ class SSELogEvent(dict):
     @classmethod
     def from_entry(cls, entry: dict) -> "SSELogEvent":
         event = cls(entry)
+        reported = entry.get("reported_host")
+        if reported:
+            event["host_self_reported"] = reported == entry.get("source_alias") and not entry.get(REPORTED_HIDDEN_KEY)
         for key in [k for k in event if isinstance(k, str) and k.startswith("_")]:
             del event[key]
         # Stored as a number; the browser gets its name, as the log API gives it
         if "source_kind" in event:
             event["source_kind"] = KIND_NAMES.get(event["source_kind"])
-        reported = event.get("reported_host")
-        if reported:
-            event["host_self_reported"] = reported == event.get("source_alias")
         event.data = _EVENT_ENCODER.encode(event)
         return event
 

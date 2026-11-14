@@ -41,18 +41,22 @@ def follow_reported_names(
     taken: Optional[str] = None,
     freed: Optional[str] = None,
     aliased_ip: Optional[str] = None,
+    unaliased_ip: Optional[str] = None,
 ) -> None:
     """
     Keep the host names syslog senders reported in step after a host alias or Docker host
-    change: aliased_ip got a configured alias (its reported names are forgotten), a configured
+    change: aliased_ip got a configured alias (its reported names are hidden), unaliased_ip lost
+    its alias (they are shown again where no configured host uses them), a configured
     host now uses taken (other senders' rows showing it go back to their address), and freed is
     no longer used (unless another configured host still uses it, rows that reported it show it
     again). Runs as a background task: it can read every day file.
     """
     if aliased_ip:
-        log_store.clear_reported_hosts(conn, aliased_ip)
+        log_store.hide_reported_hosts(conn, aliased_ip)
     if taken:
         log_store.withdraw_reported_name(conn, taken, keep_ip=aliased_ip)
+    if unaliased_ip:
+        log_store.show_reported_hosts(conn, unaliased_ip)
     if freed and (not taken or freed.lower() != taken.lower()) and freed.lower() not in load_taken_host_names(conn):
         log_store.restore_reported_name(conn, freed)
 
