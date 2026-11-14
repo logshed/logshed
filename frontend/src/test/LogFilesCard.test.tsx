@@ -41,9 +41,8 @@ describe('LogFilesCard', () => {
     render(<LogFilesCard files={days(3)} retentionDays={14} />);
     const rows = within(screen.getByRole('table', { name: 'Log files' })).getAllByRole('row').slice(1);
     expect(rows.map((r) => within(r).getAllByRole('cell')[0].firstChild?.textContent)).toEqual(['2026-11-13', '2026-11-12', '2026-11-11']);
-    // The state in its own column, and under the day on a phone (CSS picks one)
-    expect(within(rows[0]).getAllByText('open')).toHaveLength(2);
-    expect(within(rows[1]).getAllByText('sealed')).toHaveLength(2);
+    expect(within(rows[0]).getByText('open')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('sealed')).toBeInTheDocument();
     expect(within(rows[0]).getByText('1,000')).toBeInTheDocument();
     expect(within(rows[0]).getByText('2 MB')).toBeInTheDocument();
     await waitFor(() => expect(within(rows[0]).getByText('2026-11-28 00:00')).toBeInTheDocument());
@@ -79,6 +78,37 @@ describe('LogFilesCard', () => {
     expect(row).toHaveTextContent('in logs.db');
     await waitFor(() => expect(row).toHaveTextContent('all gone by 2026-11-26 09:15'));
     expect(screen.getByRole('button', { name: 'Show all 10' })).toBeInTheDocument();
+  });
+
+  it('stacks each day on a phone, as the other tables do, with nothing cut off at the side', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(max-width: 767px)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    render(<LogFilesCard files={[...days(10), LEGACY]} />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const list = screen.getByRole('list', { name: 'Log files' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(LOG_FILES_SHOWN + 1);
+    expect(items[0]).toHaveTextContent('2026-11-13');
+    expect(within(items[0]).getByText('open')).toBeInTheDocument();
+    expect(items[0]).toHaveTextContent('Logs: 1,000');
+    expect(items[0]).toHaveTextContent('Size: 2 MB');
+    await waitFor(() => expect(items[0]).toHaveTextContent('Expires: 2026-11-28 00:00'));
+    const legacy = screen.getByTestId('legacy-row');
+    expect(legacy).toHaveTextContent('Before 1.4.0');
+    expect(within(legacy).getByText('before 1.4.0')).toBeInTheDocument();
+    expect(legacy).toHaveTextContent('Logs: 1,204,551');
+    expect(legacy).toHaveTextContent('in logs.db');
+    await waitFor(() => expect(legacy).toHaveTextContent('All gone by: 2026-11-26 09:15'));
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 10' }));
+    expect(within(list).getAllByRole('listitem')).toHaveLength(11);
   });
 
   it('is not drawn without day files or legacy logs', () => {
