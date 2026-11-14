@@ -155,6 +155,26 @@ describe('AlertTestModal Component', () => {
     });
   });
 
+  it('starts the sample host at the rule\'s first named host and sends both', async () => {
+    const testSpy = vi.spyOn(alertsApi, 'testAlertRule').mockResolvedValue({ matched: true });
+    const rule: AlertRule = { ...mockRule, filter_host: 'nas, router' };
+
+    render(<AlertTestModal isOpen={true} rule={rule} availableApps={[]} onClose={onClose} />);
+    expect(screen.getByLabelText('Sample Host')).toHaveValue('nas');
+    fireEvent.click(screen.getByRole('button', { name: 'Run Test' }));
+
+    await waitFor(() =>
+      expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({ filter_host: 'nas, router', sample_host: 'nas' }))
+    );
+  });
+
+  it('leaves the sample host empty when the rule\'s first host is a wildcard', () => {
+    render(
+      <AlertTestModal isOpen={true} rule={{ ...mockRule, filter_host: '10.0.0.*' }} availableApps={[]} onClose={onClose} />
+    );
+    expect(screen.getByLabelText('Sample Host')).toHaveValue('');
+  });
+
   it('offers all 8 severities for the sample', () => {
     render(<AlertTestModal isOpen={true} rule={mockRule} availableApps={[]} onClose={onClose} />);
     expect(optionLabels(screen.getByLabelText('Sample Severity'))).toEqual([

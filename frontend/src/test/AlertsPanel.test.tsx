@@ -1610,6 +1610,23 @@ describe('AlertsPanel hand-offs', () => {
     );
   });
 
+  it('fills the host filter with the log\'s host as well as the app', async () => {
+    setAlertRuleHandoff({ hostName: 'nas', appName: 'nginx', message: 'Nginx upstream connection timeout' });
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9 });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ filter_host: 'nas', filter_app: 'nginx' }))
+    );
+  });
+
+  it('names the rule after the host when the log has no app', async () => {
+    setAlertRuleHandoff({ hostName: '192.168.1.9', message: 'link down' });
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on 192.168.1.9'));
+  });
+
   it('leaves the app filter empty when the app is not among the known apps', async () => {
     setAlertRuleHandoff({ appName: 'mystery-app', message: 'hello' });
     render(<AlertsPanel />);

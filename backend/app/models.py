@@ -1045,6 +1045,9 @@ class AlertRuleCreate(BaseModel):
     rule_type: AlertRuleType = Field("threshold", description="Rule type: threshold, pattern, or rate")
     channel_id: Optional[int] = Field(None, description="Target notification channel ID (null dispatches to all enabled channels)")
     filter_app: Optional[str] = Field(None, max_length=100, description="Optional application or container filter")
+    filter_host: Optional[str] = Field(
+        None, max_length=255, description="Optional comma-separated host name or IP patterns (wildcards * and ?)"
+    )
     filter_severity: Optional[int] = Field(None, ge=0, le=7, description="Maximum severity threshold (0-7, lower is more critical)")
     match_pattern: Optional[str] = Field(None, max_length=1000, description="Regex or keyword pattern to match against log messages")
     threshold_count: int = Field(1, ge=1, le=100000, description="Occurrences or logs/sec needed within window to trigger")
@@ -1060,6 +1063,7 @@ class AlertRuleUpdate(BaseModel):
     rule_type: Optional[AlertRuleType] = Field(None, description="Rule type: threshold, pattern, or rate")
     channel_id: Optional[int] = None
     filter_app: Optional[str] = Field(None, max_length=100)
+    filter_host: Optional[str] = Field(None, max_length=255)
     filter_severity: Optional[int] = Field(None, ge=0, le=7)
     match_pattern: Optional[str] = Field(None, max_length=1000)
     threshold_count: Optional[int] = Field(None, ge=1, le=100000)
@@ -1077,6 +1081,7 @@ class AlertRuleResponse(BaseModel):
     rule_type: str
     channel_id: Optional[int] = None
     filter_app: Optional[str] = None
+    filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
     threshold_count: int = 1
@@ -1095,10 +1100,12 @@ class AlertTestRequest(BaseModel):
     """Payload for testing an alert rule pattern against sample input."""
     rule_type: str = "threshold"
     filter_app: Optional[str] = None
+    filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
     sample_message: str = Field(..., description="Sample message text to test")
     sample_app: Optional[str] = Field(None, description="Sample app name")
+    sample_host: Optional[str] = Field(None, description="Sample host name or IP address")
     sample_severity: Optional[int] = Field(6, description="Sample severity (0-7)")
 
 
@@ -1118,6 +1125,7 @@ class AlertPresetResponse(BaseModel):
     description: str
     rule_type: str
     filter_app: Optional[str] = None
+    filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
     threshold_count: int = 1
@@ -1133,6 +1141,7 @@ class AlertRuleExportItem(BaseModel):
     name: str
     rule_type: str = "threshold"
     filter_app: Optional[str] = None
+    filter_host: Optional[str] = None
     filter_severity: Optional[int] = None
     match_pattern: Optional[str] = None
     threshold_count: int = 1

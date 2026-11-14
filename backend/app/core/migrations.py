@@ -708,6 +708,13 @@ def _register_legacy_logs(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT INTO log_id_state (id, next_id) VALUES (1, ?);", (next_id,))
 
 
+def _add_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """Add a column unless the table has it already."""
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table});").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
+
+
 def migrate_v4(conn: sqlite3.Connection) -> None:
     """
     Execute Migration 4 (LogShed 1.4.0):
@@ -715,12 +722,14 @@ def migrate_v4(conn: sqlite3.Connection) -> None:
     - new logs go to one file per UTC day: the catalogue of day files and the log id counter
       are added, and the logs table so far is listed as the legacy entry. No day file is made
       and no log row is touched: the first write after start-up makes the day's file;
-    - reported_hosts lists the host names syslog senders reported and are shown by.
+    - reported_hosts lists the host names syslog senders reported and are shown by;
+    - alert rules can be limited to hosts (alert_rules.filter_host, NULL for every host).
     """
     logger.info("Running migration v4...")
     _reencrypt_stored_secrets(conn)
     _run_script(conn, LOG_CATALOGUE_SCHEMA)
     _register_legacy_logs(conn)
+    _add_column(conn, "alert_rules", "filter_host", "TEXT")
 
 
 MIGRATIONS = [

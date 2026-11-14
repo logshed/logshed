@@ -48,7 +48,7 @@ from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.services.maintenance_service import MaintenanceSessionLimitError
 from app.core.regex_validator import check_regex_safety, validate_regex_pattern
-from app.core.utils import parse_iso_to_epoch, parse_iso_to_utc_datetime
+from app.core.utils import normalize_pattern_list, parse_iso_to_epoch, parse_iso_to_utc_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ _ALERT_RULE_COLUMNS = """
     id, name, rule_type, channel_id, filter_app, filter_severity,
     match_pattern, threshold_count, window_seconds, cooldown_seconds,
     ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-    suppress_until, display_order, created_at
+    suppress_until, display_order, created_at, filter_host
 """
 
 
@@ -79,7 +79,8 @@ async def _fetch_alert_rule_row(rule_id: int) -> Any:
 
 
 def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
-    """Map a raw database row tuple from alert_rules into an AlertRuleResponse."""
+    """Map a raw database row tuple from alert_rules (_ALERT_RULE_COLUMNS) into an AlertRuleResponse."""
+    filter_host = r[17] if len(r) > 17 else None
     if len(r) > 16:
         display_order = r[15]
         created_at = str(r[16])
@@ -93,6 +94,7 @@ def _row_to_alert_rule_response(r: Any) -> AlertRuleResponse:
         rule_type=r[2],
         channel_id=r[3],
         filter_app=r[4],
+        filter_host=filter_host,
         filter_severity=r[5],
         match_pattern=r[6],
         threshold_count=r[7] or 1,
@@ -258,7 +260,7 @@ async def list_alert_rules(user: dict = Depends(get_current_user)) -> list[Alert
 _ALERT_EXPORT_COLUMNS = """
     name, rule_type, filter_app, filter_severity, match_pattern,
     threshold_count, window_seconds, cooldown_seconds, ai_enrichment, is_enabled,
-    display_order
+    display_order, filter_host
 """
 
 
@@ -268,6 +270,7 @@ def _row_to_alert_export_item(r: Any) -> AlertRuleExportItem:
         name=r["name"],
         rule_type=r["rule_type"] or "threshold",
         filter_app=r["filter_app"],
+        filter_host=r["filter_host"],
         filter_severity=r["filter_severity"],
         match_pattern=r["match_pattern"],
         threshold_count=r["threshold_count"] or 1,
@@ -294,16 +297,17 @@ def _insert_alert_rule(conn: sqlite3.Connection, rule: dict[str, Any], created_a
     cur = conn.execute(
         """
         INSERT INTO alert_rules
-        (name, rule_type, channel_id, filter_app, filter_severity, match_pattern,
+        (name, rule_type, channel_id, filter_app, filter_host, filter_severity, match_pattern,
          threshold_count, window_seconds, cooldown_seconds, ai_enrichment,
          is_enabled, trigger_count, display_order, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """,
         (
             rule["name"],
             rule["rule_type"],
             rule["channel_id"],
             rule["filter_app"],
+            rule.get("filter_host"),
             rule["filter_severity"],
             rule["match_pattern"],
             rule["threshold_count"],
@@ -419,6 +423,10 @@ async def import_alert_rules(
         if filter_app == "":
             filter_app = None
 
+        # Files from LogShed 1.3.x have no host filter: such rules see every host
+        filter_host = raw_item.get("filter_host")
+        filter_host = normalize_pattern_list(str(filter_host)) if filter_host is not None else None
+
         filter_severity = raw_item.get("filter_severity")
         if filter_severity is not None:
             try:
@@ -435,8 +443,10 @@ async def import_alert_rules(
         if match_pattern == "":
             match_pattern = None
 
-        length_error = too_long(f"Rule '{name}'", "filter_app", filter_app, 100) or too_long(
-            f"Rule '{name}'", "match_pattern", match_pattern, 1000
+        length_error = (
+            too_long(f"Rule '{name}'", "filter_app", filter_app, 100)
+            or too_long(f"Rule '{name}'", "filter_host", filter_host, 255)
+            or too_long(f"Rule '{name}'", "match_pattern", match_pattern, 1000)
         )
         if length_error:
             errors.append(length_error)
@@ -479,6 +489,7 @@ async def import_alert_rules(
             "rule_type": rule_type,
             "channel_id": None,
             "filter_app": filter_app,
+            "filter_host": filter_host,
             "filter_severity": filter_severity,
             "match_pattern": match_pattern,
             "threshold_count": threshold_count,
@@ -520,6 +531,7 @@ async def create_alert_rule(
         "rule_type": rule_in.rule_type.strip(),
         "channel_id": rule_in.channel_id,
         "filter_app": rule_in.filter_app.strip() if rule_in.filter_app else None,
+        "filter_host": normalize_pattern_list(rule_in.filter_host),
         "filter_severity": rule_in.filter_severity,
         "match_pattern": rule_in.match_pattern.strip() if rule_in.match_pattern else None,
         "threshold_count": rule_in.threshold_count,
@@ -565,6 +577,7 @@ async def update_alert_rule(
     new_type = rule_in.rule_type.strip() if "rule_type" in fields and rule_in.rule_type is not None else row[2]
     new_channel = rule_in.channel_id if "channel_id" in fields else row[3]
     new_app = (rule_in.filter_app.strip() if rule_in.filter_app else None) if "filter_app" in fields else row[4]
+    new_host = normalize_pattern_list(rule_in.filter_host) if "filter_host" in fields else row[17]
     new_sev = rule_in.filter_severity if "filter_severity" in fields else row[5]
     new_pat = (rule_in.match_pattern.strip() if rule_in.match_pattern else None) if "match_pattern" in fields else row[6]
     if "match_pattern" in fields and new_pat:
@@ -608,7 +621,7 @@ async def update_alert_rule(
         cur.execute(
             """
             UPDATE alert_rules
-            SET name = ?, rule_type = ?, channel_id = ?, filter_app = ?,
+            SET name = ?, rule_type = ?, channel_id = ?, filter_app = ?, filter_host = ?,
                 filter_severity = ?, match_pattern = ?, threshold_count = ?,
                 window_seconds = ?, cooldown_seconds = ?, ai_enrichment = ?,
                 is_enabled = ?, suppress_until = ?
@@ -619,6 +632,7 @@ async def update_alert_rule(
                 new_type,
                 new_channel,
                 new_app,
+                new_host,
                 new_sev,
                 new_pat,
                 new_thresh,
@@ -633,17 +647,7 @@ async def update_alert_rule(
         if cur.rowcount == 0:
             # The rule was deleted between the initial read and this update
             return None
-        cur.execute(
-            """
-            SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
-                   match_pattern, threshold_count, window_seconds, cooldown_seconds,
-                   ai_enrichment, is_enabled, trigger_count, last_triggered_at,
-                   suppress_until, display_order, created_at
-            FROM alert_rules
-            WHERE id = ?
-            """,
-            (rule_id,),
-        )
+        cur.execute(f"SELECT {_ALERT_RULE_COLUMNS} FROM alert_rules WHERE id = ?", (rule_id,))
         updated_row = cur.fetchone()
         conn.commit()
         return updated_row
@@ -708,8 +712,12 @@ async def test_alert_pattern(
             if not is_safe:
                 regex_error = err
 
+        sample_host = (payload.sample_host or "").strip() or None
         sample_entry = {
             "app_name": payload.sample_app or "",
+            # The sample host stands for the log's host name and its address alike
+            "source_alias": sample_host,
+            "source_ip": sample_host,
             "severity": payload.sample_severity if payload.sample_severity is not None else 6,
             "message": payload.sample_message,
             "raw": payload.sample_message,
@@ -723,6 +731,7 @@ async def test_alert_pattern(
                 rule_type=payload.rule_type,
                 channel_id=None,
                 filter_app=payload.filter_app,
+                filter_host=payload.filter_host,
                 filter_severity=payload.filter_severity,
                 match_pattern=payload.match_pattern,
                 threshold_count=1,
@@ -787,6 +796,7 @@ async def install_preset(
         "rule_type": preset["rule_type"],
         "channel_id": channel_id,
         "filter_app": preset.get("filter_app"),
+        "filter_host": normalize_pattern_list(preset.get("filter_host")),
         "filter_severity": preset.get("filter_severity"),
         "match_pattern": preset.get("match_pattern"),
         "threshold_count": preset["threshold_count"],

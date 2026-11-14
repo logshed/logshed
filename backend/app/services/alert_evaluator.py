@@ -28,7 +28,7 @@ from app.core.regex_validator import (
     user_pattern_search,
 )
 from app.core.rule_index import RuleIndex, entry_key, exact_match_key
-from app.core.utils import compile_wildcard, parse_iso_to_epoch
+from app.core.utils import compile_host_list, compile_wildcard, parse_iso_to_epoch, split_pattern_list, wildcard_text_key
 from app.services.notifier import get_notifier
 from app.services.alert_incident import (
     AiEnrichment,
@@ -145,12 +145,14 @@ class CompiledAlertRule:
         last_triggered_at: Optional[str] = None,
         suppress_until: Optional[str] = None,
         display_order: int = 0,
+        filter_host: Optional[str] = None,
     ):
         self.id = id
         self.name = name
         self.rule_type = rule_type
         self.channel_id = channel_id
         self.filter_app = filter_app
+        self.filter_host = filter_host
         self.filter_severity = filter_severity
         self.match_pattern = match_pattern
         self.threshold_count = max(1, threshold_count)
@@ -173,6 +175,9 @@ class CompiledAlertRule:
         else:
             self._filter_apps = ()
         self._filter_app_matches = tuple(compile_wildcard(p) for p in self._filter_apps)
+        # Hosts match by name or address, as drop rules' hosts do
+        self._filter_hosts = tuple(p.lower() for p in split_pattern_list(filter_host))
+        self._filter_host_match = compile_host_list(filter_host)
 
         self.compiled_regex: Optional[regex.Pattern] = None
         self._match_pattern_lower: Optional[str] = None
@@ -241,14 +246,20 @@ class CompiledAlertRule:
             if not any(match(app_key) for match in self._filter_app_matches):
                 return False
 
-        # 2. Severity filter check (syslog 0-7, lower is more severe)
+        # 2. Host filter check (the log's host name or its address)
+        if self._filter_host_match is not None and not self._filter_host_match(
+            wildcard_text_key(entry.get("source_alias")), wildcard_text_key(entry.get("source_ip"))
+        ):
+            return False
+
+        # 3. Severity filter check (syslog 0-7, lower is more severe)
         if self.filter_severity is not None:
             sev = entry.get("severity")
             actual_sev = 6 if sev is None else sev
             if actual_sev > self.filter_severity:
                 return False
 
-        # 3. Message pattern check (prioritize substring matching when no regex metacharacters)
+        # 4. Message pattern check (prioritize substring matching when no regex metacharacters)
         if self._match_pattern_lower:
             if self._invalid:
                 return False
@@ -279,14 +290,21 @@ class CompiledAlertRule:
         return True
 
 
+def _exact_keys(patterns: tuple[str, ...]) -> Optional[tuple[str, ...]]:
+    """The exact values a pattern list matches, or None when it is empty or any entry has a wildcard."""
+    keys = tuple(exact_match_key(p) for p in patterns)
+    return keys if keys and all(keys) else None
+
+
 def _alert_rule_exact_keys(rule: CompiledAlertRule) -> Optional[tuple[str, tuple[str, ...]]]:
-    """The exact apps an alert rule is limited to, or None when it must see every entry."""
-    if not rule._filter_apps:
-        return None
-    apps = tuple(exact_match_key(app) for app in rule._filter_apps)
-    if not all(apps):
-        return None
-    return ("app", apps)
+    """The exact apps (or else hosts) an alert rule is limited to, or None when it must see every entry."""
+    apps = _exact_keys(rule._filter_apps)
+    if apps:
+        return ("app", apps)
+    hosts = _exact_keys(rule._filter_hosts)
+    if hosts:
+        return ("host", hosts)
+    return None
 
 
 class AlertEvaluator:
@@ -333,7 +351,7 @@ class AlertEvaluator:
                 SELECT id, name, rule_type, channel_id, filter_app, filter_severity,
                        match_pattern, threshold_count, window_seconds, cooldown_seconds,
                        ai_enrichment, is_enabled, trigger_count, last_triggered_at, suppress_until,
-                       display_order
+                       display_order, filter_host
                 FROM alert_rules
                 WHERE is_enabled = 1
                 ORDER BY display_order ASC, id ASC
@@ -371,6 +389,7 @@ class AlertEvaluator:
                 last_triggered_at=r[13],
                 suppress_until=r[14],
                 display_order=r[15],
+                filter_host=r[16],
             )
             if rule.compiled_regex is not None:
                 rule.on_pattern_timeout = self._make_timeout_callback(rule)
@@ -474,10 +493,15 @@ class AlertEvaluator:
         if not rules:
             return []
 
-        # Entries per rule with an exact app filter, in batch order; other rules see the whole batch
+        # Entries per rule with an exact app or host filter, in batch order; other rules see the whole batch
         entries_by_rule: dict[int, list[dict[str, Any]]] = {}
         for entry in batch:
-            for candidate in index.keyed_candidates((("app", entry_key(entry.get("app_name"))),)):
+            lookups = (
+                ("app", entry_key(entry.get("app_name"))),
+                ("host", entry_key(entry.get("source_alias"))),
+                ("host", entry_key(entry.get("source_ip"))),
+            )
+            for candidate in index.keyed_candidates(lookups):
                 entries_by_rule.setdefault(id(candidate), []).append(entry)
 
         now_iso = now_utc.isoformat()

@@ -252,7 +252,7 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   ['POST', /^\/api\/ai\/audit\/(\d+)\/follow-up$/, () => { throw notInDemo('A follow-up without streaming'); }],
   ['DELETE', /^\/api\/ai\/audit\/(\d+)\/messages$/, (m) => { conversations.set(Number(m[1]), (conversations.get(Number(m[1])) || []).slice(0, 1)); return { status: 'ok' }; }],
   ...crud('/api/alerts/rules', store.alertRules, (b) => ({
-    name: 'New rule', rule_type: 'pattern' as AlertRule['rule_type'], channel_id: null, filter_app: null, filter_severity: null, match_pattern: null, threshold_count: 1,
+    name: 'New rule', rule_type: 'pattern' as AlertRule['rule_type'], channel_id: null, filter_app: null, filter_host: null, filter_severity: null, match_pattern: null, threshold_count: 1,
     window_seconds: 60, cooldown_seconds: 300, ai_enrichment: false, is_enabled: true, ...b,
     trigger_count: 0, last_triggered_at: null, suppress_until: null, created_at: nowIso(), display_order: store.alertRules.items.length,
   })),

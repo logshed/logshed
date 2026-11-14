@@ -7,6 +7,7 @@ import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { buttonClass } from '../common/Button.tsx';
 import { controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { splitPatternList } from '../../utils/patternList.ts';
 
 export interface AlertTestModalProps {
   isOpen: boolean;
@@ -62,6 +63,7 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
 }) => {
   const [testSampleMessage, setTestSampleMessage] = useState<string>('');
   const [testSampleApp, setTestSampleApp] = useState<string>('');
+  const [testSampleHost, setTestSampleHost] = useState<string>('');
   const [testSampleSeverity, setTestSampleSeverity] = useState<number>(6);
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{
@@ -75,6 +77,9 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
 
     setTestSampleMessage(generateInitialSample(rule));
     setTestSampleApp(rule.filter_app ? rule.filter_app.split(',')[0].trim() : '');
+    // The first host the rule names, unless it is a wildcard pattern no host is called
+    const firstHost = splitPatternList(rule.filter_host)[0] || '';
+    setTestSampleHost(/[*?]/.test(firstHost) ? '' : firstHost);
     setTestSampleSeverity(
       rule.filter_severity !== null && rule.filter_severity !== undefined
         ? rule.filter_severity
@@ -91,10 +96,12 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
       const res = await testAlertRule({
         rule_type: rule.rule_type,
         filter_app: rule.filter_app ?? null,
+        filter_host: rule.filter_host ?? null,
         filter_severity: rule.filter_severity ?? null,
         match_pattern: rule.match_pattern,
         sample_message: testSampleMessage,
         sample_app: testSampleApp.trim() || null,
+        sample_host: testSampleHost.trim() || null,
         sample_severity: testSampleSeverity,
       });
       setTestResult(res);
@@ -126,6 +133,17 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
+            <label htmlFor="test-sample-host" className={LABEL_TEXT_CLASS}>Sample Host</label>
+            <input
+              id="test-sample-host"
+              type="text"
+              value={testSampleHost}
+              onChange={(e) => setTestSampleHost(e.target.value)}
+              placeholder="Host name or IP"
+              className={controlClass()}
+            />
+          </div>
+          <div className="space-y-1">
             <label htmlFor="test-sample-app" className={LABEL_TEXT_CLASS}>Sample App</label>
             {/* Before the input: space-y-* spaces every child but the last, and a datalist is never shown */}
             {availableApps.length > 0 && (
@@ -144,6 +162,9 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
               className={controlClass()}
             />
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <label id="test-sample-severity-label" htmlFor="test-sample-severity" className={LABEL_TEXT_CLASS}>Sample Severity</label>
             <SelectDropdown

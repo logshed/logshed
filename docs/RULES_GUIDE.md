@@ -68,13 +68,22 @@ Select between `Threshold (Sliding Window)`, `Pattern (Immediate Match)`, or `Ra
 #### 3. Target Channel
 Select a specific notification target or choose **All Enabled Channels** to broadcast alerts across all active webhooks and endpoints configured in Settings.
 
-#### 4. App Filter (Optional)
+#### 4. Host Filter (Optional)
+A multi-select dropdown listing the hosts in your logs, as the Console's host list does.
+- Pick one or more hosts, or type a name, an IP address or a wildcard pattern such as `192.168.1.*` or `nas*`. Any one of them must match.
+- A host matches by its name as the Console shows it (its alias, a Docker host's name, or the name a device sent) or by its IP address, the same way drop rules and maintenance targets match hosts.
+- A name that a device reported for itself (shown with a question mark in the Console, and marked "self-reported" in this list) can be sent by any device until you make it that address's alias. The dialog says so under the field. To be sure a rule watches one device, use its IP address, or click **Make it the alias** in the log drawer first.
+- If left empty, logs from every host are evaluated.
+
+#### 5. App Filter (Optional)
 A multi-select dropdown listing known applications and daemons discovered across your ingested logs.
 - You can select one or more specific apps (for example, `sshd`, `nginx`, `docker`).
 - You can also enter custom expressions or wildcards if needed.
 - If left empty, all ingested logs from any application or service are evaluated.
 
-#### 5. Severity Filter (Optional)
+With both a host filter and an app filter, a log must match both.
+
+#### 6. Severity Filter (Optional)
 Restricts rule evaluation to logs at the chosen syslog severity level or more severe (syslog levels 0 to 7, where a lower number is more severe). The dropdown shows each level as, for example, `Warning (4) and more severe`:
 - `0 - Emergency`: System unusable
 - `1 - Alert`: Action must be taken immediately
@@ -87,11 +96,11 @@ Restricts rule evaluation to logs at the chosen syslog severity level or more se
 
 Choosing `Error (3) and more severe` matches Emergency (0), Alert (1), Critical (2), and Error (3). If left empty, all severity levels are permitted.
 
-#### 6. Match Pattern (Regex or Substring)
+#### 7. Match Pattern (Regex or Substring)
 A case-insensitive keyword substring or regular expression pattern matched against the log message text and raw payload.
 - Case-insensitive substring matching: `failed password`
 - Regular expression matching: `Failed (password|publickey) for .* from (?P<ip>\d+\.\d+\.\d+\.\d+)`
-- Leave empty or enter `*` to match all log entries satisfying the app and severity filters.
+- Leave empty or enter `*` to match all log entries satisfying the host, app and severity filters.
 
 **How LogShed decides between regex and plain text:** a pattern is treated as a regular expression when it contains at least one of `* + ? [ ] ( ) { } ^ $ | \`. Otherwise it is matched as case-insensitive plain text.
 - Backslash codes work as in any regular expression: `\bKilled` matches "Killed" at the start of a word, `error \d+` matches "error " followed by digits, and `foo\.bar` matches a literal dot.
@@ -189,11 +198,11 @@ Use the **Test Rule** button on any configured rule to open the dry-run tester. 
 ### Creating an Alert Rule from a Log
 
 In the Console, click a log entry to open the Log Detail drawer, then click **Create Alert Rule** (next to **Create Drop Rule**). LogShed opens **Rules & History > Alert Rules** with a new rule dialog that starts with:
-- the name `Alert on <app>` and the log's app in the App Filter (when LogShed has seen that app before);
+- the name `Alert on <app>` (or `Alert on <host>` for a log with no app), the log's host in the Host Filter (its name as the Console shows it, or its IP address when it has none), and the log's app in the App Filter (when LogShed has seen that app before);
 - an empty Severity Filter and Match Pattern;
 - a read-only "From log:" line under the Match Pattern field, showing the log message (hover it to see the full text), so you can copy the part you want to match.
 
-Alert rules filter by app and severity only, so the host is not carried over. Closing the dialog without saving leaves you on Alert Rules.
+Remove the host from the Host Filter to watch the app on every host. Closing the dialog without saving leaves you on Alert Rules.
 
 ### Inspecting an Incident in the Console
 
@@ -233,7 +242,7 @@ LogShed 1.3.0 and earlier read such a list as one name, so after going back to 1
 ### Renaming a Host
 
 When you rename a syslog host alias or a Docker host alias under Settings > Sources, LogShed updates what names the host by its old alias, so it keeps matching the host's new logs. Deleting a syslog host alias works the same way, with the host's IP address as the new name, because its logs show the IP again:
-- drop rules that list the old alias exactly (any letter case) among their hosts; only that entry changes,
+- drop rules and alert rules that list the old alias exactly (any letter case) among their hosts; only that entry changes,
 - running maintenance windows aimed at the host,
 - saved views that filter on the host.
 
@@ -242,7 +251,7 @@ Some things are not changed:
 - **A name another host still uses:** while another syslog host or Docker host has the old alias, the rules and views keep it, because it still matches that host.
 - **A host's first alias:** until a host has an alias, its logs carry the host name it sends (or its IP), and a rule written against that name stops matching once you give the host an alias. Write such rules with the host's IP address, which an alias does not change, or edit them after adding the alias. A rule that names the IP keeps matching after you add an alias, and the drop rule dialog shows the link: in the host list each alias shows its IP, and an IP that has an alias shows that alias, with a note under the field.
 
-Alert rules have no host filter, so a rename does not affect them. Links and bookmarks with the old name in them are not changed.
+Links and bookmarks with the old name in them are not changed.
 
 ### Severity Range Handling
 

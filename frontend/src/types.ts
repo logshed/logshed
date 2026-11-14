@@ -525,6 +525,7 @@ export interface AlertRule {
   rule_type: AlertRuleType;
   channel_id?: number | null;
   filter_app?: string | null;
+  filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
   threshold_count: number;
@@ -544,6 +545,7 @@ export interface AlertRuleCreate {
   rule_type: AlertRuleType;
   channel_id?: number | null;
   filter_app?: string | null;
+  filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
   threshold_count?: number;
@@ -558,6 +560,7 @@ export interface AlertRuleUpdate {
   rule_type?: AlertRuleType;
   channel_id?: number | null;
   filter_app?: string | null;
+  filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
   threshold_count?: number;
@@ -571,10 +574,12 @@ export interface AlertRuleUpdate {
 export interface AlertTestRequest {
   rule_type: string;
   filter_app?: string | null;
+  filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
   sample_message: string;
   sample_app?: string | null;
+  sample_host?: string | null;
   sample_severity?: number | null;
 }
 
@@ -592,6 +597,7 @@ export interface AlertPreset {
   description: string;
   rule_type: string;
   filter_app?: string | null;
+  filter_host?: string | null;
   filter_severity?: number | null;
   match_pattern?: string | null;
   threshold_count: number;

@@ -3,10 +3,11 @@ Keep rules and views pointing at a host when its alias is renamed or deleted.
 
 Stored logs are rewritten to a host's new alias, or back to its IP when a syslog host alias is
 deleted (`_batch_update_log_aliases`, `_batch_update_docker_aliases`), and new logs carry that name
-from the start. Drop rules, active maintenance sessions and saved views store the name they were
-given, so afterwards they would silently stop matching the host. `follow_alias_rename` moves the
-ones that name the host by its exact old alias (letter case and surrounding spaces ignored, as the
-matching does) to the new name; in a drop rule's comma-separated host list, only that entry changes.
+from the start. Drop rules, alert rules' host filters, active maintenance sessions and saved views
+store the name they were given, so afterwards they would silently stop matching the host.
+`follow_alias_rename` moves the ones that name the host by its exact old alias (letter case and
+surrounding spaces ignored, as the matching does) to the new name; in a comma-separated host list,
+only that entry changes.
 Wildcard patterns are left alone, and so is everything when another host still has the old alias,
 because the old name still matches that host.
 """
@@ -22,6 +23,7 @@ from app.api.deps import run_db_query
 from app.core.rule_index import exact_match_key
 from app.core.utils import load_taken_host_names, normalize_pattern_list, split_pattern_list
 from app.services import log_store
+from app.services.alert_evaluator import get_alert_evaluator
 from app.services.drop_filter import get_drop_filter
 from app.services.maintenance_service import refresh_maintenance_cache
 
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AliasRenameResult:
     drop_rules: int = 0
+    alert_rules: int = 0
     maintenance_sessions: int = 0
     saved_views: int = 0
 
@@ -98,7 +101,7 @@ def _rename_in_list(values: list[Any], old_key: str, new_alias: str) -> Optional
 
 
 def _rename_in_pattern_list(pattern_list: str, old_key: str, new_alias: str) -> Optional[str]:
-    """A drop rule's host list with the old alias replaced (duplicates removed, any case), or None when absent."""
+    """A rule's host list with the old alias replaced (duplicates removed, any case), or None when absent."""
     parts = split_pattern_list(pattern_list)
     if not any(exact_match_key(p) == old_key for p in parts):
         return None
@@ -125,7 +128,7 @@ def _rename_in_view(params: dict[str, Any], old_key: str, new_alias: str) -> boo
 
 def follow_alias_rename(conn: sqlite3.Connection, old_alias: str, new_alias: str) -> AliasRenameResult:
     """
-    Point drop rules, active maintenance sessions and saved views that name old_alias exactly at
+    Point drop rules, alert rules, active maintenance sessions and saved views that name old_alias exactly at
     new_alias, inside the caller's transaction (the caller commits, then calls
     reload_after_alias_rename). The caller checks first that no other host still has old_alias.
     """
@@ -144,6 +147,16 @@ def follow_alias_rename(conn: sqlite3.Connection, old_alias: str, new_alias: str
             rule_updates.append((renamed, rule_id))
     conn.executemany("UPDATE drop_rules SET source_pattern = ? WHERE id = ?", rule_updates)
     result.drop_rules = len(rule_updates)
+
+    alert_updates = []
+    for rule_id, pattern_list in conn.execute(
+        "SELECT id, filter_host FROM alert_rules WHERE filter_host IS NOT NULL"
+    ):
+        renamed = _rename_in_pattern_list(pattern_list, old_key, new_alias)
+        if renamed is not None:
+            alert_updates.append((renamed, rule_id))
+    conn.executemany("UPDATE alert_rules SET filter_host = ? WHERE id = ?", alert_updates)
+    result.alert_rules = len(alert_updates)
 
     session_ids = [
         r[0]
@@ -180,12 +193,15 @@ async def reload_after_alias_rename(result: Optional[AliasRenameResult]) -> None
         return
     if result.drop_rules:
         await asyncio.to_thread(get_drop_filter().reload_rules)
+    if result.alert_rules:
+        await asyncio.to_thread(get_alert_evaluator().reload_rules)
     if result.maintenance_sessions:
         await run_db_query(refresh_maintenance_cache)
-    if result.drop_rules or result.maintenance_sessions or result.saved_views:
+    if result.drop_rules or result.alert_rules or result.maintenance_sessions or result.saved_views:
         logger.info(
-            "Host alias changed: %s, %s and %s now use the new name",
+            "Host alias changed: %s, %s, %s and %s now use the new name",
             _plural(result.drop_rules, "drop rule"),
+            _plural(result.alert_rules, "alert rule"),
             _plural(result.maintenance_sessions, "maintenance session"),
             _plural(result.saved_views, "saved view"),
         )

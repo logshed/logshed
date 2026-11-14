@@ -10,11 +10,14 @@ import { moreSevereLabel } from '../../utils/severityLabels.ts';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { buttonClass } from '../common/Button.tsx';
 import { CHECKBOX_CLASS, controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
 
 /** Starting values for a new rule created from a log ("Create Alert Rule" in the log detail drawer). */
 export interface AlertRulePrefill {
   name?: string;
   filterApps?: string[];
+  filterHosts?: string[];
   /** The log message, shown read-only under the pattern field so the user can copy the part to match. */
   referenceMessage?: string;
 }
@@ -37,6 +40,10 @@ export interface AlertRuleModalProps {
   ruleToEdit: AlertRule | null;
   channels: NotificationChannel[];
   availableApps: string[];
+  /** Host names and addresses for the host filter list (the Console's host list). */
+  availableHosts?: string[];
+  /** Host names in availableHosts that devices reported for themselves (no alias set), with the addresses that sent each. */
+  selfReportedHosts?: Record<string, string[]>;
   isAiConfigured?: boolean;
   /** Used only when creating a rule (ruleToEdit is null). */
   prefill?: AlertRulePrefill | null;
@@ -50,6 +57,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   ruleToEdit,
   channels,
   availableApps,
+  availableHosts = EMPTY_APPS,
+  selfReportedHosts,
   isAiConfigured = true,
   prefill,
   onNavigateToSettings,
@@ -59,6 +68,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const activePrefill = ruleToEdit ? null : prefill || null;
   const initialName = activePrefill?.name || '';
   const initialFilterApps = activePrefill?.filterApps || EMPTY_APPS;
+  const initialFilterHosts = activePrefill?.filterHosts || EMPTY_APPS;
   const referenceMessage = activePrefill?.referenceMessage || '';
   // Ties each visible label to its field (htmlFor and id)
   const fieldId = useId();
@@ -66,6 +76,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const [formRuleType, setFormRuleType] = useState<AlertRuleType>('threshold');
   const [formChannelId, setFormChannelId] = useState<number | null>(null);
   const [formFilterApps, setFormFilterApps] = useState<string[]>([]);
+  const [formFilterHosts, setFormFilterHosts] = useState<string[]>([]);
   const [formFilterSeverity, setFormFilterSeverity] = useState<number | ''>('');
   const [formMatchPattern, setFormMatchPattern] = useState<string>('');
   const [formThresholdCount, setFormThresholdCount] = useState<number | ''>(1);
@@ -93,6 +104,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           ? ruleToEdit.filter_app.split(',').map((s) => s.trim()).filter(Boolean)
           : []
       );
+      setFormFilterHosts(splitPatternList(ruleToEdit.filter_host));
       setFormFilterSeverity(
         ruleToEdit.filter_severity !== null && ruleToEdit.filter_severity !== undefined
           ? ruleToEdit.filter_severity
@@ -110,6 +122,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormRuleType('threshold');
       setFormChannelId(channels.length > 0 ? channels[0].id : null);
       setFormFilterApps(initialFilterApps);
+      setFormFilterHosts(initialFilterHosts);
       setFormFilterSeverity('');
       setFormMatchPattern('');
       setFormThresholdCount(1);
@@ -119,7 +132,15 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormIsEnabled(true);
       setFormError(null);
     }
-  }, [isOpen, ruleToEdit, channels, initialName, initialFilterApps]);
+  }, [isOpen, ruleToEdit, channels, initialName, initialFilterApps, initialFilterHosts]);
+
+  const hostPattern = joinPatternList(formFilterHosts);
+  const hostListTooLong = hostPattern.length > RULE_FILTER_MAX_LENGTH;
+  const selfReportedKeys = useMemo(
+    () => new Set(Object.keys(selfReportedHosts || {}).map((name) => name.toLowerCase())),
+    [selfReportedHosts]
+  );
+  const isSelfReported = (host: string) => selfReportedKeys.has(host.trim().toLowerCase());
 
   const isDirty = useMemo(() => {
     if (!isOpen) return false;
@@ -139,6 +160,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         formRuleType !== ruleToEdit.rule_type ||
         formChannelId !== (ruleToEdit.channel_id ?? null) ||
         appsChanged ||
+        hostPattern !== joinPatternList(splitPatternList(ruleToEdit.filter_host)) ||
         formFilterSeverity !== initialSeverity ||
         formMatchPattern !== (ruleToEdit.match_pattern || '') ||
         formThresholdCount !== ruleToEdit.threshold_count ||
@@ -157,6 +179,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
         formRuleType !== 'threshold' ||
         formChannelId !== initialChannel ||
         appsChanged ||
+        hostPattern !== joinPatternList(initialFilterHosts) ||
         formFilterSeverity !== '' ||
         formMatchPattern !== '' ||
         formThresholdCount !== 1 ||
@@ -172,6 +195,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
     channels,
     initialName,
     initialFilterApps,
+    initialFilterHosts,
+    hostPattern,
     formName,
     formRuleType,
     formChannelId,
@@ -200,11 +225,13 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormError('Rule name is required.');
       return;
     }
+    if (hostListTooLong) return;
 
     setIsSubmitting(true);
     setFormError(null);
 
     const filterAppPayload = formFilterApps.length > 0 ? formFilterApps.join(', ') : null;
+    const filterHostPayload = hostPattern || null;
     const finalCooldown = formCooldownSeconds === '' ? 0 : Number(formCooldownSeconds);
     const finalThreshold = formThresholdCount === '' ? 1 : Number(formThresholdCount);
     const finalWindow = formWindowSeconds === '' ? 60 : Number(formWindowSeconds);
@@ -217,6 +244,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           rule_type: formRuleType,
           channel_id: formChannelId,
           filter_app: filterAppPayload,
+          filter_host: filterHostPayload,
           filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
           match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
           threshold_count: (formRuleType === 'threshold' || formRuleType === 'rate') ? finalThreshold : 1,
@@ -234,6 +262,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           rule_type: formRuleType,
           channel_id: formChannelId,
           filter_app: filterAppPayload,
+          filter_host: filterHostPayload,
           filter_severity: formFilterSeverity === '' ? null : Number(formFilterSeverity),
           match_pattern: formMatchPattern.trim() ? formMatchPattern.trim() : null,
           threshold_count: (formRuleType === 'threshold' || formRuleType === 'rate') ? finalThreshold : 1,
@@ -434,8 +463,38 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </div>
         )}
 
-        {/* App Filter (Multi-Select) & Severity Filter */}
+        {/* Host & App Filters (Multi-Select) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <span id={`${fieldId}-host-label`} className={LABEL_TEXT_CLASS}>Host Filter (Optional)</span>
+            <MultiSelectDropdown
+              label="Host"
+              placeholder="All hosts"
+              options={availableHosts}
+              selected={formFilterHosts}
+              onChange={setFormFilterHosts}
+              allowCustomInput={true}
+              variant="form"
+              labelledBy={`${fieldId}-host-label`}
+              optionHint={(host) => (isSelfReported(host) ? 'self-reported' : undefined)}
+            />
+            {hostListTooLong ? (
+              <span role="alert" className="text-[11px] text-danger-400 block">
+                The host list is longer than {RULE_FILTER_MAX_LENGTH} characters. Remove some, or use a wildcard pattern.
+              </span>
+            ) : (
+              <span className="text-[11px] text-fg-muted block">
+                Any one must match the host name or IP. Type a pattern such as 192.168.1.* or nas* to add it.
+              </span>
+            )}
+            {formFilterHosts.filter(isSelfReported).map((host) => (
+              <span key={host} data-testid="alert-rule-self-reported-host" className="text-[11px] text-warning-300 block">
+                {host} is a name a device reported for itself, so another device could send it too. Make it the
+                alias (in the log drawer) to be sure the rule watches that device.
+              </span>
+            ))}
+          </div>
+
           <div className="space-y-1">
             <label className={LABEL_TEXT_CLASS}>App Filter (Optional)</label>
             <MultiSelectDropdown
@@ -448,7 +507,10 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               variant="form"
             />
           </div>
+        </div>
 
+        {/* Severity Filter */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <label id={`${fieldId}-severity-label`} htmlFor={`${fieldId}-severity`} className={LABEL_TEXT_CLASS}>Severity Filter (Optional)</label>
             <SelectDropdown
@@ -581,7 +643,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </button>
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || hostListTooLong}
             className={buttonClass('primary', 'md')}
           >
             {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}

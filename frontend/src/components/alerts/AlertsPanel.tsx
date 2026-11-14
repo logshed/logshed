@@ -99,6 +99,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
   const [presets, setPresets] = useState<AlertPreset[]>([]);
   const [dropRules, setDropRules] = useState<DropRule[]>([]);
   const [availableApps, setAvailableApps] = useState<string[]>([]);
+  const [availableHosts, setAvailableHosts] = useState<string[]>([]);
+  const [selfReportedHosts, setSelfReportedHosts] = useState<Record<string, string[]>>({});
   const [isAiConfigured, setIsAiConfigured] = useState<boolean>(true);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -211,6 +213,10 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
       if (facetsData?.apps) {
         setAvailableApps(facetsData.apps);
       }
+      if (facetsData?.sources) {
+        setAvailableHosts(facetsData.sources);
+      }
+      setSelfReportedHosts(('self_reported_sources' in facetsData && facetsData.self_reported_sources) || {});
       if (settingsData) {
         if (settingsData.app_url) {
           setAppUrl(settingsData.app_url);
@@ -261,9 +267,11 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
     if (!handoff) return;
     pendingRuleHandoffRef.current = null;
     const appName = handoff.appName?.trim() || '';
+    const hostName = handoff.hostName?.trim() || '';
     setRulePrefill({
-      name: appName ? `Alert on ${appName}` : '',
+      name: appName ? `Alert on ${appName}` : hostName ? `Alert on ${hostName}` : '',
       filterApps: appName && availableApps.includes(appName) ? [appName] : [],
+      filterHosts: hostName ? [hostName] : [],
       referenceMessage: handoff.message || '',
     });
     setRuleToEdit(null);
@@ -544,6 +552,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
         ruleToEdit={ruleToEdit}
         channels={channels}
         availableApps={availableApps}
+        availableHosts={availableHosts}
+        selfReportedHosts={selfReportedHosts}
         isAiConfigured={isAiConfigured}
         prefill={rulePrefill}
         onNavigateToSettings={handleNavigateToSettings}

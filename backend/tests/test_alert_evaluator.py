@@ -247,6 +247,88 @@ class TestCompiledAlertRule:
         assert rule.matches({"message": "anything"}) is False
 
 
+def _host_rule(filter_host, filter_app=None, rule_id=1):
+    return CompiledAlertRule(
+        id=rule_id,
+        name="Host Rule",
+        rule_type="threshold",
+        channel_id=None,
+        filter_app=filter_app,
+        filter_host=filter_host,
+        filter_severity=None,
+        match_pattern="disk",
+        threshold_count=1,
+        window_seconds=60,
+        cooldown_seconds=60,
+        ai_enrichment=False,
+        is_enabled=True,
+    )
+
+
+class TestAlertRuleHostFilter:
+    """A host filter matches the log's host name or its address, as drop rules' hosts do."""
+
+    def test_matches_by_name_or_address(self):
+        rule = _host_rule("nas")
+        assert rule.matches({"source_alias": "NAS", "source_ip": "10.0.0.5", "message": "disk"})
+        assert rule.matches({"source_alias": "10.0.0.5", "source_ip": "nas", "message": "disk"})
+        assert not rule.matches({"source_alias": "router", "source_ip": "10.0.0.1", "message": "disk"})
+        assert not rule.matches({"message": "disk"})
+
+    def test_matches_an_address(self):
+        rule = _host_rule("10.0.0.5")
+        assert rule.matches({"source_alias": "nas", "source_ip": "10.0.0.5", "message": "disk"})
+        assert not rule.matches({"source_alias": "nas", "source_ip": "10.0.0.6", "message": "disk"})
+
+    def test_wildcards_and_lists(self):
+        rule = _host_rule("router, nas-*, 10.0.1.?")
+        assert rule.matches({"source_alias": "nas-backup", "source_ip": "10.0.0.7", "message": "disk"})
+        assert rule.matches({"source_alias": "router", "source_ip": "10.0.0.1", "message": "disk"})
+        assert rule.matches({"source_alias": "x", "source_ip": "10.0.1.4", "message": "disk"})
+        assert not rule.matches({"source_alias": "nas", "source_ip": "10.0.1.40", "message": "disk"})
+
+    def test_host_and_app_both_apply(self):
+        rule = _host_rule("nas", filter_app="smartd")
+        assert rule.matches({"source_alias": "nas", "app_name": "smartd", "message": "disk"})
+        assert not rule.matches({"source_alias": "nas", "app_name": "cron", "message": "disk"})
+        assert not rule.matches({"source_alias": "router", "app_name": "smartd", "message": "disk"})
+
+    def test_matches_a_self_reported_name(self):
+        """A syslog sender with no alias is named by the HOSTNAME it sent, and the filter matches it like any name."""
+        rule = _host_rule("printer")
+        entry = {"source_alias": "printer", "source_ip": "10.0.0.9", "reported_host": "printer", "message": "disk"}
+        assert rule.matches(entry)
+
+    def test_empty_filter_matches_every_host(self):
+        rule = _host_rule(" , ")
+        assert rule.matches({"source_alias": "anything", "message": "disk"})
+
+    def test_evaluator_gives_a_host_rule_only_its_hosts_logs(self, tmp_path: Path):
+        """An exact host filter is looked up by host, and the rule still sees its host's logs by name or address."""
+        db_file = tmp_path / "host_rules.db"
+        run_migrations(db_file)
+        conn = get_connection(db_file)
+        conn.execute(
+            "INSERT INTO alert_rules (name, rule_type, filter_host, match_pattern, threshold_count, created_at) "
+            "VALUES ('by name', 'threshold', 'nas', 'disk', 2, datetime('now')),"
+            " ('by address', 'threshold', '10.0.0.5', 'disk', 2, datetime('now'))"
+        )
+        conn.commit()
+        conn.close()
+        evaluator = AlertEvaluator(db_file)
+        batch = [
+            {"source_alias": "nas", "source_ip": "10.0.0.5", "message": "disk error", "timestamp": datetime.now(timezone.utc).isoformat()},
+            {"source_alias": "router", "source_ip": "10.0.0.1", "message": "disk error", "timestamp": datetime.now(timezone.utc).isoformat()},
+            {"source_alias": "nas", "source_ip": "10.0.0.5", "message": "disk error", "timestamp": datetime.now(timezone.utc).isoformat()},
+        ]
+
+        fired = evaluator._match_batch(batch)
+
+        assert sorted(rule.name for rule, _logs, _rate in fired) == ["by address", "by name"]
+        for _rule, logs, _rate in fired:
+            assert [e["source_alias"] for e in logs] == ["nas", "nas"]
+
+
 class TestAlertEvaluatorEngine:
     """Integration tests for AlertEvaluator sliding window, cooldown, and history."""
 

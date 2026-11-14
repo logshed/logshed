@@ -248,6 +248,11 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
+                      {rule.filter_host && (
+                        <span>
+                          Host: <span className="font-mono text-fg-soft">{rule.filter_host}</span>
+                        </span>
+                      )}
                       {rule.filter_app && (
                         <span>
                           App: <span className="font-mono text-fg-soft">{rule.filter_app}</span>

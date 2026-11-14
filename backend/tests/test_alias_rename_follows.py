@@ -1,6 +1,6 @@
 """
 Renaming a host alias (a syslog host alias or a Docker host alias), or deleting a syslog host alias:
-drop rules, active maintenance sessions and saved views that name the host by its old alias follow
+drop rules, alert rules' host filters, active maintenance sessions and saved views that name the host by its old alias follow
 the new name (on a delete, the IP), so they keep matching the host's new logs. Wildcard patterns, ended sessions and names still used by another
 host are left alone.
 """
@@ -71,6 +71,22 @@ def _add_alias(db_file: Path, ip: str, alias: str) -> None:
     with open_db(db_file) as conn:
         conn.execute("INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, ?, ?)", (ip, alias, _now()))
         conn.commit()
+
+
+def _add_alert_rule(db_file: Path, filter_host: str) -> int:
+    with open_db(db_file) as conn:
+        cur = conn.execute(
+            "INSERT INTO alert_rules (name, rule_type, filter_host, match_pattern, created_at) "
+            "VALUES ('a', 'threshold', ?, 'disk', ?)",
+            (filter_host, _now()),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def _alert_filter_host(db_file: Path, rule_id: int):
+    with open_db(db_file) as conn:
+        return conn.execute("SELECT filter_host FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()[0]
 
 
 def _add_drop_rule(db_file: Path, source_pattern: str) -> int:
@@ -285,6 +301,7 @@ async def test_rename_logs_one_line_with_counts(client, headers, env, caplog):
     _add_alias(env, IP, "nas")
     _add_drop_rule(env, "nas")
     _add_drop_rule(env, "NAS")
+    _add_alert_rule(env, "nas")
     _add_session(env, "running", "nas", active=True)
     _add_view(env, "v", {"sources": ["nas"]})
 
@@ -292,7 +309,9 @@ async def test_rename_logs_one_line_with_counts(client, headers, env, caplog):
         await _rename_syslog(client, headers, IP, "storage")
 
     lines = [r.getMessage() for r in caplog.records if r.name == "app.services.alias_rename"]
-    assert lines == ["Host alias changed: 2 drop rules, 1 maintenance session and 1 saved view now use the new name"]
+    assert lines == [
+        "Host alias changed: 2 drop rules, 1 alert rule, 1 maintenance session and 1 saved view now use the new name"
+    ]
 
 
 async def _delete_alias(client, headers, ip: str) -> None:
@@ -375,3 +394,36 @@ async def test_deleting_an_alias_replaces_it_inside_a_host_list_with_the_ip(clie
 
     assert _pattern(env, rule_id) == f"router, {IP}"
     assert get_drop_filter().should_drop(IP, IP, "app", "noise here") == rule_id
+
+
+@pytest.mark.asyncio
+async def test_rename_moves_alert_rule_host_filters(client, headers, env, monkeypatch):
+    from app.services import alert_evaluator as alert_evaluator_mod
+
+    monkeypatch.setattr(alert_evaluator_mod, "_alert_evaluator", None, raising=False)
+    _add_alias(env, IP, "nas")
+    exact = _add_alert_rule(env, "NAS")
+    in_list = _add_alert_rule(env, "router, nas, nas-*")
+    wildcard = _add_alert_rule(env, "na*")
+    other = _add_alert_rule(env, "router")
+
+    await _rename_syslog(client, headers, IP, "storage")
+
+    assert _alert_filter_host(env, exact) == "storage"
+    assert _alert_filter_host(env, in_list) == "router, storage, nas-*"
+    assert _alert_filter_host(env, wildcard) == "na*"
+    assert _alert_filter_host(env, other) == "router"
+    # The evaluator matches the new name at once
+    rules = {rule.id: rule for rule in alert_evaluator_mod.get_alert_evaluator()._rules}
+    assert rules[exact].matches({"source_alias": "storage", "source_ip": IP, "message": "disk full"})
+    assert not rules[exact].matches({"source_alias": "nas", "source_ip": "10.0.0.9", "message": "disk full"})
+
+
+@pytest.mark.asyncio
+async def test_alias_delete_points_alert_host_filter_at_the_address(client, headers, env):
+    _add_alias(env, IP, "nas")
+    rule = _add_alert_rule(env, "nas")
+
+    await _delete_alias(client, headers, IP)
+
+    assert _alert_filter_host(env, rule) == IP

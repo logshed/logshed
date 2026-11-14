@@ -867,3 +867,99 @@ class TestAlertRunTestBackslashCodes:
         assert res.json()["matched"] is False
         assert "invalid regex syntax" in res.json()["error"].lower()
         assert not [r for r in caplog.records if "not a valid regular expression" in r.getMessage()]
+
+
+class TestAlertRuleHostFilterApi:
+    """Alert rules limited to hosts: stored, returned, exported, imported and tried in the test endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_create_update_and_clear_host_filter(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules",
+            json={"name": "NAS disks", "match_pattern": "disk", "filter_host": " nas ,, NAS, 10.0.0.* "},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201, res.text
+        rule = res.json()
+        assert rule["filter_host"] == "nas, 10.0.0.*"
+
+        listed = (await client.get("/api/alerts/rules", headers=auth_headers)).json()
+        assert [r["filter_host"] for r in listed] == ["nas, 10.0.0.*"]
+
+        # An update that leaves the field out keeps it
+        res = await client.put(f"/api/alerts/rules/{rule['id']}", json={"name": "NAS disk"}, headers=auth_headers)
+        assert res.json()["filter_host"] == "nas, 10.0.0.*"
+
+        res = await client.put(f"/api/alerts/rules/{rule['id']}", json={"filter_host": "router"}, headers=auth_headers)
+        assert res.json()["filter_host"] == "router"
+
+        res = await client.put(f"/api/alerts/rules/{rule['id']}", json={"filter_host": ""}, headers=auth_headers)
+        assert res.json()["filter_host"] is None
+
+    @pytest.mark.asyncio
+    async def test_host_filter_longer_than_255_is_refused(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules",
+            json={"name": "long", "match_pattern": "x", "filter_host": "h" * 256},
+            headers=auth_headers,
+        )
+        assert res.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_export_and_import_keep_the_host_filter(self, client: AsyncClient, auth_headers: dict):
+        await client.post(
+            "/api/alerts/rules",
+            json={"name": "NAS disks", "match_pattern": "disk", "filter_host": "nas"},
+            headers=auth_headers,
+        )
+        bundle = (await client.get("/api/alerts/rules/export", headers=auth_headers)).json()
+        assert bundle["alert_rules"][0]["filter_host"] == "nas"
+
+        bundle["alert_rules"][0]["name"] = "NAS disks copy"
+        res = await client.post("/api/alerts/rules/import", json=bundle, headers=auth_headers)
+        assert res.json()["imported"] == 1
+        listed = {r["name"]: r for r in (await client.get("/api/alerts/rules", headers=auth_headers)).json()}
+        assert listed["NAS disks copy"]["filter_host"] == "nas"
+
+    @pytest.mark.asyncio
+    async def test_import_of_a_1_3_file_gives_no_host_filter(self, client: AsyncClient, auth_headers: dict):
+        old_file = {
+            "version": "1",
+            "exported_at": "2026-10-01T00:00:00+00:00",
+            "alert_rules": [{"name": "Old rule", "rule_type": "threshold", "filter_app": "sshd", "match_pattern": "fail"}],
+        }
+        res = await client.post("/api/alerts/rules/import", json=old_file, headers=auth_headers)
+        assert res.json()["imported"] == 1
+        listed = (await client.get("/api/alerts/rules", headers=auth_headers)).json()
+        assert listed[0]["filter_host"] is None
+
+    @pytest.mark.asyncio
+    async def test_import_refuses_a_host_filter_longer_than_255(self, client: AsyncClient, auth_headers: dict):
+        res = await client.post(
+            "/api/alerts/rules/import",
+            json={"name": "long", "match_pattern": "x", "filter_host": "h" * 256},
+            headers=auth_headers,
+        )
+        body = res.json()
+        assert body["imported"] == 0
+        assert "filter_host" in body["errors"][0]
+
+    @pytest.mark.asyncio
+    async def test_test_endpoint_uses_the_sample_host(self, client: AsyncClient, auth_headers: dict):
+        payload = {"filter_host": "nas, 10.0.0.*", "match_pattern": "disk", "sample_message": "disk failing"}
+        for sample_host, expected in (("NAS", True), ("10.0.0.4", True), ("router", False), (None, False)):
+            res = await client.post("/api/alerts/test", json={**payload, "sample_host": sample_host}, headers=auth_headers)
+            assert res.json()["matched"] is expected, sample_host
+
+    @pytest.mark.asyncio
+    async def test_saved_host_filter_reaches_the_evaluator(self, client: AsyncClient, auth_headers: dict):
+        from app.services.alert_evaluator import get_alert_evaluator
+
+        await client.post(
+            "/api/alerts/rules",
+            json={"name": "NAS disks", "match_pattern": "disk", "filter_host": "nas"},
+            headers=auth_headers,
+        )
+        (rule,) = get_alert_evaluator()._rules
+        assert rule.matches({"source_alias": "nas", "message": "disk"})
+        assert not rule.matches({"source_alias": "router", "message": "disk"})

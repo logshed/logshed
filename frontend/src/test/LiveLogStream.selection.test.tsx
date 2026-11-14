@@ -639,7 +639,7 @@ describe('LiveLogStream "Create Alert Rule" hand-off', () => {
     vi.spyOn(settingsApi, 'fetchSettings').mockResolvedValue({} as any);
   });
 
-  it('closes the drawer, stores the app and message in memory and switches to Alert Rules without URL params', async () => {
+  it('closes the drawer, stores the host, app and message in memory and switches to Alert Rules without URL params', async () => {
     const popstate = vi.fn();
     window.addEventListener('popstate', popstate);
     renderStream();
@@ -650,7 +650,11 @@ describe('LiveLogStream "Create Alert Rule" hand-off', () => {
     expect(popstate).toHaveBeenCalled();
     expect(window.location.pathname).toBe('/rules/rules');
     expect(window.location.search).toBe('');
-    expect(takeAlertRuleHandoff()).toEqual({ appName: 'nginx', message: 'Nginx upstream connection timeout' });
+    expect(takeAlertRuleHandoff()).toEqual({
+      hostName: 'homelab-host',
+      appName: 'nginx',
+      message: 'Nginx upstream connection timeout',
+    });
     // Read once only
     expect(takeAlertRuleHandoff()).toBeNull();
     await waitFor(() => expect(screen.queryByRole('button', { name: /Create Alert Rule/i })).toBeNull());

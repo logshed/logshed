@@ -269,6 +269,7 @@ class TestSchemaIntegrity:
             "rule_type",
             "channel_id",
             "filter_app",
+            "filter_host",
             "filter_severity",
             "match_pattern",
             "threshold_count",
@@ -1560,3 +1561,25 @@ class TestDatabaseNewerThanApp:
         conn = get_connection(p)
         assert get_user_version(conn) == MIGRATIONS[-1][0]
         conn.close()
+
+
+class TestAlertRuleScopeUpgrade:
+    """Schema v4 adds alert rule columns; rules made under 1.3.x keep what they did."""
+
+    def test_v3_rules_get_no_host_filter(self, tmp_path: Path):
+        p = tmp_path / "v3_rules.db"
+        _make_v3(p)
+        conn = get_connection(p)
+        conn.execute(
+            "INSERT INTO alert_rules (name, rule_type, filter_app, match_pattern, created_at) "
+            "VALUES ('disk', 'threshold', 'smartd', 'failing', datetime('now'))"
+        )
+        conn.commit()
+        conn.close()
+
+        run_migrations(p)
+
+        conn = get_connection(p)
+        row = conn.execute("SELECT name, filter_app, filter_host FROM alert_rules").fetchone()
+        conn.close()
+        assert tuple(row) == ("disk", "smartd", None)

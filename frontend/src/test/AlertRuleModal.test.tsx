@@ -482,3 +482,77 @@ describe('AlertRuleModal prefill from a log', () => {
     expect(screen.queryByTestId('alert-rule-log-reference')).toBeNull();
   });
 });
+
+describe('AlertRuleModal host filter', () => {
+  const onClose = vi.fn();
+  const onSuccess = vi.fn();
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  const renderModal = (props: Partial<React.ComponentProps<typeof AlertRuleModal>> = {}) =>
+    render(
+      <AlertRuleModal
+        isOpen={true}
+        ruleToEdit={null}
+        channels={mockChannels}
+        availableApps={['postgres', 'nginx']}
+        availableHosts={['nas', 'router', '192.168.1.9']}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        {...props}
+      />
+    );
+
+  it('saves the hosts picked from the list as one comma-separated filter', async () => {
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRule, id: 9 });
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike'), { target: { value: 'NAS' } });
+    fireEvent.click(screen.getByRole('button', { name: /All hosts/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^nas/, pressed: false }));
+    fireEvent.click(screen.getByRole('button', { name: /^router/, pressed: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'NAS', filter_host: 'nas, router' }))
+    );
+  });
+
+  it('saves no host filter when none is picked', async () => {
+    const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRule, id: 9 });
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike'), { target: { value: 'Any' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() => expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ filter_host: null })));
+  });
+
+  it('shows the hosts of a rule it edits, and a change to them counts as unsaved', () => {
+    renderModal({ ruleToEdit: { ...mockRule, filter_host: 'nas, 10.0.0.*' } });
+    expect(screen.getByTitle('nas, 10.0.0.*')).toHaveTextContent('nas, 10.0.0.*');
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(screen.queryByText('Unsaved Changes')).toBeNull();
+  });
+
+  it('warns that a self-reported name can be sent by another device', () => {
+    renderModal({
+      prefill: { name: 'Printer', filterHosts: ['printer'] },
+      availableHosts: ['printer', 'nas'],
+      selfReportedHosts: { printer: ['192.168.1.30'] },
+    });
+    expect(screen.getByTestId('alert-rule-self-reported-host')).toHaveTextContent(
+      'printer is a name a device reported for itself, so another device could send it too.'
+    );
+  });
+
+  it('gives no such warning for an alias', () => {
+    renderModal({ prefill: { name: 'NAS', filterHosts: ['nas'] }, selfReportedHosts: { printer: ['192.168.1.30'] } });
+    expect(screen.queryByTestId('alert-rule-self-reported-host')).toBeNull();
+  });
+
+  it('refuses a host list longer than the server takes', () => {
+    renderModal({ prefill: { name: 'Many', filterHosts: Array.from({ length: 30 }, (_, i) => `host-number-${i}`) } });
+    expect(screen.getByRole('alert')).toHaveTextContent('The host list is longer than 255 characters.');
+    expect(screen.getByRole('button', { name: 'Create Rule' })).toBeDisabled();
+  });
+});

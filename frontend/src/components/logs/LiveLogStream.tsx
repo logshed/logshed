@@ -864,6 +864,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           onCreateAlertRule={(targetLog) => {
             setActiveLogDetail(null);
             setAlertRuleHandoff({
+              hostName: targetLog.source_alias || targetLog.source_ip || undefined,
               appName: targetLog.app_name || undefined,
               message: cleanLogMessageForDisplay(targetLog.message),
             });

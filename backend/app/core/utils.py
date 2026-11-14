@@ -157,6 +157,22 @@ def compile_wildcard_list(text: Optional[str]) -> Optional[Callable[[str], bool]
     return lambda t: t in exact or match(t) is not None
 
 
+def compile_host_list(text: Optional[str]) -> Optional[Callable[[Optional[str], Optional[str]], bool]]:
+    """
+    The host match of drop rules, alert rules' host filter and the like: a function of the
+    wildcard_text_key forms of a log's host name (source_alias) and address (source_ip) that is
+    true when any pattern in the comma-separated list matches either, or None when the list is
+    empty and matches any host. The host name is what the Console shows, so it is a self-reported
+    name for a syslog sender with no alias.
+    """
+    match = compile_wildcard_list(text)
+    if match is None:
+        return None
+    return lambda alias_key, ip_key: (alias_key is not None and match(alias_key)) or (
+        ip_key is not None and match(ip_key)
+    )
+
+
 def parse_iso_to_utc_datetime(val: Any) -> Optional[datetime.datetime]:
     """Parse ISO-8601 string or numeric timestamp to timezone-aware UTC datetime."""
     if val is None:

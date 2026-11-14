@@ -27,7 +27,7 @@ from app.core.regex_validator import (
     user_pattern_search,
 )
 from app.core.rule_index import RuleIndex, exact_match_key
-from app.core.utils import compile_wildcard_list, split_pattern_list, wildcard_text_key
+from app.core.utils import compile_host_list, compile_wildcard_list, split_pattern_list, wildcard_text_key
 from app.services.rule_auto_disable import AutoDisableQueue
 
 logger = logging.getLogger(__name__)
@@ -53,12 +53,14 @@ class CompiledDropRule:
     # Set by DropFilter so pattern timeouts count towards disabling the rule automatically
     on_pattern_timeout: Optional[Callable[[], None]] = field(default=None, repr=False, compare=False)
     # Prepared from the patterns once, so each log is not lowercased and compared per rule
-    _source_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
+    _source_match: Optional[Callable[[Optional[str], Optional[str]], bool]] = field(
+        init=False, default=None, repr=False, compare=False
+    )
     _app_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
     _message_text_match: Optional[Callable[[str], bool]] = field(init=False, default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        self._source_match = compile_wildcard_list(self.source_pattern)
+        self._source_match = compile_host_list(self.source_pattern)
         self._app_match = compile_wildcard_list(self.app_pattern)
         if self.message_pattern and not self.is_regex:
             pattern = self.message_pattern.strip().lower()
@@ -127,12 +129,8 @@ class CompiledDropRule:
             return False
 
         # 1. Source matching (matches either source_alias or source_ip)
-        if self._source_match is not None:
-            if not (
-                (alias_key is not None and self._source_match(alias_key))
-                or (ip_key is not None and self._source_match(ip_key))
-            ):
-                return False
+        if self._source_match is not None and not self._source_match(alias_key, ip_key):
+            return False
 
         # 2. App name matching
         if self._app_match is not None:
