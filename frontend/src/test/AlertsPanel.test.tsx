@@ -1523,7 +1523,7 @@ describe('AlertsPanel maintenance end-time presets', () => {
     for (const label of ['1 Hour', '4 Hours', '8 Hours', '24 Hours']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
-    expect(screen.queryAllByRole('button', { name: /^Extend session/ })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: /^\+1h: extend session/ })).toHaveLength(0);
   });
 
   it('sets the preset end time from now', async () => {
@@ -1569,11 +1569,11 @@ describe('AlertsPanel maintenance end-time presets', () => {
     fireEvent.click(screen.getByRole('button', { name: /Maintenance/i }));
 
     expect(await screen.findByText('Start a new window')).toBeInTheDocument();
-    const extendButtons = await screen.findAllByRole('button', { name: /^Extend session/ });
+    const extendButtons = await screen.findAllByRole('button', { name: /^\+1h: extend session/ });
     expect(extendButtons).toHaveLength(2);
     expect(extendButtons.map((b) => b.textContent)).toEqual(['+1h', '+1h']);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Extend session Web Console by one hour' }));
+    fireEvent.click(screen.getByRole('button', { name: '+1h: extend session Web Console by one hour' }));
 
     await waitFor(() => expect(extendSpy).toHaveBeenCalledWith('ui-1', 60));
     expect(setSpy).not.toHaveBeenCalled();

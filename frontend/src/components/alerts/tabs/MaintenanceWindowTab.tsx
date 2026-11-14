@@ -252,7 +252,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         type="button"
                         onClick={() => onExtendSession(sess.session_id)}
                         title="Move this session's end one hour later"
-                        aria-label={`Extend session ${sess.reason || 'On-Demand Session'} by one hour`}
+                        aria-label={`+1h: extend session ${sess.reason || 'On-Demand Session'} by one hour`}
                         className="px-2.5 py-1 text-xs font-medium bg-warning-950/30 hover:bg-warning-950/50 text-warning-200 hover:text-fg-max border border-warning-800/60 rounded-sm transition cursor-pointer"
                       >
                         +1h

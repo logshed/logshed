@@ -99,7 +99,7 @@ describe('MaintenanceWindowTab', () => {
     expect(screen.getByText('Host: nas01')).toBeInTheDocument();
     expect(screen.getByText('On-Demand Session')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Extend session On-Demand Session by one hour' }));
+    fireEvent.click(screen.getByRole('button', { name: '+1h: extend session On-Demand Session by one hour' }));
     expect(handlers.onExtendSession).toHaveBeenCalledWith('cccc2222dddd');
     fireEvent.click(screen.getAllByRole('button', { name: 'Stop Session' })[0]);
     expect(handlers.onDisableSession).toHaveBeenCalledWith('aaaa1111bbbb');
@@ -332,5 +332,13 @@ describe('ScheduleEditorModal mode and targets', () => {
     );
     expect(screen.getByLabelText('Host (Optional)')).toHaveValue('nas01');
     expect(screen.getByTestId('schedule-scope-help')).toHaveTextContent('Its error logs are discarded.');
+  });
+});
+
+describe('MaintenanceWindowTab extend button name', () => {
+  it('starts with the text it shows, so voice control can reach it by saying it', () => {
+    renderTab({ isOnDemandActiveNow: true });
+    const button = screen.getByRole('button', { name: '+1h: extend session Nightly backup by one hour' });
+    expect(button).toHaveTextContent('+1h');
   });
 });
