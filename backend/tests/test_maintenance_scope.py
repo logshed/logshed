@@ -388,3 +388,45 @@ class TestScheduleSave:
     async def test_bad_fields_are_refused(self, client, headers, extra):
         res = await client.post("/api/alerts/maintenance/schedules", json=self._payload(**extra), headers=headers)
         assert res.status_code == 422
+
+
+class TestScheduleWindowTiming:
+    """Back-to-back windows leave no gap, and a window lasts its duration in real time across a clock change."""
+
+    def test_back_to_back_daily_window_caches_the_next_one_too(self, env):
+        start = _utc(minutes=1).replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
+        with _connection(env) as conn:
+            ms.save_schedules(conn, [MaintenanceSchedule(
+                id="d", name="All day", recurrence="daily", start_time=start.strftime("%H:%M"),
+                duration_minutes=1440, log_handling="drop_errors",
+            )])
+            ms.refresh_maintenance_cache(conn)
+        windows = ms.get_cached_maintenance_sessions()
+        assert [w["starts_at"] is None for w in windows] == [True, False]
+        assert windows[1]["starts_at"] == start.isoformat()
+
+    def test_window_across_the_spring_clock_change_ends_in_real_time(self, env, monkeypatch):
+        from zoneinfo import ZoneInfo
+
+        london = ZoneInfo("Europe/London")
+        # 2026-03-29: clocks go from 01:00 GMT to 02:00 BST
+        now_local = datetime.datetime(2026, 3, 29, 0, 29, tzinfo=london)
+        monkeypatch.setattr(ms, "_get_server_time_info", lambda: (now_local, "GMT"))
+        with _connection(env) as conn:
+            ms.save_schedules(conn, [MaintenanceSchedule(
+                id="n", name="Night", recurrence="daily", start_time="00:30", duration_minutes=120,
+            )])
+            ms.refresh_maintenance_cache(conn)
+        (window,) = ms.get_cached_maintenance_sessions()
+        assert window["starts_at"] == "2026-03-29T00:30:00+00:00"
+        assert window["expires_at"] == "2026-03-29T02:30:00+00:00"
+
+    def test_extending_a_session_keeps_the_schedule_windows(self, env):
+        with _connection(env) as conn:
+            ms.save_schedules(conn, [MaintenanceSchedule(
+                id="s", name="Backup", recurrence="daily", start_time=_utc(minutes=-5).strftime("%H:%M"),
+                duration_minutes=30, target_app="restic",
+            )])
+            created = ms.create_maintenance_session(conn, duration_minutes=10, target_host="nas")
+            ms.extend_maintenance_session(conn, created["session_id"], 30)
+        assert "schedule:s" in {w["session_id"] for w in ms.get_cached_maintenance_sessions()}

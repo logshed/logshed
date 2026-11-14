@@ -9,7 +9,7 @@ import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel } from '../../utils/severityLabels.ts';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { buttonClass } from '../common/Button.tsx';
-import { CHECKBOX_CLASS, controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { Checkbox, CHECKBOX_CLASS, controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 import { RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
 
@@ -551,15 +551,12 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             placeholder={formIsRegex ? 'e.g. Failed password|authentication failure' : 'e.g. Failed password'}
             className={controlClass({ mono: true })}
           />
-          <label className="flex items-center gap-2 cursor-pointer pt-0.5">
-            <input
-              type="checkbox"
-              checked={formIsRegex}
-              onChange={(e) => setFormIsRegex(e.target.checked)}
-              className={CHECKBOX_CLASS}
-            />
-            <span className="text-fg-soft">Match as a regular expression</span>
-          </label>
+          <Checkbox
+            label="Match as a regular expression"
+            checked={formIsRegex}
+            onChange={(e) => setFormIsRegex(e.target.checked)}
+            className="pt-0.5"
+          />
           <p className="text-[11px] text-fg-muted">
             {formIsRegex
               ? 'Searched in the log message as a case-insensitive regular expression. Write \\\\ for a backslash.'

@@ -8,6 +8,7 @@ import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '
 import { useMediaQuery, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { formatMaintenanceTime } from '../../utils/formatters.ts';
+import { runningTargets } from '../../utils/maintenanceSchedule.ts';
 import { announceNearLimit, type NearLimitReason } from '../../utils/nearLimit.ts';
 
 export const formatInitiator = (initiatedBy: string): string => {
@@ -27,6 +28,11 @@ export const formatInitiator = (initiatedBy: string): string => {
 export const getMaintenanceBannerText = (maintenance: MaintenanceWindowResponse, timeZone?: string): string => {
   const untilFormatted = formatMaintenanceTime(maintenance.until, timeZone);
   const isDropErrors = maintenance.log_handling === 'drop_errors';
+  // Only windows with a target run: name them, as only their logs are kept from the alert rules
+  const targets = runningTargets(maintenance);
+  if (targets) {
+    return `Maintenance on ${targets} - ${isDropErrors ? 'errors filtered, ' : ''}its alerts held back until ${untilFormatted}`;
+  }
   const actionText = isDropErrors ? 'errors filtered' : 'alerts silenced';
 
   const sessions = maintenance.sessions || [];

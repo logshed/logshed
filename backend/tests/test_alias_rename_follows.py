@@ -310,7 +310,7 @@ async def test_rename_logs_one_line_with_counts(client, headers, env, caplog):
 
     lines = [r.getMessage() for r in caplog.records if r.name == "app.services.alias_rename"]
     assert lines == [
-        "Host alias changed: 2 drop rules, 1 alert rule, 1 maintenance session and 1 saved view now use the new name"
+        "Host alias changed: 2 drop rules, 1 alert rule, 1 maintenance session, 0 maintenance schedules and 1 saved view now use the new name"
     ]
 
 
@@ -427,3 +427,33 @@ async def test_alias_delete_points_alert_host_filter_at_the_address(client, head
     await _delete_alias(client, headers, IP)
 
     assert _alert_filter_host(env, rule) == IP
+
+
+def _schedules(db_file: Path):
+    with open_db(db_file) as conn:
+        return json.loads(conn.execute("SELECT value FROM system_settings WHERE key = 'maintenance_schedules'").fetchone()[0])
+
+
+@pytest.mark.asyncio
+async def test_rename_moves_maintenance_schedule_targets(client, headers, env):
+    _add_alias(env, IP, "nas")
+    stored = [
+        {"id": "a", "name": "Backup", "recurrence": "daily", "start_time": "02:00", "duration_minutes": 30, "target_host": "NAS"},
+        {"id": "b", "name": "Router", "recurrence": "daily", "start_time": "02:00", "duration_minutes": 30, "target_host": "router"},
+        {"id": "c", "name": "Pattern", "recurrence": "daily", "start_time": "02:00", "duration_minutes": 30, "target_host": "na*"},
+        {"id": "d", "name": "Old", "recurrence": "daily", "start_time": "02:00", "duration_minutes": 30},
+    ]
+    with open_db(env) as conn:
+        conn.execute(
+            "INSERT INTO system_settings (key, value, updated_at, is_encrypted) VALUES ('maintenance_schedules', ?, ?, 0)",
+            (json.dumps(stored), _now()),
+        )
+        conn.commit()
+
+    await _rename_syslog(client, headers, IP, "storage")
+
+    assert [s.get("target_host") for s in _schedules(env)] == ["storage", "router", "na*", None]
+
+    await _delete_alias(client, headers, IP)
+
+    assert _schedules(env)[0]["target_host"] == IP

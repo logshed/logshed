@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { AlertRule, NotificationChannel, MaintenanceWindowResponse } from '../../../types.ts';
 import { formatLocalTimestamp, formatMaintenanceTime } from '../../../utils/formatters.ts';
+import { runningTargets } from '../../../utils/maintenanceSchedule.ts';
 import { useServerTimezone } from '../../../utils/hooks.ts';
 import { useReorderableList } from '../../../utils/useReorderableList.ts';
 import { RuleOrderControls } from '../RuleOrderControls.tsx';
@@ -94,10 +95,17 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                 )}
               </div>
               <p className="text-fg-soft mt-0.5">
-                Alert notifications are silenced
+                {runningTargets(maintenance) ? (
+                  <>Logs from {runningTargets(maintenance)} count towards no alert rule</>
+                ) : (
+                  <>Alert notifications are silenced</>
+                )}
                 {maintenance.until ? (
                   <> until <span className="font-semibold text-fg-max">{formatMaintenanceTime(maintenance.until, serverTimezone)}</span></>
-                ) : null}. Rule evaluation and incident recording continue normally.
+                ) : null}
+                {runningTargets(maintenance)
+                  ? '. Other alerts are sent as usual.'
+                  : '. Rule evaluation and incident recording continue normally.'}
               </p>
             </div>
           </div>

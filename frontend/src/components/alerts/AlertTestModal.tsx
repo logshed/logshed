@@ -6,7 +6,7 @@ import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
 import { buttonClass } from '../common/Button.tsx';
-import { controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 import { splitPatternList } from '../../utils/patternList.ts';
 
 export interface AlertTestModalProps {
@@ -133,17 +133,14 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="test-sample-host" className={LABEL_TEXT_CLASS}>Sample Host</label>
-            <input
-              id="test-sample-host"
-              type="text"
-              value={testSampleHost}
-              onChange={(e) => setTestSampleHost(e.target.value)}
-              placeholder="Host name or IP"
-              className={controlClass()}
-            />
-          </div>
+          <TextField
+            label="Sample Host"
+            id="test-sample-host"
+            type="text"
+            value={testSampleHost}
+            onChange={(e) => setTestSampleHost(e.target.value)}
+            placeholder="Host name or IP"
+          />
           <div className="space-y-1">
             <label htmlFor="test-sample-app" className={LABEL_TEXT_CLASS}>Sample App</label>
             {/* Before the input: space-y-* spaces every child but the last, and a datalist is never shown */}

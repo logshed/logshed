@@ -836,7 +836,8 @@ async def install_preset(
         "rule_type": preset["rule_type"],
         "channel_id": channel_id,
         "filter_app": preset.get("filter_app"),
-        "filter_host": normalize_pattern_list(preset.get("filter_host")),
+        # Custom presets are user-written JSON: the host filter may be any value
+        "filter_host": normalize_pattern_list(str(preset["filter_host"])) if preset.get("filter_host") is not None else None,
         "filter_severity": preset.get("filter_severity"),
         "match_pattern": preset.get("match_pattern"),
         "is_regex": is_regex,

@@ -246,7 +246,7 @@ LogShed 1.3.0 and earlier read such a list as one name, so after going back to 1
 
 When you rename a syslog host alias or a Docker host alias under Settings > Sources, LogShed updates what names the host by its old alias, so it keeps matching the host's new logs. Deleting a syslog host alias works the same way, with the host's IP address as the new name, because its logs show the IP again:
 - drop rules and alert rules that list the old alias exactly (any letter case) among their hosts; only that entry changes,
-- running maintenance windows aimed at the host,
+- running maintenance windows and maintenance schedules aimed at the host,
 - saved views that filter on the host.
 
 Some things are not changed:

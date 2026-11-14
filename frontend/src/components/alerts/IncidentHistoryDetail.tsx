@@ -184,7 +184,9 @@ export const IncidentHistoryDetail: React.FC<IncidentHistoryDetailProps> = ({
         </div>
         {!isDropMode && (
           <p className="text-fg-muted text-[11px]">
-            Logs were stored normally during this window. Only alert notifications were silenced.
+            {item.maintenance_target_app || item.maintenance_target_host
+              ? 'Logs were stored normally during this window. Since LogShed 1.4.0, logs from its target count towards no alert rule while it runs; other alerts are sent.'
+              : 'Logs were stored normally during this window. Only alert notifications were silenced.'}
           </p>
         )}
       </div>

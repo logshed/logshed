@@ -86,6 +86,16 @@ describe('IncidentHistoryDetail maintenance variant', () => {
     expect(screen.getByText('Ended early')).toBeInTheDocument();
     expect(screen.getByText('Ended early at')).toBeInTheDocument();
     expect(screen.queryByText('Logs dropped')).not.toBeInTheDocument();
+    // The window had a target (app batch): only its logs were kept from the rules
+    expect(screen.getByText(/logs from its target count towards no alert rule while it runs/)).toBeInTheDocument();
+  });
+
+  it('says only notifications were silenced for a window without a target', () => {
+    render(
+      <IncidentHistoryDetail
+        item={{ ...baseItem, maintenance_type: 'silence_alerts', maintenance_target_app: null, maintenance_target_host: null }}
+      />
+    );
     expect(screen.getByText(/Only alert notifications were silenced/)).toBeInTheDocument();
   });
 });

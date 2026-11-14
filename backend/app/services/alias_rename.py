@@ -35,6 +35,7 @@ class AliasRenameResult:
     drop_rules: int = 0
     alert_rules: int = 0
     maintenance_sessions: int = 0
+    maintenance_schedules: int = 0
     saved_views: int = 0
 
 
@@ -126,9 +127,33 @@ def _rename_in_view(params: dict[str, Any], old_key: str, new_alias: str) -> boo
     return changed
 
 
+def _rename_in_schedules(conn: sqlite3.Connection, old_key: str, new_alias: str) -> int:
+    """
+    Point maintenance schedules whose target host is exactly the old alias at the new one, in the
+    stored JSON (inside the caller's transaction). Returns how many changed.
+    """
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'maintenance_schedules'").fetchone()
+    try:
+        schedules = json.loads(row[0]) if row and row[0] else []
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(schedules, list):
+        return 0
+    changed = 0
+    for sched in schedules:
+        if isinstance(sched, dict) and isinstance(sched.get("target_host"), str) and exact_match_key(sched["target_host"]) == old_key:
+            sched["target_host"] = new_alias
+            changed += 1
+    if changed:
+        conn.execute(
+            "UPDATE system_settings SET value = ? WHERE key = 'maintenance_schedules'", (json.dumps(schedules),)
+        )
+    return changed
+
+
 def follow_alias_rename(conn: sqlite3.Connection, old_alias: str, new_alias: str) -> AliasRenameResult:
     """
-    Point drop rules, alert rules, active maintenance sessions and saved views that name old_alias exactly at
+    Point drop rules, alert rules, active maintenance sessions, maintenance schedules and saved views that name old_alias exactly at
     new_alias, inside the caller's transaction (the caller commits, then calls
     reload_after_alias_rename). The caller checks first that no other host still has old_alias.
     """
@@ -169,6 +194,7 @@ def follow_alias_rename(conn: sqlite3.Connection, old_alias: str, new_alias: str
         "UPDATE maintenance_sessions SET target_host = ? WHERE id = ?", [(new_alias, i) for i in session_ids]
     )
     result.maintenance_sessions = len(session_ids)
+    result.maintenance_schedules = _rename_in_schedules(conn, old_key, new_alias)
 
     view_updates = []
     for view_id, raw in conn.execute("SELECT id, query_params FROM saved_views"):
@@ -195,13 +221,17 @@ async def reload_after_alias_rename(result: Optional[AliasRenameResult]) -> None
         await asyncio.to_thread(get_drop_filter().reload_rules)
     if result.alert_rules:
         await asyncio.to_thread(get_alert_evaluator().reload_rules)
-    if result.maintenance_sessions:
+    if result.maintenance_sessions or result.maintenance_schedules:
         await run_db_query(refresh_maintenance_cache)
-    if result.drop_rules or result.alert_rules or result.maintenance_sessions or result.saved_views:
+    if (
+        result.drop_rules or result.alert_rules or result.maintenance_sessions
+        or result.maintenance_schedules or result.saved_views
+    ):
         logger.info(
-            "Host alias changed: %s, %s, %s and %s now use the new name",
+            "Host alias changed: %s, %s, %s, %s and %s now use the new name",
             _plural(result.drop_rules, "drop rule"),
             _plural(result.alert_rules, "alert rule"),
             _plural(result.maintenance_sessions, "maintenance session"),
+            _plural(result.maintenance_schedules, "maintenance schedule"),
             _plural(result.saved_views, "saved view"),
         )

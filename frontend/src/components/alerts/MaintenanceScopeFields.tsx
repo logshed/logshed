@@ -1,7 +1,7 @@
 import React from 'react';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
-import { controlClass, LABEL_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { LABEL_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 import { MaintenanceLogHandling } from '../../types.ts';
 
 /** What a maintenance window does and which logs it covers (no target: every log). */
@@ -73,43 +73,39 @@ export const MaintenanceScopeFields: React.FC<MaintenanceScopeFieldsProps> = ({
             onChange={(v) => onChange({ ...value, logHandling: v as MaintenanceLogHandling })}
           />
         </div>
-        <div>
-          <label htmlFor={`${idPrefix}-host`} className={LABEL_CLASS}>Host (Optional)</label>
-          {/* Before the input: a datalist is never shown */}
-          <datalist id={`${idPrefix}-hosts`}>
-            {availableHosts.map((host) => (
-              <option key={host} value={host} />
-            ))}
-          </datalist>
-          <input
-            id={`${idPrefix}-host`}
-            type="text"
-            list={`${idPrefix}-hosts`}
-            maxLength={255}
-            value={value.targetHost}
-            onChange={(e) => onChange({ ...value, targetHost: e.target.value })}
-            placeholder="Every host"
-            className={controlClass({ mono: true })}
-          />
-        </div>
-        <div>
-          <label htmlFor={`${idPrefix}-app`} className={LABEL_CLASS}>App (Optional)</label>
-          <datalist id={`${idPrefix}-apps`}>
-            {availableApps.map((app) => (
-              <option key={app} value={app} />
-            ))}
-          </datalist>
-          <input
-            id={`${idPrefix}-app`}
-            type="text"
-            list={`${idPrefix}-apps`}
-            maxLength={255}
-            value={value.targetApp}
-            onChange={(e) => onChange({ ...value, targetApp: e.target.value })}
-            placeholder="Every app"
-            className={controlClass({ mono: true })}
-          />
-        </div>
+        {/* The suggestion lists sit outside the fields' spacing: a datalist is never shown */}
+        <datalist id={`${idPrefix}-hosts`}>
+          {availableHosts.map((host) => (
+            <option key={host} value={host} />
+          ))}
+        </datalist>
+        <datalist id={`${idPrefix}-apps`}>
+          {availableApps.map((app) => (
+            <option key={app} value={app} />
+          ))}
+        </datalist>
+        <TextField
+          label="Host (Optional)"
+          id={`${idPrefix}-host`}
+          type="text"
+          list={`${idPrefix}-hosts`}
+          maxLength={255}
+          mono
+          value={value.targetHost}
+          onChange={(e) => onChange({ ...value, targetHost: e.target.value })}
+          placeholder="Every host"
+        />
+        <TextField
+          label="App (Optional)"
+          id={`${idPrefix}-app`}
+          type="text"
+          list={`${idPrefix}-apps`}
+          maxLength={255}
+          mono
+          value={value.targetApp}
+          onChange={(e) => onChange({ ...value, targetApp: e.target.value })}
+          placeholder="Every app"
+        />
       </div>
       <p className="text-[11px] text-fg-muted" data-testid={`${idPrefix}-scope-help`}>
         {targeted

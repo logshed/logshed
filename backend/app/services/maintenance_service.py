@@ -346,29 +346,33 @@ def update_cached_maintenance_sessions(sessions: list[dict[str, Any]]) -> None:
 def _schedule_windows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     The windows of enabled schedules that are running now or start within SCHEDULE_LOOKAHEAD,
-    in the form of the cached sessions (a starts_at on a window that has not started yet).
+    in the form of the cached sessions (a starts_at on a window that has not started yet). A
+    schedule whose next window starts as the running one ends gets both, so it has no gap.
+    Times are computed in UTC, so a window lasts its duration in real time across a clock change.
     """
     now_local, _tz_name = _get_server_time_info()
+    now_utc = now_local.astimezone(datetime.timezone.utc)
     windows = []
     for sched in load_schedules(conn):
         is_active, active_end, next_start = evaluate_schedule(sched, now_local)
+        spans: list[tuple[Optional[datetime.datetime], datetime.datetime]] = []
         if is_active and active_end is not None:
-            starts_at, ends_at = None, active_end
-        elif next_start is not None and next_start - now_local <= SCHEDULE_LOOKAHEAD:
-            starts_at = next_start
-            ends_at = next_start + datetime.timedelta(minutes=max(1, sched.duration_minutes))
-        else:
-            continue
-        windows.append({
-            "session_id": f"{SCHEDULE_WINDOW_PREFIX}{sched.id}",
-            "initiated_by": "schedule",
-            "reason": sched.name,
-            "log_handling": sched.log_handling,
-            "target_app": sched.target_app,
-            "target_host": sched.target_host,
-            "starts_at": starts_at.astimezone(datetime.timezone.utc).isoformat() if starts_at else None,
-            "expires_at": ends_at.astimezone(datetime.timezone.utc).isoformat(),
-        })
+            spans.append((None, active_end.astimezone(datetime.timezone.utc)))
+        if next_start is not None:
+            start_utc = next_start.astimezone(datetime.timezone.utc)
+            if start_utc - now_utc <= SCHEDULE_LOOKAHEAD:
+                spans.append((start_utc, start_utc + datetime.timedelta(minutes=max(1, sched.duration_minutes))))
+        for starts_at, ends_at in spans:
+            windows.append({
+                "session_id": f"{SCHEDULE_WINDOW_PREFIX}{sched.id}",
+                "initiated_by": "schedule",
+                "reason": sched.name,
+                "log_handling": sched.log_handling,
+                "target_app": sched.target_app,
+                "target_host": sched.target_host,
+                "starts_at": starts_at.isoformat() if starts_at else None,
+                "expires_at": ends_at.isoformat(),
+            })
     return windows
 
 

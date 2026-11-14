@@ -463,6 +463,25 @@ describe('Navbar Component', () => {
     });
     expect(multi).toContain('Maintenance active (2 sessions) - errors filtered until');
   });
+
+  it('names the targets when only windows with a target run', () => {
+    const session = {
+      session_id: 's-1', initiated_by: 'web_ui', reason: null, log_handling: 'drop_errors',
+      target_app: 'restic', target_host: 'nas', expires_at: '2026-09-26T14:30:00Z',
+    };
+    const text = getMaintenanceBannerText({
+      active: true, until: '2026-09-26T14:30:00Z', active_sessions_count: 1, log_handling: 'drop_errors',
+      silences_all_alerts: false, sessions: [session],
+      schedules: [{ id: 'a', name: 'Router', enabled: true, recurrence: 'daily', start_time: '02:00', duration_minutes: 60, is_active: true, target_host: 'router' }],
+    });
+    expect(text).toMatch(/^Maintenance on host nas, app restic; host router - errors filtered, its alerts held back until/);
+
+    const everything = getMaintenanceBannerText({
+      active: true, until: '2026-09-26T14:30:00Z', active_sessions_count: 1, log_handling: 'silence_alerts',
+      silences_all_alerts: true, sessions: [session],
+    });
+    expect(everything).toContain('- alerts silenced until');
+  });
 });
 
 
