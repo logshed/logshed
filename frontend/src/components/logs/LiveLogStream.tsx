@@ -675,7 +675,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         )}
 
         {!streamDisconnected && !filters.to && (
-          <StreamLoadNote skipped={skippedCount} nearLimit={nearLimit} />
+          <StreamLoadNote skipped={skippedCount} nearLimit={nearLimit} searching={Boolean(filters.query)} />
         )}
 
         {streamDisconnected && !filters.to && (

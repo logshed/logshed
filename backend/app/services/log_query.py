@@ -248,10 +248,12 @@ def build_day_where(f: LogFilter, docker_names: list[str]) -> tuple[str, dict[st
         params.update({f"src_{i}": s for i, s in enumerate(f.sources)})
         params.update({f"docker_{i}": s for i, s in enumerate(docker_names)})
 
-    if len(f.apps) == 1:
+    if len(f.apps) == 1 and not f.query:
         # One app as "=" to a single id: with IN (SELECT ...) SQLite cannot read idx_logs_app_time
         # in time order and sorts every row of the app in the file for one page (about 19 ms
-        # against 0.7 ms on a day of 120,000 rows)
+        # against 0.7 ms for an app with 120,000 rows in the file). Not with a word search: there
+        # the planner would then walk the app's rows instead of the full-text matches (a rare
+        # word in a busy app went from 1 ms to 55 ms)
         where_clauses.append("logs.app_id = (SELECT id FROM apps WHERE name = :app_0)")
         params["app_0"] = f.apps[0]
     elif f.apps:

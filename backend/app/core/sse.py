@@ -93,8 +93,17 @@ def _events_per_subscriber(
     picked = []
     for q in subscribers:
         accept = getattr(q, "accept", None)
-        picked.append((q, events if accept is None else [e for e in events if accept(e)]))
+        picked.append((q, events if accept is None else [e for e in events if _accepts(accept, e)]))
     return picked
+
+
+def _accepts(accept: Callable[[dict], bool], event: SSELogEvent) -> bool:
+    """A stream filter that fails on an entry leaves the entry out, so it cannot stop the batch's storage."""
+    try:
+        return accept(event)
+    except Exception as e:
+        logger.debug(f"Live stream filter failed on an entry: {e}")
+        return False
 
 
 class SSEBroadcaster:

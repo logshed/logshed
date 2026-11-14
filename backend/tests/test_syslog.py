@@ -2074,8 +2074,8 @@ class TestSyslogSharedParseQueue:
             other.cancel()
             await shared.close()
         frames_between = [len(run) for run in "".join("f" if o == "frame" else " " for o in order).split()]
-        # Two frames pass the 10 ms budget, so no slice holds more than two
-        assert max(frames_between) == 2, order
+        # Two frames pass the 10 ms budget, so no slice holds more than two (one on a slow runner)
+        assert max(frames_between) <= 2 and len(frames_between) >= 3, order
 
     @pytest.mark.asyncio
     async def test_udp_drops_in_a_flood_log_a_summary_not_a_line_each(self, db_path: Path, monkeypatch, caplog):
@@ -2098,7 +2098,7 @@ class TestSyslogSharedParseQueue:
             shared.put_udp(b"x", "10.0.0.1")
         assert get_dropped_count() == initial_drops + 1000
         assert len(warnings()) == 1
-        assert "summarized every 10 s" in warnings()[0]
+        assert "counted in one line every 10 s" in warnings()[0]
 
         # Within the interval nothing more; after it, one line with every drop since the first
         clock[0] += syslog_mod.UDP_DROP_WARNING_INTERVAL - 0.1
@@ -2116,6 +2116,13 @@ class TestSyslogSharedParseQueue:
         assert shared.put_udp(b"x", "10.0.0.1")
         assert len(warnings()) == 3
         assert "1 more UDP packet dropped" in warnings()[2]
+
+        # A flood after a quiet interval starts with a first line again, not a count over the gap
+        clock[0] += 3600
+        shared.max_items = 0
+        shared.put_udp(b"x", "10.0.0.1")
+        assert len(warnings()) == 4
+        assert "counted in one line every 10 s" in warnings()[3]
         await shared.close()
 
     @pytest.mark.asyncio

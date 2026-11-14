@@ -447,6 +447,11 @@ def test_one_app_filter_reads_the_app_index_in_time_order(tmp_path: Path):
         plan = " | ".join(r[3] for r in day_conn.execute("EXPLAIN QUERY PLAN " + sql, params))
         assert "idx_logs_app_time" in plan
         assert "USE TEMP B-TREE FOR ORDER BY" not in plan, plan
+        # With a word, the full-text matches drive the query, not a walk of the app's rows
+        where, params = build_day_where(LogFilter.parse(apps=["app1"], query="line"), [])
+        sql = f"SELECT logs.id FROM logs {where} ORDER BY logs.ts DESC, logs.id DESC LIMIT 50"
+        plan = " | ".join(r[3] for r in day_conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+        assert "INTEGER PRIMARY KEY" in plan and "idx_logs_app_time" not in plan, plan
     finally:
         day_conn.close()
 

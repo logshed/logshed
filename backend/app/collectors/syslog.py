@@ -788,7 +788,11 @@ class SyslogParseQueue:
         if len(self._items) >= self.max_items or self._bytes + len(data) > self.max_bytes:
             increment_dropped_count(1)
             self._unlogged_drops += 1
-            self._log_udp_drops(first=self._drop_warned_at is None)
+            # The first drop, or the first after a quiet interval, starts a new run of lines
+            quiet = self._unlogged_drops == 1 and (
+                self._drop_warned_at is None or time.monotonic() - self._drop_warned_at >= UDP_DROP_WARNING_INTERVAL
+            )
+            self._log_udp_drops(first=quiet)
             return False
         if self._unlogged_drops:
             self._log_udp_drops(first=False)
@@ -803,7 +807,7 @@ class SyslogParseQueue:
         if first:
             logger.warning(
                 f"Syslog parse queue full ({len(self._items)} messages, {self._bytes} bytes). UDP packet dropped; "
-                f"further drops are summarized every {UDP_DROP_WARNING_INTERVAL:g} s."
+                f"further drops are counted in one line every {UDP_DROP_WARNING_INTERVAL:g} s."
             )
         else:
             count = self._unlogged_drops

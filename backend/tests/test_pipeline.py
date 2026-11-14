@@ -1016,6 +1016,22 @@ class TestQueueConsumer:
         assert everything.skipped == 7 + 2
 
     @pytest.mark.asyncio
+    async def test_sse_filter_that_fails_leaves_the_entry_out_and_the_batch_goes_on(self):
+        from app.core.sse import SSEBroadcaster
+
+        def broken(event):
+            if event["id"] == 2:
+                raise KeyError("severity")
+            return True
+
+        broadcaster = SSEBroadcaster()
+        filtered = await broadcaster.subscribe(accept=broken)
+        everything = await broadcaster.subscribe()
+        await broadcaster.broadcast_batch([{"id": n, "message": "m"} for n in range(1, 4)])
+        assert [filtered.get_nowait()["id"] for _ in range(filtered.qsize())] == [1, 3]
+        assert everything.qsize() == 3
+
+    @pytest.mark.asyncio
     async def test_sse_events_are_built_off_the_event_loop(self, monkeypatch):
         """Encoding and filtering a batch run in a worker thread, so web requests do not wait for them."""
         import threading
