@@ -705,10 +705,49 @@ class Figures:
     max_ts: Optional[int]
     # (hour start in epoch seconds, host, app, severity) -> count
     counts: dict[tuple[int, str, str, int], int]
+    # Every distinct (address, app, host) of the file, for the Console's host and app lists
+    sources: list[tuple[str, str, str]]
+
+
+def distinct_sources(day_conn: sqlite3.Connection, limit: Optional[int] = None) -> list[tuple[str, str, str]]:
+    """
+    A day file's distinct (address, app name, host name), in the order of idx_logs_ip_app_host,
+    at most limit of them: one index seek each (the next host of the same address and app, else
+    the next app of the address, else the next address), whatever the number of rows. A row-value
+    range, (source_ip, app_id, host_id) > (...), uses only the index's first column and read every
+    row of the current address up to the position (1.2 s on a 536k-row file with 2 addresses).
+    """
+    return [
+        (r[0], r[1], r[2])
+        for r in day_conn.execute(
+            """
+            WITH RECURSIVE t(ip, app, host) AS (
+                SELECT * FROM (
+                    SELECT source_ip, app_id, host_id FROM logs ORDER BY source_ip, app_id, host_id LIMIT 1
+                )
+                UNION ALL
+                SELECT nxt.source_ip, nxt.app_id, nxt.host_id
+                FROM t
+                JOIN logs nxt ON nxt.id = COALESCE(
+                    (SELECT id FROM logs WHERE source_ip = t.ip AND app_id = t.app AND host_id > t.host
+                        ORDER BY source_ip, app_id, host_id LIMIT 1),
+                    (SELECT id FROM logs WHERE source_ip = t.ip AND app_id > t.app
+                        ORDER BY source_ip, app_id, host_id LIMIT 1),
+                    (SELECT id FROM logs WHERE source_ip > t.ip
+                        ORDER BY source_ip, app_id, host_id LIMIT 1)
+                )
+                LIMIT ?
+            )
+            SELECT t.ip, (SELECT name FROM apps WHERE apps.id = t.app), (SELECT name FROM hosts WHERE hosts.id = t.host)
+            FROM t
+            """,
+            (-1 if limit is None else limit,),
+        ).fetchall()
+    ]
 
 
 def figures(day_conn: sqlite3.Connection) -> Figures:
-    """A day file's figures: its id and time ranges, and its counts by hour x host x app x severity."""
+    """A day file's figures: its id and time ranges, its counts by hour x host x app x severity, and its sources."""
     bounds = day_conn.execute(
         "SELECT COUNT(*), MIN(id), MAX(id), MIN(ts), MAX(ts) FROM logs"
     ).fetchone()
@@ -728,11 +767,11 @@ def figures(day_conn: sqlite3.Connection) -> Figures:
     for hour, host, app, severity, cnt in rows:
         key = (hour, host, app, severity)
         counts[key] = counts.get(key, 0) + cnt
-    return Figures(bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], counts)
+    return Figures(bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], counts, distinct_sources(day_conn))
 
 
 def _write_figures(write: sqlite3.Connection, day: str, found: Figures, size: int, seal: bool) -> None:
-    """Store a day file's figures and counts in the catalogue (in the caller's transaction)."""
+    """Store a day file's figures, counts and sources in the catalogue (in the caller's transaction)."""
     sealed = ", state = 'sealed', sealed_at = :now" if seal else ""
     write.execute(
         f"""
@@ -750,6 +789,11 @@ def _write_figures(write: sqlite3.Connection, day: str, found: Figures, size: in
     write.executemany(
         "INSERT INTO log_file_counts (day, hour, host, app, severity, count) VALUES (?, ?, ?, ?, ?, ?)",
         [(day, hour, host, app, sev, cnt) for (hour, host, app, sev), cnt in found.counts.items()],
+    )
+    write.execute("DELETE FROM log_file_sources WHERE day = ?", (day,))
+    write.executemany(
+        "INSERT INTO log_file_sources (day, source_ip, app, host) VALUES (?, ?, ?, ?)",
+        [(day, ip, app or "", host or "") for ip, app, host in found.sources],
     )
 
 

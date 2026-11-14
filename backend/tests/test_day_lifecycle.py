@@ -180,6 +180,52 @@ class TestSealing:
             assert log_store.count(conn, LogFilter(), "source")[2] == {"storage": 6}
 
 
+    def _seen_opening(self, path: Path) -> tuple[log_store.SeenNames, list[str]]:
+        """The Console's host and app lists, and the day files opened to build them."""
+        day_store.forget_connections()
+        opened = []
+        real = day_store.connection
+
+        def spy(file_path, create=False):
+            opened.append(Path(file_path).name)
+            return real(file_path, create)
+
+        with mock.patch.object(day_store, "connection", spy), open_db(path) as conn:
+            return log_store.seen_names(conn, 502, 10000), opened
+
+    def test_the_host_and_app_lists_of_sealed_days_come_from_logs_db(self, three_days):
+        """A seal lists its file's sources in logs.db, so the lists open no sealed file."""
+        from_files, _ = self._seen_opening(three_days)
+        _seal_all(three_days)
+        with open_db(three_days) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM log_file_sources WHERE day = ?", (D1,)).fetchone()[0] > 0
+        sealed, opened = self._seen_opening(three_days)
+        assert sealed == from_files
+        assert opened == []
+        # A file sealed before the list existed (nothing stored for it) is read instead
+        with open_db(three_days) as conn:
+            conn.execute("DELETE FROM log_file_sources WHERE day = ?", (D2,))
+        fallback, opened = self._seen_opening(three_days)
+        assert fallback == from_files
+        assert opened == [day_files.file_name(D2)]
+
+    def test_a_relabel_in_a_sealed_day_rewrites_its_listed_sources(self, three_days):
+        _seal_all(three_days)
+        with open_db(three_days) as conn:
+            log_store.relabel_host(conn, "10.0.0.1", "storage")
+        seen, opened = self._seen_opening(three_days)
+        assert opened == []
+        # Both hosts sent from 10.0.0.1, so both took the new name
+        assert [alias for alias, _ip in seen.aliases] == ["storage"]
+        with open_db(three_days) as conn:
+            conn.execute("DELETE FROM log_file_sources")
+        assert self._seen_opening(three_days)[0] == seen
+        # Dropped with the day's entry when retention deletes the file
+        with open_db(three_days) as conn:
+            log_store.prune(conn, f"{D2}T00:00:00+00:00", lambda: None)
+            assert conn.execute("SELECT COUNT(*) FROM log_file_sources WHERE day = ?", (D1,)).fetchone()[0] == 0
+
+
 class TestRetention:
     def test_day_files_go_whole_once_their_whole_day_is_past_the_cutoff(self, three_days):
         _seal_all(three_days)

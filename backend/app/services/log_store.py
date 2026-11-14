@@ -1138,8 +1138,8 @@ def seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> Se
     """
     The distinct host names, addresses and apps of every stored log, read with loose index
     skip-scans (one B-tree seek per distinct value), so a name with a single log is listed and
-    the cost does not grow with the number of logs. Across parts, the lists are merged and
-    capped again.
+    the cost does not grow with the number of logs; a sealed day file's come from the sources its
+    seal listed in logs.db. Across parts, the lists are merged and capped again.
     """
     found = day_store.parts(conn)
     if not found:
@@ -1151,10 +1151,13 @@ def seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> Se
         if part.legacy:
             results.append(_legacy_seen_names(part.conn, scan_limit, pair_limit))
             walked.append(None)
-        else:
-            seen, first_pair = _day_seen(part.conn, scan_limit, pair_limit)
-            results.append(seen)
-            walked.append(first_pair)
+            continue
+        # A sealed file's sources are listed in logs.db, so it is not opened (31 files took 0.15 s
+        # warm and 3.8 s cold at 50M rows, growing with the days kept); today's file is walked
+        stored = _sealed_seen(conn, part, scan_limit, pair_limit) if part.sealed else None
+        seen, first_pair = stored if stored is not None else _day_seen(part.conn, scan_limit, pair_limit)
+        results.append(seen)
+        walked.append(first_pair)
     if len(results) == 1:
         return results[0]
     # Each host name is listed with the address of its first (app, address) pair, as one table gives
@@ -1211,35 +1214,37 @@ def _day_seen(
     day_conn: sqlite3.Connection, scan_limit: int, pair_limit: int
 ) -> tuple[SeenNames, Optional[dict[str, tuple[str, str]]]]:
     """_day_seen_names(), with each host's first (app, address) pair when the walk saw every triple (else None)."""
-    walk_limit = 2 * pair_limit + 2 * scan_limit
-    triples = day_conn.execute(
-        """
-        WITH RECURSIVE t(ip, app, host) AS (
-            SELECT * FROM (
-                SELECT source_ip, app_id, host_id FROM logs ORDER BY source_ip, app_id, host_id LIMIT 1
-            )
-            UNION ALL
-            SELECT nxt.source_ip, nxt.app_id, nxt.host_id
-            FROM t
-            -- The next triple by equality seeks (next host, else next app, else next address),
-            -- one B-tree seek each: a row-value range uses only the index's first column, so it
-            -- read every row of the current address up to the position (1.2 s on a 536k-row file
-            -- with 2 addresses)
-            JOIN logs nxt ON nxt.id = COALESCE(
-                (SELECT id FROM logs WHERE source_ip = t.ip AND app_id = t.app AND host_id > t.host
-                    ORDER BY source_ip, app_id, host_id LIMIT 1),
-                (SELECT id FROM logs WHERE source_ip = t.ip AND app_id > t.app
-                    ORDER BY source_ip, app_id, host_id LIMIT 1),
-                (SELECT id FROM logs WHERE source_ip > t.ip
-                    ORDER BY source_ip, app_id, host_id LIMIT 1)
-            )
-            LIMIT ?
-        )
-        SELECT t.ip, (SELECT name FROM apps WHERE apps.id = t.app), (SELECT name FROM hosts WHERE hosts.id = t.host)
-        FROM t
-        """,
-        (walk_limit,),
+    walk_limit = _walk_limit(scan_limit, pair_limit)
+    triples = day_store.distinct_sources(day_conn, walk_limit)
+    return _seen_from_triples(triples, scan_limit, pair_limit, complete=len(triples) < walk_limit)
+
+
+def _walk_limit(scan_limit: int, pair_limit: int) -> int:
+    return 2 * pair_limit + 2 * scan_limit
+
+
+def _sealed_seen(
+    conn: sqlite3.Connection, part: day_store.Part, scan_limit: int, pair_limit: int
+) -> Optional[tuple[SeenNames, Optional[dict[str, tuple[str, str]]]]]:
+    """
+    _day_seen() of a sealed file from the sources the seal stored in logs.db, without opening the
+    file; None when that list cannot stand in for the walk: it reaches the walk's limit (which
+    triples a capped walk keeps follows the file's index order), or it is missing (a file sealed
+    before the list existed).
+    """
+    walk_limit = _walk_limit(scan_limit, pair_limit)
+    triples = conn.execute(
+        "SELECT source_ip, app, host FROM log_file_sources WHERE day = ? LIMIT ?", (part.day, walk_limit)
     ).fetchall()
+    if len(triples) >= walk_limit or (not triples and part.row_count):
+        return None
+    return _seen_from_triples(triples, scan_limit, pair_limit, complete=True)
+
+
+def _seen_from_triples(
+    triples: list, scan_limit: int, pair_limit: int, complete: bool
+) -> tuple[SeenNames, Optional[dict[str, tuple[str, str]]]]:
+    """SeenNames from a day file's (address, app, host) triples; the first pairs only when complete."""
     bare_ips: set[str] = set()
     apps: set[str] = set()
     alias_apps: dict[tuple[str, str], str] = {}
@@ -1265,7 +1270,7 @@ def _day_seen(
         alias_apps=[(a, app, ip) for (a, app), ip in sorted(alias_apps.items())][:pair_limit],
         bare_ip_apps=sorted(bare_ip_apps)[:pair_limit] if bare_ips else [],
     )
-    return seen, (first_pair if len(triples) < walk_limit else None)
+    return seen, (first_pair if complete else None)
 
 
 def _legacy_seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> SeenNames:

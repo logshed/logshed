@@ -656,6 +656,13 @@ CREATE TABLE IF NOT EXISTS log_file_counts (
     count INTEGER NOT NULL,
     PRIMARY KEY (day, hour, host, app, severity)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS log_file_sources (
+    day TEXT NOT NULL REFERENCES log_files(day) ON DELETE CASCADE,
+    source_ip TEXT NOT NULL,
+    app TEXT NOT NULL,
+    host TEXT NOT NULL,
+    PRIMARY KEY (day, source_ip, app, host)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS log_id_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     next_id INTEGER NOT NULL
