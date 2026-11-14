@@ -78,14 +78,14 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
               onClick={() => (isActive ? onResetFilters() : onApplySavedView(view.query_params))}
               aria-pressed={isActive}
               title={isActive ? `Clear saved view ${view.name}` : `Apply saved view ${view.name}`}
-              className={`flex items-center gap-1 px-2 py-1 md:py-0.5 rounded text-[11px] border transition cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1 px-2 h-6.5 md:h-5.5 rounded text-[11px] border transition cursor-pointer shrink-0 ${
                 isActive
                   ? 'bg-accent-950 text-accent-300 border-accent-500 font-semibold'
                   : 'bg-raised text-fg-soft border-line hover:border-line-stronger'
               }`}
             >
               <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
-              <span className="truncate max-w-40">{view.name}</span>
+              <span className="truncate max-w-40 text-trim">{view.name}</span>
             </button>
           );
         })}
@@ -112,7 +112,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
                   ? selfReportedTitle(src, reportedBy)
                   : undefined
               }
-              className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition shrink-0 ${
+              className={`inline-flex items-center px-2 h-6.5 md:h-5.5 rounded text-[11px] font-mono border transition shrink-0 ${
                 isSelected
                   ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold cursor-pointer'
                   : isDisabled
@@ -120,7 +120,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
                   : 'bg-raised text-fg-soft border-line hover:border-line-stronger cursor-pointer'
               }`}
             >
-              <HostName name={src} selfReported={Boolean(reportedBy)} />
+              <HostName name={src} selfReported={Boolean(reportedBy)} trimText />
             </button>
           );
         })}
@@ -137,13 +137,13 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
               key={app}
               data-testid="quick-filter-app"
               onClick={() => onToggleApp(app)}
-              className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
+              className={`inline-flex items-center px-2 h-6.5 md:h-5.5 rounded text-[11px] font-mono border transition cursor-pointer shrink-0 ${
                 isSelected
                   ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold'
                   : 'bg-raised text-fg-soft border-line hover:border-line-stronger'
               }`}
             >
-              {app}
+              <span className="text-trim">{app}</span>
             </button>
           );
         })}

@@ -205,6 +205,13 @@ main {
   scrollbar-gutter: stable;
 }
 
+/* Text whose box is trimmed to its capital letters and baseline, so it centres in a fixed-height
+   chip in any font (a monospace font leaves room for descenders below its letters, so plain text
+   sits high). Browsers without text-box (before Chrome 133, Safari 18.2) show it as before. */
+@utility text-trim {
+  text-box: trim-both cap alphabetic;
+}
+
 /* Log rows: the default transition and hover, for rows without their own hover classes (the phone
    layout). In the components layer, so the desktop row's hover classes (brighter, and blue on a
    ticked row) win, as in Tailwind 3. */

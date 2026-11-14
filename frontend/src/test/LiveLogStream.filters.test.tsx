@@ -638,8 +638,9 @@ describe('Console filter controls', () => {
       renderStream();
       await screen.findByText('msg 1 from zz');
       const chip = (await screen.findAllByTestId('quick-filter-host'))[0];
-      expect(chip.className).toContain('py-1');
-      expect(chip.className).toContain('md:py-0.5');
+      // The same heights as before (26 and 22 px), fixed so the trimmed label centres in them
+      expect(chip.className).toContain('h-6.5');
+      expect(chip.className).toContain('md:h-5.5');
     });
   });
 
