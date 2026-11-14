@@ -1231,9 +1231,35 @@ class AlertHistoryListResponse(BaseModel):
     offset: int
 
 
+MaintenanceLogHandling = Literal["silence_alerts", "drop_errors"]
+
+
+def _blank_to_none(value: Optional[str]) -> Optional[str]:
+    """A maintenance target as stored: trimmed, or None when empty."""
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 class MaintenanceWindowRequest(BaseModel):
-    """Payload for setting or clearing the on-demand alert maintenance window."""
-    until: Optional[str] = Field(None, description="End time in ISO 8601 format, or null to clear.")
+    """Payload for starting a web UI maintenance session, or for ending every session."""
+    until: Optional[str] = Field(None, description="End time in ISO 8601 format, or null to end every session.")
+    log_handling: MaintenanceLogHandling = Field(
+        "silence_alerts",
+        description="'silence_alerts', or 'drop_errors' to discard error logs (severity 0 to 3) from the targets",
+    )
+    target_app: Optional[str] = Field(
+        None, max_length=255, description="Only this app (wildcards * and ?); with no target, every log"
+    )
+    target_host: Optional[str] = Field(
+        None, max_length=255, description="Only this host name or IP (wildcards * and ?); with no target, every log"
+    )
+
+    @field_validator("target_app", "target_host")
+    @classmethod
+    def blank_target_is_none(cls, v: Optional[str]) -> Optional[str]:
+        return _blank_to_none(v)
 
 
 class MaintenanceSessionExtendRequest(BaseModel):
@@ -1253,6 +1279,10 @@ class MaintenanceSchedule(BaseModel):
     day_of_month: Optional[int] = Field(1, ge=1, le=31, description="Day of month 1 to 31")
     is_active: Optional[bool] = Field(False, description="Whether the schedule is active right now")
     next_run: Optional[str] = Field(None, description="ISO timestamp of next scheduled window start")
+    # Schedules saved before 1.4.0 have neither: they silence every alert notification
+    log_handling: str = Field("silence_alerts", description="'silence_alerts' or 'drop_errors'")
+    target_app: Optional[str] = Field(None, description="Only this app (wildcards * and ?)")
+    target_host: Optional[str] = Field(None, description="Only this host name or IP (wildcards * and ?)")
 
 
 _SCHEDULE_START_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -1273,6 +1303,15 @@ class MaintenanceSchedulesUpdateRequest(BaseModel):
                     f"start_time of schedule '{schedule.name}' must be a 24-hour time HH:MM (00:00 to 23:59), "
                     f"not '{schedule.start_time}'"
                 )
+            if schedule.log_handling not in ("silence_alerts", "drop_errors"):
+                raise ValueError(
+                    f"log_handling of schedule '{schedule.name}' must be 'silence_alerts' or 'drop_errors'"
+                )
+            schedule.target_app = _blank_to_none(schedule.target_app)
+            schedule.target_host = _blank_to_none(schedule.target_host)
+            for field, value in (("target_app", schedule.target_app), ("target_host", schedule.target_host)):
+                if value is not None and len(value) > 255:
+                    raise ValueError(f"{field} of schedule '{schedule.name}' is longer than 255 characters")
         return schedules
 
 
@@ -1301,6 +1340,11 @@ class MaintenanceWindowResponse(BaseModel):
     active_sessions_count: int = 0
     sessions: list[MaintenanceSessionDetail] = Field(default_factory=list)
     log_handling: str = "silence_alerts"
+    silences_all_alerts: bool = Field(
+        False,
+        description="Whether a running window has no target, so every alert notification is held back; "
+        "a window with a target keeps only its target's logs out of the alert rules",
+    )
 
 
 class ExternalMaintenanceEnableRequest(BaseModel):
@@ -1354,6 +1398,9 @@ class ExternalMaintenanceStatusResponse(BaseModel):
     log_handling: str = "silence_alerts"
     active_sessions_count: int = 0
     sessions: list[MaintenanceSessionDetail] = Field(default_factory=list)
+    silences_all_alerts: bool = Field(
+        False, description="Whether a running window has no target, so every alert notification is held back"
+    )
 
 
 # API Token Models

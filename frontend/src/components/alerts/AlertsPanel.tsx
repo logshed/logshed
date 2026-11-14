@@ -535,6 +535,13 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ onNavigateToSettings }
           isOnDemandActiveNow={isOnDemandActiveNow}
           customUntil={maint.customUntil}
           setCustomUntil={maint.setCustomUntil}
+          scope={maint.scope}
+          onScopeChange={maint.setScope}
+          pendingUntil={maint.pendingUntil}
+          onConfirmPending={maint.confirmPendingWindow}
+          onCancelPending={maint.cancelPendingWindow}
+          availableHosts={availableHosts}
+          availableApps={availableApps}
           onClearMaintenance={() => setIsClearMaintenanceModalOpen(true)}
           onSetPreset={maint.setPreset}
           onExtendSession={maint.extendSession}

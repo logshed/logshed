@@ -243,7 +243,7 @@ To safeguard tokens and credentials, the following features are managed exclusiv
 | **Host Aliases** | **Settings > Host Aliases** | Map IP addresses (e.g. `192.168.1.1`) to friendly names (`router`). Applies dynamically to log streams. |
 | **Alert Rules & Presets** | **Rules & History > Alert Rules** | Define threshold, pattern, or rate spike detection rules and link them to notification channels. |
 | **Ingestion Drop Rules** | **Rules & History > Drop Rules** | Filter repetitive log noise in memory before database insertion and indexing. |
-| **Maintenance Windows** | **Rules & History > Maintenance** | Set on-demand or recurring schedules to silence notifications during planned downtime. |
+| **Maintenance Windows** | **Rules & History > Maintenance** | Set on-demand or recurring windows that silence notifications, or also drop error logs, from every source or one host or app, during planned downtime (see [Maintenance Windows](RULES_GUIDE.md#maintenance-windows)). |
 | **API Tokens & MCP Access** | **Settings > API & MCP Access** | Generate scoped Bearer tokens, toggle the Model Context Protocol (MCP) server, and inspect client configuration guides (Claude Desktop, Cursor, Antigravity). |
 
 ---

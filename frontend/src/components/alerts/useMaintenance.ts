@@ -8,6 +8,7 @@ import {
   extendMaintenanceSession,
 } from '../../api/alerts.ts';
 import { formatMaintenanceTime, fromLocalDatetimeInputString } from '../../utils/formatters.ts';
+import { dropsEveryError, EMPTY_MAINTENANCE_SCOPE, MaintenanceScope } from './MaintenanceScopeFields.tsx';
 
 // The longest delay setTimeout honours (2^31-1 ms, about 24.8 days)
 const MAX_TIMEOUT_MS = 2147483647;
@@ -23,7 +24,17 @@ export interface ScheduleFields {
   dayOfWeek: number;
   dayOfMonth: number;
   enabled: boolean;
+  scope: MaintenanceScope;
 }
+
+/** A scope's targets as the server stores them: trimmed, or null when empty. */
+const targetOrNull = (value: string): string | null => value.trim() || null;
+
+const scheduleScope = (scope: MaintenanceScope) => ({
+  log_handling: scope.logHandling,
+  target_app: targetOrNull(scope.targetApp),
+  target_host: targetOrNull(scope.targetHost),
+});
 
 /** Tells the Navbar and any other listener about the new maintenance state. */
 const announce = (res: MaintenanceWindowResponse) =>
@@ -50,6 +61,10 @@ export function useMaintenance({
     schedules: [],
   });
   const [customUntil, setCustomUntil] = useState<string>('');
+  // The mode and targets of the next session started here
+  const [scope, setScope] = useState<MaintenanceScope>(EMPTY_MAINTENANCE_SCOPE);
+  // The end of a session that drops errors from every source, waiting for its confirmation
+  const [pendingUntil, setPendingUntil] = useState<string | null>(null);
 
   const refreshMaintenance = () => {
     fetchMaintenanceWindow().then(setMaintenance).catch(() => {});
@@ -97,11 +112,17 @@ export function useMaintenance({
     maintenance.on_demand_until || (maintenance.sessions && maintenance.sessions.length > 0)
   );
 
-  const setWindow = async (untilIso: string) => {
+  const setWindow = async (untilIso: string, confirmed = false) => {
+    if (dropsEveryError(scope) && !confirmed) {
+      setPendingUntil(untilIso);
+      return;
+    }
     try {
-      const res = await setMaintenanceWindow(untilIso);
+      const res = await setMaintenanceWindow(untilIso, scheduleScope(scope));
       setMaintenance(res);
       setCustomUntil('');
+      // The next session starts from the default again, so errors are never dropped by accident
+      setScope(EMPTY_MAINTENANCE_SCOPE);
       announce(res);
       onHistoryChanged();
       onFeedback({
@@ -115,6 +136,14 @@ export function useMaintenance({
       });
     }
   };
+
+  const confirmPendingWindow = async () => {
+    const untilIso = pendingUntil;
+    setPendingUntil(null);
+    if (untilIso) await setWindow(untilIso, true);
+  };
+
+  const cancelPendingWindow = () => setPendingUntil(null);
 
   const clearAllSessions = async () => {
     try {
@@ -211,6 +240,7 @@ export function useMaintenance({
               day_of_week: fields.recurrence === 'weekly' ? fields.dayOfWeek : undefined,
               day_of_month: fields.recurrence === 'monthly' ? fields.dayOfMonth : undefined,
               enabled: fields.enabled,
+              ...scheduleScope(fields.scope),
             }
           : s
       );
@@ -224,6 +254,7 @@ export function useMaintenance({
         day_of_week: fields.recurrence === 'weekly' ? fields.dayOfWeek : undefined,
         day_of_month: fields.recurrence === 'monthly' ? fields.dayOfMonth : undefined,
         enabled: fields.enabled,
+        ...scheduleScope(fields.scope),
       };
       updatedList = [...currentList, newSched];
     }
@@ -295,6 +326,11 @@ export function useMaintenance({
     refreshMaintenance,
     customUntil,
     setCustomUntil,
+    scope,
+    setScope,
+    pendingUntil,
+    confirmPendingWindow,
+    cancelPendingWindow,
     isMaintenanceActiveNow,
     isOnDemandActiveNow,
     setPreset,

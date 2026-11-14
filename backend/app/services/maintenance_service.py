@@ -15,7 +15,7 @@ import uuid
 import threading
 from typing import Any, Optional
 
-from app.core.utils import get_server_tzinfo, match_wildcard, parse_iso_to_utc_datetime
+from app.core.utils import get_server_tzinfo, match_wildcard, parse_iso_to_epoch, parse_iso_to_utc_datetime
 from app.models import MaintenanceSchedule, MaintenanceSessionDetail, MaintenanceWindowResponse
 
 logger = logging.getLogger(__name__)
@@ -241,8 +241,16 @@ def save_schedules(conn: sqlite3.Connection, schedules: list[MaintenanceSchedule
     conn.commit()
 
 
+# The maintenance windows the ingest path and the alert evaluator check without SQLite: active
+# sessions, and the windows of schedules that are running or start within SCHEDULE_LOOKAHEAD
 _active_maintenance_sessions: list[dict[str, Any]] = []
 _active_sessions_lock = threading.Lock()
+
+# Cached windows of schedules have ids that begin with this; their drops are not counted
+SCHEDULE_WINDOW_PREFIX = "schedule:"
+# The sweep refreshes the cache every 30 s, so a schedule window starting within this is cached
+# ahead with its start time, and starts on time
+SCHEDULE_LOOKAHEAD = datetime.timedelta(seconds=120)
 
 MAX_ACTIVE_MAINTENANCE_SESSIONS = 20
 MAINTENANCE_HISTORY_RULE_NAME = "Maintenance Window"
@@ -258,7 +266,9 @@ class MaintenanceSessionLimitError(Exception):
 
 
 def record_maintenance_drop(session_id: str) -> None:
-    """Increment the in-memory dropped-log counter for a maintenance session."""
+    """Increment the in-memory dropped-log counter for a maintenance session (not for a schedule's window)."""
+    if session_id.startswith(SCHEDULE_WINDOW_PREFIX):
+        return
     with _dropped_counters_lock:
         _dropped_counters[session_id] = _dropped_counters.get(session_id, 0) + 1
 
@@ -314,10 +324,105 @@ def get_cached_maintenance_sessions() -> list[dict[str, Any]]:
 
 
 def update_cached_maintenance_sessions(sessions: list[dict[str, Any]]) -> None:
-    """Update the in-memory active maintenance sessions list."""
+    """
+    Update the in-memory list of maintenance windows. Each gets its start and end as epochs
+    (_starts, _ends; a window without starts_at has started), so the per-log checks parse nothing.
+    An end that cannot be read gives 0, so that window never runs.
+    """
     global _active_maintenance_sessions
+    windows = []
+    for session in sessions:
+        window = dict(session)
+        window["_starts"] = parse_iso_to_epoch(window.get("starts_at"), fallback=0.0) if window.get("starts_at") else 0.0
+        # A window without an end (none is stored so) runs until the cache changes, as before
+        window["_ends"] = (
+            parse_iso_to_epoch(window["expires_at"], fallback=0.0) if window.get("expires_at") else float("inf")
+        )
+        windows.append(window)
     with _active_sessions_lock:
-        _active_maintenance_sessions = list(sessions)
+        _active_maintenance_sessions = windows
+
+
+def _schedule_windows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """
+    The windows of enabled schedules that are running now or start within SCHEDULE_LOOKAHEAD,
+    in the form of the cached sessions (a starts_at on a window that has not started yet).
+    """
+    now_local, _tz_name = _get_server_time_info()
+    windows = []
+    for sched in load_schedules(conn):
+        is_active, active_end, next_start = evaluate_schedule(sched, now_local)
+        if is_active and active_end is not None:
+            starts_at, ends_at = None, active_end
+        elif next_start is not None and next_start - now_local <= SCHEDULE_LOOKAHEAD:
+            starts_at = next_start
+            ends_at = next_start + datetime.timedelta(minutes=max(1, sched.duration_minutes))
+        else:
+            continue
+        windows.append({
+            "session_id": f"{SCHEDULE_WINDOW_PREFIX}{sched.id}",
+            "initiated_by": "schedule",
+            "reason": sched.name,
+            "log_handling": sched.log_handling,
+            "target_app": sched.target_app,
+            "target_host": sched.target_host,
+            "starts_at": starts_at.astimezone(datetime.timezone.utc).isoformat() if starts_at else None,
+            "expires_at": ends_at.astimezone(datetime.timezone.utc).isoformat(),
+        })
+    return windows
+
+
+def _load_cached_windows(conn: sqlite3.Connection, now_iso: str) -> list[dict[str, Any]]:
+    """The active sessions and the schedule windows, for update_cached_maintenance_sessions."""
+    return _load_active_sessions(conn, now_iso) + _schedule_windows(conn)
+
+
+def _window_targets(window: dict[str, Any], source_alias: Optional[str], source_ip: Optional[str], app_name: Optional[str]) -> bool:
+    """Whether a log from this host and app is one the window's targets name (a window without targets names every log)."""
+    target_app = window.get("target_app")
+    if target_app and not match_wildcard(target_app, app_name):
+        return False
+    target_host = window.get("target_host")
+    if target_host:
+        if not (
+            (source_alias and match_wildcard(target_host, source_alias))
+            or (source_ip and match_wildcard(target_host, source_ip))
+        ):
+            return False
+    return True
+
+
+def _window_running(window: dict[str, Any], now_epoch: float) -> bool:
+    return window["_starts"] <= now_epoch < window["_ends"]
+
+
+def has_targeted_maintenance() -> bool:
+    """Whether any cached window (running or about to start) has a target, so logs must be checked against it."""
+    with _active_sessions_lock:
+        windows = _active_maintenance_sessions
+    return any(w.get("target_app") or w.get("target_host") for w in windows)
+
+
+def in_targeted_maintenance(
+    source_alias: Optional[str],
+    source_ip: Optional[str],
+    app_name: Optional[str],
+) -> bool:
+    """
+    Whether a log comes from the target of a running maintenance window with a target (either mode).
+    Such logs are stored and shown, but count towards no alert rule. In-memory, no SQLite.
+    """
+    with _active_sessions_lock:
+        windows = _active_maintenance_sessions
+    if not windows:
+        return False
+    now_epoch = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    for window in windows:
+        if not (window.get("target_app") or window.get("target_host")):
+            continue
+        if _window_running(window, now_epoch) and _window_targets(window, source_alias, source_ip, app_name):
+            return True
+    return False
 
 
 def _sweep_expired_sessions(conn: sqlite3.Connection, now_iso: str) -> None:
@@ -371,9 +476,9 @@ def refresh_maintenance_cache(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     _sweep_expired_sessions(conn, now_iso)
-    sessions = _load_active_sessions(conn, now_iso)
-    update_cached_maintenance_sessions(sessions)
-    return sessions
+    windows = _load_cached_windows(conn, now_iso)
+    update_cached_maintenance_sessions(windows)
+    return windows
 
 
 def should_drop_maintenance_error(
@@ -397,34 +502,12 @@ def should_drop_maintenance_error(
     if not active_sessions:
         return None
 
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-
-    for s in active_sessions:
-        if s.get("log_handling") != "drop_errors":
+    now_epoch = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    for window in active_sessions:
+        if window.get("log_handling") != "drop_errors" or not _window_running(window, now_epoch):
             continue
-
-        exp_str = s.get("expires_at")
-        if exp_str:
-            exp_dt = parse_iso_to_utc_datetime(exp_str)
-            if exp_dt and exp_dt <= now_utc:
-                continue
-
-        target_app = s.get("target_app")
-        target_host = s.get("target_host")
-
-        if target_app and not match_wildcard(target_app, app_name):
-            continue
-
-        if target_host:
-            matched_host = False
-            if source_alias and match_wildcard(target_host, source_alias):
-                matched_host = True
-            elif source_ip and match_wildcard(target_host, source_ip):
-                matched_host = True
-            if not matched_host:
-                continue
-
-        return s.get("session_id")
+        if _window_targets(window, source_alias, source_ip, app_name):
+            return window.get("session_id")
 
     return None
 
@@ -508,7 +591,7 @@ def create_maintenance_session(
     except BaseException:
         conn.rollback()
         raise
-    update_cached_maintenance_sessions(_load_active_sessions(conn, now_iso))
+    update_cached_maintenance_sessions(_load_cached_windows(conn, now_iso))
 
     return {
         "session_id": session_id,
@@ -570,7 +653,7 @@ def disable_maintenance_sessions(
 
     conn.commit()
     sessions = _load_active_sessions(conn, now_iso)
-    update_cached_maintenance_sessions(sessions)
+    update_cached_maintenance_sessions(sessions + _schedule_windows(conn))
     return terminated, len(sessions)
 
 
@@ -608,7 +691,7 @@ def extend_maintenance_session(
     except BaseException:
         conn.rollback()
         raise
-    update_cached_maintenance_sessions(_load_active_sessions(conn, now_iso))
+    update_cached_maintenance_sessions(_load_cached_windows(conn, now_iso))
     return new_end_iso
 
 
@@ -646,6 +729,9 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
     scheduled_active = False
     active_schedule_end_dt: Optional[datetime.datetime] = None
     active_schedule_name: Optional[str] = None
+    # A window without a target silences every alert notification; one with a target only its target's logs
+    silences_all = on_demand_active
+    has_drop_errors = False
 
     for sched in schedules:
         sched_active, sched_end_dt, next_start_dt = evaluate_schedule(sched, now_local)
@@ -656,6 +742,10 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
 
         if sched_active and sched_end_dt:
             scheduled_active = True
+            if not (sched.target_app or sched.target_host):
+                silences_all = True
+            if sched.log_handling == "drop_errors":
+                has_drop_errors = True
             # Compare as UTC instants: datetimes sharing one tzinfo compare by wall clock
             sched_end_utc = sched_end_dt.astimezone(datetime.timezone.utc)
             if active_schedule_end_dt is None or sched_end_utc > active_schedule_end_dt:
@@ -670,7 +760,6 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
         all_end_times.append(active_schedule_end_dt)
 
     session_details: list[MaintenanceSessionDetail] = []
-    has_drop_errors = False
 
     for s in active_sessions:
         exp_dt = parse_iso_to_utc_datetime(s["expires_at"])
@@ -678,6 +767,8 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
             all_end_times.append(exp_dt)
             if s.get("log_handling") == "drop_errors":
                 has_drop_errors = True
+            if not (s.get("target_app") or s.get("target_host")):
+                silences_all = True
             session_details.append(
                 MaintenanceSessionDetail(
                     session_id=s["session_id"],
@@ -721,6 +812,7 @@ def get_maintenance_status(conn: sqlite3.Connection) -> MaintenanceWindowRespons
         active_sessions_count=len(session_details),
         sessions=session_details,
         log_handling=log_handling,
+        silences_all_alerts=silences_all,
     )
 
 

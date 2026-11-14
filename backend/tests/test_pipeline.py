@@ -413,10 +413,10 @@ class TestFilterAndEnqueue:
         from app.services import maintenance_service
 
         future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
-        monkeypatch.setattr(
-            maintenance_service,
-            "_active_maintenance_sessions",
-            [{"session_id": "m1", "log_handling": "drop_errors", "expires_at": future}],
+        # Restored at teardown; the setter below fills it as the sweep does
+        monkeypatch.setattr(maintenance_service, "_active_maintenance_sessions", [])
+        maintenance_service.update_cached_maintenance_sessions(
+            [{"session_id": "m1", "log_handling": "drop_errors", "expires_at": future}]
         )
         assert pipeline_mod.filter_and_enqueue(_make_entry(severity=3, message="boom")) is False
         assert pipeline_mod.filter_and_enqueue(_make_entry(severity=6, message="fine")) is True

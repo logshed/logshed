@@ -30,6 +30,7 @@ from app.core.regex_validator import (
 )
 from app.core.rule_index import RuleIndex, entry_key, exact_match_key
 from app.core.utils import compile_host_list, compile_wildcard, parse_iso_to_epoch, split_pattern_list, wildcard_text_key
+from app.services.maintenance_service import has_targeted_maintenance, in_targeted_maintenance
 from app.services.notifier import get_notifier
 from app.services.alert_incident import (
     AiEnrichment,
@@ -471,6 +472,13 @@ class AlertEvaluator:
         self.prune_expired_windows(now_epoch)
 
         batch = [entry for entry in batch if not entry.get(SKIP_ALERT_RULES_KEY)]
+        # Logs from the target of a maintenance window with a target count towards no rule
+        if batch and has_targeted_maintenance():
+            batch = [
+                entry
+                for entry in batch
+                if not in_targeted_maintenance(entry.get("source_alias"), entry.get("source_ip"), entry.get("app_name"))
+            ]
         if not batch:
             return []
 
@@ -664,7 +672,11 @@ class AlertEvaluator:
             logger.warning(f"Failed to persist trigger state for rule {rule.id}: {exc}")
 
     def _is_maintenance_active(self) -> bool:
-        """Check if global maintenance window (on-demand or scheduled) is active in system_settings."""
+        """
+        Whether a running maintenance window without a target (on-demand, API or scheduled) holds back
+        every alert notification. A window with a target holds back nothing here: its target's logs
+        never reach the rules (_match_batch).
+        """
         from app.core.config import get_db_path
         effective_db = self.db_path or get_db_path()
         if not effective_db:
@@ -675,7 +687,7 @@ class AlertEvaluator:
             from app.services.maintenance_service import get_maintenance_status
             conn = get_thread_connection(effective_db)
             status = get_maintenance_status(conn)
-            return status.active
+            return status.silences_all_alerts
         except Exception as exc:
             logger.warning(f"Error checking maintenance window in alert evaluator: {exc}")
             return False
@@ -705,7 +717,7 @@ class AlertEvaluator:
 
         if await asyncio.to_thread(self._is_maintenance_active):
             logger.info(
-                f"Global maintenance window active: skipping notification dispatch for alert rule '{rule.name}'"
+                f"Maintenance window for every source active: skipping notification dispatch for alert rule '{rule.name}'"
             )
             return
 

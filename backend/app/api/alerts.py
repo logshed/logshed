@@ -131,9 +131,11 @@ async def set_maintenance_window(
     user: dict = Depends(get_current_user),
 ) -> MaintenanceWindowResponse:
     """
-    Set or clear the on-demand alert maintenance window.
-    Pass { "until": "<ISO 8601 datetime>" } to activate or { "until": null } to clear.
-    Clearing terminates all active on-demand and API maintenance sessions.
+    Start a maintenance session from the web UI, or end every session.
+    Pass { "until": "<ISO 8601 datetime>" } to start one, with optional log_handling, target_app
+    and target_host (a session with a target holds back only its target's alerts), or
+    { "until": null } to terminate all active on-demand and API maintenance sessions.
+    The web UI may drop errors from every source (after its confirmation); MCP may not.
     """
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     now_iso = now_dt.isoformat()
@@ -174,6 +176,9 @@ async def set_maintenance_window(
                 conn,
                 expires_at=dt,
                 reason="Web Console",
+                log_handling=payload.log_handling,
+                target_app=payload.target_app,
+                target_host=payload.target_host,
                 initiated_by="web_ui",
                 trigger_label="UI",
             )
@@ -234,10 +239,12 @@ async def update_maintenance_schedules(
     user: dict = Depends(get_current_user),
 ) -> MaintenanceWindowResponse:
     """Save recurring maintenance schedules (daily, weekly, monthly)."""
-    from app.services.maintenance_service import get_maintenance_status, save_schedules
+    from app.services.maintenance_service import get_maintenance_status, refresh_maintenance_cache, save_schedules
 
     def _save_all(conn):
         save_schedules(conn, payload.schedules)
+        # A schedule's mode and targets apply to the next log, not after the next sweep
+        refresh_maintenance_cache(conn)
 
     await run_db_query(_save_all)
     return await run_db_query(get_maintenance_status)

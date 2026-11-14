@@ -318,10 +318,8 @@ class TestIngestPipelinePath:
     async def test_drop_errors_session_drops_http_errors(self, client, write_token, isolated_filters, monkeypatch):
         _, maintenance_service = isolated_filters
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        monkeypatch.setattr(
-            maintenance_service,
-            "_active_maintenance_sessions",
-            [{"session_id": "maint-1", "log_handling": "drop_errors", "expires_at": future, "target_app": "db"}],
+        maintenance_service.update_cached_maintenance_sessions(
+            [{"session_id": "maint-1", "log_handling": "drop_errors", "expires_at": future, "target_app": "db"}]
         )
 
         resp = await client.post(

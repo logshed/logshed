@@ -8,6 +8,7 @@ import {
   AlertRuleUpdate,
   AlertTestRequest,
   AlertTestResponse,
+  MaintenanceLogHandling,
   MaintenanceSchedule,
   MaintenanceWindowResponse,
 } from '../types.ts';
@@ -114,12 +115,14 @@ export async function fetchMaintenanceWindow(): Promise<MaintenanceWindowRespons
   return apiFetch<MaintenanceWindowResponse>('/api/alerts/maintenance');
 }
 
+/** Starts a session ending at `until` with the given mode and targets, or ends every session when `until` is null. */
 export async function setMaintenanceWindow(
-  until: string | null
+  until: string | null,
+  scope?: { log_handling: MaintenanceLogHandling; target_app: string | null; target_host: string | null }
 ): Promise<MaintenanceWindowResponse> {
   return apiFetch<MaintenanceWindowResponse>('/api/alerts/maintenance', {
     method: 'POST',
-    body: JSON.stringify({ until }),
+    body: JSON.stringify(until === null ? { until } : { until, ...scope }),
   });
 }
 

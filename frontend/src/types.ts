@@ -668,6 +668,8 @@ export interface AlertHistoryResponse {
   offset: number;
 }
 
+export type MaintenanceLogHandling = 'silence_alerts' | 'drop_errors';
+
 export interface MaintenanceSchedule {
   id: string;
   name: string;
@@ -679,6 +681,10 @@ export interface MaintenanceSchedule {
   day_of_month?: number | null;
   is_active?: boolean;
   next_run?: string | null;
+  /** Schedules saved before 1.4.0 have none: they silence every alert */
+  log_handling?: MaintenanceLogHandling;
+  target_app?: string | null;
+  target_host?: string | null;
 }
 
 export interface MaintenanceSessionDetail {
@@ -704,6 +710,8 @@ export interface MaintenanceWindowResponse {
   active_sessions_count?: number;
   sessions?: MaintenanceSessionDetail[];
   log_handling?: string;
+  /** A running window has no target, so every alert notification is held back */
+  silences_all_alerts?: boolean;
 }
 
 export interface ApiToken {

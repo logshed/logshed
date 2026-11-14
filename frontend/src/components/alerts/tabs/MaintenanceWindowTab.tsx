@@ -17,6 +17,12 @@ import type { ScheduleFields } from '../useMaintenance.ts';
 import { buttonClass } from '../../common/Button.tsx';
 import { controlClass } from '../../common/Field.tsx';
 import { Card } from '../../common/Card.tsx';
+import {
+  describeMaintenanceScope,
+  DropEveryErrorConfirm,
+  MaintenanceScope,
+  MaintenanceScopeFields,
+} from '../MaintenanceScopeFields.tsx';
 
 export { formatScheduleRecurrence } from '../../../utils/maintenanceSchedule.ts';
 
@@ -25,6 +31,15 @@ export interface MaintenanceWindowTabProps {
   isOnDemandActiveNow: boolean;
   customUntil: string;
   setCustomUntil: (val: string) => void;
+  /** The mode and targets of the next session started here. */
+  scope: MaintenanceScope;
+  onScopeChange: (next: MaintenanceScope) => void;
+  /** The end of a session that drops errors from every source, waiting for the confirmation. */
+  pendingUntil?: string | null;
+  onConfirmPending?: () => void;
+  onCancelPending?: () => void;
+  availableHosts?: string[];
+  availableApps?: string[];
   onClearMaintenance: () => void;
   onSetPreset: (hours: number) => void;
   /** Moves one session's end an hour later; shown on every active session row. */
@@ -38,11 +53,22 @@ export interface MaintenanceWindowTabProps {
   appUrl?: string;
 }
 
+/** Whole minutes from now until an ISO time (at least 1). */
+const minutesUntil = (iso: string | null): number =>
+  iso ? Math.max(1, Math.round((new Date(iso).getTime() - Date.now()) / 60000)) : 0;
+
 export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
   maintenance,
   isOnDemandActiveNow,
   customUntil,
   setCustomUntil,
+  scope,
+  onScopeChange,
+  pendingUntil = null,
+  onConfirmPending,
+  onCancelPending,
+  availableHosts,
+  availableApps,
   onClearMaintenance,
   onSetPreset,
   onExtendSession,
@@ -112,7 +138,9 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-warning-950/20 border border-warning-800/40">
               <div>
                 <p className="text-xs font-medium text-warning-200">
-                  Alert notifications are currently silenced
+                  {maintenance.silences_all_alerts === false
+                    ? 'Logs from the targets below count towards no alert rule'
+                    : 'Alert notifications are currently silenced'}
                 </p>
                 <p className="text-xs text-fg-soft mt-0.5">
                   Active until <span className="font-semibold text-fg-max">{formatMaintenanceTime(maintenance.until || maintenance.on_demand_until, serverTimezone)}</span>
@@ -128,9 +156,17 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
             </div>
           ) : (
             <p className="text-xs text-fg-soft">
-              Select a preset duration or set a specific end time to immediately silence outgoing alert notifications.
+              Choose what the window does and, optionally, the host or app it covers, then a duration or an end time to start it.
             </p>
           )}
+
+          <MaintenanceScopeFields
+            idPrefix="on-demand"
+            value={scope}
+            onChange={onScopeChange}
+            availableHosts={availableHosts}
+            availableApps={availableApps}
+          />
 
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-2">
             {/* Quick Presets */}
@@ -197,6 +233,9 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                         }`}>
                           {sess.log_handling === 'drop_errors' ? 'Filtering Errors' : 'Silencing Alerts'}
                         </span>
+                        {!sess.target_app && !sess.target_host && (
+                          <span className="text-[10px] text-fg-muted">All sources</span>
+                        )}
                       </div>
                       <div className="text-[11px] text-fg-muted mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                         <span>Initiated by: {sess.initiated_by}</span>
@@ -245,7 +284,7 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
               <span>Scheduled Maintenance Windows</span>
             </h3>
             <p className="text-xs text-fg-muted mt-0.5">
-              Define daily, weekly, or monthly recurring windows to automatically silence alerts during planned maintenance.
+              Define daily, weekly, or monthly recurring windows that silence alerts, or drop error logs, from every source or chosen targets.
             </p>
           </div>
           <button
@@ -298,6 +337,12 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
                       </span>
                       <span>
                         Duration: <span className="font-mono text-fg-soft">{sched.duration_minutes} min</span>
+                      </span>
+                      <span
+                        className={sched.log_handling === 'drop_errors' && !sched.target_app && !sched.target_host ? 'text-warning-300' : undefined}
+                        data-testid="schedule-scope"
+                      >
+                        {describeMaintenanceScope(sched)}
                       </span>
                       {sched.next_run && sched.enabled && !sched.is_active && (
                         <span>
@@ -416,8 +461,17 @@ export const MaintenanceWindowTab: React.FC<MaintenanceWindowTabProps> = ({
           scheduleToEdit={editor.schedule}
           onClose={() => setEditor(null)}
           onSave={onSaveSchedule}
+          availableHosts={availableHosts}
+          availableApps={availableApps}
         />
       )}
+
+      <DropEveryErrorConfirm
+        isOpen={pendingUntil !== null}
+        when={`For the next ${minutesUntil(pendingUntil)} minutes`}
+        onCancel={() => onCancelPending?.()}
+        onConfirm={() => onConfirmPending?.()}
+      />
     </div>
   );
 };

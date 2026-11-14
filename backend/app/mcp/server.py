@@ -454,6 +454,9 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         description=(
             "Start an on-demand maintenance window to silence alert notifications "
             "and optionally drop error logs during planned operations. Returns a session_id. "
+            "With target_app or target_host, the window covers only that target: its logs count towards "
+            "no alert rule (and with 'drop_errors' its error logs are dropped), and other alerts are sent "
+            "as usual. Without a target it holds back every alert notification. "
             "duration_minutes must be 1 - 1440, log_handling is 'silence_alerts' or 'drop_errors', "
             "and reason, target_app and target_host are limited to 255 characters. "
             "'drop_errors' needs target_app or target_host over MCP. Requires the maintenance:write scope. "
@@ -590,6 +593,7 @@ def create_mcp_server(*, stdio: bool = False) -> LogShedMcpServer:
         payload = {
             "maintenance_active": maint_status.active,
             "maintenance_until": maint_status.until,
+            "maintenance_silences_all_alerts": maint_status.silences_all_alerts,
             "log_handling": maint_status.log_handling,
             "recent_incidents": recent_alerts,
         }

@@ -161,6 +161,7 @@ async def get_maintenance_status_v1(
         log_handling=status_obj.log_handling,
         active_sessions_count=status_obj.active_sessions_count,
         sessions=status_obj.sessions,
+        silences_all_alerts=status_obj.silences_all_alerts,
     )
 
 

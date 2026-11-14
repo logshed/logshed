@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MaintenanceWindowTab, formatScheduleRecurrence } from '../components/alerts/tabs/MaintenanceWindowTab.tsx';
 import type { MaintenanceSchedule, MaintenanceWindowResponse } from '../types.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
+import { EMPTY_MAINTENANCE_SCOPE } from '../components/alerts/MaintenanceScopeFields.tsx';
+import { ScheduleEditorModal } from '../components/alerts/ScheduleEditorModal.tsx';
+import { chooseOption } from './selectDropdownHelpers.ts';
 
 vi.mock('../api/settings.ts', () => ({
   fetchSettings: vi.fn().mockResolvedValue({ server_timezone: 'UTC' }),
@@ -52,9 +55,19 @@ function renderTab(overrides: Partial<React.ComponentProps<typeof MaintenanceWin
     onToggleScheduleEnabled: vi.fn(),
     onDeleteSchedule: vi.fn(),
     onDisableSession: vi.fn(),
+    onScopeChange: vi.fn(),
+    onConfirmPending: vi.fn(),
+    onCancelPending: vi.fn(),
   };
   render(
-    <MaintenanceWindowTab maintenance={MAINTENANCE} isOnDemandActiveNow={false} customUntil="" {...handlers} {...overrides} />
+    <MaintenanceWindowTab
+      maintenance={MAINTENANCE}
+      isOnDemandActiveNow={false}
+      customUntil=""
+      scope={EMPTY_MAINTENANCE_SCOPE}
+      {...handlers}
+      {...overrides}
+    />
   );
   return handlers;
 }
@@ -195,5 +208,129 @@ describe('MaintenanceWindowTab API snippets', () => {
       fireEvent.click(screen.getAllByRole('button', { name: /Copy cURL/ })[0]);
     });
     expect(screen.queryByRole('button', { name: /Copied/ })).toBeNull();
+  });
+});
+
+describe('MaintenanceWindowTab mode and targets', () => {
+  it('changes the mode and targets of the next session', () => {
+    const handlers = renderTab({ availableHosts: ['nas01'], availableApps: ['restic'] });
+    chooseOption(screen.getByLabelText('Mode'), 'Silence alerts and drop error logs');
+    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, logHandling: 'drop_errors' });
+    fireEvent.change(screen.getByLabelText('Host (Optional)'), { target: { value: 'nas01' } });
+    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetHost: 'nas01' });
+    fireEvent.change(screen.getByLabelText('App (Optional)'), { target: { value: 'restic' } });
+    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetApp: 'restic' });
+  });
+
+  it('says what a window without a target does, and what one with a target does', () => {
+    renderTab();
+    expect(screen.getByTestId('on-demand-scope-help')).toHaveTextContent('With no host or app, every alert notification is held back.');
+  });
+
+  it('says a target only holds back its own alerts', () => {
+    renderTab({ scope: { logHandling: 'drop_errors', targetHost: 'nas01', targetApp: '' } });
+    expect(screen.getByTestId('on-demand-scope-help')).toHaveTextContent('count towards no alert rule');
+    expect(screen.getByTestId('on-demand-scope-help')).toHaveTextContent('Its error logs are discarded.');
+  });
+
+  it('asks before a session drops error logs from every source', () => {
+    const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const handlers = renderTab({ pendingUntil: until });
+    const dialog = screen.getByTestId('drop-every-error-confirm');
+    expect(screen.getByRole('heading', { name: 'Drop error logs from every source?' })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(
+      'For the next 60 minutes, error, critical, alert and emergency logs from every host and app are discarded. ' +
+        'They are not stored, not shown in the Console and not counted by alert rules, and cannot be recovered. Other logs are kept.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Drop errors from every source' }));
+    expect(handlers.onConfirmPending).toHaveBeenCalled();
+  });
+
+  it('cancels the pending session', () => {
+    const handlers = renderTab({ pendingUntil: new Date(Date.now() + 600000).toISOString() });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(handlers.onCancelPending).toHaveBeenCalled();
+  });
+
+  it('shows each schedule\'s scope, and marks one that drops errors from every source', () => {
+    renderTab({
+      maintenance: {
+        ...MAINTENANCE,
+        schedules: [
+          schedule({ id: 'a', name: 'Backup', log_handling: 'drop_errors', target_app: 'restic' }),
+          schedule({ id: 'b', name: 'Patch night', log_handling: 'drop_errors' }),
+          schedule({ id: 'c', name: 'Old one' }),
+        ],
+      },
+    });
+    const scopes = screen.getAllByTestId('schedule-scope').map((el) => el.textContent);
+    expect(scopes).toEqual(['Drops errors from app restic', 'Drops errors from every source', 'Silences every alert']);
+    expect(screen.getAllByTestId('schedule-scope')[1].className).toContain('text-warning-300');
+  });
+
+  it('says only the targets are held back when no running window covers every source', () => {
+    renderTab({
+      isOnDemandActiveNow: true,
+      maintenance: { ...MAINTENANCE, silences_all_alerts: false, sessions: [MAINTENANCE.sessions![0]] },
+    });
+    expect(screen.getByText('Logs from the targets below count towards no alert rule')).toBeInTheDocument();
+    expect(screen.queryByText('All sources')).toBeNull();
+  });
+
+  it('marks a session without a target as covering all sources', () => {
+    renderTab({ isOnDemandActiveNow: true, maintenance: { ...MAINTENANCE, silences_all_alerts: true } });
+    expect(screen.getByText('Alert notifications are currently silenced')).toBeInTheDocument();
+    expect(screen.getByText('All sources')).toBeInTheDocument();
+  });
+});
+
+describe('ScheduleEditorModal mode and targets', () => {
+  const fill = () => {
+    fireEvent.change(screen.getByLabelText('Schedule Name'), { target: { value: 'Backup' } });
+  };
+
+  it('saves the mode and targets with the schedule', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    render(<ScheduleEditorModal scheduleToEdit={null} onClose={vi.fn()} onSave={onSave} />);
+    fill();
+    chooseOption(screen.getByLabelText('Mode'), 'Silence alerts and drop error logs');
+    fireEvent.change(screen.getByLabelText('App (Optional)'), { target: { value: 'restic' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+    });
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: { logHandling: 'drop_errors', targetHost: '', targetApp: 'restic' } }),
+      null
+    );
+  });
+
+  it('asks before saving a schedule that drops errors from every source', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    render(<ScheduleEditorModal scheduleToEdit={null} onClose={vi.fn()} onSave={onSave} />);
+    fill();
+    chooseOption(screen.getByLabelText('Mode'), 'Silence alerts and drop error logs');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+    });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByTestId('drop-every-error-confirm')).toHaveTextContent(
+      'Each time this schedule runs (Weekly on Sunday at 02:00), for 60 minutes, error, critical, alert and emergency logs'
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Drop errors from every source' }));
+    });
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ scope: { logHandling: 'drop_errors', targetHost: '', targetApp: '' } }), null);
+  });
+
+  it('opens a schedule with the mode and targets it has', () => {
+    render(
+      <ScheduleEditorModal
+        scheduleToEdit={schedule({ name: 'Backup', log_handling: 'drop_errors', target_host: 'nas01' })}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(screen.getByLabelText('Host (Optional)')).toHaveValue('nas01');
+    expect(screen.getByTestId('schedule-scope-help')).toHaveTextContent('Its error logs are discarded.');
   });
 });

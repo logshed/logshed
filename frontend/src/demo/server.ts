@@ -174,13 +174,25 @@ function maintenanceState() {
     active: live.length > 0, until, on_demand_until: until, reason: live[0]?.reason ?? null, schedule_name: null,
     schedules: store.schedules, server_time: new Date().toISOString(),
     server_timezone: String(settings.server_timezone), remaining_seconds: until ? Math.round((Date.parse(until) - now) / 1000) : 0,
-    active_sessions_count: live.length, sessions: live, log_handling: 'silence_alerts',
+    active_sessions_count: live.length, sessions: live,
+    log_handling: live.some((x) => x.log_handling === 'drop_errors') ? 'drop_errors' : 'silence_alerts',
+    silences_all_alerts: live.some((x) => !x.target_app && !x.target_host),
   };
+}
+
+/** Whether a running session with a target covers this log (the demo compares names exactly). */
+function inTargetedMaintenance(log: LogEntry): boolean {
+  const same = (a: string | null | undefined, b: string) => a?.toLowerCase() === b.toLowerCase();
+  return maintenanceState().sessions.some((x) =>
+    (x.target_app || x.target_host) &&
+    (!x.target_app || same(x.target_app, log.app_name)) &&
+    (!x.target_host || same(x.target_host, log.source_alias) || same(x.target_host, log.source_ip))
+  );
 }
 
 /** Fire the alert rules a new line matches, as the real alert engine would, with each rule's cooldown. */
 function checkAlerts(log: LogEntry) {
-  if (maintenanceState().active) return;
+  if (maintenanceState().silences_all_alerts || inTargetedMaintenance(log)) return;
   for (const rule of store.alertRules.items) {
     if (!rule.is_enabled || !store.matchesRule(rule, log)) continue;
     if (rule.last_triggered_at && Date.parse(log.timestamp) - Date.parse(rule.last_triggered_at) < rule.cooldown_seconds * 1000) continue;
@@ -287,7 +299,11 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   ['DELETE', /^\/api\/alerts\/history$/, () => { store.history.items = []; return { status: 'ok' }; }],
   ['GET', /^\/api\/alerts\/maintenance$/, () => maintenanceState()],
   ['POST', /^\/api\/alerts\/maintenance$/, (_m, _q, b) => {
-    if (b?.until) store.sessions.push({ session_id: `demo-${Date.now()}`, reason: 'Started from the web UI', log_handling: 'silence_alerts', initiated_by: 'web', expires_at: String(b.until) });
+    if (b?.until) store.sessions.push({
+      session_id: `demo-${Date.now()}`, reason: 'Started from the web UI', log_handling: String(b.log_handling || 'silence_alerts'),
+      target_app: (b.target_app as string | null) ?? null, target_host: (b.target_host as string | null) ?? null,
+      initiated_by: 'web', expires_at: String(b.until),
+    });
     else store.sessions.splice(0);
     return maintenanceState();
   }],

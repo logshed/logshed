@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { MaintenanceSchedule } from '../../types.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
-import { DAYS_OF_WEEK } from '../../utils/maintenanceSchedule.ts';
+import { DAYS_OF_WEEK, formatScheduleRecurrence } from '../../utils/maintenanceSchedule.ts';
 import type { ScheduleFields } from './useMaintenance.ts';
+import { DropEveryErrorConfirm, dropsEveryError, MaintenanceScope, MaintenanceScopeFields } from './MaintenanceScopeFields.tsx';
 import { buttonClass } from '../common/Button.tsx';
 import { CHECKBOX_CLASS, controlClass, LABEL_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 
@@ -13,10 +14,18 @@ export interface ScheduleEditorModalProps {
   onClose: () => void;
   /** Saves the schedule; the dialog closes when this resolves true. */
   onSave: (fields: ScheduleFields, scheduleToEdit: MaintenanceSchedule | null) => Promise<boolean>;
+  availableHosts?: string[];
+  availableApps?: string[];
 }
 
 /** Adds or edits a recurring maintenance schedule. Mount it only while it is open. */
-export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ scheduleToEdit, onClose, onSave }) => {
+export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({
+  scheduleToEdit,
+  onClose,
+  onSave,
+  availableHosts,
+  availableApps,
+}) => {
   const [scheduleFormName, setScheduleFormName] = useState<string>(scheduleToEdit?.name ?? '');
   const [scheduleFormRecurrence, setScheduleFormRecurrence] = useState<'daily' | 'weekly' | 'monthly'>(
     scheduleToEdit?.recurrence || 'weekly'
@@ -26,9 +35,19 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
   const [scheduleFormDayOfWeek, setScheduleFormDayOfWeek] = useState<number>(scheduleToEdit?.day_of_week ?? 0);
   const [scheduleFormDayOfMonth, setScheduleFormDayOfMonth] = useState<number>(scheduleToEdit?.day_of_month ?? 1);
   const [scheduleFormEnabled, setScheduleFormEnabled] = useState<boolean>(scheduleToEdit?.enabled ?? true);
+  const [scheduleScope, setScheduleScope] = useState<MaintenanceScope>({
+    logHandling: scheduleToEdit?.log_handling ?? 'silence_alerts',
+    targetHost: scheduleToEdit?.target_host ?? '',
+    targetApp: scheduleToEdit?.target_app ?? '',
+  });
+  const [confirmingDrop, setConfirmingDrop] = useState<boolean>(false);
 
-  const handleSaveSchedule = async (e?: React.FormEvent) => {
+  const handleSaveSchedule = async (e?: React.FormEvent, confirmed = false) => {
     if (e) e.preventDefault();
+    if (dropsEveryError(scheduleScope) && !confirmed) {
+      setConfirmingDrop(true);
+      return;
+    }
     const saved = await onSave(
       {
         name: scheduleFormName,
@@ -38,6 +57,7 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
         dayOfWeek: scheduleFormDayOfWeek,
         dayOfMonth: scheduleFormDayOfMonth,
         enabled: scheduleFormEnabled,
+        scope: scheduleScope,
       },
       scheduleToEdit
     );
@@ -186,6 +206,15 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
           ))}
         </div>
 
+        {/* Mode & Targets */}
+        <MaintenanceScopeFields
+          idPrefix="schedule"
+          value={scheduleScope}
+          onChange={setScheduleScope}
+          availableHosts={availableHosts}
+          availableApps={availableApps}
+        />
+
         {/* Enabled Switch */}
         <div className="flex items-center gap-2 pt-2">
           <input
@@ -217,6 +246,21 @@ export const ScheduleEditorModal: React.FC<ScheduleEditorModalProps> = ({ schedu
           </button>
         </div>
       </form>
+
+      <DropEveryErrorConfirm
+        isOpen={confirmingDrop}
+        when={`Each time this schedule runs (${formatScheduleRecurrence({
+          recurrence: scheduleFormRecurrence,
+          start_time: scheduleFormStartTime,
+          day_of_week: scheduleFormDayOfWeek,
+          day_of_month: scheduleFormDayOfMonth,
+        } as MaintenanceSchedule)}), for ${scheduleFormDuration} minutes`}
+        onCancel={() => setConfirmingDrop(false)}
+        onConfirm={() => {
+          setConfirmingDrop(false);
+          void handleSaveSchedule(undefined, true);
+        }}
+      />
     </Modal>
   );
 };

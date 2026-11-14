@@ -24,6 +24,7 @@ This guide explains how to configure real-time alert rules and ingestion drop ru
   - [Practical Drop Rule Examples](#practical-drop-rule-examples)
   - [Built-in Presets](#built-in-presets)
   - [Preset Bundles & Sharing](#preset-bundles--sharing)
+- [Maintenance Windows](#maintenance-windows)
 
 ---
 
@@ -366,3 +367,16 @@ JSON files in `/data/presets/alerts/` and `/data/presets/drops/` appear in the s
 ### Preset Bundles & Sharing
 
 - **JSON Export & Import**: Export all configured drop rules as a clean, human-readable JSON bundle. Import rules across multiple LogShed instances with automatic conflict resolution and deduplication.
+
+<a id="maintenance-windows"></a>
+## Maintenance Windows
+
+**Rules & History > Maintenance** holds back alerts while you work on a machine: start a window on demand (for 1, 4, 8 or 24 hours, or until a time you choose) or on a daily, weekly or monthly schedule. Home Assistant, the REST API (`POST /api/v1/maintenance/enable`) and MCP start the same windows.
+
+Each window has a **Mode** and, optionally, a **Host** and an **App**:
+- **Silence alerts**: with no host or app, every alert notification is held back while the window runs (alerts are still recorded in History). With a host, an app or both, only the target is covered: its logs are stored and shown as usual but count towards no alert rule, and every other alert is sent. A rule that watches several hosts then fires only on what the other hosts send.
+- **Silence alerts and drop error logs**: the same, and error, critical, alert and emergency logs from the target are discarded before they are stored (not shown, not counted, not recoverable). Use it for the burst of errors a restart or a backup causes. Other logs are kept.
+
+The host matches a log's name as the Console shows it or its IP address, and the host and app can be patterns such as `nas*` or `192.168.1.*`. With both, a log must match both. Dropping errors from every source (that mode with no host or app) asks you to confirm first, for a session when you start it and for a schedule when you save it; the schedule list marks such a schedule. MCP clients cannot start it: over MCP, dropping errors needs a target.
+
+While any window without a target runs, every notification is held back, whatever other windows run beside it. Schedules saved before LogShed 1.4.0 have no mode or target, so they silence every alert notification as they did. A session started with a target before the upgrade, and still running after it, covers only its target from then on.
