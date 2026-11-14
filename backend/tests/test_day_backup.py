@@ -259,3 +259,23 @@ class TestRestoreWithDayFiles:
             archive = _backup(db)
         with pytest.raises(restore_mod.RestoreError, match="layout"):
             restore_mod.restore_backup(archive, db, LATEST, say=lambda _t: None)
+
+
+def test_the_copied_file_list_keeps_no_counts_for_files_left_out(db, tmp_path):
+    """
+    The backup's copy of the file list is cut to the archived day files, and their counts go with
+    them: the foreign keys are switched on before the transaction, where the pragma takes effect.
+    """
+    _write(db, _row(D1, 3, "one"), _row(D2, 3, "two"))
+    _seal(db)
+    with open_db(db) as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert {r[0] for r in conn.execute("SELECT DISTINCT day FROM log_file_counts")} == {D1, D2}
+    copy = tmp_path / "copy.db"
+    copy.write_bytes(db.read_bytes())
+
+    db_backup._match_catalogue(copy, [D1], None)
+
+    with closing(sqlite3.connect(copy)) as conn:
+        assert [r[0] for r in conn.execute("SELECT day FROM log_files WHERE day != 'legacy'")] == [D1]
+        assert {r[0] for r in conn.execute("SELECT DISTINCT day FROM log_file_counts")} == {D1}

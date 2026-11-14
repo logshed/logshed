@@ -603,10 +603,12 @@ def _match_catalogue(db_copy: Path, archived: list[str], top_id: Optional[int]) 
     copied later, and a restore must not give them out again.
     """
     with contextlib.closing(sqlite3.connect(str(db_copy), isolation_level=None)) as conn:
+        # Before BEGIN: inside a transaction the pragma does nothing, and the counts of the files
+        # left out would stay behind their deleted entries
+        conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("BEGIN;")
         placeholders = ",".join("?" * len(archived))
         keep = f"AND day NOT IN ({placeholders})" if archived else ""
-        conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(f"DELETE FROM log_files WHERE day != 'legacy' {keep};", archived)
         if top_id is not None:
             conn.execute("UPDATE log_id_state SET next_id = MAX(next_id, ?) WHERE id = 1;", (top_id + 1,))
