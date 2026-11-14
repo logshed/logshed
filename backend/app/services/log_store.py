@@ -1496,12 +1496,7 @@ def error_figures(conn: sqlite3.Connection, since_1h: str, since_24h: str) -> Er
                 "(SELECT app_id, COUNT(*) AS cnt FROM logs WHERE severity <= 3 AND ts >= ? GROUP BY +app_id) AS g",
                 (since_24h_us,),
             ).fetchall()
-            host_rows = part.conn.execute(
-                "SELECT COALESCE(NULLIF((SELECT name FROM hosts WHERE hosts.id = g.host_id), ''), g.source_ip), g.cnt FROM "
-                "(SELECT host_id, source_ip, COUNT(*) AS cnt FROM logs WHERE severity <= 3 AND ts >= ? "
-                "GROUP BY host_id, source_ip) AS g",
-                (since_24h_us,),
-            ).fetchall()
+            host_rows = part.conn.execute(_DAY_ERROR_HOSTS_SQL, (since_24h_us,)).fetchall()
         for name, value in zip(_ERROR_COUNT_COLUMNS, row):
             counts[name] += value or 0
         for name, cnt in app_rows:
@@ -1512,6 +1507,30 @@ def error_figures(conn: sqlite3.Connection, since_1h: str, since_24h: str) -> Er
     top_apps = [{"app_name": n, "cnt": c} for n, c in sorted(apps.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
     top_hosts = [{"host_val": n, "cnt": c} for n, c in sorted(hosts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
     return ErrorFigures(counts, top_apps, top_hosts)
+
+
+# A day file's errors per host since a time. Grouped by +host_id (as the apps by +app_id): grouped
+# by the bare column, the planner skip-scanned the host index and read every row of the range
+# for its severity (0.7 s on a 1.7M-row day), where the time index holds the severity
+_DAY_ERROR_HOSTS_SQL = (
+    "SELECT COALESCE(NULLIF((SELECT name FROM hosts WHERE hosts.id = g.host_id), ''), g.source_ip), g.cnt FROM "
+    "(SELECT host_id, source_ip, COUNT(*) AS cnt FROM logs WHERE severity <= 3 AND ts >= ? "
+    "GROUP BY +host_id, source_ip) AS g"
+)
+
+
+# A day file's errors per host, address and app since a time, for the digest; +host_id for the
+# same reason (a whole-index scan, 19 times slower on a 300k-row day)
+_DAY_DIGEST_ERRORS_SQL = """
+    SELECT (SELECT name FROM hosts WHERE hosts.id = g.host_id), g.source_ip,
+           (SELECT name FROM apps WHERE apps.id = g.app_id), g.cnt, g.e0, g.e1, g.e2, g.e3, g.low
+    FROM (
+        SELECT host_id, source_ip, app_id, COUNT(*) AS cnt, SUM(severity = 0) AS e0,
+               SUM(severity = 1) AS e1, SUM(severity = 2) AS e2, SUM(severity = 3) AS e3,
+               MIN(severity) AS low
+        FROM logs WHERE severity <= 3 AND ts >= ? GROUP BY +host_id, source_ip, app_id
+    ) AS g
+"""
 
 
 # The error totals and per-severity counts (warning included) share one pass over the
@@ -1614,16 +1633,7 @@ def digest_figures(conn: sqlite3.Connection, since_iso: str) -> DigestFigures:
             time_column = "ts"
             error_rows = []
             for alias, ip, app, *figures in part.conn.execute(
-                """
-                SELECT (SELECT name FROM hosts WHERE hosts.id = g.host_id), g.source_ip,
-                       (SELECT name FROM apps WHERE apps.id = g.app_id), g.cnt, g.e0, g.e1, g.e2, g.e3, g.low
-                FROM (
-                    SELECT host_id, source_ip, app_id, COUNT(*) AS cnt, SUM(severity = 0) AS e0,
-                           SUM(severity = 1) AS e1, SUM(severity = 2) AS e2, SUM(severity = 3) AS e3,
-                           MIN(severity) AS low
-                    FROM logs WHERE severity <= 3 AND ts >= ? GROUP BY host_id, source_ip, app_id
-                ) AS g
-                """,
+                _DAY_DIGEST_ERRORS_SQL,
                 (since,),
             ).fetchall():
                 docker = (ip or "").lower() == "docker" or (alias or "").lower() == "docker"

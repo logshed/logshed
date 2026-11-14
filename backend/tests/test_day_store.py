@@ -17,6 +17,7 @@ import pytest
 
 import app.core.migrations as migrations_mod
 from app.core import day_files
+from app.core.day_files import iso_to_us
 from app.core.migrations import MIGRATIONS, run_migrations
 from app.services import day_store, log_store
 from app.services.fts_indexer import index_pending_logs
@@ -366,4 +367,47 @@ def test_the_facet_walk_seeks_each_distinct_source_once(tmp_path):
     assert seen.bare_ip_apps == [("cron", "10.0.0.1")]
     # Six seeks and their name lookups take a few thousand instructions; reading the rows took hundreds of thousands
     assert len(steps) < 20, f"{len(steps) * 1000} instructions"
+    day_store.close_thread_connections()
+
+
+def test_error_figures_and_the_digest_read_only_the_time_range_of_a_sealed_day(tmp_path):
+    """
+    The top error hosts of the last 24 hours read the time index, which holds the severity: grouped
+    by the bare host column, the planner skip-scanned the host index and read the table row of every
+    log in the range (0.7 s on a 1.7M-row day). The plan is checked, because in a small file both
+    plans take about the same instructions; the cost is the table pages read.
+    """
+    day_store.forget_id_blocks()
+    path = tmp_path / "logs.db"
+    run_migrations(path)
+    start = datetime.datetime(2026, 11, 13, tzinfo=datetime.timezone.utc)
+    rows = []
+    for i in range(20_000):
+        stamp = (start + datetime.timedelta(seconds=4 * i)).isoformat()
+        rows.append({"timestamp": stamp, "received_at": stamp, "source_ip": f"10.0.0.{i % 40}",
+                     "source_alias": f"host{i % 40}", "app_name": f"app{i % 7}", "severity": 3 if i % 5 == 0 else 6,
+                     "message": f"line {i}", "raw": f"line {i}"})
+    with open_db(path) as conn:
+        day_store.write_rows(conn, rows)
+        day_conn = day_store.connection(day_files.day_path(path, "2026-11-13"))
+        while day_store.index_pending(day_conn, 5000):
+            pass
+        assert day_store.seal(conn, "2026-11-13")
+    # The second half of the day: 10,000 rows, 2,000 of them errors
+    since = (start + datetime.timedelta(seconds=4 * 10_000)).isoformat()
+    with open_db(path, sqlite3.Row) as conn:
+        found = log_store.error_figures(conn, since[:19], since[:19])
+    assert found.severity_counts["count_24h"] == 2000
+    assert sum(r["cnt"] for r in found.top_hosts) == 5 * 250  # errors are every fifth row: 8 hosts of 250
+    day_conn = sqlite3.connect(day_files.day_path(path, "2026-11-13"))
+    try:
+        # The daily digest's errors per host, address and app had the same plan
+        plans = [
+            [r[3] for r in day_conn.execute("EXPLAIN QUERY PLAN " + sql, (iso_to_us(since),))]
+            for sql in (log_store._DAY_ERROR_HOSTS_SQL, log_store._DAY_DIGEST_ERRORS_SQL)
+        ]
+    finally:
+        day_conn.close()
+    for plan in plans:
+        assert any("idx_logs_time_sev" in step for step in plan), plan
     day_store.close_thread_connections()
