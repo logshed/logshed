@@ -94,6 +94,8 @@ export function prepareLogEntry(
   return {
     ...entry,
     source_alias,
+    // A configured alias replaces a name the device reported for itself
+    host_self_reported: canonical ? false : entry.host_self_reported,
     storedSourceAlias,
     formattedTimestamp:
       existing.formattedTimestamp ??

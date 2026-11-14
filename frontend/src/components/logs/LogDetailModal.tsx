@@ -4,6 +4,8 @@ import { LogEntry, DockerEndpoint } from '../../types.ts';
 import { fetchLogContext, deleteSingleLog } from '../../api/logs.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
 import { SlideOver } from '../common/SlideOver.tsx';
+import { HostName } from './HostName.tsx';
+import { ReportedHostNote } from './ReportedHostNote.tsx';
 import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp, formatUtcOffset } from '../../utils/formatters.ts';
 import { getCachedServerTimezone } from '../../api/settings.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
@@ -23,6 +25,10 @@ interface LogDetailModalProps {
   /** Aliases of deleted or renamed Docker hosts; rows that carry one are container logs. */
   formerDockerAliases?: string[];
   isHostAliased?: boolean;
+  /** Configured host aliases by address, for the note on a host name the device reported */
+  hostAliases?: Record<string, string>;
+  /** Saves a reported host name as its address's alias (the note's one-click button) */
+  onMakeAlias?: (ip: string, name: string) => Promise<void>;
   onCreateDropRule?: (log: LogEntry) => void;
   /** Opens Rules & History with a new alert rule prefilled from this log. */
   onCreateAlertRule?: (log: LogEntry) => void;
@@ -60,6 +66,8 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   dockerEndpoints = [],
   formerDockerAliases = [],
   isHostAliased,
+  hostAliases = {},
+  onMakeAlias,
   onCreateDropRule,
   onCreateAlertRule,
   onDeleteLog,
@@ -77,7 +85,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     return offset ? `(${offset})` : '';
   };
   const hostIsAliased = Boolean(
-    isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip)
+    isHostAliased ?? (log && log.source_alias && log.source_alias !== log.source_ip && !log.host_self_reported)
   );
   const [contextLogs, setContextLogs] = useState<LogEntry[]>([]);
   const [isLoadingContext, setIsLoadingContext] = useState(false);
@@ -287,8 +295,10 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             <SeverityBadge severity={log.severity} />
             <span className="font-mono text-fg-soft font-medium">{log.app_name}</span>
             <span className="text-fg-subtle">•</span>
-            <span className="font-mono text-fg-muted">{log.source_alias}</span>
-            <span className="text-fg-muted">({log.source_ip})</span>
+            <span className="font-mono text-fg-muted">
+              <HostName name={log.source_alias} selfReported={log.host_self_reported} />
+            </span>
+            {log.source_alias !== log.source_ip && <span className="text-fg-muted">({log.source_ip})</span>}
           </div>
 
           {/* Phones: two columns, with Explain with AI across both below them */}
@@ -402,6 +412,20 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             )}
           </div>
         </div>
+
+        <ReportedHostNote
+          log={log}
+          hostAliases={hostAliases}
+          dockerEndpoints={dockerEndpoints}
+          onMakeAlias={
+            onMakeAlias
+              ? async (ip, name) => {
+                  await onMakeAlias(ip, name);
+                  onClose();
+                }
+              : undefined
+          }
+        />
 
         {/* Delete Confirmation Banner */}
         {showDeleteConfirm && (

@@ -277,8 +277,10 @@ LOG_COLUMNS = (
 
 def log_columns(include_raw: bool = True) -> str:
     """The SELECT column list for log rows, with the raw packet only when it is needed."""
-    # Legacy rows have no source kind: it is unknown, and they are classed by host name instead
-    return f"{LOG_COLUMNS}, logs.raw, NULL AS source_kind" if include_raw else f"{LOG_COLUMNS}, NULL AS source_kind"
+    # Legacy rows have no source kind (they are classed by host name instead)
+    # nor a reported host name
+    extra = "NULL AS source_kind, NULL AS reported_host, 0 AS host_self_reported"
+    return f"{LOG_COLUMNS}, logs.raw, {extra}" if include_raw else f"{LOG_COLUMNS}, {extra}"
 
 
 def _kind_name(row: Any) -> Optional[str]:
@@ -287,6 +289,14 @@ def _kind_name(row: Any) -> Optional[str]:
         return KIND_NAMES.get(row["source_kind"])
     except (IndexError, KeyError):
         return None
+
+
+def _reported(row: Any) -> dict[str, Any]:
+    """The reported host name and self-reported flag, or nothing when the row was read without them."""
+    try:
+        return {"reported_host": row["reported_host"], "host_self_reported": bool(row["host_self_reported"])}
+    except (IndexError, KeyError):
+        return {}
 
 
 def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = True) -> LogEntry:
@@ -310,6 +320,7 @@ def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = Tr
             message=row["message"],
             raw=raw,
             source_kind=_kind_name(row),
+            **_reported(row),
         )
     return LogEntry(
         id=row["id"],
@@ -323,6 +334,7 @@ def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = Tr
         message=redact(row["message"]),
         raw=redact(raw) if raw is not None else None,
         source_kind=_kind_name(row),
+        **_reported(row),
     )
 
 

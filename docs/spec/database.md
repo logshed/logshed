@@ -390,6 +390,10 @@ One step for the whole 1.4.0 release: later 1.4.0 changes add to it until 1.4.0 
       PRIMARY KEY (day, source_ip, app, host)
   ) WITHOUT ROWID;
   CREATE TABLE log_id_state (id INTEGER PRIMARY KEY CHECK (id = 1), next_id INTEGER NOT NULL);
+  CREATE TABLE reported_hosts (      -- host names syslog senders are shown by (2.3c, "Reported host names")
+      name TEXT NOT NULL, source_ip TEXT NOT NULL, last_seen_us INTEGER NOT NULL,
+      PRIMARY KEY (name, source_ip)
+  ) WITHOUT ROWID;
   ```
   The legacy entry's id range and time range come from the primary key and `idx_logs_time_sev`, and its row count from one `COUNT(*)` on the smallest index (0.4 s warm, 0.7 s cold at 50 million rows in batch C), so the step is quick at any size (a timestamp that cannot be read leaves the time range empty). `log_id_state.next_id` starts after the highest id the legacy table ever gave (`sqlite_sequence`, or `MAX(id)` if higher), so log ids keep increasing across the upgrade.
 
@@ -420,7 +424,7 @@ CREATE TABLE logs (
     host_id INTEGER NOT NULL,        -- hosts.id; the name was source_alias ('' when the address has no alias)
     app_id INTEGER NOT NULL,         -- apps.id; the name was app_name
     source_kind INTEGER NOT NULL,    -- 1 syslog, 2 Docker, 3 HTTP ingest, 4 LogShed itself
-    reported_host_id INTEGER,        -- reserved: the host name a syslog sender claimed
+    reported_host_id INTEGER,        -- hosts.id of the HOSTNAME a syslog sender reported, when its address had no alias
     facility INTEGER NOT NULL DEFAULT 1,
     severity INTEGER NOT NULL DEFAULT 6,
     message TEXT NOT NULL,
@@ -437,6 +441,7 @@ CREATE TABLE fts_index_state (id INTEGER PRIMARY KEY CHECK (id = 1), last_indexe
 - **Stored forms.** Times are kept as integers and given back as `datetime.isoformat()` in UTC (`iso_sql` builds the same string in SQL, also for times before 1970). Host and app names become ids into the file's own tables, which never reuse an id. `raw` keeps only what `message` does not already hold, and is rebuilt byte for byte (`RAW_SQL`). A day file is about 55% of the size the same logs took in the legacy table (`.plans` storage design, measured in batch C).
 - **Indexes.** Four instead of the legacy table's five: time, app, host, and (address, app, host), which serves the host filter's address branch, relabels by address and the host and app lists (one index seek per distinct triple).
 - **Full-text index.** Contentless (`content=''`), so it keeps no copy of the text and needs no triggers: the indexer adds each row with its text, and deletes remove rows by id (`contentless_delete=1`, SQLite 3.43 or later). The column names stay `app_name` and `source_alias`, so the search syntax (`host:`, `app:`) is unchanged.
+- **Reported host names.** A syslog sender whose address has no alias keeps the HOSTNAME it sent in `reported_host_id`, and is shown by it (`host_id = reported_host_id`, "self-reported") unless a configured host uses that name, letter case ignored: a syslog host alias, a Docker host name (`load_docker_source_aliases`) or `logshed` (`load_taken_host_names` in `core/utils.py`). Then `host_id` is the address, so a device cannot pose as another host. The store returns `reported_host` and `host_self_reported` (`reported_host_id = host_id`). Stored rows follow configuration changes in the background (`follow_reported_names` in `services/alias_rename.py`): an address that gets an alias loses its reported names (`clear_reported_hosts`), a name a syslog alias or Docker host starts using is withdrawn from other addresses' self-reported rows (`withdraw_reported_name`), and a name no configured host uses any more is shown again on the rows that reported it (`restore_reported_name`, which reads every row of every day file, as no index covers `reported_host_id`). `reported_hosts` in `logs.db` lists each (name, address) shown as self-reported, for the Console's host chips (`self_reported_sources` in the facets): ingest writes a pair at most once an hour, an alias save deletes its address's pairs, and a prune deletes pairs not seen since the cutoff. Legacy rows have no reported name: a HOSTNAME stored before 1.4.0 stays as `source_alias` until retention removes it.
 - **What the store returns:** ISO times, names and the whole `raw`, with the legacy column names, plus `source_kind` (`NULL` for legacy rows).
 
 ### 2.3d Sealing, Retention of Day Files and the Checks at Start-up

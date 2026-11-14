@@ -31,7 +31,7 @@ from app.core.pipeline import (
     ingest_room,
     wait_for_ingest_room,
 )
-from app.core.utils import SEVERITY_NAME_MAP, load_docker_source_aliases
+from app.core.utils import SEVERITY_NAME_MAP, load_taken_host_names
 
 logger = logging.getLogger(__name__)
 
@@ -529,8 +529,9 @@ class AliasCache:
         self._db_path = Path(db_path)
         self._refresh_interval = refresh_interval
         self._aliases: dict[str, str] = {}
-        # Docker host aliases, lowercased: a syslog hostname equal to one is never used as an alias
-        self._docker_aliases: frozenset[str] = frozenset()
+        # Every name a configured host uses, lowercased (load_taken_host_names): a reported
+        # HOSTNAME equal to one is never shown
+        self._taken_names: frozenset[str] = frozenset()
         self._lock = threading.Lock()
         self._refresh_task: asyncio.Task | None = None
         if preload:
@@ -542,15 +543,15 @@ class AliasCache:
         with self._lock:
             return self._aliases.get(source_ip, source_ip)
 
-    def is_docker_alias(self, name: str) -> bool:
-        """True when name matches a Docker host alias, ignoring letter case."""
+    def is_taken(self, name: str) -> bool:
+        """True when a configured host already uses name (letter case ignored), see _taken_names."""
         with self._lock:
-            return name.lower() in self._docker_aliases
+            return name.lower() in self._taken_names
 
     def load_aliases(self) -> None:
         """Synchronous: bulk-load all aliases from host_aliases, and the Docker host aliases."""
         new_aliases: dict[str, str] = {}
-        new_docker_aliases: frozenset[str] = frozenset()
+        new_taken: frozenset[str] = frozenset()
         try:
             conn = get_connection(self._db_path)
             try:
@@ -558,7 +559,7 @@ class AliasCache:
                 cursor.execute("SELECT ip, alias FROM host_aliases")
                 for row in cursor.fetchall():
                     new_aliases[row[0]] = row[1]
-                new_docker_aliases = frozenset(a.lower() for a in load_docker_source_aliases(conn))
+                new_taken = load_taken_host_names(conn)
             finally:
                 conn.close()
         except sqlite3.OperationalError:
@@ -570,7 +571,7 @@ class AliasCache:
 
         with self._lock:
             self._aliases = new_aliases
-            self._docker_aliases = new_docker_aliases
+            self._taken_names = new_taken
 
     async def start(self) -> None:
         """Start the periodic refresh background task. Safe to call again while running."""
@@ -906,6 +907,23 @@ class SyslogParseQueue:
             self._close_task = None
 
 
+def name_syslog_host(parsed: dict[str, Any], source_ip: str, alias_cache: "AliasCache") -> None:
+    """
+    Set the host name of a parsed message: its address's alias when it has one. An address with
+    no alias keeps the HOSTNAME its device sent as reported_host, and is shown by it (marked as
+    self-reported) unless a configured host already uses that name, so a device cannot pose as
+    another host; otherwise by its address. In-memory lookups only.
+    """
+    source_alias = alias_cache.resolve(source_ip)
+    if source_alias == source_ip:
+        hostname = parsed.get("hostname")
+        if hostname and hostname not in ("-", "unknown") and hostname != source_ip:
+            parsed["reported_host"] = hostname
+            if not alias_cache.is_taken(hostname):
+                source_alias = hostname
+    parsed["source_alias"] = source_alias
+
+
 async def dispatch_syslog_message(
     data: bytes,
     source_ip: str,
@@ -919,14 +937,7 @@ async def dispatch_syslog_message(
     """
     try:
         parsed = parse_syslog_message(data, source_ip)
-        # Zero-cost in-memory lookup - no DB I/O
-        source_alias = alias_cache.resolve(source_ip)
-        if source_alias == source_ip:
-            hostname = parsed.get("hostname")
-            # A hostname that is also a Docker host alias would make these rows read as container logs
-            if hostname and hostname not in ("-", "unknown") and not alias_cache.is_docker_alias(hostname):
-                source_alias = hostname
-        parsed["source_alias"] = source_alias
+        name_syslog_host(parsed, source_ip, alias_cache)
         stream_key = f"{source_ip}:{parsed['app_name']}"
 
         if (
@@ -950,6 +961,9 @@ async def dispatch_syslog_message(
                             parsed["hostname"] = parent["hostname"]
                         if "source_alias" in parent:
                             parsed["source_alias"] = parent["source_alias"]
+                        parsed.pop("reported_host", None)
+                        if "reported_host" in parent:
+                            parsed["reported_host"] = parent["reported_host"]
 
         await assembler.feed(stream_key, parsed)
     except Exception as e:

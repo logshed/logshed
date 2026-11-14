@@ -2,6 +2,7 @@ import React from 'react';
 import { Sparkles, CheckSquare, Square } from 'lucide-react';
 import { LogEntry } from '../../types.ts';
 import { SeverityBadge } from '../common/SeverityBadge.tsx';
+import { HostName, selfReportedTitle } from './HostName.tsx';
 
 import type { ProcessedLogEntry } from '../../utils/logEntry.ts';
 
@@ -88,6 +89,7 @@ export function areLogRowPropsEqual(prevProps: LogRowProps, nextProps: LogRowPro
       prevProps.log.severity !== nextProps.log.severity ||
       prevProps.log.app_name !== nextProps.log.app_name ||
       prevProps.log.source_alias !== nextProps.log.source_alias ||
+      prevProps.log.host_self_reported !== nextProps.log.host_self_reported ||
       prevProps.log.timestamp !== nextProps.log.timestamp ||
       prevProps.log.received_at !== nextProps.log.received_at ||
       prevProps.log.formattedTimestamp !== nextProps.log.formattedTimestamp ||
@@ -135,7 +137,9 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
           <SeverityBadge severity={log.severity} />
           <span className="font-mono text-xs truncate">
             <span className="text-fg font-semibold">{log.app_name}</span>
-            <span className="text-fg-muted font-normal ml-1">({log.source_alias})</span>
+            <span className="text-fg-muted font-normal ml-1">
+              (<HostName name={log.source_alias} selfReported={log.host_self_reported} />)
+            </span>
           </span>
         </div>
 
@@ -219,8 +223,11 @@ export const LogRowComponent: React.FC<LogRowProps> = ({
       </div>
 
       {/* Host Alias / IP */}
-      <div className="text-fg-soft truncate pr-2" title={`${log.source_alias} (${log.source_ip})`}>
-        {log.source_alias}
+      <div
+        className="text-fg-soft truncate pr-2"
+        title={log.host_self_reported ? selfReportedTitle(log.source_alias, [log.source_ip]) : `${log.source_alias} (${log.source_ip})`}
+      >
+        <HostName name={log.source_alias} selfReported={log.host_self_reported} />
       </div>
 
       {/* App Name */}

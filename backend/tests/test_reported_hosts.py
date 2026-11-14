@@ -1,0 +1,188 @@
+"""
+A syslog sender whose address has no alias is shown by the HOSTNAME it reports, marked as
+self-reported, unless a configured host (a syslog host alias, a Docker host or LogShed itself)
+already uses that name: then it is shown by its address, so it cannot pose as that host. Stored
+rows follow when aliases and Docker hosts change. Logs stored before 1.4.0 have no reported name.
+"""
+
+import datetime
+import sqlite3
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from app.collectors.syslog import AliasCache, name_syslog_host
+from app.core import pipeline as pipeline_mod
+from app.core.day_files import KIND_SYSLOG
+from app.core.migrations import run_migrations
+from app.core.security import (
+    SESSION_COOKIE_NAME,
+    create_session_token,
+    get_or_create_master_key,
+    reset_crypto_cache,
+)
+from app.core.sse import SSELogEvent
+from app.main import create_app
+from app.services import day_store, log_store
+from tests.db_helpers import open_db, store_logs, stored_logs
+
+PRINTER_IP = "172.17.0.4"
+NAS_IP = "192.168.10.20"
+TS = "2026-11-14T10:00:00+00:00"
+
+
+@pytest.fixture(autouse=True)
+def env(tmp_path: Path, monkeypatch):
+    pipeline_mod._log_queue = None
+    reset_crypto_cache()
+    day_store._reported_written.clear()
+    db_file = tmp_path / "reported.db"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("SECRET_KEY_PATH", str(tmp_path / ".secret_key"))
+    monkeypatch.delenv("LOGSHED_SECRET_KEY", raising=False)
+    run_migrations(db_file)
+    get_or_create_master_key(tmp_path / ".secret_key")
+    with open_db(db_file) as conn:
+        conn.execute(
+            "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, 'truenas', ?)",
+            (NAS_IP, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+        )
+    yield db_file
+    pipeline_mod._log_queue = None
+    day_store._reported_written.clear()
+
+
+@pytest_asyncio.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://testserver") as ac:
+        yield ac
+
+
+@pytest.fixture
+def headers():
+    return {
+        "Cookie": f"{SESSION_COOKIE_NAME}={create_session_token(user_id=1)}",
+        "x-requested-with": "XMLHttpRequest",
+    }
+
+
+def _named(env: Path, hostname: str, ip: str = PRINTER_IP) -> dict:
+    parsed = {"hostname": hostname}
+    name_syslog_host(parsed, ip, AliasCache(env, preload=True))
+    return parsed
+
+
+def _row(message: str, hostname: str, ip: str = PRINTER_IP, env: Path | None = None) -> dict:
+    """A syslog row named as the collector names it."""
+    named = _named(env, hostname, ip)
+    return {
+        "timestamp": TS, "source_ip": ip, "source_kind": KIND_SYSLOG, "app_name": "app", "facility": 1,
+        "severity": 6, "message": message, "raw": message,
+        "source_alias": named["source_alias"], "reported_host": named.get("reported_host"),
+    }
+
+
+async def _logs(client: AsyncClient, headers: dict, **params) -> dict[str, dict]:
+    resp = await client.get("/api/logs", params=params, headers=headers)
+    assert resp.status_code == 200
+    return {log["message"]: log for log in resp.json()["logs"]}
+
+
+async def _facets(client: AsyncClient, headers: dict) -> dict:
+    resp = await client.get("/api/logs/facets", headers=headers)
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_a_free_name_is_shown_and_a_taken_one_is_not(env):
+    assert _named(env, "printer-hp") == {"hostname": "printer-hp", "reported_host": "printer-hp", "source_alias": "printer-hp"}
+    # Another address's alias (any letter case), a Docker host and LogShed's own name are refused
+    assert _named(env, "TrueNAS")["source_alias"] == PRINTER_IP
+    assert _named(env, "TrueNAS")["reported_host"] == "TrueNAS"
+    assert _named(env, "docker")["source_alias"] == PRINTER_IP
+    assert _named(env, "logshed")["source_alias"] == PRINTER_IP
+    # An address with an alias is named by it, and keeps no reported name
+    assert _named(env, "printer-hp", ip=NAS_IP) == {"hostname": "printer-hp", "source_alias": "truenas"}
+
+
+@pytest.mark.asyncio
+async def test_logs_and_host_lists_say_which_names_are_self_reported(client, headers, env):
+    store_logs(env, _row("job done", "printer-hp", env=env), _row("root login", "truenas", env=env))
+
+    logs = await _logs(client, headers)
+    assert logs["job done"]["source_alias"] == "printer-hp"
+    assert logs["job done"]["reported_host"] == "printer-hp"
+    assert logs["job done"]["host_self_reported"] is True
+    assert logs["root login"]["source_alias"] == PRINTER_IP
+    assert logs["root login"]["reported_host"] == "truenas"
+    assert logs["root login"]["host_self_reported"] is False
+
+    # The impostor's logs are not the real host's
+    assert list(await _logs(client, headers, source="truenas")) == []
+    assert list(await _logs(client, headers, source="printer-hp")) == ["job done"]
+
+    facets = await _facets(client, headers)
+    assert facets["self_reported_sources"] == {"printer-hp": [PRINTER_IP]}
+
+
+@pytest.mark.asyncio
+async def test_a_name_another_host_starts_using_is_withdrawn_and_comes_back_when_freed(client, headers, env):
+    store_logs(env, _row("job done", "printer-hp", env=env))
+
+    resp = await client.post("/api/aliases", json={"ip": "10.0.0.9", "alias": "Printer-HP"}, headers=headers)
+    assert resp.status_code == 200
+    assert {r["message"]: r["source_alias"] for r in stored_logs(env)} == {"job done": PRINTER_IP}
+    assert (await _facets(client, headers))["self_reported_sources"] == {}
+
+    resp = await client.delete("/api/aliases/10.0.0.9", headers=headers)
+    assert resp.status_code == 200
+    rows = stored_logs(env)
+    assert [(r["source_alias"], r["host_self_reported"]) for r in rows] == [("printer-hp", 1)]
+
+
+@pytest.mark.asyncio
+async def test_making_the_reported_name_the_alias_ends_the_self_reported_mark(client, headers, env):
+    store_logs(env, _row("job done", "printer-hp", env=env))
+
+    resp = await client.post("/api/aliases", json={"ip": PRINTER_IP, "alias": "printer-hp"}, headers=headers)
+    assert resp.status_code == 200
+
+    log = (await _logs(client, headers))["job done"]
+    assert (log["source_alias"], log["reported_host"], log["host_self_reported"]) == ("printer-hp", None, False)
+    assert (await _facets(client, headers))["self_reported_sources"] == {}
+
+
+@pytest.mark.asyncio
+async def test_a_new_docker_host_takes_its_name_from_reported_rows(client, headers, env, monkeypatch):
+    store_logs(env, _row("job done", "tower", env=env))
+    monkeypatch.setattr("app.api.docker_hosts._ensure_url_target_allowed", _allow, raising=False)
+
+    resp = await client.post(
+        "/api/docker/hosts",
+        json={"name": "Tower", "url": "tcp://10.0.0.7:2375", "source_alias": "tower", "enabled": False},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert [r["source_alias"] for r in stored_logs(env)] == [PRINTER_IP]
+
+
+async def _allow(*_args, **_kwargs):
+    return None
+
+
+def test_the_live_stream_marks_self_reported_names():
+    shown = SSELogEvent.from_entry({"id": 1, "source_alias": "printer-hp", "reported_host": "printer-hp"})
+    refused = SSELogEvent.from_entry({"id": 2, "source_alias": PRINTER_IP, "reported_host": "truenas"})
+    assert shown["host_self_reported"] is True
+    assert refused["host_self_reported"] is False
+
+
+def test_retention_forgets_names_no_stored_log_carries(env):
+    store_logs(env, _row("job done", "printer-hp", env=env))
+    with open_db(env, sqlite3.Row) as conn:
+        assert [tuple(r) for r in conn.execute("SELECT name, source_ip FROM reported_hosts")] == [("printer-hp", PRINTER_IP)]
+        log_store.prune(conn, "2099-01-01T00:00:00+00:00", lambda: None)
+        assert conn.execute("SELECT COUNT(*) FROM reported_hosts").fetchone()[0] == 0

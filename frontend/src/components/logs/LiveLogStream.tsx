@@ -44,6 +44,8 @@ import { StreamToolbar } from './StreamToolbar.tsx';
 import { SelectionActionBar } from './SelectionActionBar.tsx';
 import { DeleteSelectedDialog } from './DeleteSelectedDialog.tsx';
 import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
+import { saveAlias } from '../../api/aliases.ts';
+import { useAlias } from '../../context/AliasContext.tsx';
 
 // Loaded on first use, not with the Console
 const CreateDropRuleModal = React.lazy(() =>
@@ -129,6 +131,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const { shiftAnchor, clearAnchor } = selection;
   const selectionAnchor = useMemo(() => ({ shift: shiftAnchor, clear: clearAnchor }), [shiftAnchor, clearAnchor]);
 
+  const { bumpAliasVersion } = useAlias();
   // The handlers below run after the aliases or facets load, by when buffer and facets (declared
   // further down, because they need the aliases) exist
   const sources = useSourcesConfig({
@@ -573,6 +576,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       activeHosts={activeSources}
       activeApps={activeApps}
       selectableHosts={chips.selectableHosts}
+      selfReportedHosts={facets.selfReportedHosts}
       onToggleHost={toggleQuickSource}
       onToggleApp={toggleQuickApp}
       bufferSize={logs.length}
@@ -824,8 +828,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
           formerDockerAliases={sources.formerDockerAliases}
           isHostAliased={Boolean(
             sources.aliases[activeLogDetail.source_ip] ||
-            (activeLogDetail.source_alias && activeLogDetail.source_alias !== activeLogDetail.source_ip)
+            (activeLogDetail.source_alias &&
+              activeLogDetail.source_alias !== activeLogDetail.source_ip &&
+              !activeLogDetail.host_self_reported)
           )}
+          hostAliases={sources.aliases}
+          onMakeAlias={async (ip, name) => {
+            await saveAlias({ ip, alias: name });
+            bumpAliasVersion();
+          }}
           onCreateDropRule={(targetLog) => {
             setActiveLogDetail(null);
             setDropRuleTargetLog(targetLog);

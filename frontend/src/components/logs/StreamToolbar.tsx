@@ -3,6 +3,7 @@ import { Bookmark, Box, Clock, Pause, Play, Server, Trash2 } from 'lucide-react'
 import { LogFilterParams, SavedView } from '../../types.ts';
 import { SELECT_ALL_LIMIT } from './useLogSelection.ts';
 import { buttonClass } from '../common/Button.tsx';
+import { HostName, selfReportedTitle } from './HostName.tsx';
 
 interface StreamToolbarProps {
   isMobile: boolean;
@@ -17,6 +18,8 @@ interface StreamToolbarProps {
   activeApps: string[];
   /** Hosts the selected apps leave selectable; other host chips show disabled */
   selectableHosts: Set<string>;
+  /** Host names devices reported for themselves, with the addresses that sent each */
+  selfReportedHosts?: Record<string, string[]>;
   onToggleHost: (host: string) => void;
   onToggleApp: (app: string) => void;
   bufferSize: number;
@@ -45,6 +48,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
   activeHosts,
   activeApps,
   selectableHosts,
+  selfReportedHosts = {},
   onToggleHost,
   onToggleApp,
   bufferSize,
@@ -94,13 +98,20 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
         {hostChips.map((src) => {
           const isSelected = activeHosts.includes(src);
           const isDisabled = !isSelected && !selectableHosts.has(src);
+          const reportedBy = selfReportedHosts[src];
           return (
             <button
               key={src}
               data-testid="quick-filter-host"
               onClick={() => onToggleHost(src)}
               disabled={isDisabled}
-              title={isDisabled ? `No logs from ${src} for the selected app${activeApps.length > 1 ? 's' : ''}` : undefined}
+              title={
+                isDisabled
+                  ? `No logs from ${src} for the selected app${activeApps.length > 1 ? 's' : ''}`
+                  : reportedBy
+                  ? selfReportedTitle(src, reportedBy)
+                  : undefined
+              }
               className={`px-2 py-1 md:py-0.5 rounded text-[11px] font-mono border transition shrink-0 ${
                 isSelected
                   ? 'bg-accent-950 text-accent-300 border-accent-700 font-semibold cursor-pointer'
@@ -109,7 +120,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
                   : 'bg-raised text-fg-soft border-line hover:border-line-stronger cursor-pointer'
               }`}
             >
-              {src}
+              <HostName name={src} selfReported={Boolean(reportedBy)} />
             </button>
           );
         })}

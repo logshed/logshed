@@ -123,6 +123,11 @@ export function diffSources(
     }
   });
 
+  // Names a configured host uses (letter case ignored), which no device may show itself as
+  const takenNames = new Set<string>(['logshed']);
+  allDockerAliases.forEach((a) => takenNames.add(a.toLowerCase()));
+  Object.values(aliases).forEach((a) => takenNames.add(a.toLowerCase()));
+
   // Update source_alias on matching in-memory logs with strict separation between Docker and Syslog
   const remapRow = (log: ProcessedLogEntry): ProcessedLogEntry => {
     const isDocker = isDockerRow(log, log.source_alias, allDockerAliases);
@@ -159,9 +164,12 @@ export function diffSources(
     if (!log.source_ip) return log;
     if (aliases[log.source_ip]) {
       const newAlias = aliases[log.source_ip];
-      if (log.source_alias !== newAlias) {
-        return { ...log, source_alias: newAlias };
+      if (log.source_alias !== newAlias || log.host_self_reported) {
+        return { ...log, source_alias: newAlias, host_self_reported: false };
       }
+    } else if (log.host_self_reported && takenNames.has(log.source_alias.toLowerCase())) {
+      // A configured host now uses the name the device reported: shown by its address, as the server does
+      return { ...log, source_alias: log.source_ip, host_self_reported: false };
     } else if (previousAliases[log.source_ip]) {
       // Alias was removed; revert to raw IP matching backend behavior
       if (log.source_alias !== log.source_ip) {

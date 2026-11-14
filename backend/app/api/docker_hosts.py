@@ -32,7 +32,13 @@ from app.core.config import invalidate_settings_cache
 from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
 from app.core.utils import note_docker_alias_change
-from app.services.alias_rename import AliasRenameResult, alias_in_use, follow_alias_rename, reload_after_alias_rename
+from app.services.alias_rename import (
+    AliasRenameResult,
+    alias_in_use,
+    follow_alias_rename,
+    follow_reported_names,
+    reload_after_alias_rename,
+)
 from app.services import log_store
 from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
 
@@ -271,6 +277,7 @@ async def list_docker_endpoints(
 @router.post("", response_model=DockerEndpointResponse)
 async def create_docker_endpoint(
     payload: DockerEndpointCreateRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> DockerEndpointResponse:
     """Create a new Docker endpoint and spawn its worker task if enabled."""
@@ -321,6 +328,9 @@ async def create_docker_endpoint(
 
     new_id = await run_db_query(_insert)
     await asyncio.to_thread(reload_active_alias_caches)
+    # Syslog senders that reported this name are shown under their address from now on
+    new_alias = payload.source_alias.strip() or "docker"
+    background_tasks.add_task(run_db_query, lambda conn: follow_reported_names(conn, taken=new_alias))
 
     ep_data = {
         "id": new_id,
@@ -564,6 +574,7 @@ async def update_docker_endpoint(
                     old_alias=prev_alias,
                     batch_size=1000,
                 )
+                follow_reported_names(conn, taken=new_alias, freed=prev_alias)
             except Exception as exc:
                 logger.error(
                     f"Background retroactive Docker alias update failed for {target_ip} ({prev_alias} -> {new_alias}): {exc}"
@@ -577,6 +588,7 @@ async def update_docker_endpoint(
 @router.delete("/{endpoint_id}")
 async def delete_docker_endpoint(
     endpoint_id: int,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> dict[str, str]:
     """Delete a Docker endpoint and stop its worker (primary socket ID 1 protected)."""
@@ -599,9 +611,11 @@ async def delete_docker_endpoint(
         # Its container logs keep their alias, so they must stay Docker rows
         note_docker_alias_change(conn, row[0], None)
         conn.commit()
+        return row[0]
 
-    await run_db_query(_delete)
+    old_alias = await run_db_query(_delete)
     await asyncio.to_thread(reload_active_alias_caches)
+    background_tasks.add_task(run_db_query, lambda conn: follow_reported_names(conn, freed=old_alias))
 
     from app.main import get_docker_pool
     pool = get_docker_pool()

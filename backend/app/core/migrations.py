@@ -667,6 +667,12 @@ CREATE TABLE IF NOT EXISTS log_id_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     next_id INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reported_hosts (
+    name TEXT NOT NULL,
+    source_ip TEXT NOT NULL,
+    last_seen_us INTEGER NOT NULL,
+    PRIMARY KEY (name, source_ip)
+) WITHOUT ROWID;
 """
 
 
@@ -707,7 +713,8 @@ def migrate_v4(conn: sqlite3.Connection) -> None:
     - stored secrets move to their own key, derived from the master key apart from the session key;
     - new logs go to one file per UTC day: the catalogue of day files and the log id counter
       are added, and the logs table so far is listed as the legacy entry. No day file is made
-      and no log row is touched: the first write after start-up makes the day's file.
+      and no log row is touched: the first write after start-up makes the day's file;
+    - reported_hosts lists the host names syslog senders reported and are shown by.
     """
     logger.info("Running migration v4...")
     _reencrypt_stored_secrets(conn)

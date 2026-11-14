@@ -7,7 +7,7 @@ import sqlite3
 from typing import Any
 
 from app.api.deps import run_db_query
-from app.core.utils import AliasIndex, load_former_docker_aliases
+from app.core.utils import AliasIndex, load_former_docker_aliases, load_taken_host_names
 from app.models import LogFacetsResponse
 from app.services import log_store
 
@@ -39,7 +39,25 @@ def fetch_facets(conn: sqlite3.Connection) -> dict[str, Any]:
     result = facets.capped()
     result["truncated"] = result["truncated"] or truncated or bare_ip_truncated
     result["former_docker_aliases"] = load_former_docker_aliases(conn)
+    result["self_reported_sources"] = _self_reported(conn, set(result["sources"]), alias_index)
     return result
+
+
+def _self_reported(conn: sqlite3.Connection, listed: set[str], alias_index: AliasIndex) -> dict[str, list[str]]:
+    """
+    The listed host names that syslog senders reported for themselves, each with the addresses
+    that sent it: names no configured host uses, from addresses that still have no alias.
+    """
+    try:
+        rows = conn.execute("SELECT name, source_ip FROM reported_hosts ORDER BY name, source_ip").fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    taken = load_taken_host_names(conn)
+    found: dict[str, list[str]] = {}
+    for name, ip in rows:
+        if name in listed and name.lower() not in taken and ip not in alias_index.alias_by_ip:
+            found.setdefault(name, []).append(ip)
+    return found
 
 
 def _host_app_pairs(seen: log_store.SeenNames) -> tuple[list[tuple[str, str, str]], bool]:

@@ -168,10 +168,13 @@ def _plain(value):
     return value
 
 
+_DAY_FILE_ONLY = {"source_kind", "reported_host", "host_self_reported"}
+
+
 def _without_kind(value):
-    """value with every row's source_kind left out: legacy rows have none, day-file rows do."""
+    """value without each row's source kind and reported host: legacy rows have neither, day-file rows do."""
     if isinstance(value, dict):
-        return {k: _without_kind(v) for k, v in value.items() if k != "source_kind"}
+        return {k: _without_kind(v) for k, v in value.items() if k not in _DAY_FILE_ONLY}
     if isinstance(value, (list, tuple)):
         return type(value)(_without_kind(v) for v in value)
     return value
@@ -202,8 +205,8 @@ def test_rows_come_back_exactly_as_they_were_stored(layouts):
         _, rows = log_store.search(conn, LogFilter(), fetch=len(ROWS), count_limit=len(ROWS))
     by_id = {r["id"]: dict(r) for r in rows}
     for i, stored in enumerate(ROWS, start=1):
-        # A row stored without a source kind reads back as unknown (0)
-        assert by_id[i] == {"id": i, "source_kind": 0, **stored}
+        # A row stored without a source kind reads back as unknown (0), with no reported host
+        assert by_id[i] == {"id": i, "source_kind": 0, "reported_host": None, "host_self_reported": 0, **stored}
 
 
 FILTERS = [

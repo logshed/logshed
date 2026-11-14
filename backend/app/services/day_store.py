@@ -33,7 +33,7 @@ _INTERRUPT_CHECK_INSTRUCTIONS = 10_000
 # Log ids a process reserves from logs.db at a time
 ID_BLOCK = 100_000
 
-# Rows per multi-row INSERT (12 parameters each)
+# Rows per multi-row INSERT (13 parameters each)
 INSERT_CHUNK_ROWS = 500
 # The most (address, app, host) a seal lists per day file. The Console's lists use a stored list only
 # when it is shorter than their walk's limit (21,004), so more would only grow logs.db (a day of
@@ -403,9 +403,10 @@ def forget_id_blocks() -> None:
 # ---------------------------------------------------------------------------
 
 _INSERT_COLUMNS = (
-    "id, ts, received_us, source_ip, host_id, app_id, source_kind, facility, severity, message, raw, raw_kind"
+    "id, ts, received_us, source_ip, host_id, app_id, source_kind, reported_host_id, facility, severity, message,"
+    " raw, raw_kind"
 )
-_ROW_PLACEHOLDER = "(" + ", ".join("?" * 12) + ")"
+_ROW_PLACEHOLDER = "(" + ", ".join("?" * 13) + ")"
 
 
 def _name_ids(day_conn: sqlite3.Connection, table: str, names: set[str]) -> dict[str, int]:
@@ -517,6 +518,54 @@ def stored_values(entry: dict) -> tuple:
     return ts, received_us, day
 
 
+# (database, name, address) to when reported_hosts last had it written: each pair is written at
+# most once an hour, so ingest touches logs.db only for a name it has not seen lately
+_reported_written: dict[tuple[str, str, str], int] = {}
+REPORTED_REFRESH_US = 3600 * 1_000_000
+
+
+def note_reported_hosts(conn: sqlite3.Connection, entries: list[dict]) -> None:
+    """
+    Record in logs.db's reported_hosts the (name, address) of each stored entry shown by the
+    host name its syslog sender reported, for the host lists. A failure is logged, never raised:
+    the logs are stored already.
+    """
+    pairs = {
+        (e["reported_host"], e.get("source_ip") or "")
+        for e in entries
+        if e.get("reported_host") and e.get("id") is not None and e.get("source_alias") == e["reported_host"]
+    }
+    if not pairs:
+        return
+    db_path = main_path(conn)
+    if db_path is None:
+        return
+    now = int(time.time() * 1_000_000)
+    due = [p for p in pairs if now - _reported_written.get((str(db_path), *p), 0) >= REPORTED_REFRESH_US]
+    if not due:
+        return
+    try:
+        write = _main_write_conn(db_path)
+        with write:
+            write.executemany(
+                "INSERT INTO reported_hosts (name, source_ip, last_seen_us) VALUES (?, ?, ?)"
+                " ON CONFLICT(name, source_ip) DO UPDATE SET last_seen_us = excluded.last_seen_us",
+                [(name, ip, now) for name, ip in due],
+            )
+    except sqlite3.Error as exc:
+        logger.warning(f"Could not record the host names syslog senders reported: {exc}")
+        return
+    for name, ip in due:
+        _reported_written[(str(db_path), name, ip)] = now
+
+
+def forget_reported_hosts(conn: sqlite3.Connection, where_sql: str, params: tuple) -> None:
+    """Delete the reported_hosts rows where_sql selects (logs.db), and forget that they were written."""
+    conn.execute(f"DELETE FROM reported_hosts WHERE {where_sql}", params)
+    conn.commit()
+    _reported_written.clear()
+
+
 def write_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
     """
     Store entries (dicts with the row fields) in the day files of their received_at day, give
@@ -561,7 +610,10 @@ def _today() -> str:
 
 
 def _insert(day_conn: sqlite3.Connection, rows: list[tuple[dict, int, int]]) -> None:
-    hosts = _name_ids(day_conn, "hosts", {e.get("source_alias") or "" for e, _t, _r in rows})
+    host_names = {e.get("source_alias") or "" for e, _t, _r in rows}
+    # The HOSTNAME a syslog sender reported, where its address has no alias (None otherwise)
+    host_names.update(e["reported_host"] for e, _t, _r in rows if e.get("reported_host"))
+    hosts = _name_ids(day_conn, "hosts", host_names)
     apps = _name_ids(day_conn, "apps", {e.get("app_name") or "" for e, _t, _r in rows})
     for i in range(0, len(rows), INSERT_CHUNK_ROWS):
         chunk = rows[i:i + INSERT_CHUNK_ROWS]
@@ -578,6 +630,7 @@ def _insert(day_conn: sqlite3.Connection, rows: list[tuple[dict, int, int]]) -> 
                 hosts[entry.get("source_alias") or ""],
                 apps[entry.get("app_name") or ""],
                 entry.get("source_kind", 0),
+                hosts[entry["reported_host"]] if entry.get("reported_host") else None,
                 entry.get("facility", 1),
                 entry.get("severity", 6),
                 message,
@@ -944,7 +997,13 @@ def columns(include_raw: bool = True, alias: str = "logs") -> str:
     )
     if include_raw:
         cols += ", " + RAW_SQL.replace("logs.", f"{alias}.") + " AS raw"
-    return cols + f", {alias}.source_kind AS source_kind"
+    # The name a syslog sender reported, and whether it is the name shown (the address had no
+    # alias and no configured host used the name)
+    return cols + (
+        f", {alias}.source_kind AS source_kind,"
+        f" (SELECT name FROM hosts WHERE hosts.id = {alias}.reported_host_id) AS reported_host,"
+        f" {alias}.reported_host_id IS NOT NULL AND {alias}.reported_host_id = {alias}.host_id AS host_self_reported"
+    )
 
 
 def names_in(table: str, placeholders: str) -> str:
@@ -1127,6 +1186,32 @@ def set_names(
             cursor = day_conn.execute(f"UPDATE logs SET {column} = ? WHERE id IN ({placeholders})", (target_id, *chunk))
             changed += max(cursor.rowcount, 0)
             _reindex(day_conn, chunk)
+        pause()
+    return changed
+
+
+def update_in_batches(
+    day_conn: sqlite3.Connection,
+    set_sql: str,
+    where_sql: str,
+    params: tuple,
+    batch_size: int,
+    pause: Callable[[], None],
+    reindex: bool,
+) -> int:
+    """
+    Run UPDATE logs SET set_sql on the rows where_sql selects, newest id first, batch_size rows
+    per commit (re-indexing their full-text rows when reindex). Returns how many changed.
+    """
+    ids = sorted((r[0] for r in day_conn.execute(f"SELECT id FROM logs WHERE {where_sql}", params)), reverse=True)
+    changed = 0
+    for i in range(0, len(ids), batch_size):
+        chunk = ids[i:i + batch_size]
+        placeholders = ",".join("?" * len(chunk))
+        with day_conn:
+            changed += max(day_conn.execute(f"UPDATE logs SET {set_sql} WHERE id IN ({placeholders})", chunk).rowcount, 0)
+            if reindex:
+                _reindex(day_conn, chunk)
         pause()
     return changed
 

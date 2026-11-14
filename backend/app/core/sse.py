@@ -39,6 +39,9 @@ class SSELogEvent(dict):
         # Stored as a number; the browser gets its name, as the log API gives it
         if "source_kind" in event:
             event["source_kind"] = KIND_NAMES.get(event["source_kind"])
+        reported = event.get("reported_host")
+        if reported:
+            event["host_self_reported"] = reported == event.get("source_alias")
         event.data = _EVENT_ENCODER.encode(event)
         return event
 

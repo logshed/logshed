@@ -64,6 +64,10 @@ class LogEntry(BaseModel):
     raw: Optional[str] = None
     # syslog, docker, ingest or internal; None for logs stored before 1.4.0, which do not record it
     source_kind: Optional[str] = None
+    # The HOSTNAME a syslog sender reported when its address had no alias, and whether it is the
+    # name shown in source_alias (it is not when a configured host already uses that name)
+    reported_host: Optional[str] = None
+    host_self_reported: bool = False
 
 
 class LogListResponse(BaseModel):
@@ -121,6 +125,10 @@ class LogFacetsResponse(BaseModel):
     former_docker_aliases: list[str] = Field(
         default_factory=list,
         description="Aliases of deleted or renamed Docker hosts; rows that carry one are Docker rows",
+    )
+    self_reported_sources: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Host names in `sources` that syslog senders reported for themselves, each with the addresses that sent it",
     )
 
 

@@ -77,6 +77,7 @@ def insert_rows(conn: sqlite3.Connection, entries: list[dict]) -> None:
     """
     if _writes_day_files(conn):
         day_store.write_rows(conn, entries)
+        day_store.note_reported_hosts(conn, entries)
         return
     cursor = conn.cursor()
     for i in range(0, len(entries), INSERT_CHUNK_ROWS):
@@ -107,7 +108,9 @@ def insert_rows_one_by_one(
     stored entries and the skipped entries with their errors.
     """
     if _writes_day_files(conn):
-        return day_store.write_rows_one_by_one(conn, entries, repair)
+        stored, skipped = day_store.write_rows_one_by_one(conn, entries, repair)
+        day_store.note_reported_hosts(conn, stored)
+        return stored, skipped
     stored: list[dict] = []
     skipped: list[tuple[dict, Exception]] = []
     try:
@@ -197,6 +200,80 @@ def relabel_host(
     else:
         alias_sql, alias_params = "+source_alias != ? OR +source_alias IS NULL", (target_alias,)
     return total + _keyset_alias_backfill(conn, source_ip, alias_sql, alias_params, target_alias, batch_size)
+
+
+# ---------------------------------------------------------------------------
+# Host names that syslog senders reported
+# ---------------------------------------------------------------------------
+#
+# A day-file row from an address with no alias keeps the HOSTNAME its sender reported
+# (reported_host_id), and shows it (host_id = reported_host_id) unless a configured host uses the
+# name. These keep stored rows in step when aliases and Docker hosts change. Legacy rows have
+# no reported name and are left as they are.
+
+_NAMED_LIKE = "(SELECT id FROM hosts WHERE lower(name) = lower(?))"
+
+
+def clear_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
+    """Forget the names an address reported, once it has a configured alias. Returns rows changed."""
+    if not _writes_day_files(conn):
+        return 0
+    day_store.forget_reported_hosts(conn, "source_ip = ?", (source_ip,))
+    total = 0
+    for day, day_conn in day_store.open_day_connections(conn):
+        total += day_store.update_in_batches(
+            day_conn, "reported_host_id = NULL", "source_ip = ? AND reported_host_id IS NOT NULL",
+            (source_ip,), batch_size, _pause, reindex=False,
+        )
+    return total
+
+
+def withdraw_reported_name(
+    conn: sqlite3.Connection, name: str, keep_ip: Optional[str] = None, batch_size: int = 1000
+) -> int:
+    """
+    A configured host now uses name (letter case ignored): rows that show it as the name their
+    sender reported (from any address but keep_ip) are shown under their address instead.
+    Returns the number of rows changed.
+    """
+    total = 0
+    for day, day_conn in day_store.open_day_connections(conn):
+        where = f"host_id IN {_NAMED_LIKE} AND reported_host_id = host_id AND source_ip IS NOT ?"
+        addresses = [r[0] for r in day_conn.execute(f"SELECT DISTINCT source_ip FROM logs WHERE {where}", (name, keep_ip))]
+        try:
+            for address in addresses:
+                total += day_store.set_names(
+                    day_conn, "host_id", f"{where} AND source_ip = ?", (name, keep_ip, address), address, batch_size, _pause
+                )
+        finally:
+            if addresses:
+                day_store.refresh_figures(conn, day)
+    return total
+
+
+def restore_reported_name(conn: sqlite3.Connection, name: str, batch_size: int = 1000) -> int:
+    """
+    No configured host uses name any more: rows whose sender reported it, shown under their
+    address because the name was taken, show it again. Returns the number of rows changed.
+    """
+    total = 0
+    for day, day_conn in day_store.open_day_connections(conn):
+        where = (
+            f"reported_host_id IN {_NAMED_LIKE} AND host_id IS NOT reported_host_id"
+            " AND host_id = (SELECT id FROM hosts WHERE hosts.name = logs.source_ip)"
+        )
+        try:
+            changed = day_store.update_in_batches(
+                day_conn, "host_id = reported_host_id", where, (name,), batch_size, _pause, reindex=True
+            )
+        except BaseException:
+            # Some batches may have committed: the day's figures follow them
+            day_store.refresh_figures(conn, day)
+            raise
+        if changed:
+            day_store.refresh_figures(conn, day)
+        total += changed
+    return total
 
 
 def _pause() -> None:
@@ -542,6 +619,8 @@ def prune(
             day_store.delete_file(conn, day)
             total += rows
             between_batches()
+        # A reported host name not seen since the cutoff has no stored log left to name
+        day_store.forget_reported_hosts(conn, "last_seen_us < ?", (iso_to_us(cutoff_iso),))
     if not _has_legacy_table(conn):
         return total
     cursor = conn.cursor()

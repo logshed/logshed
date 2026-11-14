@@ -13,6 +13,10 @@ export interface LogEntry {
   raw?: string | null;
   /** Which collector stored the log; null for logs stored before 1.4.0, which do not record it */
   source_kind?: 'syslog' | 'docker' | 'ingest' | 'internal' | null;
+  /** The HOSTNAME a syslog sender reported when its address had no alias */
+  reported_host?: string | null;
+  /** source_alias is the name the device reported for itself (no configured host uses it) */
+  host_self_reported?: boolean;
 }
 
 export interface LogContextResponse {
@@ -356,6 +360,8 @@ export interface LogFacetsResponse {
   limit?: number;
   /** Aliases of deleted or renamed Docker hosts; rows that carry one are Docker rows */
   former_docker_aliases?: string[];
+  /** Host names in sources that syslog senders reported for themselves, with the addresses that sent each */
+  self_reported_sources?: Record<string, string[]>;
 }
 
 export interface AiModelInfo {

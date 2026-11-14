@@ -306,6 +306,24 @@ def load_docker_source_aliases(conn: Any) -> set[str]:
         return {"docker"}
 
 
+# The host name of LogShed's own logs, which no syslog sender may take either
+INTERNAL_HOST_NAME = "logshed"
+
+
+def load_taken_host_names(conn: Any) -> frozenset[str]:
+    """
+    Every host name a configured host uses, lowercased: the Docker host names
+    (load_docker_source_aliases), the syslog host aliases and LogShed's own. A HOSTNAME a
+    syslog sender reports is never shown when it is one of these.
+    """
+    names = {a.lower() for a in load_docker_source_aliases(conn)} | {INTERNAL_HOST_NAME}
+    try:
+        names.update(str(r[0]).strip().lower() for r in conn.execute("SELECT alias FROM host_aliases") if r[0])
+    except Exception:
+        pass
+    return frozenset(names)
+
+
 @dataclass(frozen=True)
 class AliasIndex:
     """

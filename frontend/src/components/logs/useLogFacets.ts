@@ -2,6 +2,7 @@ import { MutableRefObject, useCallback, useEffect, useMemo, useState } from 'rea
 import { LogEntry, LogFacetsResponse } from '../../types.ts';
 import { fetchLogFacets } from '../../api/logs.ts';
 import { SourcesChange } from './useSourcesConfig.ts';
+import { isDockerRow } from '../../utils/logEntry.ts';
 
 interface LogFacetsOptions {
   /** Host aliases by address, and the latest of them for callbacks created once */
@@ -47,17 +48,15 @@ export function useLogFacets({
   const [facetsLimit, setFacetsLimit] = useState<number | undefined>(undefined);
   const [hostToAppsMap, setHostToAppsMap] = useState<Record<string, string[]>>({});
   const [appToHostsMap, setAppToHostsMap] = useState<Record<string, string[]>>({});
+  // Host names that devices reported for themselves, with the addresses that sent each
+  const [selfReportedHosts, setSelfReportedHosts] = useState<Record<string, string[]>>({});
 
   // Incrementally accumulate facets from incoming batches without rescanning 50k logs
   const addLogs = useCallback((newLogs: LogEntry[]) => {
     if (!newLogs || newLogs.length === 0) return;
 
     const getLogCanonicalHost = (log: LogEntry): string => {
-      const isDocker =
-        log.source_ip === 'docker' ||
-        Boolean(dockerAliasesRef.current && log.source_alias && dockerAliasesRef.current.has(log.source_alias));
-
-      if (isDocker) {
+      if (isDockerRow(log, log.source_alias, dockerAliasesRef.current)) {
         return log.source_alias || 'docker';
       }
       return (
@@ -82,6 +81,18 @@ export function useLogFacets({
         }
       }
       return added ? Array.from(currentSet).sort() : prev;
+    });
+
+    // A name a device reported for itself, from an address that still has no alias
+    setSelfReportedHosts((prev) => {
+      let next = prev;
+      for (const log of newLogs) {
+        if (!log.host_self_reported || !log.source_alias || aliasesRef.current[log.source_ip]) continue;
+        const known = next[log.source_alias] || [];
+        if (known.includes(log.source_ip)) continue;
+        next = { ...next, [log.source_alias]: [...known, log.source_ip].sort() };
+      }
+      return next;
     });
 
     // 2. Incrementally add any new apps
@@ -138,6 +149,17 @@ export function useLogFacets({
 
   /** Renames hosts after the aliases or Docker hosts changed (useSourcesConfig's onChanged). */
   const applySourcesChange = useCallback(({ aliases: newMerged, hostReplacements, retiredHosts }: SourcesChange) => {
+    // An address that got an alias, or a name a configured host now uses, is no longer self-reported
+    setSelfReportedHosts((prev) => {
+      const taken = new Set(Object.values(newMerged).map((a) => a.toLowerCase()));
+      const next: Record<string, string[]> = {};
+      Object.entries(prev).forEach(([name, ips]) => {
+        const left = ips.filter((ip) => !newMerged[ip]);
+        if (left.length > 0 && !taken.has(name.toLowerCase()) && !retiredHosts.has(name)) next[name] = left;
+      });
+      return next;
+    });
+
     // Update accumulatedSources: replace retired aliases/IPs with their new canonical names
     setAccumulatedSources((prev) => {
       const aliasedIps = new Set(Object.keys(newMerged));
@@ -182,6 +204,9 @@ export function useLogFacets({
     fetchLogFacets()
       .then((facets) => {
         onLoaded(facets);
+        if (facets.self_reported_sources) {
+          setSelfReportedHosts((prev) => mergeRelations(facets.self_reported_sources ?? {}, prev));
+        }
         setFacetsTruncated(Boolean(facets.truncated));
         setFacetsLimit(facets.limit);
         if (facets.sources && facets.sources.length > 0) {
@@ -329,6 +354,7 @@ export function useLogFacets({
     availableSourcesForSelectedApps,
     facetsTruncated,
     facetsLimit,
+    selfReportedHosts,
     addLogs,
     applySourcesChange,
   };

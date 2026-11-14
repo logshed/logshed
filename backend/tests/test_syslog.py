@@ -667,7 +667,7 @@ class TestSyslogNetworkAndProtocol:
             conn.commit()
 
         alias_cache = AliasCache(db_path)
-        assert alias_cache.is_docker_alias("Tower")
+        assert alias_cache.is_taken("Tower")
         proto = SyslogUDPProtocol(MockAssembler(), alias_cache)
 
         proto.datagram_received(b"<14>Jan 15 10:00:00 Tower kernel: disk spun down", ("192.168.1.50", 514))
@@ -676,6 +676,29 @@ class TestSyslogNetworkAndProtocol:
 
         aliases = {entry["source_ip"]: entry["source_alias"] for _, entry in received}
         assert aliases == {"192.168.1.50": "192.168.1.50", "192.168.1.51": "nas01"}
+
+    @pytest.mark.asyncio
+    async def test_syslog_hostname_matching_another_hosts_alias_retains_ip(self, db_path: Path):
+        """A device cannot pose as another host: a hostname equal to another address's alias is not shown."""
+        received = []
+
+        class MockAssembler:
+            async def feed(self, stream_key: str, entry: dict):
+                received.append((stream_key, entry))
+
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with open_db(db_path) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES ('192.168.10.20', 'truenas', ?)", (now,)
+            )
+            conn.commit()
+
+        alias_cache = AliasCache(db_path)
+        proto = SyslogUDPProtocol(MockAssembler(), alias_cache)
+        proto.datagram_received(b"<14>Jan 15 10:00:00 TrueNAS sshd: root login", ("172.17.0.4", 514))
+        await asyncio.sleep(0.05)
+
+        assert [entry["source_alias"] for _, entry in received] == ["172.17.0.4"]
 
     @pytest.mark.asyncio
     async def test_syslog_omitted_hostname_uses_configured_alias_or_ip(self, db_path: Path):

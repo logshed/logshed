@@ -20,7 +20,8 @@ from typing import Any, Optional
 
 from app.api.deps import run_db_query
 from app.core.rule_index import exact_match_key
-from app.core.utils import normalize_pattern_list, split_pattern_list
+from app.core.utils import load_taken_host_names, normalize_pattern_list, split_pattern_list
+from app.services import log_store
 from app.services.drop_filter import get_drop_filter
 from app.services.maintenance_service import refresh_maintenance_cache
 
@@ -32,6 +33,28 @@ class AliasRenameResult:
     drop_rules: int = 0
     maintenance_sessions: int = 0
     saved_views: int = 0
+
+
+def follow_reported_names(
+    conn: sqlite3.Connection,
+    *,
+    taken: Optional[str] = None,
+    freed: Optional[str] = None,
+    aliased_ip: Optional[str] = None,
+) -> None:
+    """
+    Keep the host names syslog senders reported in step after a host alias or Docker host
+    change: aliased_ip got a configured alias (its reported names are forgotten), a configured
+    host now uses taken (other senders' rows showing it go back to their address), and freed is
+    no longer used (unless another configured host still uses it, rows that reported it show it
+    again). Runs as a background task: it can read every day file.
+    """
+    if aliased_ip:
+        log_store.clear_reported_hosts(conn, aliased_ip)
+    if taken:
+        log_store.withdraw_reported_name(conn, taken, keep_ip=aliased_ip)
+    if freed and (not taken or freed.lower() != taken.lower()) and freed.lower() not in load_taken_host_names(conn):
+        log_store.restore_reported_name(conn, freed)
 
 
 def alias_in_use(

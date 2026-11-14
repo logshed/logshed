@@ -12,7 +12,12 @@ from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
 from app.core.utils import load_docker_source_aliases, load_former_docker_aliases
 from app.models import HostAliasCreate, HostAliasResponse, MessageResponse
-from app.services.alias_rename import alias_in_use, follow_alias_rename, reload_after_alias_rename
+from app.services.alias_rename import (
+    alias_in_use,
+    follow_alias_rename,
+    follow_reported_names,
+    reload_after_alias_rename,
+)
 from app.services import log_store
 
 logger = logging.getLogger(__name__)
@@ -100,11 +105,13 @@ async def create_or_update_alias(
     clean_alias = req.alias.strip()
 
     followed: list = [None]
+    previous: list = [None]
 
     def _upsert(conn):
         cursor = conn.cursor()
         cursor.execute("SELECT alias FROM host_aliases WHERE ip = ?", (clean_ip,))
         current = cursor.fetchone()
+        previous[0] = current[0] if current else None
         if clean_ip != "docker":
             if not current or current[0] != clean_alias:
                 raise_if_alias_used_by_docker(conn, clean_alias)
@@ -140,6 +147,8 @@ async def create_or_update_alias(
     def _run_batch(conn):
         try:
             _batch_update_log_aliases(conn, clean_ip, clean_alias, batch_size=1000)
+            if clean_ip != "docker":
+                follow_reported_names(conn, taken=clean_alias, freed=previous[0], aliased_ip=clean_ip)
         except Exception as exc:
             logger.error(f"Background retroactive alias update failed for {clean_ip} -> {clean_alias}: {exc}")
 
@@ -155,11 +164,13 @@ async def delete_alias(
 ) -> MessageResponse:
     """Delete a host alias mapping by IP address, reverting existing logs to raw IP."""
     followed: list = [None]
+    previous: list = [None]
 
     def _delete(conn):
         cursor = conn.cursor()
         cursor.execute("SELECT alias FROM host_aliases WHERE ip = ?", (ip,))
         current = cursor.fetchone()
+        previous[0] = current[0] if current else None
         cursor.execute("DELETE FROM host_aliases WHERE ip = ?", (ip,))
         deleted = cursor.rowcount > 0
         # The host's logs go back to its IP, so rules and views naming the alias follow to the IP
@@ -181,6 +192,7 @@ async def delete_alias(
     def _run_batch_delete(conn):
         try:
             _batch_update_log_aliases(conn, ip, ip, batch_size=1000)
+            follow_reported_names(conn, freed=previous[0])
         except Exception as exc:
             logger.error(f"Background retroactive alias reversion failed for {ip}: {exc}")
 

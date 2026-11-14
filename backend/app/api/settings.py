@@ -558,6 +558,7 @@ async def update_settings(
         new_alias = req.docker_source_alias.strip() or "docker"
         if prev_alias and prev_alias != new_alias:
             from app.api.docker_hosts import _batch_update_docker_aliases
+            from app.services.alias_rename import follow_reported_names
             from app.collectors.docker_collector import effective_source_ip
             from app.collectors.syslog import reload_active_alias_caches
 
@@ -576,6 +577,7 @@ async def update_settings(
                         old_alias=prev_alias,
                         batch_size=1000,
                     )
+                    follow_reported_names(conn, taken=new_alias, freed=prev_alias)
                 except Exception as exc:
                     logger.error(
                         f"Background retroactive Docker alias update failed for primary Docker ({prev_alias} -> {new_alias}): {exc}"
