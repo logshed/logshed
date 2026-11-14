@@ -8,6 +8,7 @@ import { HealthResponse, AppTab, VersionInfo, MaintenanceWindowResponse } from '
 import { useMediaQuery, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { PullTouchHandlers } from '../../utils/usePullToRefresh.ts';
 import { formatMaintenanceTime } from '../../utils/formatters.ts';
+import { announceNearLimit, type NearLimitReason } from '../../utils/nearLimit.ts';
 
 export const formatInitiator = (initiatedBy: string): string => {
   if (!initiatedBy) return '';
@@ -51,7 +52,7 @@ export const LOOP_LAG_WARNING_MS = 50;
 export const QUEUE_WARNING_DEPTH = 5000;
 export const NEAR_LIMIT_DURATION_MS = 30000;
 
-export type NearLimitReason = 'loop' | 'queue' | 'both';
+export type { NearLimitReason };
 
 export const getNearLimitTooltip = (reason: NearLimitReason): string => {
   const seconds = NEAR_LIMIT_DURATION_MS / 1000;
@@ -111,13 +112,16 @@ export const Navbar: React.FC<NavbarProps> = ({
       const held = (since: number | null) => since !== null && now - since >= NEAR_LIMIT_DURATION_MS;
       const lagHeld = held(lagHighSince.current);
       const queueHeld = held(queueHighSince.current);
-      setNearLimit(lagHeld && queueHeld ? 'both' : lagHeld ? 'loop' : queueHeld ? 'queue' : null);
+      const reason = lagHeld && queueHeld ? 'both' : lagHeld ? 'loop' : queueHeld ? 'queue' : null;
+      setNearLimit(reason);
+      announceNearLimit(reason);
     } catch {
       setHealth({ status: 'degraded' });
       lagHighSince.current = null;
       queueHighSince.current = null;
       lastDroppedLogs.current = null;
       setNearLimit(null);
+      announceNearLimit(null);
     }
   };
 
@@ -157,6 +161,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
     return () => {
       window.removeEventListener('maintenance-updated', onMaintenanceUpdated);
+      announceNearLimit(null);
     };
   }, []);
 

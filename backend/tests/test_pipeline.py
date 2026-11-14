@@ -992,6 +992,68 @@ class TestQueueConsumer:
                     assert json.loads(event.data) == {"id": event["id"], "message": f"m{event['id']}"}
 
 
+    @pytest.mark.asyncio
+    async def test_sse_subscriber_gets_only_accepted_entries_and_counts_what_it_drops(self):
+        """A filtered queue holds only what its filter accepts, and counts accepted entries it had to drop."""
+        from app.core.sse import SSEBroadcaster
+
+        broadcaster = SSEBroadcaster()
+        everything = await broadcaster.subscribe(maxsize=5)
+        errors_only = await broadcaster.subscribe(maxsize=5, accept=lambda e: e["severity"] <= 3)
+        # 12 entries, 4 of them errors
+        batch = [{"id": n, "severity": 3 if n % 3 == 0 else 6, "message": f"m{n}"} for n in range(12)]
+        await broadcaster.broadcast_batch(batch)
+
+        assert [e["id"] for e in [errors_only.get_nowait() for _ in range(errors_only.qsize())]] == [0, 3, 6, 9]
+        assert errors_only.skipped == 0
+        assert [e["id"] for e in [everything.get_nowait() for _ in range(everything.qsize())]] == [7, 8, 9, 10, 11]
+        assert everything.skipped == 7
+
+        # Entries still queued and dropped by a later batch count too
+        await broadcaster.broadcast_batch(batch[:3])
+        await broadcaster.broadcast_batch(batch[3:7])
+        assert everything.qsize() == 5
+        assert everything.skipped == 7 + 2
+
+    @pytest.mark.asyncio
+    async def test_sse_events_are_built_off_the_event_loop(self, monkeypatch):
+        """Encoding and filtering a batch run in a worker thread, so web requests do not wait for them."""
+        import threading
+        import app.core.sse as sse_mod
+        from app.core.sse import SSEBroadcaster
+
+        threads: list[str] = []
+        original = sse_mod._events_per_subscriber
+
+        def recording(batch, subscribers):
+            threads.append(threading.current_thread().name)
+            return original(batch, subscribers)
+
+        monkeypatch.setattr(sse_mod, "_events_per_subscriber", recording)
+        broadcaster = SSEBroadcaster()
+        q = await broadcaster.subscribe()
+        await broadcaster.broadcast_batch([{"id": 1, "message": "m"}])
+        assert q.get_nowait()["id"] == 1
+        assert threads and threads[0] != threading.main_thread().name
+
+    @pytest.mark.asyncio
+    async def test_sse_stream_closed_while_events_are_built_gets_nothing(self, monkeypatch):
+        import app.core.sse as sse_mod
+        from app.core.sse import SSEBroadcaster
+
+        broadcaster = SSEBroadcaster()
+        q = await broadcaster.subscribe()
+        original = sse_mod._events_per_subscriber
+
+        def closing(batch, subscribers):
+            broadcaster._subscribers.discard(q)
+            return original(batch, subscribers)
+
+        monkeypatch.setattr(sse_mod, "_events_per_subscriber", closing)
+        await broadcaster.broadcast_batch([{"id": 1, "message": "m"}])
+        assert q.empty()
+
+
 class TestKeyedMultilineAssemblerLimits:
     """Unit tests for multiline assembler bounds, eviction, and timeout guards."""
 

@@ -93,6 +93,8 @@ Its tooltip says which. The dot clears at the first check where neither holds. I
 - simplify or remove regex alert and drop rules;
 - move busy senders to TCP, which slows them down instead of losing messages.
 
+While the dot is on because of the event loop, the Console shows "LogShed is busy: live updates may arrive late." above the log rows. When a flood is more than a browser tab can keep up with, LogShed skips live rows for that tab rather than slowing everything else down, and the Console says how many it skipped. Every log is still stored: search to see them.
+
 The same figures are in `GET /api/health` and `GET /api/v1/system/metrics`: `ingest_rate`, `queue_depth`, `dropped_logs` (Lost), `udp_receive_errors` (UDP lost), and `loop_lag_ms`, `loop_lag_p95_ms` and `loop_lag_max_ms`.
 
 ---

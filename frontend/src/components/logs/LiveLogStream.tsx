@@ -44,6 +44,9 @@ import { StreamToolbar } from './StreamToolbar.tsx';
 import { SelectionActionBar } from './SelectionActionBar.tsx';
 import { DeleteSelectedDialog } from './DeleteSelectedDialog.tsx';
 import { ConsoleEmptyKind, ConsoleEmptyState } from './ConsoleEmptyState.tsx';
+import { StreamLoadNote } from './StreamLoadNote.tsx';
+import { useSkippedNote } from './useSkippedNote.ts';
+import { useNearLimit } from '../../utils/nearLimit.ts';
 import { saveAlias } from '../../api/aliases.ts';
 import { useAlias } from '../../context/AliasContext.tsx';
 
@@ -88,6 +91,8 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
   const [dropRuleTargetLog, setDropRuleTargetLog] = useState<LogEntry | null>(null);
   const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] = useState<boolean>(false);
   const [streamDisconnected, setStreamDisconnected] = useState<boolean>(false);
+  const { skipped: skippedCount, noteSkipped, reset: resetSkipped } = useSkippedNote();
+  const nearLimit = useNearLimit();
   const [streamReconnectNonce, setStreamReconnectNonce] = useState<number>(0);
   const [serverTimezone, setServerTimezone] = useState<string>(() => getCachedServerTimezone() || '');
   // Off until settings load, so users who never turned AI on do not see AI buttons flash in
@@ -236,6 +241,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
     }
 
     setStreamDisconnected(false);
+    resetSkipped();
 
     // If viewing a bounded historical range (to is specified), pause/skip live incoming SSE events
     if (filters.to) {
@@ -264,6 +270,15 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
         queueLiveLog(entry);
       } catch (e) {
         console.error('Error parsing SSE log event', e);
+      }
+    });
+
+    // The server dropped entries this stream could not keep up with: the rows shown are not every new log
+    es.addEventListener('skipped', (event: MessageEvent) => {
+      try {
+        noteSkipped(Number(JSON.parse(event.data).count));
+      } catch (e) {
+        console.error('Error parsing SSE skipped event', e);
       }
     });
 
@@ -304,7 +319,7 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
       eventSourceRef.current = null;
       dropPendingLiveLogs();
     };
-  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropPendingLiveLogs, streamReconnectNonce]);
+  }, [filters.severity_max, filters.to, sourcesKey, appsKey, queueLiveLog, dropPendingLiveLogs, streamReconnectNonce, noteSkipped, resetSkipped]);
 
   const reconnectStream = () => {
     if (streamRetryTimerRef.current !== null) {
@@ -657,6 +672,10 @@ export const LiveLogStream: React.FC<LiveLogStreamProps> = ({
             <AlertCircle className="w-4 h-4 text-danger-400 shrink-0" />
             <span>{buffer.loadError}</span>
           </div>
+        )}
+
+        {!streamDisconnected && !filters.to && (
+          <StreamLoadNote skipped={skippedCount} nearLimit={nearLimit} />
         )}
 
         {streamDisconnected && !filters.to && (

@@ -2043,6 +2043,41 @@ class TestSyslogSharedParseQueue:
             await asyncio.wait_for(task, timeout=2.0)
 
     @pytest.mark.asyncio
+    async def test_a_slow_slice_lets_other_tasks_run_before_its_frame_count(self, db_path: Path, monkeypatch):
+        """The worker yields once a slice has run PARSE_SLICE_SECONDS, however few frames it parsed."""
+        import time as time_mod
+        import app.collectors.syslog as syslog_mod
+        from app.collectors.syslog import SyslogParseQueue
+
+        monkeypatch.setattr(syslog_mod, "PARSE_SLICE_SECONDS", 0.01)
+        order: list[str] = []
+
+        async def slow_dispatch(data, source_ip, alias_cache, assembler):
+            # Parsing that holds the loop, as it does while the insert thread holds the interpreter
+            time_mod.sleep(0.006)
+            order.append("frame")
+
+        monkeypatch.setattr(syslog_mod, "dispatch_syslog_message", slow_dispatch)
+        shared = SyslogParseQueue(KeyedMultilineAssembler(), AliasCache(db_path, preload=False))
+
+        async def other_task():
+            while len(order) < 6:
+                order.append("other")
+                await asyncio.sleep(0)
+
+        for n in range(6):
+            shared.put_udp(b"frame %d" % n, "10.0.0.1")
+        other = asyncio.create_task(other_task())
+        try:
+            await _wait_until(lambda: order.count("frame") == 6)
+        finally:
+            other.cancel()
+            await shared.close()
+        frames_between = [len(run) for run in "".join("f" if o == "frame" else " " for o in order).split()]
+        # Two frames pass the 10 ms budget, so no slice holds more than two
+        assert max(frames_between) == 2, order
+
+    @pytest.mark.asyncio
     async def test_full_ingest_queue_waits_then_loses_until_half_empty(self, db_path: Path, monkeypatch):
         import app.collectors.syslog as syslog_mod
         import app.core.pipeline as pipeline_mod

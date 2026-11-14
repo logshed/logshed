@@ -109,8 +109,25 @@ async def stream_logs(
     parsed_sources = set(alias_index.expand(source))
     parsed_apps = set(parse_multi_values(app_name))
 
+    def accept(entry: dict) -> bool:
+        """The stream's filters (run by the broadcaster in a worker thread)."""
+        if severity_max is not None and entry.get("severity", 6) > severity_max:
+            return False
+        if parsed_sources:
+            entry_alias = (entry.get("source_alias") or "").strip()
+            entry_ip = (entry.get("source_ip") or "").strip()
+            if alias_index.is_docker(entry_alias, entry_ip, entry.get("source_kind")):
+                if entry_alias not in parsed_sources:
+                    return False
+            elif entry_alias not in parsed_sources and entry_ip not in parsed_sources:
+                return False
+        if parsed_apps and entry.get("app_name") not in parsed_apps:
+            return False
+        return True
+
+    filtered = severity_max is not None or bool(parsed_sources) or bool(parsed_apps)
     try:
-        queue = await sse_manager.subscribe()
+        queue = await sse_manager.subscribe(accept=accept if filtered else None)
     except SSESubscriberLimitError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
@@ -136,24 +153,14 @@ async def stream_logs(
                         entries.append(queue.get_nowait())
 
                     events = []
+                    # Entries this stream's queue dropped because the browser fell behind: the
+                    # Console says so, as the rows it shows are then not every new log
+                    if queue.skipped:
+                        events.append(f'event: skipped\ndata: {{"count": {queue.skipped}}}\n\n')
+                        queue.skipped = 0
                     for entry in entries:
                         if max_events is not None and sent >= max_events:
                             break
-                        # Apply optional stream filters
-                        if severity_max is not None and entry.get("severity", 6) > severity_max:
-                            continue
-                        if parsed_sources:
-                            entry_alias = (entry.get("source_alias") or "").strip()
-                            entry_ip = (entry.get("source_ip") or "").strip()
-                            if alias_index.is_docker(entry_alias, entry_ip, entry.get("source_kind")):
-                                if entry_alias not in parsed_sources:
-                                    continue
-                            else:
-                                if entry_alias not in parsed_sources and entry_ip not in parsed_sources:
-                                    continue
-                        if parsed_apps and entry.get("app_name") not in parsed_apps:
-                            continue
-
                         # Pre-encoded once per entry by the broadcaster, without private keys
                         events.append(f"event: log\ndata: {entry.data}\n\n")
                         sent += 1

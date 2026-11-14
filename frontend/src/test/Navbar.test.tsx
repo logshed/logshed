@@ -9,6 +9,7 @@ import {
 } from '../components/common/Navbar.tsx';
 import * as systemApi from '../api/system.ts';
 import * as alertsApi from '../api/alerts.ts';
+import { useNearLimit } from '../utils/nearLimit.ts';
 
 vi.mock('../context/AuthContext.tsx', () => ({
   useAuth: () => ({
@@ -16,6 +17,9 @@ vi.mock('../context/AuthContext.tsx', () => ({
     isAuthenticated: true,
   }),
 }));
+
+
+const NearLimitProbe = () => <span data-testid="near-limit-probe">{useNearLimit() ?? 'none'}</span>;
 
 describe('Navbar Component', () => {
   beforeEach(() => {
@@ -625,19 +629,28 @@ describe('Navbar event loop lag', () => {
     const fetchSpy = vi.spyOn(systemApi, 'fetchHealth').mockResolvedValue(healthWithLag(LOOP_LAG_WARNING_MS + 50));
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      render(<Navbar activeTab="stream" onTabChange={vi.fn()} />);
+      render(
+        <>
+          <Navbar activeTab="stream" onTabChange={vi.fn()} />
+          <NearLimitProbe />
+        </>,
+      );
       await screen.findByText('1.0 logs/s');
       await advancePolls(2);
       expect(screen.queryByTestId('health-near-limit')).toBeNull();
+      expect(screen.getByTestId('near-limit-probe')).toHaveTextContent('none');
 
       await advancePolls(1);
       const dot = await screen.findByTestId('health-near-limit');
       expect(dot.getAttribute('title')).toContain('near its processing limit');
       expect(screen.queryByTestId('health-degraded')).toBeNull();
+      // The Console reads the same state for its note
+      expect(screen.getByTestId('near-limit-probe')).toHaveTextContent('loop');
 
       fetchSpy.mockResolvedValue(healthWithLag(LOOP_LAG_WARNING_MS - 50));
       await advancePolls(1);
       await waitFor(() => expect(screen.queryByTestId('health-near-limit')).toBeNull());
+      expect(screen.getByTestId('near-limit-probe')).toHaveTextContent('none');
     } finally {
       vi.useRealTimers();
     }

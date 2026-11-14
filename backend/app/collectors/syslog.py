@@ -721,8 +721,11 @@ TCP_PAUSE_ITEMS = 2000
 TCP_PAUSE_BYTES = 4 * 1024 * 1024
 TCP_RESUME_ITEMS = 500
 TCP_RESUME_BYTES = 1024 * 1024
-# Frames parsed before the worker lets other tasks run (the ingest consumer, the API, the listeners)
+# Frames parsed before the worker lets other tasks run (the ingest consumer, the API, the listeners),
+# and the longest a slice runs: when the insert thread holds the interpreter, 500 frames can take
+# tens of milliseconds, and every web request waits that long
 PARSE_SLICE = 500
+PARSE_SLICE_SECONDS = 0.005
 # When the ingest queue is full, the worker waits this long for room (TCP senders are paused
 # meanwhile). If none comes, entries that do not fit are lost as before, and the worker waits
 # again only once the ingest queue is below half full, so a long stall blocks senders once.
@@ -854,6 +857,7 @@ class SyslogParseQueue:
                 self._wakeup = loop.create_future()
                 await self._wakeup
                 continue
+            slice_end = time.perf_counter() + PARSE_SLICE_SECONDS
             for _ in range(PARSE_SLICE):
                 if not items:
                     break
@@ -866,6 +870,8 @@ class SyslogParseQueue:
                     raise
                 except Exception as e:
                     logger.error(f"Error in syslog parse worker: {e}")
+                if time.perf_counter() >= slice_end:
+                    break
             if self._paused:
                 self._resume_paused()
             # Let the ingest consumer, the API and the listeners run between slices

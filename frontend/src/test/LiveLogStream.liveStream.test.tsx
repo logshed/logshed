@@ -12,6 +12,8 @@ import * as authApi from '../api/auth.ts';
 import { LogEntry } from '../types.ts';
 import { AliasContext } from '../context/AliasContext.tsx';
 import { chooseOption, toolbarSelect } from './selectDropdownHelpers.ts';
+import { announceNearLimit } from '../utils/nearLimit.ts';
+import { SKIPPED_NOTE_MS } from '../components/logs/useSkippedNote.ts';
 import { MockEventSource, virtualizerControl, sampleLogs, renderWithContext, setupConsoleMocks } from './liveLogStreamSetup.tsx';
 
 vi.mock('@tanstack/react-virtual', async () => (await import('./liveLogStreamVirtualizer.ts')).virtualizerMock);
@@ -57,6 +59,70 @@ describe('Console live stream and history pages', () => {
       const updatedRows = document.querySelectorAll('.log-row');
       expect(updatedRows[0]).toHaveTextContent('Hardware error corrected by ECC');
     });
+  });
+
+  it('shows the high-load note while the stream skips entries, adding them up, and clears it after the last skip', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+      await waitFor(() => {
+        expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('stream-load-note')).not.toBeInTheDocument();
+
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+      act(() => {
+        es.emit('skipped', { count: 1200 });
+      });
+      expect(screen.getByTestId('stream-load-note')).toHaveTextContent(
+        'High load: 1,200 live updates skipped. Every log is still stored; search to see them.',
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SKIPPED_NOTE_MS - 1000);
+      });
+      act(() => {
+        es.emit('skipped', { count: 34 });
+      });
+      expect(screen.getByTestId('stream-load-note')).toHaveTextContent('1,234 live updates skipped');
+
+      // Ten seconds after the last skip, not the first
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SKIPPED_NOTE_MS - 1000);
+      });
+      expect(screen.getByTestId('stream-load-note')).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(screen.queryByTestId('stream-load-note')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says LogShed is busy while the event loop is near its limit, and not for a full queue alone', async () => {
+    renderWithContext(<LiveLogStream onDiagnoseAi={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText('Nginx upstream connection timeout')).toBeInTheDocument();
+    });
+    try {
+      act(() => announceNearLimit('queue'));
+      expect(screen.queryByTestId('stream-load-note')).not.toBeInTheDocument();
+      act(() => announceNearLimit('loop'));
+      expect(screen.getByTestId('stream-load-note')).toHaveTextContent('LogShed is busy: live updates may arrive late.');
+
+      // A skip count says more, so it takes the note's place
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+      act(() => {
+        es.emit('skipped', { count: 1 });
+      });
+      expect(screen.getByTestId('stream-load-note')).toHaveTextContent('High load: 1 live update skipped.');
+
+      act(() => announceNearLimit(null));
+      expect(screen.getByTestId('stream-load-note')).toHaveTextContent('High load: 1 live update skipped.');
+    } finally {
+      act(() => announceNearLimit(null));
+    }
   });
 
   it('displays auto-scroll pause banner and jumps to top on click', async () => {

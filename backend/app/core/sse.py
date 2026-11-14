@@ -5,6 +5,7 @@ Server-Sent Events (SSE) broadcaster for real-time log streaming.
 import asyncio
 import json
 import logging
+from typing import Callable, Optional
 
 from app.core.day_files import KIND_NAMES, REPORTED_HIDDEN_KEY
 
@@ -46,18 +47,54 @@ class SSELogEvent(dict):
         return event
 
 
+class SubscriberQueue(asyncio.Queue):
+    """
+    One live stream's queue. ``accept`` is the stream's filter (None takes every entry), applied
+    by the broadcaster, so entries the stream would not show never take its room. ``skipped``
+    counts the accepted entries dropped because the stream fell behind, until the stream reads
+    and clears it to tell the browser.
+    """
+
+    def __init__(self, maxsize: int = 0, accept: Optional[Callable[[dict], bool]] = None):
+        super().__init__(maxsize=maxsize)
+        self.accept = accept
+        self.skipped = 0
+
+
 def _put_newest(q: asyncio.Queue, events: list[SSELogEvent]) -> None:
     """
     Queue the events, dropping the oldest queued ones when the queue is full: a slow subscriber
     keeps the newest entries, the same as putting each event and dropping the oldest when full,
-    without moving the entries that would be dropped again within the same batch.
+    without moving the entries that would be dropped again within the same batch. The number
+    dropped is added to the queue's ``skipped`` count, when it keeps one.
     """
+    dropped = 0
     if q.maxsize > 0:
+        dropped = max(0, len(events) - q.maxsize)
         events = events[-q.maxsize:]
         for _ in range(q.qsize() + len(events) - q.maxsize):
             q.get_nowait()
+            dropped += 1
     for event in events:
         q.put_nowait(event)
+    if dropped and isinstance(q, SubscriberQueue):
+        q.skipped += dropped
+
+
+def _events_per_subscriber(
+    batch: list[dict], subscribers: list[asyncio.Queue]
+) -> list[tuple[asyncio.Queue, list[SSELogEvent]]]:
+    """
+    Blocking part of broadcast_batch: encode each entry once and pick each subscriber's entries
+    with its filter. Runs in a worker thread, because for a full batch of thousands of entries
+    it takes tens of milliseconds that every web request would otherwise wait.
+    """
+    events = [SSELogEvent.from_entry(log_entry) for log_entry in batch]
+    picked = []
+    for q in subscribers:
+        accept = getattr(q, "accept", None)
+        picked.append((q, events if accept is None else [e for e in events if accept(e)]))
+    return picked
 
 
 class SSEBroadcaster:
@@ -70,9 +107,15 @@ class SSEBroadcaster:
         self._lock = asyncio.Lock()
         self._max_subscribers = max_subscribers
 
-    async def subscribe(self, maxsize: int = 500) -> asyncio.Queue:
-        """Register a new client subscriber queue, refusing it when the stream limit is reached."""
-        q = asyncio.Queue(maxsize=maxsize)
+    async def subscribe(
+        self, maxsize: int = 500, accept: Optional[Callable[[dict], bool]] = None
+    ) -> SubscriberQueue:
+        """
+        Register a new client subscriber queue, refusing it when the stream limit is reached.
+        ``accept`` filters the entries the queue receives; it runs in a worker thread, so it
+        must only read the entry and data that does not change while the stream is open.
+        """
+        q = SubscriberQueue(maxsize=maxsize, accept=accept)
         async with self._lock:
             if len(self._subscribers) >= self._max_subscribers:
                 raise SSESubscriberLimitError(
@@ -88,20 +131,27 @@ class SSEBroadcaster:
 
     async def broadcast_batch(self, batch: list[dict]) -> None:
         """
-        Push a batch of log entries to all active subscriber queues under a single lock acquisition.
-        Bypasses lock and iteration entirely if there are no active subscribers.
+        Push a batch of log entries to every subscriber queue that accepts them.
+        Returns at once when there are no subscribers.
 
         Each entry is copied without its private keys (names starting with '_', such as the
-        alert evaluator's _epoch_ts) and encoded to JSON once, here, so later changes to the
-        shared pipeline dict never reach the browser and subscribers do not re-encode it.
+        alert evaluator's _epoch_ts) and encoded to JSON once, so later changes to the shared
+        pipeline dict never reach the browser and subscribers do not re-encode it. Encoding and
+        filtering run in a worker thread, and only the queue puts on the event loop; entries must
+        not change until this returns (the queue consumer runs the alert checks after it).
         """
         if not self._subscribers or not batch:
             return
 
-        events = [SSELogEvent.from_entry(log_entry) for log_entry in batch]
+        async with self._lock:
+            subscribers = list(self._subscribers)
+        picked = await asyncio.to_thread(_events_per_subscriber, batch, subscribers)
 
         async with self._lock:
-            for q in list(self._subscribers):
+            for q, events in picked:
+                # A stream that closed while the events were built gets nothing
+                if q not in self._subscribers or not events:
+                    continue
                 try:
                     _put_newest(q, events)
                 except Exception as e:

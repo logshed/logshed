@@ -1431,6 +1431,49 @@ class TestSseLimitsAndPayload:
         assert not [k for k in payload if k.startswith("_")]
 
     @pytest.mark.asyncio
+    async def test_stream_says_how_many_entries_it_skipped(self, client: AsyncClient, auth_cookie: dict):
+        """When a stream falls behind and its queue drops entries, the browser is told how many."""
+        import json as json_mod
+
+        client.cookies.set(SESSION_COOKIE_NAME, auth_cookie[SESSION_COOKIE_NAME])
+        batch = [
+            {
+                "id": n,
+                "timestamp": "2026-10-15T12:00:00+00:00",
+                "received_at": "2026-10-15T12:00:00+00:00",
+                "source_ip": "10.0.0.1",
+                "source_alias": "srv1",
+                "app_name": "web" if n % 2 else "db",
+                "facility": 1,
+                "severity": 6,
+                "message": f"flood {n}",
+                "raw": "raw",
+            }
+            for n in range(1400)
+        ]
+
+        async def _flood():
+            for _ in range(50):
+                if sse_manager.subscriber_count() > 0:
+                    break
+                await asyncio.sleep(0.01)
+            # One batch larger than the stream's queue of 500
+            await sse_manager.broadcast_batch(batch)
+
+        task = asyncio.create_task(_flood())
+        # Filtered to one app: 700 entries match, so 200 are skipped
+        async with client.stream("GET", "/api/logs/stream", params={"app_name": "web", "max_events": 500}) as response:
+            lines = [line async for line in response.aiter_lines() if line.strip()]
+        await task
+
+        assert lines[0] == "event: skipped"
+        assert json_mod.loads(lines[1][len("data: "):]) == {"count": 200}
+        payloads = [json_mod.loads(line[len("data: "):]) for line in lines[2:] if line.startswith("data: ")]
+        assert len(payloads) == 500
+        assert {p["app_name"] for p in payloads} == {"web"}
+        assert payloads[0]["message"] == "flood 401"
+
+    @pytest.mark.asyncio
     async def test_queued_entries_are_sent_together_filtered_and_in_order(self, auth_cookie: dict):
         import json as json_mod
 
