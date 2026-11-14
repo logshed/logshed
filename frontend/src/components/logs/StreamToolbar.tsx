@@ -85,7 +85,7 @@ export const StreamToolbar: React.FC<StreamToolbarProps> = ({
               }`}
             >
               <Bookmark className={`w-3 h-3 text-accent-400 ${isActive ? 'fill-accent-400' : ''}`} aria-hidden="true" />
-              <span className="truncate max-w-40 text-trim">{view.name}</span>
+              <span className="max-w-40 overflow-x-clip text-ellipsis whitespace-nowrap text-trim">{view.name}</span>
             </button>
           );
         })}

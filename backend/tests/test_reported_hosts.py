@@ -186,3 +186,78 @@ def test_retention_forgets_names_no_stored_log_carries(env):
         assert [tuple(r) for r in conn.execute("SELECT name, source_ip FROM reported_hosts")] == [("printer-hp", PRINTER_IP)]
         log_store.prune(conn, "2099-01-01T00:00:00+00:00", lambda: None)
         assert conn.execute("SELECT COUNT(*) FROM reported_hosts").fetchone()[0] == 0
+
+
+def test_an_address_is_never_a_reported_name(env):
+    # A filter by the alias truenas also matches its address, so a device must not take it
+    assert _named(env, NAS_IP)["source_alias"] == PRINTER_IP
+    assert _named(env, "fe80::1")["source_alias"] == PRINTER_IP
+    assert _named(env, "10printer")["source_alias"] == "10printer"
+
+
+@pytest.mark.asyncio
+async def test_names_are_matched_whatever_their_letter_case_beyond_ascii(client, headers, env):
+    store_logs(env, _row("light on", "Küche", env=env))
+
+    resp = await client.post("/api/aliases", json={"ip": "10.0.0.9", "alias": "KÜCHE"}, headers=headers)
+    assert resp.status_code == 200
+    assert [r["source_alias"] for r in stored_logs(env)] == [PRINTER_IP]
+
+    resp = await client.delete("/api/aliases/10.0.0.9", headers=headers)
+    assert resp.status_code == 200
+    assert [r["source_alias"] for r in stored_logs(env)] == ["Küche"]
+
+
+@pytest.mark.asyncio
+async def test_a_docker_host_rename_and_delete_free_its_name(client, headers, env):
+    store_logs(env, _row("job done", "tower", env=env), _row("other", "tower-old", env=env))
+    with open_db(env) as conn:
+        conn.execute(
+            "INSERT INTO docker_endpoints (id, name, url, source_alias, enabled, created_at, updated_at)"
+            " VALUES (2, 'Tower', 'tcp://10.0.0.7:2375', 'tower', 0, ?, ?)",
+            (TS, TS),
+        )
+    with open_db(env) as conn:
+        log_store.withdraw_reported_name(conn, "tower")
+    assert {r["message"]: r["source_alias"] for r in stored_logs(env)} == {"job done": PRINTER_IP, "other": "tower-old"}
+
+    # Renamed: tower-old is taken; tower stays reserved for the host's old container logs while
+    # logs from before 1.4.0 remain (a former Docker alias), as the collector treats it
+    resp = await client.put("/api/docker/hosts/2", json={"source_alias": "tower-old"}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert {r["message"]: r["source_alias"] for r in stored_logs(env)} == {"job done": PRINTER_IP, "other": PRINTER_IP}
+
+    # Deleted, then the legacy table goes: tower is free, tower-old was the host's and is reserved no more
+    resp = await client.delete("/api/docker/hosts/2", headers=headers)
+    assert resp.status_code == 200
+    with open_db(env) as conn:
+        assert log_store.drop_empty_legacy(conn)
+    assert {r["message"]: r["source_alias"] for r in stored_logs(env)} == {"job done": "tower", "other": "tower-old"}
+
+
+@pytest.mark.asyncio
+async def test_continuation_lines_keep_the_reported_name(env):
+    from app.collectors.syslog import dispatch_syslog_message
+
+    fed: list[dict] = []
+
+    class Assembler:
+        """Every line after the first continues the first one's stream."""
+
+        def get_active_stream_key_for_source(self, source_ip):
+            return "stream" if fed else None
+
+        def continues_stream(self, key, text):
+            return True
+
+        def get_stream_parent_entry(self, key):
+            return fed[0]
+
+        async def feed(self, stream_key, entry):
+            fed.append(entry)
+
+    cache = AliasCache(env)
+    await dispatch_syslog_message(b"<14>Nov 14 10:00:00 printer-hp app[1]: Traceback (most recent call last):", PRINTER_IP, cache, Assembler())
+    # A line with no header: it would read as host "-" and app "unknown" on its own
+    await dispatch_syslog_message(b'  File "x.py", line 1, in <module>', PRINTER_IP, cache, Assembler())
+    assert [(e["source_alias"], e.get("reported_host")) for e in fed] == [("printer-hp", "printer-hp")] * 2

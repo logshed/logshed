@@ -66,7 +66,7 @@ export function reapplyAliases(
   let changed = false;
   const next = logs.map((log) => {
     const prepared = prepareLogEntry(log, aliases, undefined, dockerAliases);
-    if (prepared.source_alias === log.source_alias) return log;
+    if (prepared.source_alias === log.source_alias && prepared.host_self_reported === log.host_self_reported) return log;
     changed = true;
     return prepared;
   });

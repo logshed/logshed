@@ -205,7 +205,7 @@ main {
   scrollbar-gutter: stable;
 }
 
-/* Text whose box is trimmed to its capital letters and baseline, so it centres in a fixed-height
+/* Text whose box is trimmed to its capital letters and baseline, so it sits in the middle of a fixed-height
    chip in any font (a monospace font leaves room for descenders below its letters, so plain text
    sits high). Browsers without text-box (before Chrome 133, Safari 18.2) show it as before. */
 @utility text-trim {

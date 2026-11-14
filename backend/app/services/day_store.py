@@ -522,6 +522,9 @@ def stored_values(entry: dict) -> tuple:
 # most once an hour, so ingest touches logs.db only for a name it has not seen lately
 _reported_written: dict[tuple[str, str, str], int] = {}
 REPORTED_REFRESH_US = 3600 * 1_000_000
+# Syslog is unauthenticated, so a sender can make up names without end: past this many pairs the
+# record starts again (it only saves writes)
+REPORTED_WRITTEN_MAX = 10_000
 
 
 def note_reported_hosts(conn: sqlite3.Connection, entries: list[dict]) -> None:
@@ -555,6 +558,8 @@ def note_reported_hosts(conn: sqlite3.Connection, entries: list[dict]) -> None:
     except sqlite3.Error as exc:
         logger.warning(f"Could not record the host names syslog senders reported: {exc}")
         return
+    if len(_reported_written) + len(due) > REPORTED_WRITTEN_MAX:
+        _reported_written.clear()
     for name, ip in due:
         _reported_written[(str(db_path), name, ip)] = now
 

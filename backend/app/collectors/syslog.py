@@ -5,6 +5,7 @@ Supports UDP and TCP on port 1514, parsing RFC 3164 and RFC 5424.
 
 import asyncio
 import datetime
+import ipaddress
 import logging
 import re
 import socket
@@ -907,6 +908,17 @@ class SyslogParseQueue:
             self._close_task = None
 
 
+def _is_ip_address(name: str) -> bool:
+    """Whether name is an IPv4 or IPv6 address (most HOSTNAMEs fail the first check, cheaply)."""
+    if not (name[0].isdigit() or ":" in name):
+        return False
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return True
+
+
 def name_syslog_host(parsed: dict[str, Any], source_ip: str, alias_cache: "AliasCache") -> None:
     """
     Set the host name of a parsed message: its address's alias when it has one. An address with
@@ -919,7 +931,8 @@ def name_syslog_host(parsed: dict[str, Any], source_ip: str, alias_cache: "Alias
         hostname = parsed.get("hostname")
         if hostname and hostname not in ("-", "unknown") and hostname != source_ip:
             parsed["reported_host"] = hostname
-            if not alias_cache.is_taken(hostname):
+            # Another address is taken too: host filters by an alias also match its address
+            if not alias_cache.is_taken(hostname) and not _is_ip_address(hostname):
                 source_alias = hostname
     parsed["source_alias"] = source_alias
 

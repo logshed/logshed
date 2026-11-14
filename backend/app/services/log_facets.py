@@ -3,6 +3,7 @@ The host and app lists of the Console filters, REST v1 and MCP (``list_services`
 apps across every stored log, configured host aliases and Docker hosts, and their mappings.
 """
 
+import json
 import sqlite3
 from typing import Any
 
@@ -49,7 +50,13 @@ def _self_reported(conn: sqlite3.Connection, listed: set[str], alias_index: Alia
     that sent it: names no configured host uses, from addresses that still have no alias.
     """
     try:
-        rows = conn.execute("SELECT name, source_ip FROM reported_hosts ORDER BY name, source_ip").fetchall()
+        # Only the listed names (at most FACET_LIMIT, by the primary key): syslog is
+        # unauthenticated, so the table can hold many more
+        rows = conn.execute(
+            "SELECT name, source_ip FROM reported_hosts WHERE name IN (SELECT value FROM json_each(?))"
+            " ORDER BY name, source_ip",
+            (json.dumps(sorted(listed)),),
+        ).fetchall()
     except sqlite3.OperationalError:
         return {}
     taken = load_taken_host_names(conn)

@@ -16,6 +16,8 @@ export interface SourcesChange {
   retiredHosts: Set<string>;
   /** Shows the rows already in the list under their new host names */
   remapRow: (log: ProcessedLogEntry) => ProcessedLogEntry;
+  /** Host names a configured host uses (syslog aliases, Docker hosts, LogShed), lowercased */
+  takenNames: Set<string>;
 }
 
 export interface SourcesConfigHandlers {
@@ -179,7 +181,7 @@ export function diffSources(
     return log;
   };
 
-  return { previousAliases, aliases, hostReplacements, retiredHosts, remapRow };
+  return { previousAliases, aliases, hostReplacements, retiredHosts, remapRow, takenNames };
 }
 
 /**

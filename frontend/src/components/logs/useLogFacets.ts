@@ -148,10 +148,10 @@ export function useLogFacets({
   }, [aliasesRef, dockerAliasesRef]);
 
   /** Renames hosts after the aliases or Docker hosts changed (useSourcesConfig's onChanged). */
-  const applySourcesChange = useCallback(({ aliases: newMerged, hostReplacements, retiredHosts }: SourcesChange) => {
+  const applySourcesChange = useCallback(({ aliases: newMerged, hostReplacements, retiredHosts, takenNames }: SourcesChange) => {
     // An address that got an alias, or a name a configured host now uses, is no longer self-reported
     setSelfReportedHosts((prev) => {
-      const taken = new Set(Object.values(newMerged).map((a) => a.toLowerCase()));
+      const taken = takenNames;
       const next: Record<string, string[]> = {};
       Object.entries(prev).forEach(([name, ips]) => {
         const left = ips.filter((ip) => !newMerged[ip]);

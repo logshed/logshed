@@ -5,7 +5,7 @@ import { BadgeQuestionMark } from 'lucide-react';
  * A host name as the Console shows it. A name the device reported for itself (its address has no
  * alias) gets a small question-mark badge after it, and "(self-reported)" for screen readers.
  * trimText trims the name to its letters (the text-trim utility), for a fixed-height chip that
- * centres its content.
+ * holds its content in the middle.
  */
 export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText?: boolean }> = ({
   name,
@@ -14,10 +14,11 @@ export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText
 }) => {
   if (!selfReported) return trimText ? <span className="text-trim">{name}</span> : <>{name}</>;
   if (trimText) {
-    // In a chip: the name trimmed to its letters, and the icon centred on them
+    // In a chip: the name trimmed to its letters, and the icon in line with their middle
     return (
       <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
-        <span className="truncate text-trim">{name}</span>
+        {/* Cut short sideways only: a vertical clip would cut the descenders the trim leaves outside the box */}
+        <span className="overflow-x-clip text-ellipsis whitespace-nowrap text-trim">{name}</span>
         <BadgeQuestionMark className="w-3 h-3 shrink-0 text-fg-subtle" aria-hidden="true" />
         <span className="sr-only"> (self-reported)</span>
       </span>
@@ -25,11 +26,12 @@ export const HostName: React.FC<{ name: string; selfReported?: boolean; trimText
   }
   return (
     // In running text: on the text's baseline, so the name lines up with the text around it. The
-    // icon sits beside a zero-width space at vertical-align middle, centred on the letters' x-height
+    // icon sits beside a zero-width space at vertical-align middle, level with the middle of the letters
     // in any font; it stays visible when a long name is cut short.
     <span className="inline-flex items-baseline gap-1 min-w-0 max-w-full">
       <span className="truncate">{name}</span>
-      <span className="shrink-0" aria-hidden="true">
+      {/* Not selectable, so a copied host name has no zero-width space in it */}
+      <span className="shrink-0 select-none" aria-hidden="true">
         {'\u200b'}
         <BadgeQuestionMark className="inline w-3 h-3 align-middle text-fg-subtle" />
       </span>

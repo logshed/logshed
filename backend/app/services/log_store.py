@@ -21,7 +21,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us
-from app.core.utils import DOCKER_ALIASES_SQL, FORMER_DOCKER_ALIASES_KEY, format_severity_label
+from app.core.utils import (
+    DOCKER_ALIASES_SQL,
+    FORMER_DOCKER_ALIASES_KEY,
+    format_severity_label,
+    load_former_docker_aliases,
+    load_taken_host_names,
+)
 from app.services import day_store
 from app.services.log_query import (
     LogFilter,
@@ -211,7 +217,13 @@ def relabel_host(
 # name. These keep stored rows in step when aliases and Docker hosts change. Legacy rows have
 # no reported name and are left as they are.
 
-_NAMED_LIKE = "(SELECT id FROM hosts WHERE lower(name) = lower(?))"
+def _host_ids_named(day_conn: sqlite3.Connection, name: str) -> list[int]:
+    """
+    The ids of a day file's host names equal to name, letter case ignored as Python folds it
+    (as the collector does; SQLite's lower() folds only ASCII letters).
+    """
+    folded = name.lower()
+    return [r[0] for r in day_conn.execute("SELECT id, name FROM hosts") if r[1].lower() == folded]
 
 
 def clear_reported_hosts(conn: sqlite3.Connection, source_ip: str, batch_size: int = 1000) -> int:
@@ -238,12 +250,15 @@ def withdraw_reported_name(
     """
     total = 0
     for day, day_conn in day_store.open_day_connections(conn):
-        where = f"host_id IN {_NAMED_LIKE} AND reported_host_id = host_id AND source_ip IS NOT ?"
-        addresses = [r[0] for r in day_conn.execute(f"SELECT DISTINCT source_ip FROM logs WHERE {where}", (name, keep_ip))]
+        ids = _host_ids_named(day_conn, name)
+        if not ids:
+            continue
+        where = f"host_id IN ({','.join('?' * len(ids))}) AND reported_host_id = host_id AND source_ip IS NOT ?"
+        addresses = [r[0] for r in day_conn.execute(f"SELECT DISTINCT source_ip FROM logs WHERE {where}", (*ids, keep_ip))]
         try:
             for address in addresses:
                 total += day_store.set_names(
-                    day_conn, "host_id", f"{where} AND source_ip = ?", (name, keep_ip, address), address, batch_size, _pause
+                    day_conn, "host_id", f"{where} AND source_ip = ?", (*ids, keep_ip, address), address, batch_size, _pause
                 )
         finally:
             if addresses:
@@ -258,13 +273,16 @@ def restore_reported_name(conn: sqlite3.Connection, name: str, batch_size: int =
     """
     total = 0
     for day, day_conn in day_store.open_day_connections(conn):
+        ids = _host_ids_named(day_conn, name)
+        if not ids:
+            continue
         where = (
-            f"reported_host_id IN {_NAMED_LIKE} AND host_id IS NOT reported_host_id"
+            f"reported_host_id IN ({','.join('?' * len(ids))}) AND host_id IS NOT reported_host_id"
             " AND host_id = (SELECT id FROM hosts WHERE hosts.name = logs.source_ip)"
         )
         try:
             changed = day_store.update_in_batches(
-                day_conn, "host_id = reported_host_id", where, (name,), batch_size, _pause, reindex=True
+                day_conn, "host_id = reported_host_id", where, tuple(ids), batch_size, _pause, reindex=True
             )
         except BaseException:
             # Some batches may have committed: the day's figures follow them
@@ -644,6 +662,7 @@ def drop_empty_legacy(conn: sqlite3.Connection) -> bool:
     """
     if not _writes_day_files(conn) or not _has_legacy_table(conn):
         return False
+    former = load_former_docker_aliases(conn)
     conn.execute("BEGIN IMMEDIATE")
     try:
         if conn.execute("SELECT EXISTS(SELECT 1 FROM logs)").fetchone()[0]:
@@ -661,6 +680,11 @@ def drop_empty_legacy(conn: sqlite3.Connection) -> bool:
         if conn.in_transaction:
             conn.execute("ROLLBACK")
         raise
+    # Those names are free now, unless a configured host uses one: rows that reported them show them
+    taken = load_taken_host_names(conn)
+    for name in former:
+        if name.lower() not in taken:
+            restore_reported_name(conn, name)
     return True
 
 
