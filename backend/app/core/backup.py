@@ -736,7 +736,11 @@ def create_backup(
     label = f"Backing up the database to {name}"
     started = time.monotonic()
     used = method
-    logger.info(f"{label} ({format_bytes(db_size)})...")
+    if method == METHOD_WITHOUT_LOGS:
+        # The database's size would read as the backup's: say the logs are left out
+        logger.info(f"{label}, leaving out the stored logs (database {format_bytes(db_size)})...")
+    else:
+        logger.info(f"{label} ({format_bytes(db_size)})...")
     try:
         if method == METHOD_LOCKED_STREAM:
             try:

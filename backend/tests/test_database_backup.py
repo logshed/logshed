@@ -169,14 +169,16 @@ def test_upgrade_from_v3_backs_up_once_before_all_steps(db, monkeypatch):
     assert _counts(restored)["logs"] == 10
 
 
-def test_step_that_keeps_log_rows_gets_a_backup_without_logs(db, monkeypatch):
+def test_step_that_keeps_log_rows_gets_a_backup_without_logs(db, monkeypatch, caplog):
     run_migrations(db)
     _add_logs(db, 30)
     _add_settings_rows(db)
     before = _counts(db)
     _with_next_step(monkeypatch, MigrationNeeds(backup_without_logs=True))
 
-    run_migrations(db)
+    with caplog.at_level("INFO", logger="app.core.backup"):
+        run_migrations(db)
+    assert "leaving out the stored logs (database " in caplog.text
 
     (archive,) = _archives(db)
     manifest, restored = _extract(archive, db.parent / "x")
