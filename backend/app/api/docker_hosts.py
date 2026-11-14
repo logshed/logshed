@@ -376,7 +376,7 @@ def _batch_update_docker_aliases(
     if source_ip != "docker":
         if not old_alias or old_alias == target_alias:
             return
-        log_store.relabel_host(conn, source_ip, target_alias, only_alias=old_alias, batch_size=batch_size)
+        log_store.relabel_host(conn, source_ip, target_alias, only_alias=old_alias, docker_rows=True, batch_size=batch_size)
     else:
         log_store.relabel_host(conn, "docker", target_alias, batch_size=batch_size)
 

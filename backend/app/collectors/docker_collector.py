@@ -26,6 +26,7 @@ import httpx
 
 from app.collectors.syslog import RE_LOGFMT_LEVEL, RE_LOGFMT_MSG, VALKEY_SEVERITY, AliasCache
 from app.core.config import env_bool, env_docker_disabled, get_db_path
+from app.core.day_files import KIND_DOCKER
 from app.core.migrations import get_connection
 from app.core.net_guard import GuardedAsyncHTTPTransport
 from app.core.pipeline import (
@@ -487,6 +488,7 @@ def _make_log_entry(
         "received_at": now,
         "source_ip": source_ip,
         "source_alias": resolved_alias,
+        "source_kind": KIND_DOCKER,
         "app_name": container_name,
         "facility": 1,
         "severity": severity,

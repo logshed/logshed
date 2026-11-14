@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.api.auth import get_client_ip
 from app.api.deps import bearer_scheme, parse_bearer_token, rate_limit_headers, verify_api_token
 from app.core.api_tokens import ApiTokenRateLimiter
+from app.core.day_files import KIND_INGEST
 from app.core.config import get_max_retention_days
 from app.core.pipeline import (
     MAX_FUTURE_TIMESTAMP_SKEW_SECONDS,
@@ -412,6 +413,7 @@ async def ingest_logs(
             "received_at": now_utc_str,
             "source_ip": src_ip,
             "source_alias": src_alias,
+            "source_kind": KIND_INGEST,
             "app_name": app_name,
             "facility": fac,
             "severity": sev,

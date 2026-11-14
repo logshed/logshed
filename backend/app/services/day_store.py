@@ -944,7 +944,7 @@ def columns(include_raw: bool = True, alias: str = "logs") -> str:
     )
     if include_raw:
         cols += ", " + RAW_SQL.replace("logs.", f"{alias}.") + " AS raw"
-    return cols
+    return cols + f", {alias}.source_kind AS source_kind"
 
 
 def names_in(table: str, placeholders: str) -> str:

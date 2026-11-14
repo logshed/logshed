@@ -21,13 +21,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from app.core.day_files import LEGACY_DAY, RAW_SQL, day_start_us, iso_sql, iso_to_us
-from app.core.utils import DOCKER_ALIASES_SQL, format_severity_label
+from app.core.utils import DOCKER_ALIASES_SQL, FORMER_DOCKER_ALIASES_KEY, format_severity_label
 from app.services import day_store
 from app.services.log_query import (
     LogFilter,
     build_day_where,
     build_where,
     context_source_clause,
+    day_docker_sql,
     docker_aliases,
     execute_with_fts_fallback,
     expand_sources,
@@ -152,6 +153,7 @@ def relabel_host(
     *,
     only_alias: Optional[str] = None,
     keep_aliases: tuple[str, ...] = (),
+    docker_rows: Optional[bool] = None,
     batch_size: int = 1000,
 ) -> int:
     """
@@ -159,14 +161,25 @@ def relabel_host(
     the newest, then the legacy table), in batches of batch_size committed separately. With
     only_alias, only rows named only_alias change; otherwise every row not already named
     target_alias, except rows named one of keep_aliases. Returns the number of rows changed.
+
+    In day files, docker_rows True changes only Docker rows and False only the others, told
+    apart by source kind (keep_aliases then only matters to the legacy table, whose rows have
+    none).
     """
     total = 0
     if only_alias is not None:
         day_sql, day_params = "source_ip = ? AND host_id = (SELECT id FROM hosts WHERE name = ?)", (source_ip, only_alias)
+    elif docker_rows is not None:
+        day_sql, day_params = "source_ip = ? AND host_id IS NOT (SELECT id FROM hosts WHERE name = ?)", (source_ip, target_alias)
     else:
         kept = (target_alias, *keep_aliases)
         day_sql = f"source_ip = ? AND host_id NOT IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(kept))}))"
         day_params = (source_ip, *kept)
+    if docker_rows is not None:
+        names = docker_aliases(conn)
+        docker_sql = day_docker_sql(",".join("?" * len(names)))
+        day_sql = f"{day_sql} AND {'' if docker_rows else 'NOT '}{docker_sql}"
+        day_params = (*day_params, *names)
     for day, day_conn in day_store.open_day_connections(conn):
         # The figures are rewritten even when a batch fails part way (refresh_figures skips a file not sealed)
         try:
@@ -189,6 +202,11 @@ def relabel_host(
 def _pause() -> None:
     """A moment between relabel batches, so ingest and readers get the files in between."""
     time.sleep(0.005)
+
+
+def has_legacy_table(conn: sqlite3.Connection) -> bool:
+    """Whether logs.db still holds the logs table kept from before 1.4.0."""
+    return _has_legacy_table(conn)
 
 
 def _has_legacy_table(conn: sqlite3.Connection) -> bool:
@@ -255,14 +273,16 @@ def relabel_docker_app(
     """
     Rename a Docker app (container) from raw_name to target_name on stored logs from source_ip,
     in batches committed separately. With source_alias, only that Docker host's rows change;
-    otherwise rows under any Docker host name, so syslog rows from a shared address keep theirs.
+    otherwise every Docker row (in day files by source kind, in the legacy table by Docker host
+    name), so syslog rows from a shared address keep theirs.
     """
+    names = docker_aliases(conn)
+    docker_sql = day_docker_sql(",".join("?" * len(names)))
     if source_alias:
-        hosts_sql, host_params = "host_id = (SELECT id FROM hosts WHERE name = ?)", (source_alias,)
+        hosts_sql = f"host_id = (SELECT id FROM hosts WHERE name = ?) AND {docker_sql}"
+        host_params: tuple = (source_alias, *names)
     else:
-        names = docker_aliases(conn)
-        hosts_sql = f"host_id IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(names))}))"
-        host_params = tuple(names)
+        hosts_sql, host_params = docker_sql, tuple(names)
     day_sql = f"source_ip = ? AND app_id = (SELECT id FROM apps WHERE name = ?) AND {hosts_sql}"
     for day, day_conn in day_store.open_day_connections(conn):
         try:
@@ -555,6 +575,8 @@ def drop_empty_legacy(conn: sqlite3.Connection) -> bool:
         conn.execute("DROP TABLE logs")
         conn.execute("DROP TABLE IF EXISTS fts_index_state")
         conn.execute("DELETE FROM log_files WHERE day = ?", (LEGACY_DAY,))
+        # Only the legacy rows, which have no source kind, needed the former Docker aliases
+        conn.execute("DELETE FROM system_settings WHERE key = ?", (FORMER_DOCKER_ALIASES_KEY,))
         conn.execute("COMMIT")
     except BaseException:
         if conn.in_transaction:

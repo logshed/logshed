@@ -62,6 +62,8 @@ class LogEntry(BaseModel):
     severity: int
     message: str
     raw: Optional[str] = None
+    # syslog, docker, ingest or internal; None for logs stored before 1.4.0, which do not record it
+    source_kind: Optional[str] = None
 
 
 class LogListResponse(BaseModel):

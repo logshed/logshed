@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 
+from app.core.day_files import KIND_NAMES
+
 logger = logging.getLogger(__name__)
 
 # Each stream holds a queue of up to 500 entries and its own HTTP connection.
@@ -34,6 +36,9 @@ class SSELogEvent(dict):
         event = cls(entry)
         for key in [k for k in event if isinstance(k, str) and k.startswith("_")]:
             del event[key]
+        # Stored as a number; the browser gets its name, as the log API gives it
+        if "source_kind" in event:
+            event["source_kind"] = KIND_NAMES.get(event["source_kind"])
         event.data = _EVENT_ENCODER.encode(event)
         return event
 

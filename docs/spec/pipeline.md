@@ -71,6 +71,7 @@ The LogShed ingestion pipeline ingests high-volume syslog and Docker container l
 ## 4. Raw Log Storage
 
 - Logs are committed to SQLite in their original unredacted format.
+- Each entry carries `source_kind`, set by whatever built it: `KIND_SYSLOG` (the syslog parser), `KIND_DOCKER` (the Docker collector), `KIND_INGEST` (HTTP ingest) or `KIND_INTERNAL` (`InternalLogHandler`), from `core/day_files.py`. It is stored with the row, and the live stream sends its name (`database.md`, "Source kind").
 - Redaction is deliberately not applied during ingestion so that raw operational audit data remains intact in the database. Redaction occurs strictly on-demand before external LLM dispatch.
 
 ---

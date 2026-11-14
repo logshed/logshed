@@ -38,6 +38,9 @@ KIND_DOCKER = 2
 KIND_INGEST = 3
 KIND_INTERNAL = 4
 
+# The names the API gives source_kind; 0 (or a legacy row, which has no column) is unknown
+KIND_NAMES = {KIND_SYSLOG: "syslog", KIND_DOCKER: "docker", KIND_INGEST: "ingest", KIND_INTERNAL: "internal"}
+
 RAW_IS_MESSAGE = 0
 RAW_IS_PREFIX = 1
 RAW_IS_WHOLE = 2

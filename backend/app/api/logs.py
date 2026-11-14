@@ -145,7 +145,7 @@ async def stream_logs(
                         if parsed_sources:
                             entry_alias = (entry.get("source_alias") or "").strip()
                             entry_ip = (entry.get("source_ip") or "").strip()
-                            if alias_index.is_docker(entry_alias, entry_ip):
+                            if alias_index.is_docker(entry_alias, entry_ip, entry.get("source_kind")):
                                 if entry_alias not in parsed_sources:
                                     continue
                             else:

@@ -11,7 +11,7 @@ import {
   withHostAppLists,
   withHosts,
 } from '../utils/filters.ts';
-import { mergeRowsInTimeOrder, prepareLogEntry } from '../utils/logEntry.ts';
+import { isDockerRow, mergeRowsInTimeOrder, prepareLogEntry } from '../utils/logEntry.ts';
 import { diffSources } from '../components/logs/useSourcesConfig.ts';
 import { DockerEndpoint, LogEntry } from '../types.ts';
 
@@ -334,5 +334,34 @@ describe('diffSources', () => {
     expect(change.remapRow(primaryRow).source_alias).toBe('unraid');
     expect(change.remapRow(remoteRow).source_alias).toBe('remote-b');
     expect(change.hostReplacements).toMatchObject({ docker: 'unraid', 'remote-a': 'remote-b' });
+  });
+
+  it('tells Docker rows by their source kind when they have one', () => {
+    const change = diffSources({}, { '10.0.0.1': 'nas' }, [endpoint(2, 'tower')], [endpoint(2, 'tower')], []);
+    // A container row under a name no Docker host uses any more, and a syslog row named like a Docker host
+    const containerRow = prepareLogEntry({ ...sampleLog, source_ip: '10.0.0.1', source_alias: 'old-host', source_kind: 'docker' });
+    const syslogRow = prepareLogEntry({ ...sampleLog, source_ip: '10.0.0.1', source_alias: 'tower', source_kind: 'syslog' });
+    expect(change.remapRow(containerRow).source_alias).toBe('old-host');
+    expect(change.remapRow(syslogRow).source_alias).toBe('nas');
+  });
+});
+
+describe('isDockerRow', () => {
+  const docker = new Set(['tower']);
+
+  it('follows the source kind when the row has one', () => {
+    expect(isDockerRow({ source_ip: '10.0.0.1', source_kind: 'docker' }, 'anything', docker)).toBe(true);
+    expect(isDockerRow({ source_ip: 'docker', source_kind: 'syslog' }, 'tower', docker)).toBe(false);
+  });
+
+  it('falls back to the Docker host names for logs stored before 1.4.0', () => {
+    expect(isDockerRow({ source_ip: '10.0.0.1', source_kind: null }, 'tower', docker)).toBe(true);
+    expect(isDockerRow({ source_ip: 'docker' }, 'x', docker)).toBe(true);
+    expect(isDockerRow({ source_ip: '10.0.0.1' }, 'nas', docker)).toBe(false);
+  });
+
+  it('gives a syslog row named like a Docker host its address alias', () => {
+    const row = prepareLogEntry({ ...sampleLog, source_ip: '10.0.0.1', source_alias: 'tower', source_kind: 'syslog' }, { '10.0.0.1': 'nas' }, undefined, docker);
+    expect(row.source_alias).toBe('nas');
   });
 });

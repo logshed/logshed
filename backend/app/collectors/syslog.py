@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from app.core.config import get_syslog_udp_receive_buffer_bytes
+from app.core.day_files import KIND_SYSLOG
 from app.core.migrations import get_connection
 from app.core.pipeline import (
     MAX_FUTURE_TIMESTAMP_SKEW_SECONDS,
@@ -468,6 +469,7 @@ def parse_syslog_message(
         "received_at": now_iso,
         "source_ip": source_ip,
         "source_alias": source_ip,
+        "source_kind": KIND_SYSLOG,
         "app_name": "unknown",
         "facility": 1,
         "severity": 6,

@@ -168,10 +168,19 @@ def _plain(value):
     return value
 
 
+def _without_kind(value):
+    """value with every row's source_kind left out: legacy rows have none, day-file rows do."""
+    if isinstance(value, dict):
+        return {k: _without_kind(v) for k, v in value.items() if k != "source_kind"}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_without_kind(v) for v in value)
+    return value
+
+
 def _assert_same(results: dict) -> None:
-    reference = results["legacy"]
+    reference = _without_kind(results["legacy"])
     for name in ("days", "split", "sealed", "split_sealed"):
-        assert results[name] == reference, name
+        assert _without_kind(results[name]) == reference, name
 
 
 def test_the_layouts_hold_what_they_should(layouts):
@@ -193,7 +202,8 @@ def test_rows_come_back_exactly_as_they_were_stored(layouts):
         _, rows = log_store.search(conn, LogFilter(), fetch=len(ROWS), count_limit=len(ROWS))
     by_id = {r["id"]: dict(r) for r in rows}
     for i, stored in enumerate(ROWS, start=1):
-        assert by_id[i] == {"id": i, **stored}
+        # A row stored without a source kind reads back as unknown (0)
+        assert by_id[i] == {"id": i, "source_kind": 0, **stored}
 
 
 FILTERS = [

@@ -213,8 +213,9 @@ def parse_multi_values(values: Optional[list[str]]) -> list[str]:
 
 
 # system_settings key holding a JSON list of the aliases of deleted Docker hosts and the old
-# aliases of renamed ones. Rows have no column that says which collector stored them, so this
-# list is what keeps those hosts' old container logs classed as Docker.
+# aliases of renamed ones. Rows of the legacy logs table (stored before 1.4.0) have no source
+# kind, so this list is what keeps those hosts' old container logs classed as Docker. It is
+# deleted with the legacy table.
 FORMER_DOCKER_ALIASES_KEY = "former_docker_aliases"
 
 # Every source_alias that marks a row as Docker output: the alias of each Docker host (enabled or
@@ -261,14 +262,18 @@ def note_docker_alias_change(conn: Any, old_alias: Optional[str], new_alias: Opt
     """
     Record that a Docker host stopped using old_alias (deleted, or renamed to new_alias) and
     started using new_alias (created or renamed). The old alias joins the former Docker aliases,
-    so the container logs that carry it stay Docker; the new one leaves that list. The caller
-    commits.
+    so the legacy container logs that carry it stay Docker; the new one leaves that list. Once the
+    legacy table is gone no old alias is added: day-file rows record their source kind. The
+    caller commits.
     """
+    from app.services import log_store
+
     old_alias = (old_alias or "").strip()
     new_alias = (new_alias or "").strip()
     former = load_former_docker_aliases(conn)
     updated = [a for a in former if a != new_alias]
-    if old_alias and old_alias != new_alias and old_alias != "docker" and old_alias not in updated:
+    keep_old = old_alias and old_alias != new_alias and old_alias != "docker" and log_store.has_legacy_table(conn)
+    if keep_old and old_alias not in updated:
         updated.append(old_alias)
     if updated == former:
         return
@@ -341,8 +346,13 @@ class AliasIndex:
             _folded={k: frozenset(v) for k, v in folded.items()},
         )
 
-    def is_docker(self, source_alias: Optional[str], source_ip: Optional[str]) -> bool:
-        """True when a row with this alias and address is Docker container output."""
+    def is_docker(self, source_alias: Optional[str], source_ip: Optional[str], source_kind: Optional[str] = None) -> bool:
+        """
+        True when a row is Docker container output: by its source kind when it has one (rows in
+        day files), otherwise by its alias and address (rows stored before 1.4.0).
+        """
+        if source_kind:
+            return source_kind == "docker"
         return source_ip == "docker" or bool(source_alias and source_alias in self.docker_aliases)
 
     def expand(self, sources: Optional[list[str]]) -> list[str]:

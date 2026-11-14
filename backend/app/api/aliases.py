@@ -83,7 +83,9 @@ def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_siz
         log_store.relabel_host(conn, "docker", target_alias, batch_size=batch_size)
     else:
         docker_aliases = tuple(sorted(load_docker_source_aliases(conn)))
-        log_store.relabel_host(conn, source_ip, target_alias, keep_aliases=docker_aliases, batch_size=batch_size)
+        log_store.relabel_host(
+            conn, source_ip, target_alias, keep_aliases=docker_aliases, docker_rows=False, batch_size=batch_size
+        )
 
 
 @router.post("", response_model=HostAliasResponse)

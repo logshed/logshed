@@ -23,6 +23,19 @@ export function buildDockerAliasSet(endpoints: DockerEndpoint[], formerAliases: 
 }
 
 /**
+ * Whether a row is Docker container output: by its source kind when it has one, otherwise (logs
+ * stored before 1.4.0) by the address "docker", or by hostName being one of dockerAliases.
+ */
+export function isDockerRow(
+  entry: Pick<LogEntry, 'source_ip' | 'source_kind'>,
+  hostName: string | undefined,
+  dockerAliases: Set<string> | undefined,
+): boolean {
+  if (entry.source_kind) return entry.source_kind === 'docker';
+  return entry.source_ip === 'docker' || Boolean(dockerAliases && hostName && dockerAliases.has(hostName));
+}
+
+/**
  * Give rows whose stored alias turns out to be a Docker alias that alias back. Rows prepared
  * before the Docker hosts and former Docker aliases were loaded may show the syslog alias of
  * their address instead. Returns the same array when nothing changes.
@@ -34,7 +47,7 @@ export function restoreDockerAliases(
   let changed = false;
   const next = logs.map((log) => {
     const stored = log.storedSourceAlias;
-    if (!stored || log.source_alias === stored || !dockerAliases.has(stored)) return log;
+    if (!stored || log.source_alias === stored || !isDockerRow(log, stored, dockerAliases)) return log;
     changed = true;
     return { ...log, source_alias: stored };
   });
@@ -69,11 +82,7 @@ export function prepareLogEntry(
 ): ProcessedLogEntry {
   const existing = entry as Partial<ProcessedLogEntry>;
   const storedSourceAlias = existing.storedSourceAlias ?? entry.source_alias;
-  const isDocker =
-    entry.source_ip === 'docker' ||
-    Boolean(
-      dockerAliases && storedSourceAlias && dockerAliases.has(storedSourceAlias)
-    );
+  const isDocker = isDockerRow(entry, storedSourceAlias, dockerAliases);
 
   const canonical =
     !isDocker &&

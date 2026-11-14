@@ -196,7 +196,10 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
     onClose();
   };
 
+  // The source kind says which collector stored the log; logs stored before 1.4.0 have none, and
+  // their raw text tells a syslog packet apart
   const isSyslogRaw = useMemo(() => {
+    if (log?.source_kind) return log.source_kind === 'syslog';
     if (!log?.raw) return false;
     return /^<\d{1,3}>/.test(log.raw);
   }, [log]);
@@ -206,6 +209,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   // reserved source_ip "docker" - never by facility, which HTTP ingest also defaults to 1
   const matchedDockerEndpoint = useMemo(() => {
     if (!log || isSyslogRaw) return null;
+    if (log.source_kind && log.source_kind !== 'docker') return null;
     const endpoints = dockerEndpoints || [];
 
     // 1. Match on source_alias
@@ -229,6 +233,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   // deleted or renamed host (remote hosts log under their address, which syslog senders share)
   const isDeletedDockerHost = useMemo(() => {
     if (!log || isSyslogRaw || matchedDockerEndpoint) return false;
+    if (log.source_kind) return log.source_kind === 'docker';
     return log.source_ip === 'docker' || (Boolean(log.source_alias) && formerDockerAliases.includes(log.source_alias));
   }, [log, isSyslogRaw, matchedDockerEndpoint, formerDockerAliases]);
 

@@ -21,6 +21,7 @@ from app.core.config import (
     parse_internal_log_level,
     to_canonical_log_level_name,
 )
+from app.core.day_files import KIND_INTERNAL
 from app.core.migrations import run_migrations
 from app.core.pipeline import SKIP_ALERT_RULES_KEY, InternalLogHandler, get_queue
 from app.core.security import SESSION_COOKIE_NAME, create_session_token
@@ -175,6 +176,7 @@ class TestInternalLogHandler:
         assert entry["message"] == "Warning log"
         assert entry["app_name"] == "syslog"
         assert entry["source_alias"] == "logshed"
+        assert entry["source_kind"] == KIND_INTERNAL
 
         # Emit ERROR -> captured
         handler.emit(self._make_record(level=logging.ERROR, msg="Error log"))

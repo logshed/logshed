@@ -11,6 +11,8 @@ export interface LogEntry {
   severity: number;
   message: string;
   raw?: string | null;
+  /** Which collector stored the log; null for logs stored before 1.4.0, which do not record it */
+  source_kind?: 'syslog' | 'docker' | 'ingest' | 'internal' | null;
 }
 
 export interface LogContextResponse {

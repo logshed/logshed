@@ -16,6 +16,7 @@ from typing import Any, Optional, Union
 from pathlib import Path
 from collections import deque
 
+from app.core.day_files import KIND_INTERNAL
 from app.core.utils import SEVERITY_NAME_MAP
 from app.services import log_store
 
@@ -194,6 +195,7 @@ class InternalLogHandler(logging.Handler):
                 "received_at": now_iso,
                 "source_ip": source_ip,
                 "source_alias": source_alias,
+                "source_kind": KIND_INTERNAL,
                 "app_name": app_subname,
                 "facility": 1,
                 "severity": severity,

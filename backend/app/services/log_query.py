@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from fastapi import HTTPException, Request, status
 
-from app.core.day_files import iso_to_us
+from app.core.day_files import KIND_DOCKER, KIND_NAMES, iso_to_us
 from app.core.redactor import redact
 from app.core.utils import (
     DOCKER_ALIASES_SQL,
@@ -210,6 +210,17 @@ def docker_aliases(conn: sqlite3.Connection) -> list[str]:
     return sorted({r[0] for r in conn.execute(DOCKER_ALIASES_SQL).fetchall() if r[0]})
 
 
+def day_docker_sql(docker_placeholders: str) -> str:
+    """
+    SQL true for a day file's Docker rows: by source kind, or for a row of unknown kind (0) by
+    the Docker host names in docker_placeholders and the address "docker", as legacy rows are.
+    """
+    return (
+        f"(logs.source_kind = {KIND_DOCKER} OR (logs.source_kind = 0 AND (logs.source_ip = 'docker'"
+        f" OR logs.host_id IN (SELECT id FROM hosts WHERE name IN ({docker_placeholders})))))"
+    )
+
+
 def build_day_where(f: LogFilter, docker_names: list[str]) -> tuple[str, dict[str, Any]]:
     """
     build_where for a day file: the same selection on its stored forms (integer times, host and
@@ -232,9 +243,7 @@ def build_day_where(f: LogFilter, docker_names: list[str]) -> tuple[str, dict[st
         # A host name, or the address of syslog and ingest rows (never Docker rows, which share it)
         where_clauses.append(
             f"(logs.host_id IN (SELECT id FROM hosts WHERE name IN ({source_placeholders}))"
-            f" OR (logs.source_ip IN ({source_placeholders})"
-            f" AND logs.host_id NOT IN (SELECT id FROM hosts WHERE name IN ({docker_placeholders}))"
-            " AND logs.source_ip != 'docker'))"
+            f" OR (logs.source_ip IN ({source_placeholders}) AND NOT {day_docker_sql(docker_placeholders)}))"
         )
         params.update({f"src_{i}": s for i, s in enumerate(f.sources)})
         params.update({f"docker_{i}": s for i, s in enumerate(docker_names)})
@@ -268,7 +277,16 @@ LOG_COLUMNS = (
 
 def log_columns(include_raw: bool = True) -> str:
     """The SELECT column list for log rows, with the raw packet only when it is needed."""
-    return f"{LOG_COLUMNS}, logs.raw" if include_raw else LOG_COLUMNS
+    # Legacy rows have no source kind: it is unknown, and they are classed by host name instead
+    return f"{LOG_COLUMNS}, logs.raw, NULL AS source_kind" if include_raw else f"{LOG_COLUMNS}, NULL AS source_kind"
+
+
+def _kind_name(row: Any) -> Optional[str]:
+    """The source kind's name, or None when it is unknown or the row was read without the column."""
+    try:
+        return KIND_NAMES.get(row["source_kind"])
+    except (IndexError, KeyError):
+        return None
 
 
 def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = True) -> LogEntry:
@@ -291,6 +309,7 @@ def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = Tr
             severity=row["severity"],
             message=row["message"],
             raw=raw,
+            source_kind=_kind_name(row),
         )
     return LogEntry(
         id=row["id"],
@@ -303,6 +322,7 @@ def row_to_log_entry(row: Any, *, external: bool = False, include_raw: bool = Tr
         severity=row["severity"],
         message=redact(row["message"]),
         raw=redact(raw) if raw is not None else None,
+        source_kind=_kind_name(row),
     )
 
 

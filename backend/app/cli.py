@@ -16,6 +16,7 @@ import signal
 import sqlite3
 import sys
 
+from app.core.day_files import KIND_SYSLOG
 from app.core.migrations import (
     MIGRATIONS,
     DatabaseNewerThanAppError,
@@ -161,6 +162,7 @@ def _seed_logs_locked(count: int, days: int, db_path: str, log_store) -> int:
             "received_at": ts_iso,
             "source_ip": ip,
             "source_alias": alias,
+            "source_kind": KIND_SYSLOG,
             "app_name": app,
             "facility": 1,
             "severity": severity,

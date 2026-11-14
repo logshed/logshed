@@ -417,6 +417,39 @@ describe('LogDetailModal Component (Items #8, #9, #11)', () => {
     expect(screen.queryByText('Raw Syslog Packet')).toBeNull();
   });
 
+  it('labels the raw text by the source kind when the log has one', () => {
+    const { rerender } = render(
+      <LogDetailModal
+        log={{ ...sampleLog, source_kind: 'docker', raw: 'plain container line' }}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Raw Container Output')).toBeInTheDocument();
+
+    // A syslog packet whose priority prefix was not kept is still a syslog packet
+    rerender(
+      <LogDetailModal
+        log={{ ...sampleLog, source_kind: 'syslog', raw: 'no priority prefix' }}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Raw Syslog Packet')).toBeInTheDocument();
+
+    rerender(
+      <LogDetailModal
+        log={{ ...sampleLog, source_kind: 'ingest', raw: '<13>looks like syslog' }}
+        isOpen={true}
+        onClose={vi.fn()}
+        onExplainWithAi={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Raw Log Record')).toBeInTheDocument();
+  });
+
   it('renders Raw Syslog Packet label for non-Docker logs', () => {
     render(
       <LogDetailModal

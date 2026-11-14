@@ -438,6 +438,18 @@ class TestIngestLimitsAndFields:
         assert [e["severity"] for e in _queued_entries()] == [6, 6]
 
     @pytest.mark.asyncio
+    async def test_ingested_logs_are_marked_as_ingested(self, client, write_token):
+        from app.core.day_files import KIND_INGEST
+
+        resp = await client.post(
+            "/api/v1/ingest",
+            json=[{"message": "a", "host": "docker"}],
+            headers={"Authorization": f"Bearer {write_token}"},
+        )
+        assert resp.status_code == 200
+        assert [e["source_kind"] for e in _queued_entries()] == [KIND_INGEST]
+
+    @pytest.mark.asyncio
     async def test_message_and_raw_are_capped_and_raw_is_cleaned(self, client, write_token):
         from app.core.pipeline import MAX_MESSAGE_BYTES
 

@@ -3,7 +3,7 @@ import { DockerEndpoint, HostAlias } from '../../types.ts';
 import { fetchAliases } from '../../api/aliases.ts';
 import { fetchDockerEndpoints } from '../../api/dockerHosts.ts';
 import { useAlias } from '../../context/AliasContext.tsx';
-import { buildDockerAliasSet, ProcessedLogEntry } from '../../utils/logEntry.ts';
+import { buildDockerAliasSet, isDockerRow, ProcessedLogEntry } from '../../utils/logEntry.ts';
 
 /** How the hosts the Console shows changed when the aliases or Docker hosts were edited. */
 export interface SourcesChange {
@@ -125,9 +125,7 @@ export function diffSources(
 
   // Update source_alias on matching in-memory logs with strict separation between Docker and Syslog
   const remapRow = (log: ProcessedLogEntry): ProcessedLogEntry => {
-    const isDocker =
-      log.source_ip === 'docker' ||
-      Boolean(log.source_alias && allDockerAliases.has(log.source_alias));
+    const isDocker = isDockerRow(log, log.source_alias, allDockerAliases);
 
     if (isDocker) {
       // Primary Docker endpoint
