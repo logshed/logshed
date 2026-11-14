@@ -168,10 +168,11 @@ def relabel_host(
         day_sql = f"source_ip = ? AND host_id NOT IN (SELECT id FROM hosts WHERE name IN ({','.join('?' * len(kept))}))"
         day_params = (source_ip, *kept)
     for day, day_conn in day_store.open_day_connections(conn):
-        changed = day_store.set_names(day_conn, "host_id", day_sql, day_params, target_alias, batch_size, _pause)
-        if changed:
+        # The figures are rewritten even when a batch fails part way (refresh_figures skips a file not sealed)
+        try:
+            total += day_store.set_names(day_conn, "host_id", day_sql, day_params, target_alias, batch_size, _pause)
+        finally:
             day_store.refresh_figures(conn, day)
-        total += changed
     if not _has_legacy_table(conn):
         return total
     if only_alias is not None:
@@ -264,7 +265,9 @@ def relabel_docker_app(
         host_params = tuple(names)
     day_sql = f"source_ip = ? AND app_id = (SELECT id FROM apps WHERE name = ?) AND {hosts_sql}"
     for day, day_conn in day_store.open_day_connections(conn):
-        if day_store.set_names(day_conn, "app_id", day_sql, (source_ip, raw_name, *host_params), target_name, batch_size, _pause):
+        try:
+            day_store.set_names(day_conn, "app_id", day_sql, (source_ip, raw_name, *host_params), target_name, batch_size, _pause)
+        finally:
             day_store.refresh_figures(conn, day)
     if not _has_legacy_table(conn):
         return
@@ -346,26 +349,30 @@ def _delete_in_parts(
     query = _PartQuery.prepare(conn, log_filter)
     deleted = 0
     for part in found:
-        if by_ids:
-            ids = [i for i in log_filter.log_ids if part.min_id <= i <= part.max_id]  # type: ignore[operator]
-            if part.legacy:
+        if part.legacy:
+            if by_ids:
+                ids = [i for i in log_filter.log_ids if part.min_id <= i <= part.max_id]  # type: ignore[operator]
                 deleted += _delete_ids(conn, tuple(ids), between_batches)
-                continue
-            gone = day_store.delete_ids(part.conn, ids, between_batches)
-        else:
-            where_sql, params = query.where(part)
-            if part.legacy:
+            else:
+                where_sql, params = query.where(part)
                 deleted += _delete_legacy_where(conn, where_sql, params, log_filter.query, batch_size, between_batches)
-                continue
-            gone = execute_with_fts_fallback(
-                lambda p, c=part.conn, w=where_sql: day_store.delete_rows(c, w, p, batch_size, between_batches),
-                params,
-                log_filter.query,
-                empty=0,
-            )
-        if gone and part.sealed:
+            continue
+        # A sealed file's figures are rewritten even when the delete stops part way, and also when
+        # the file was sealed after this delete began (refresh_figures checks its state itself)
+        try:
+            if by_ids:
+                ids = [i for i in log_filter.log_ids if part.min_id <= i <= part.max_id]  # type: ignore[operator]
+                deleted += day_store.delete_ids(part.conn, ids, between_batches)
+            else:
+                where_sql, params = query.where(part)
+                deleted += execute_with_fts_fallback(
+                    lambda p, c=part.conn, w=where_sql: day_store.delete_rows(c, w, p, batch_size, between_batches),
+                    params,
+                    log_filter.query,
+                    empty=0,
+                )
+        finally:
             day_store.refresh_figures(conn, part.day)
-        deleted += gone
     return deleted
 
 
@@ -434,12 +441,12 @@ def delete_everything(conn: sqlite3.Connection, batch_size: int, between_batches
                 deleted += part.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
                 day_store.delete_file(conn, part.day)
             else:
-                gone = day_store.delete_rows(
-                    part.conn, "WHERE logs.id <= :last", {"last": part.max_id}, batch_size, between_batches
-                )
-                if gone and part.sealed:
+                try:
+                    deleted += day_store.delete_rows(
+                        part.conn, "WHERE logs.id <= :last", {"last": part.max_id}, batch_size, between_batches
+                    )
+                finally:
                     day_store.refresh_figures(conn, part.day)
-                deleted += gone
     if not _has_legacy_table(conn):
         return deleted
     conn.execute("BEGIN IMMEDIATE")
@@ -1137,16 +1144,25 @@ def seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> Se
     found = day_store.parts(conn)
     if not found:
         return SeenNames([], [], [], [], [])
-    results = [
-        _legacy_seen_names(part.conn, scan_limit, pair_limit) if part.legacy else _day_seen_names(part.conn, scan_limit, pair_limit)
-        for part in found
-    ]
+    results: list[SeenNames] = []
+    # Per day file: each host's first (app, address) pair, when its index walk saw every triple
+    walked: list[Optional[dict[str, tuple[str, str]]]] = []
+    for part in found:
+        if part.legacy:
+            results.append(_legacy_seen_names(part.conn, scan_limit, pair_limit))
+            walked.append(None)
+        else:
+            seen, first_pair = _day_seen(part.conn, scan_limit, pair_limit)
+            results.append(seen)
+            walked.append(first_pair)
     if len(results) == 1:
         return results[0]
     # Each host name is listed with the address of its first (app, address) pair, as one table gives
     first: dict[str, tuple[str, str]] = {}
-    for part, seen in zip(found, results):
-        for alias, pair in _alias_first_addresses(part, [a for a, _ip in seen.aliases]).items():
+    for part, seen, first_pair in zip(found, results, walked):
+        names = [a for a, _ip in seen.aliases]
+        pairs = {a: first_pair[a] for a in names if a in first_pair} if first_pair is not None else _alias_first_addresses(part, names)
+        for alias, pair in pairs.items():
             if alias not in first or pair < first[alias]:
                 first[alias] = pair
     aliases = {alias: ip for alias, (_app, ip) in first.items()}
@@ -1188,6 +1204,14 @@ def _alias_first_addresses(part: day_store.Part, aliases: list[str]) -> dict[str
 
 def _day_seen_names(day_conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> SeenNames:
     """seen_names() of one day file: one seek per distinct (address, app, host) in idx_logs_ip_app_host."""
+    return _day_seen(day_conn, scan_limit, pair_limit)[0]
+
+
+def _day_seen(
+    day_conn: sqlite3.Connection, scan_limit: int, pair_limit: int
+) -> tuple[SeenNames, Optional[dict[str, tuple[str, str]]]]:
+    """_day_seen_names(), with each host's first (app, address) pair when the walk saw every triple (else None)."""
+    walk_limit = 2 * pair_limit + 2 * scan_limit
     triples = day_conn.execute(
         """
         WITH RECURSIVE t(ip, app, host) AS (
@@ -1208,7 +1232,7 @@ def _day_seen_names(day_conn: sqlite3.Connection, scan_limit: int, pair_limit: i
         SELECT t.ip, (SELECT name FROM apps WHERE apps.id = t.app), (SELECT name FROM hosts WHERE hosts.id = t.host)
         FROM t
         """,
-        (2 * pair_limit + 2 * scan_limit,),
+        (walk_limit,),
     ).fetchall()
     bare_ips: set[str] = set()
     apps: set[str] = set()
@@ -1227,7 +1251,7 @@ def _day_seen_names(day_conn: sqlite3.Connection, scan_limit: int, pair_limit: i
             bare_ips.add(ip)
             if app:
                 bare_ip_apps.add((app, ip))
-    return SeenNames(
+    seen = SeenNames(
         # Each host name with the address of its first (app, address) pair, as the legacy index gives
         aliases=sorted((host, pair[1]) for host, pair in first_pair.items())[:scan_limit],
         bare_ips=sorted(bare_ips)[:scan_limit],
@@ -1235,6 +1259,7 @@ def _day_seen_names(day_conn: sqlite3.Connection, scan_limit: int, pair_limit: i
         alias_apps=[(a, app, ip) for (a, app), ip in sorted(alias_apps.items())][:pair_limit],
         bare_ip_apps=sorted(bare_ip_apps)[:pair_limit] if bare_ips else [],
     )
+    return seen, (first_pair if len(triples) < walk_limit else None)
 
 
 def _legacy_seen_names(conn: sqlite3.Connection, scan_limit: int, pair_limit: int) -> SeenNames:
@@ -1366,18 +1391,25 @@ class StoredFile:
 def files(conn: sqlite3.Connection) -> list[StoredFile]:
     """
     Every day file in the catalogue (newest day first) with its logs and size, then the legacy
-    table while it exists. The open files' figures are brought up to date first.
+    table while it exists. The open files' figures are brought up to date first when logs.db can
+    be written (not during a Compact, which holds it: the figures of the last refresh are used).
     """
     if not _writes_day_files(conn):
         return []
-    day_store.refresh_open_figures(conn)
+    try:
+        day_store.refresh_open_figures(conn)
+    except sqlite3.OperationalError:
+        pass
     found = []
-    for day, file_name, state, row_count, size_bytes in conn.execute(
-        "SELECT day, file_name, state, row_count, size_bytes FROM log_files "
+    db_path = day_store.main_path(conn)
+    for day, file_name, state, row_count in conn.execute(
+        "SELECT day, file_name, state, row_count FROM log_files "
         "WHERE day != ? AND state IN ('open', 'sealed') ORDER BY day DESC",
         (LEGACY_DAY,),
     ).fetchall():
-        found.append(StoredFile(day, file_name, state, row_count, size_bytes or 0, None))
+        # Sizes from the disk, so they are right even when the refresh above could not run
+        size = day_store.file_bytes(db_path.parent / file_name) if db_path is not None else 0
+        found.append(StoredFile(day, file_name, state, row_count, size, None))
     if _has_legacy_table(conn):
         newest = conn.execute("SELECT MAX(timestamp) FROM logs").fetchone()[0]
         found.append(StoredFile(LEGACY_DAY, "logs.db", "legacy", None, None, newest))

@@ -267,7 +267,7 @@ All persistent application data is stored under the `/data` directory:
 | `/data/.migration_failed` | Written when an upgrade of the database stopped; it keeps LogShed in [recovery mode](#recovery-mode) across restarts. Removed by a retry, or when another version starts. |
 | `/data/.tmp/` | SQLite's temporary files: the copy of the database that **Compact Database** builds, and large sorts. They are deleted as soon as they are created, so the folder looks empty while they take space. It sits beside the database (it follows `DATA_DIR` and `DB_PATH`), so this space comes from the `/data` disk and not from the container's own filesystem (on Unraid, `docker.img`). |
 
-**Free space for Compact Database:** compacting writes a copy of the database and then the whole database again into `logs.db-wal`, so it needs free space of about **twice the database's size** on the `/data` disk. LogShed checks before it starts and refuses with the figures if there is not enough. The extra space is released when it finishes.
+**Free space for Compact Database:** compacting writes a copy of the data in the database and then all of it again into `logs.db-wal`, so it needs free space of about **twice the size of that data** on the `/data` disk (the file's size, less the free space inside it that Compact gives back). LogShed checks before it starts and refuses with the figures if there is not enough. The extra space is released when it finishes.
 
 > [!WARNING]
 > Always host the `/data` directory on a local filesystem (such as ext4, btrfs, or zfs) or an SSD cache pool. Network mounts (NFS, SMB) and Unraid FUSE user shares (`/mnt/user/`) do not reliably support POSIX shared memory (`mmap`) or file locking required for SQLite WAL mode.

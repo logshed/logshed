@@ -554,13 +554,15 @@ def _listed_day_files(db_copy: Path) -> list[str]:
 
 
 @contextlib.contextmanager
-def _day_file_copy(path: Path, scratch: Path, cancel: Optional[threading.Event]):
+def _day_file_copy(path: Path, scratch: Path, cancel: Optional[threading.Event], owner: Optional[tuple[int, int]] = None):
     """
     A consistent copy of a day file to archive, while the app may write it. When its WAL is empty
     (a sealed file, checkpointed when sealed), the file itself inside a read transaction: a checkpoint
     cannot write into a database file while a reader reads it without the WAL, so the file stays as it
     was until the copy is done. Otherwise (today's file) a VACUUM INTO copy at `scratch`, deleted after.
-    Yields (path to stream, its highest log id), or None when the file is gone.
+    Yields (path to stream, its highest log id), or None when the file is gone. Opening a file in
+    WAL mode makes its -wal and -shm when the app has none open; run as root (`docker exec`), those
+    are given to `owner`, or the app could no longer open the file.
     """
     if not path.exists():
         yield None
@@ -589,6 +591,9 @@ def _day_file_copy(path: Path, scratch: Path, cancel: Optional[threading.Event])
                 conn.execute("COMMIT;")
         conn.close()
         scratch.unlink(missing_ok=True)
+        for name in (path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+            if name.exists():
+                _give_to(name, owner)
 
 
 def _match_catalogue(db_copy: Path, archived: list[str], top_id: Optional[int]) -> None:
@@ -643,6 +648,7 @@ def _size_without_logs(db_path: Path, omitted: tuple[str, ...] = LOG_TABLES) -> 
 def _write_with_day_files(
     db_path: Path, tmp: Path, db_copy: Path, manifest: dict, entry: dict, label: str,
     progress_cb: Optional[ProgressCallback], cancel: Optional[threading.Event], scratch: Path,
+    owner: Optional[tuple[int, int]] = None,
 ) -> None:
     """The archive of a database copy and the day files its catalogue lists: day files first, then the database."""
     from app.core import day_files as day_files_mod
@@ -655,7 +661,7 @@ def _write_with_day_files(
         top_id: Optional[int] = None
         for day in days:
             path = day_files_mod.day_path(db_path, day)
-            with _day_file_copy(path, scratch, cancel) as found:
+            with _day_file_copy(path, scratch, cancel, owner) as found:
                 if found is None:
                     continue
                 source, file_top = found
@@ -756,7 +762,9 @@ def create_backup(
             os.chmod(copy, 0o640)
             _give_to(copy, owner)
             if day_files:
-                _write_with_day_files(db_path, tmp, copy, manifest, entry, label, progress_cb, cancel, folder / f"{name}.day.tmp")
+                _write_with_day_files(
+                    db_path, tmp, copy, manifest, entry, label, progress_cb, cancel, folder / f"{name}.day.tmp", owner
+                )
             else:
                 _write_archive(tmp, copy, db_path.name, manifest, entry, label, progress_cb, cancel)
         os.chmod(tmp, 0o640)

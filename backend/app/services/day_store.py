@@ -13,15 +13,19 @@ the day-file connections the search uses, through ``use_interrupt``.
 
 import contextlib
 import datetime
+import logging
 import os
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
 from app.core import day_files
 from app.core.day_files import RAW_SQL, iso_sql, iso_to_us
+
+logger = logging.getLogger(__name__)
 
 # SQLite virtual machine instructions between two interrupt checks (as run_db_query)
 _INTERRUPT_CHECK_INSTRUCTIONS = 10_000
@@ -39,22 +43,59 @@ _generation = 0
 _generation_lock = threading.Lock()
 
 
+# A connection the thread has not used for this long is closed at its next connection() call
+IDLE_CLOSE_SECONDS = 600.0
+# Connections set aside by forget_connections() are closed this long after, not at once: a call
+# that began before (a search, a context) may still hold one (longer than the 2-minute search limit)
+RETIRED_CLOSE_SECONDS = 180.0
+
+
 def forget_connections() -> None:
-    """Make every thread close and reopen its day-file connections (a file was deleted or replaced)."""
+    """
+    Make every thread reopen its day-file connections (a file was deleted or replaced). The
+    calling thread closes its own now (it holds none in use: deletes work from the catalogue);
+    every other thread sets its old connections aside at its next connection() call and closes
+    them a few minutes later, so a search or context it is running still finishes.
+    """
     global _generation
     with _generation_lock:
         _generation += 1
     close_thread_connections()
 
 
+def _close(conn: sqlite3.Connection) -> None:
+    with contextlib.suppress(Exception):
+        conn.close()
+
+
 def close_thread_connections() -> None:
-    """Close the calling thread's day-file connections."""
+    """Close the calling thread's day-file connections now, those set aside too."""
     cache = getattr(_local, "connections", None)
     if cache:
         for conn in cache.values():
-            with contextlib.suppress(Exception):
-                conn.close()
+            _close(conn)
         cache.clear()
+    for _at, conn in getattr(_local, "retired", ()):
+        _close(conn)
+    _local.retired = []
+
+
+def _sweep(keep: str, now: float) -> None:
+    """Close this thread's connections set aside long enough, and those unused for IDLE_CLOSE_SECONDS."""
+    retired = getattr(_local, "retired", [])
+    if retired:
+        for at, conn in retired:
+            if now - at >= RETIRED_CLOSE_SECONDS:
+                _close(conn)
+        _local.retired = [(at, conn) for at, conn in retired if now - at < RETIRED_CLOSE_SECONDS]
+    used = getattr(_local, "used", {})
+    cache = getattr(_local, "connections", {})
+    for key in [k for k, at in used.items() if k != keep and now - at >= IDLE_CLOSE_SECONDS]:
+        conn = cache.pop(key, None)
+        used.pop(key, None)
+        if conn is not None:
+            # Set aside rather than closed: a caller may still hold it
+            _local.retired = [*getattr(_local, "retired", []), (now, conn)]
 
 
 @contextlib.contextmanager
@@ -111,12 +152,16 @@ def connection(path: Path, create: bool = False) -> Optional[sqlite3.Connection]
     The calling thread's connection to a day file (rows as sqlite3.Row), or None when the file
     does not exist and create is False. With create, a missing file is made with the layout.
     """
+    now = time.monotonic()
     cache = getattr(_local, "connections", None)
     if cache is None or getattr(_local, "generation", None) != _generation:
-        close_thread_connections()
+        _local.retired = [*getattr(_local, "retired", []), *((now, c) for c in (cache or {}).values())]
         cache = _local.connections = {}
+        _local.used = {}
         _local.generation = _generation
     key = str(path)
+    _sweep(key, now)
+    _local.used[key] = now
     conn = cache.get(key)
     if conn is None:
         if not create and not path.exists():
@@ -385,22 +430,38 @@ _listed_lock = threading.Lock()
 def _open_day(conn: sqlite3.Connection, db_path: Path, day: str) -> sqlite3.Connection:
     """The day's file, with its catalogue entry; both are made on the day's first write."""
     key = (str(db_path), os.stat(db_path).st_ino, day)
+    path = day_files.day_path(db_path, day)
     if key not in _listed_days:
         write = _main_write_conn(db_path)
         with write:
-            write.execute(
+            added = write.execute(
                 "INSERT OR IGNORE INTO log_files (day, file_name, layout, state, row_count) VALUES (?, ?, ?, 'open', 0)",
                 (day, day_files.file_name(day), day_files.LAYOUT_VERSION),
-            )
+            ).rowcount
+            if added and path.exists():
+                # A file of this day that the catalogue did not list (left by a restore or copied in) is
+                # never adopted: its log ids may be ones this database hands out again
+                _set_unlisted_aside(path)
         with _listed_lock:
             _listed_days.add(key)
-    path = day_files.day_path(db_path, day)
     is_new = not path.exists()
     day_conn = connection(path, create=True)
     assert day_conn is not None
     if is_new:
         _give_to_database_owner(db_path, path)
     return day_conn
+
+
+def _set_unlisted_aside(path: Path) -> None:
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    aside = path.with_name(f"{path.name}.unlisted-{stamp}")
+    for suffix in ("", "-wal", "-shm"):
+        with contextlib.suppress(FileNotFoundError):
+            Path(f"{path}{suffix}").rename(f"{aside}{suffix}")
+    logger.warning(
+        f"{path.name} was in the data folder but LogShed had no record of it, so it was renamed to {aside.name} "
+        "and new logs of that day go to a new file. Move or delete it when you no longer need it."
+    )
 
 
 def _give_to_database_owner(db_path: Path, path: Path) -> None:
@@ -911,19 +972,17 @@ def write_rows_one_by_one(
     return stored, skipped
 
 
-def open_day_connections(conn: sqlite3.Connection, states: tuple[str, ...] = ("open", "sealed")) -> list[tuple[str, sqlite3.Connection]]:
-    """(day, connection) of every day file in the catalogue in these states that exists, newest first."""
+def open_day_connections(conn: sqlite3.Connection, states: tuple[str, ...] = ("open", "sealed")) -> Iterator[tuple[str, sqlite3.Connection]]:
+    """(day, connection) of every day file in the catalogue in these states that exists, newest first, each opened as it is reached."""
     db_path = main_path(conn)
     if db_path is None or not has_catalogue(conn):
-        return []
-    found = []
+        return
     for day, state in catalogue_days(conn):
         if day == day_files.LEGACY_DAY or state not in states:
             continue
         day_conn = connection(day_files.day_path(db_path, day))
         if day_conn is not None:
-            found.append((day, day_conn))
-    return found
+            yield day, day_conn
 
 
 def index_pending_all(conn: sqlite3.Connection, batch_size: int) -> int:

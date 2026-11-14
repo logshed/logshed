@@ -367,7 +367,8 @@ async def test_the_storage_overview_lists_each_file_with_when_it_expires(api_env
     assert files[D1]["logs"] == 1 and files[D1]["file_name"] == "logs-2026-03-27-UTC.db"
     # Deleted from the first prune once its whole day is 7 days old: 00:00 UTC, 8 days after its start
     assert files[D1]["expires_at"] == "2026-04-04T00:00:00+00:00"
-    assert files["legacy"]["expires_at"] == "2026-03-28T10:00:00+00:00"
+    # Its newest log is 7 days old at 10:00 on 28 March; the prune after that midnight removes it
+    assert files["legacy"]["expires_at"] == "2026-03-29T00:00:00+00:00"
     assert files["legacy"]["logs"] == 1 and files["legacy"]["size_bytes"] is None
 
 
@@ -390,3 +391,92 @@ def test_the_indexer_seals_finished_days_when_idle_at_most_once_a_minute(db):
         assert _catalogue(db)[D1]["state"] == "sealed" and _catalogue(db)[D1]["row_count"] == 2
     finally:
         worker.close()
+
+
+class TestReviewFixes:
+    def test_compaction_headroom_counts_the_live_data_not_the_file(self, tmp_path):
+        day_store.forget_id_blocks()
+        path = tmp_path / "logs.db"
+        old = (datetime.datetime.now(_UTC) - datetime.timedelta(days=40)).isoformat()
+        _upgraded_with_legacy(path, [(old, f"old {i}") for i in range(2000)])
+        retention.execute_prune(path, retention_days=14)  # drops the table; the file keeps its size
+        footprint = retention.get_db_footprint_bytes(path)
+        live = retention.get_db_live_bytes(path)
+        assert live < footprint / 4
+        free = 2 * live + 10 * 1024**2  # room for the live data twice, not for the file twice
+        with mock.patch.object(retention, "_free_bytes", return_value=free):
+            assert retention.check_vacuum_headroom(path, safe_margin_bytes=0)[0] == live
+
+    def test_the_snapshot_keeps_its_figures_while_logs_db_cannot_be_written(self, three_days):
+        storage_metrics.clear_storage_snapshot_cache()
+        with mock.patch.object(day_store, "refresh_open_figures", side_effect=sqlite3.OperationalError("database is locked")):
+            snap = storage_metrics.sample_storage_metrics(three_days)
+        assert snap["total_logs_count"] == 7
+        assert {f["day"] for f in snap["log_files"]} - {"legacy"} == {D1, D2, D3}
+        assert snap["day_files_size_bytes"] > 0
+
+    @pytest.mark.parametrize("how", ["delete", "relabel"])
+    def test_a_change_to_a_sealed_file_that_stops_part_way_still_rewrites_its_figures(self, db, how):
+        _write(db, [_row(D1, h % 24, message=f"disk {h}") for h in range(30)])
+        index_pending_logs(db)
+        _seal_all(db)
+
+        def stop(*_a):
+            raise RuntimeError("stopped")
+
+        with open_db(db) as conn, pytest.raises(RuntimeError):
+            if how == "delete":
+                log_store.delete(conn, LogFilter(query="disk"), 10, stop)
+            else:
+                with mock.patch.object(log_store, "_pause", stop):
+                    log_store.relabel_host(conn, "10.0.0.1", "storage", batch_size=10)
+        with open_db(db) as conn:
+            day_conn = day_store.connection(day_files.day_path(db, D1))
+            left = day_conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+            renamed = day_conn.execute("SELECT COUNT(*) FROM logs JOIN hosts ON hosts.id = host_id WHERE hosts.name = 'storage'").fetchone()[0]
+        entry = _catalogue(db)[D1]
+        counts = _counts(db, D1)
+        assert entry["row_count"] == left == sum(counts.values())
+        assert sum(c for k, c in counts.items() if k[1] == "storage") == renamed
+        assert (left, renamed) != (30, 0)  # one batch went through before the stop
+
+    def test_a_reader_keeps_its_connections_when_another_thread_forgets_them(self, three_days):
+        _seal_all(three_days)
+        with open_db(three_days) as conn:
+            parts = day_store.parts(conn)
+            newest = parts[0].conn  # opened
+            # Another thread deletes a file: only the generation moves for this one
+            with day_store._generation_lock:
+                day_store._generation += 1
+            assert parts[2].conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0] == 4  # opens another file
+            assert newest.execute("SELECT COUNT(*) FROM logs").fetchone()[0] == 1  # still usable
+            # Set aside, then closed a few minutes later
+            later = day_store.time.monotonic() + day_store.RETIRED_CLOSE_SECONDS + 1
+            with mock.patch.object(day_store.time, "monotonic", return_value=later):
+                day_store.connection(day_files.day_path(three_days, D2))
+            with pytest.raises(sqlite3.ProgrammingError):
+                newest.execute("SELECT 1")
+
+    def test_connections_unused_for_a_while_are_closed(self, three_days):
+        first = day_store.connection(day_files.day_path(three_days, D1))
+        start = day_store.time.monotonic()
+        with mock.patch.object(day_store.time, "monotonic", return_value=start + day_store.IDLE_CLOSE_SECONDS + 1):
+            day_store.connection(day_files.day_path(three_days, D2))
+        first.execute("SELECT 1")  # set aside, not yet closed: a caller may still hold it
+        with mock.patch.object(
+            day_store.time, "monotonic",
+            return_value=start + day_store.IDLE_CLOSE_SECONDS + day_store.RETIRED_CLOSE_SECONDS + 2,
+        ):
+            day_store.connection(day_files.day_path(three_days, D2))
+        with pytest.raises(sqlite3.ProgrammingError):
+            first.execute("SELECT 1")
+        assert day_store.connection(day_files.day_path(three_days, D1)) is not first
+
+    def test_a_days_first_write_never_adopts_a_file_with_no_record(self, db):
+        today = datetime.datetime.now(_UTC).date().isoformat()
+        stray = day_files.day_path(db, today)
+        stray.write_bytes(b"not ours")
+        _write(db, [_row(today, 0)])
+        assert [r["message"] for r in stored_logs(db)] == ["disk full"]
+        (aside,) = db.parent.glob(f"{stray.name}.unlisted-*")
+        assert aside.read_bytes() == b"not ours"

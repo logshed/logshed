@@ -9,6 +9,7 @@ import os
 import shutil
 import sqlite3
 import threading
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -503,6 +504,20 @@ def get_db_footprint_bytes(db_path: Union[str, Path]) -> int:
     return total_size
 
 
+def get_db_live_bytes(db_path: Union[str, Path]) -> int:
+    """
+    Bytes of the database's pages in use (its free pages left out): what VACUUM copies and then
+    writes again. After the old logs table is dropped the file keeps its size, but this falls to
+    what settings and history hold. The file's footprint when the database cannot be read.
+    """
+    try:
+        with closing(sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, timeout=5.0)) as conn:
+            pages, free, size = (conn.execute(f"PRAGMA {name}").fetchone()[0] for name in ("page_count", "freelist_count", "page_size"))
+        return (pages - free) * size
+    except sqlite3.Error:
+        return get_db_footprint_bytes(db_path)
+
+
 def sqlite_temp_dir() -> Path:
     """
     The folder SQLite's unix VFS writes temporary files to: the first of SQLITE_TMPDIR, TMPDIR,
@@ -531,14 +546,14 @@ def check_vacuum_headroom(
     safe_margin_bytes: int = 100 * 1024 * 1024,
 ) -> tuple[int, int, int]:
     """
-    Verify there is room for compaction. VACUUM builds a copy of the database in SQLite's temporary
-    folder, then writes every page again into the WAL beside the database, so each needs about the
-    database's size; when both are on one disk, that disk needs twice the size.
+    Verify there is room for compaction. VACUUM builds a copy of the database's pages in use in
+    SQLite's temporary folder, then writes each of them again into the WAL beside the database, so
+    each needs about the size of the live data (get_db_live_bytes); on one disk, twice that.
     Returns (db_footprint, disk_free, required_headroom) for the database's disk.
     Raises InsufficientDiskSpaceError if a disk has less free space than it needs.
     """
     db_path_obj = Path(db_path)
-    db_size = get_db_footprint_bytes(db_path_obj)
+    db_size = get_db_live_bytes(db_path_obj)
     db_dir = db_path_obj.parent
     temp_dir = sqlite_temp_dir()
 
@@ -561,7 +576,7 @@ def check_vacuum_headroom(
             raise InsufficientDiskSpaceError(
                 f"Insufficient temporary disk headroom available for database compaction. "
                 f"Compaction needs {needed} bytes free in {folder} for {purpose} "
-                f"({'twice ' if same_disk else ''}the database size of {db_size} bytes, "
+                f"({'twice ' if same_disk else ''}the database's live data of {db_size} bytes, "
                 f"plus a safe margin of {safe_margin_bytes} bytes), but only {free} bytes are available."
             )
     return db_size, _free_bytes(db_dir), checks[0][1]
@@ -585,7 +600,8 @@ async def execute_vacuum(
     db_path_obj = Path(db_path)
 
     # 1. Free Headroom Guard
-    previous_size, _, _ = check_vacuum_headroom(db_path_obj, safe_margin_bytes=safe_margin_bytes)
+    check_vacuum_headroom(db_path_obj, safe_margin_bytes=safe_margin_bytes)
+    previous_size = get_db_footprint_bytes(db_path_obj)
 
     # Resolve workers if not passed
     if queue_consumer is None:

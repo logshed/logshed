@@ -97,10 +97,11 @@ def _seed_logs(db_file: Path):
     """Seed logs across last 24h and older than 24h."""
     now = datetime.datetime.now(datetime.timezone.utc)
     recent_ts = now - datetime.timedelta(hours=2)
-    recent_str = recent_ts.strftime("%Y-%m-%d %H:%M:%S")
+    # Stored as ingest stores them (ISO, UTC): a space-separated time sorts before an ISO cutoff on the same date
+    recent_str = recent_ts.isoformat()
 
     old_ts = now - datetime.timedelta(hours=30)
-    old_str = old_ts.strftime("%Y-%m-%d %H:%M:%S")
+    old_str = old_ts.isoformat()
 
     with open_db(db_file) as conn:
         # Logs within 24h:
@@ -199,7 +200,7 @@ def test_compute_daily_digest_rollup_with_data(tmp_path: Path):
 def test_compute_daily_digest_rollup_docker_custom_alias_shows_app(tmp_path: Path):
     db_file = tmp_path / "logs.db"
     now = datetime.datetime.now(datetime.timezone.utc)
-    recent_str = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_str = (now - datetime.timedelta(hours=1)).isoformat()
 
     with open_db(db_file) as conn:
         # Ingest error from docker container with custom source_alias (e.g. docker-unraid) and source_ip='docker'
@@ -220,7 +221,7 @@ def test_compute_daily_digest_rollup_prioritizes_severity_over_error_count(tmp_p
     """
     db_file = tmp_path / "logs.db"
     now = datetime.datetime.now(datetime.timezone.utc)
-    recent_str = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_str = (now - datetime.timedelta(hours=1)).isoformat()
 
     with open_db(db_file) as conn:
         # Host 1: 5 error logs (severity 3)

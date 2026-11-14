@@ -274,7 +274,10 @@ def _log_file_item(item: dict, retention_days: int) -> LogFileItem:
                 newest = datetime.datetime.fromisoformat(item["newest_log_at"])
                 if newest.tzinfo is None:
                     newest = newest.replace(tzinfo=datetime.timezone.utc)
-                expires = (newest + keep).astimezone(datetime.timezone.utc).isoformat()
+                # The last of them goes at the first daily prune after newest + retention: the next UTC midnight
+                gone = (newest + keep).astimezone(datetime.timezone.utc)
+                midnight = datetime.datetime.combine(gone.date(), datetime.time(), tzinfo=datetime.timezone.utc)
+                expires = (midnight if midnight == gone else midnight + datetime.timedelta(days=1)).isoformat()
         else:
             day_end = datetime.datetime.fromisoformat(item["day"]).replace(tzinfo=datetime.timezone.utc) + datetime.timedelta(days=1)
             expires = (day_end + keep).isoformat()

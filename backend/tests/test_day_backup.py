@@ -141,6 +141,19 @@ class TestBackupWithDayFiles:
         with closing(sqlite3.connect(tmp_path / "x.db")) as conn:
             assert {r[0] for r in conn.execute("SELECT day FROM log_files")} == {"legacy", D2}
 
+    def test_wal_files_a_backup_run_as_root_makes_go_to_the_owner(self, db):
+        _write(db, _row(D1, 1, "one"))
+        _seal(db)
+        day_store.forget_connections()  # the app has the sealed file closed: no -wal or -shm
+        path = day_files.day_path(db, D1)
+        for suffix in ("-wal", "-shm"):
+            Path(f"{path}{suffix}").unlink(missing_ok=True)
+        given = []
+        with mock.patch.object(db_backup, "_owner_to_apply", return_value=(1000, 1000)), \
+                mock.patch.object(db_backup, "_give_to", side_effect=lambda p, owner: given.append((Path(p).name, owner))):
+            _backup(db)
+        assert (f"{path.name}-wal", (1000, 1000)) in given and (f"{path.name}-shm", (1000, 1000)) in given
+
     def test_the_space_check_counts_the_day_files(self, db):
         _write(db, *[_row(D1, h % 24, "x" * 2000) for h in range(300)])
         plain = db_backup.backup_space_needed(db, db_backup.METHOD_VACUUM_INTO)

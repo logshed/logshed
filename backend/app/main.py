@@ -363,8 +363,8 @@ def _check_day_files(conn) -> None:
         logger.info(f"Finished deleting the log file of {day} (UTC), which a stop part way had left.")
     if found.unlisted:
         logger.warning(
-            f"LogShed does not use these log files beside the database, because its catalogue does not list them "
-            f"(left by a restore or by running an older version): {', '.join(found.unlisted)}. "
+            f"LogShed does not use these log files beside the database, because it has no record of them "
+            f"(left by a restore, or copied in by hand): {', '.join(found.unlisted)}. "
             "Move or delete them when you no longer need them."
         )
 
