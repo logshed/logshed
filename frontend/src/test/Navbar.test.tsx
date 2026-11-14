@@ -614,7 +614,8 @@ describe('Navbar event loop lag', () => {
     expect(rate.getAttribute('title')).toBe(
       'Ingestion Rate\nEvent loop lag (last 60 s): 12 ms now, 40 ms 95th percentile, 900 ms max\n' +
         'Loop lag is how late LogShed gets to its work. Healthy: a few ms at the 95th percentile ' +
-        '(short spikes in the max are normal); 50 ms or more for 30 s turns on the amber dot.',
+        '(short spikes in the max are normal). At 50 ms or more for 30 s, LogShed is near its processing limit: ' +
+        'syslog is read late and UDP messages can be lost.',
     );
   });
 
