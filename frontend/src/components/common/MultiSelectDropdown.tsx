@@ -41,7 +41,6 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
 }) => {
   const labelId = useId();
   const valueId = useId();
-  const countId = useId();
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -384,9 +383,9 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         aria-labelledby={
           isForm
             ? labelledBy
-              ? [labelledBy, valueId, selected.length > 1 ? countId : ''].join(' ').trim()
+              ? `${labelledBy} ${valueId}`
               : undefined
-            : [labelId, valueId, selected.length > 1 ? countId : ''].join(' ').trim()
+            : `${labelId} ${valueId}`
         }
       >
         {isForm ? (
@@ -402,17 +401,6 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               >
                 {selected.length === 0 ? placeholder : selected.join(', ')}
               </span>
-              {selected.length > 1 && (
-                <span
-                  id={countId}
-                  className="bg-accent-950 text-accent-300 border border-accent-700/60 text-[10px] font-mono px-1.5 py-0.5 rounded-full font-semibold shrink-0"
-                >
-                  {/* The space keeps the count a separate word in the text read with the selection (not drawn) */}
-                  {' '}
-                  {selected.length}
-                  <span className="sr-only"> selected</span>
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               {/* Room for the clear button, which sits over the trigger rather than inside it */}
@@ -437,18 +425,6 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             >
               {getSummaryText()}
             </span>
-
-            {/* Selected Counter Badge */}
-            {selected.length > 1 && (
-              <span
-                id={countId}
-                className="bg-accent-950 text-accent-300 border border-accent-700/60 text-[10px] font-mono px-1 rounded-full font-semibold"
-              >
-                {' '}
-                {selected.length}
-                <span className="sr-only"> selected</span>
-              </span>
-            )}
 
             {/* Room for the clear button, which sits over the trigger rather than inside it */}
             {selected.length > 0 && <span className={FILTER_CLEAR_ROOM} aria-hidden="true" />}

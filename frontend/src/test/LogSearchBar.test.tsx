@@ -719,7 +719,7 @@ describe('LogSearchBar filter controls name what they show', () => {
   it('keeps the Host and App clear buttons out of the dropdown trigger', async () => {
     const { onFilterChange } = await renderBar({ sources: ['host-a', 'host-b'], source: 'host-a,host-b', apps: ['nginx'], app_name: 'nginx' });
     const hostClear = screen.getAllByRole('button', { name: 'Clear host / ip filter' })[0];
-    const hostTrigger = screen.getByRole('button', { name: spacedName('Host / IP: host-a (+1) 2', 'selected') });
+    const hostTrigger = screen.getByRole('button', { name: 'Host / IP: host-a (+1)' });
     expect(hostTrigger).not.toContainElement(hostClear);
     expect(hostTrigger.parentElement).toContainElement(hostClear);
     const appClear = screen.getAllByRole('button', { name: 'Clear app / container filter' })[0];
