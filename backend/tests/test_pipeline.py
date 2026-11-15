@@ -1335,6 +1335,39 @@ class TestQueueConsumerPersistentConnection:
         # After stop(), persistent connection must be closed and cleared
         assert consumer._conn is None
 
+    def test_closing_waits_for_an_insert_still_using_the_connection(self, db_path: Path):
+        """
+        A close from another thread (stop, pause_writes) must not close the connection under an
+        insert that is still running on it: SQLite crashes the process when a connection is closed
+        mid-statement (seen as a segmentation fault in a lifespan test).
+        """
+        import threading
+        import time
+
+        consumer = QueueConsumer(db_path)
+        inserting = threading.Event()
+        seen_open: list[bool] = []
+        real_insert = pipeline_mod.log_store.insert_rows
+
+        def slow_insert(conn, entries):
+            inserting.set()
+            time.sleep(0.3)
+            # Still open: a closed connection raises ProgrammingError here
+            conn.execute("SELECT 1").fetchone()
+            seen_open.append(True)
+            real_insert(conn, entries)
+
+        with patch.object(pipeline_mod.log_store, "insert_rows", side_effect=slow_insert):
+            writer = threading.Thread(target=consumer._insert_batch, args=([_make_entry(message="late")],))
+            writer.start()
+            assert inserting.wait(2)
+            consumer._close_conn()
+            writer.join(5)
+
+        assert seen_open == [True]
+        assert consumer._conn is None
+        assert [r["message"] for r in stored_logs(db_path)] == ["late"]
+
 
 
 class TestFutureTimestampWindow:

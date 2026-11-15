@@ -60,6 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A rare crash when ingest stops or pauses**: Stopping LogShed, or pausing writes for a Compact, while a batch of logs was being written could close the database connection under it, which can crash the process. The connection is now closed only once the batch is written.
 - **Retention slider marks line up with the thumb**: On the Storage page the day marks under the retention slider sat up to 8 pixels away from the thumb near the ends (the 3-day mark showed left of the thumb at 3 days). Each mark is now under the thumb at its value.
 - **AI notices in the alert rule dialog use the normal font**: The amber notes that AI enrichment needs an AI provider were set in a monospaced font.
 - **Host and app lists keep their height**: Choosing a second host or app in a list (the Console filters, drop rules, alert rules, Delete Logs) no longer adds a count in a circle beside the names, which made the field a pixel or two taller and moved the page below. The field already shows the names, or the first one with "(+N)".

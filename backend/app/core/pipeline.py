@@ -942,7 +942,10 @@ class QueueConsumer:
         self._drain_done = asyncio.Event()
         self._drain_lock = asyncio.Lock()
         self._conn: Optional[sqlite3.Connection] = None
-        self._conn_lock = threading.Lock()
+        # Held while the connection is opened, used for a batch or closed, so a close from another
+        # thread (stop, pause_writes) waits for an insert still running on it. Re-entrant: an insert
+        # that fails closes the connection while holding it.
+        self._conn_lock = threading.RLock()
         self._paused = False
         self._resume_event = asyncio.Event()
         self._resume_event.set()
@@ -1220,20 +1223,20 @@ class QueueConsumer:
         if not batch:
             return
 
-        conn = self._get_connection()
-
-        try:
-            self._normalize_timestamps(batch)
-            log_store.insert_rows(conn, batch)
-
-            conn.commit()
-            self._notify_fts_indexer()
-        except Exception as e:
+        with self._conn_lock:
+            conn = self._get_connection()
             try:
-                conn.rollback()
-            except Exception:
-                self._close_conn()
-            raise e
+                self._normalize_timestamps(batch)
+                log_store.insert_rows(conn, batch)
+
+                conn.commit()
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    self._close_conn()
+                raise e
+        self._notify_fts_indexer()
 
     @_takes_ingest_turn
     def _insert_rows_separately(self, batch: list[dict]) -> tuple[list[dict], list[tuple[dict, Exception]]]:
@@ -1244,16 +1247,17 @@ class QueueConsumer:
         (OperationalError) is raised, and the normal retry stores each row once.
         Returns the stored entries and the skipped entries with their errors.
         """
-        conn = self._get_connection()
-        self._normalize_timestamps(batch)
-        try:
-            stored, skipped = log_store.insert_rows_one_by_one(conn, batch, _replace_entry_surrogates)
-        except Exception:
+        with self._conn_lock:
+            conn = self._get_connection()
+            self._normalize_timestamps(batch)
             try:
-                conn.rollback()
+                stored, skipped = log_store.insert_rows_one_by_one(conn, batch, _replace_entry_surrogates)
             except Exception:
-                self._close_conn()
-            raise
+                try:
+                    conn.rollback()
+                except Exception:
+                    self._close_conn()
+                raise
         if stored:
             self._notify_fts_indexer()
         return stored, skipped
