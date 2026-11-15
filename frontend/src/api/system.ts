@@ -1,5 +1,5 @@
 import { apiFetch } from './client.ts';
-import { HealthResponse, PrunePreview, PruneResponse, StorageMetricsResponse, VacuumResponse, VersionInfo } from '../types.ts';
+import { HealthResponse, PrunePreview, PruneResponse, StorageMetricsResponse, TopSources, VacuumResponse, VersionInfo } from '../types.ts';
 
 export async function fetchHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>('/api/health');
@@ -7,6 +7,11 @@ export async function fetchHealth(): Promise<HealthResponse> {
 
 export async function fetchStorageMetrics(): Promise<StorageMetricsResponse> {
   return apiFetch<StorageMetricsResponse>('/api/system/storage');
+}
+
+/** The hosts and apps with the most logs in the last 24 hours (worked out by the server every 5 minutes). */
+export async function fetchTopSources(): Promise<TopSources> {
+  return apiFetch<TopSources>('/api/system/storage/top-sources');
 }
 
 export async function fetchPrunePreview(retentionDays?: number): Promise<PrunePreview> {

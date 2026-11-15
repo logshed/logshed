@@ -543,6 +543,20 @@ class HostAliasResponse(BaseModel):
 
 
 
+class SourceCount(BaseModel):
+    """A host or app and how many logs it sent in the window."""
+    name: str
+    count: int
+
+
+class TopSourcesResponse(BaseModel):
+    """The hosts and apps with the most logs in the 24 whole hours up to as_of."""
+    as_of: Optional[str] = Field(None, description="When the figures were worked out (ISO 8601, UTC); null until the first time after start-up.")
+    since: Optional[str] = Field(None, description="The start of the window (ISO 8601, UTC, on the hour), by each log's own time.")
+    total: int = 0
+    hosts: list[SourceCount] = []
+    apps: list[SourceCount] = []
+
 class SelfReportedHost(BaseModel):
     """An address with no alias whose logs are shown by a host name it reported for itself."""
     ip: str

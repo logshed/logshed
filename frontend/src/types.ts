@@ -69,6 +69,20 @@ export interface SelfReportedHosts {
   limit: number;
 }
 
+export interface SourceCount {
+  name: string;
+  count: number;
+}
+
+/** The top hosts and apps of the 24 whole hours up to as_of (null until the server first works them out). */
+export interface TopSources {
+  as_of: string | null;
+  since: string | null;
+  total: number;
+  hosts: SourceCount[];
+  apps: SourceCount[];
+}
+
 export interface AiProviderConfig {
   has_api_key: boolean;
   ai_api_key: string;

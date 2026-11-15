@@ -13,6 +13,7 @@ import { StorageTrendChart } from './StorageTrendChart.tsx';
 import { DeleteLogsCard } from './DeleteLogsCard.tsx';
 import { DatabaseBackupsCard } from './DatabaseBackupsCard.tsx';
 import { LogFilesCard } from './LogFilesCard.tsx';
+import { TopSourcesCard } from './TopSourcesCard.tsx';
 
 export const StoragePanel: React.FC = () => {
   const [storageMetrics, setStorageMetrics] = useState<StorageMetricsResponse | null>(null);
@@ -101,6 +102,7 @@ export const StoragePanel: React.FC = () => {
       {/* Storage & Retention Section */}
       <section className="space-y-4">
         <StorageCard metrics={storageMetrics} />
+        <TopSourcesCard />
         {retentionDays !== undefined && (
           <RetentionSlider
             retentionDays={retentionDays}

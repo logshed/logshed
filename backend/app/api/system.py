@@ -18,6 +18,8 @@ from app.core.loop_lag import get_loop_lag
 from app.core.pipeline import get_dropped_count, get_ingest_rate, get_queue
 
 from app.models import (
+    SourceCount,
+    TopSourcesResponse,
     HealthResponse,
     UpgradeStatus,
     PrunePreviewResponse,
@@ -42,6 +44,7 @@ from app.services.retention import (
     get_effective_retention_days,
 )
 from app.services.storage_metrics import get_cached_storage_metrics
+from app.services.top_sources import get_top_sources
 from app.services.version_service import check_for_updates
 
 logger = logging.getLogger(__name__)
@@ -326,6 +329,21 @@ async def get_storage_overview(user: dict = Depends(get_current_user)) -> Storag
         backups_size_bytes=sum(b.size_bytes for b in backups),
         backups_count=len(backups),
         history=history,
+    )
+
+
+@router.get("/system/storage/top-sources", response_model=TopSourcesResponse)
+async def get_top_sources_route(user: dict = Depends(get_current_user)) -> TopSourcesResponse:
+    """The five hosts and five apps with the most logs in the last 24 hours, worked out every 5 minutes."""
+    found = get_top_sources()
+    if found is None:
+        return TopSourcesResponse()
+    return TopSourcesResponse(
+        as_of=found.as_of,
+        since=found.since,
+        total=found.total,
+        hosts=[SourceCount(name=n, count=c) for n, c in found.hosts],
+        apps=[SourceCount(name=n, count=c) for n, c in found.apps],
     )
 
 

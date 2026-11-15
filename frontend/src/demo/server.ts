@@ -435,6 +435,14 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   })),
   ['POST', /^\/api\/docker\/hosts\/test$/, () => { throw notInDemo('Testing a Docker connection'); }],
   // The demo's devices all have aliases, so none is shown by a name it reported itself
+  ['GET', /^\/api\/system\/storage\/top-sources$/, () => {
+    const now = Date.now();
+    const since = new Date(Math.floor(now / 3_600_000) * 3_600_000 - 23 * 3_600_000).toISOString();
+    const hosts = [['docker-vm', 41_200], ['opnsense', 18_950], ['pve-node1', 7_400], ['truenas', 5_120], ['pihole', 3_870]];
+    const apps = [['filterlog', 16_300], ['nginx', 12_800], ['traefik', 9_950], ['pvedaemon', 4_200], ['smartd', 1_150]];
+    const row = ([name, count]: (string | number)[]) => ({ name: String(name), count: Number(count) });
+    return { as_of: new Date(now - 2 * 60_000).toISOString(), since, total: 81_430, hosts: hosts.map(row), apps: apps.map(row) };
+  }],
   ['GET', /^\/api\/aliases\/self-reported$/, () => ({ hosts: [], truncated: false, limit: 200 })],
   ['GET', /^\/api\/aliases$/, () => store.aliases.map((a, i) => ({ ...a, last_seen: secondsAgo(3 + i * 11) }))],
   ['POST', /^\/api\/aliases$/, (_m, _q, b) => {

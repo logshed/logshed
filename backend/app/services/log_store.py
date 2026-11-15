@@ -1950,3 +1950,83 @@ def _legacy_digest_figures(conn: sqlite3.Connection, since_iso: str) -> DigestFi
     top_services = [{"service": row[0], "log_count": row[1]} for row in cursor.fetchall()]
 
     return DigestFigures(total_logs, total_errors, top_errors, top_services)
+
+
+@dataclass(frozen=True)
+class SourceCounts:
+    """Logs per host and per app since a time, every one of them (the caller takes the top)."""
+
+    total: int
+    hosts: dict[str, int]
+    apps: dict[str, int]
+
+
+def source_counts(conn: sqlite3.Connection, since_us: int) -> SourceCounts:
+    """
+    Logs per host and per app whose own time is since_us or later, for the Storage page's top
+    sources. A sealed day file is read from the catalogue's hourly counts (since_us is meant to
+    be the start of an hour; the hour holding it is counted whole), an open one is counted with
+    its host and app indexes, and the legacy table by its own columns.
+    """
+    hosts: dict[str, int] = {}
+    apps: dict[str, int] = {}
+
+    def add(into: dict[str, int], rows) -> None:
+        for name, cnt in rows:
+            key = name or "unknown"
+            into[key] = into.get(key, 0) + cnt
+
+    for part in day_store.parts(conn):
+        if not part.overlaps(since_us, None):
+            continue
+        if part.legacy:
+            since_iso = datetime.datetime.fromtimestamp(since_us / 1_000_000, tz=datetime.timezone.utc).isoformat()
+            add(hosts, part.conn.execute(
+                "SELECT COALESCE(NULLIF(source_alias, ''), source_ip, 'unknown') AS h, COUNT(*) FROM logs "
+                "WHERE timestamp >= ? GROUP BY h",
+                (since_iso,),
+            ).fetchall())
+            add(apps, part.conn.execute(
+                "SELECT COALESCE(NULLIF(app_name, ''), 'unknown') AS a, COUNT(*) FROM logs WHERE timestamp >= ? GROUP BY a",
+                (since_iso,),
+            ).fetchall())
+            continue
+        if part.sealed:
+            hour_from = since_us // 1_000_000 - (since_us // 1_000_000) % 3600
+            host_rows = conn.execute(
+                "SELECT host, SUM(count) FROM log_file_counts WHERE day = ? AND hour >= ? GROUP BY host",
+                (part.day, hour_from),
+            ).fetchall()
+            add(apps, conn.execute(
+                "SELECT app, SUM(count) FROM log_file_counts WHERE day = ? AND hour >= ? GROUP BY app",
+                (part.day, hour_from),
+            ).fetchall())
+            if any(name == "" for name, _ in host_rows):
+                # The counts keep no address: read those rows from the file
+                host_rows = [r for r in host_rows if r[0] != ""] + _unnamed_host_rows(part, hour_from * 1_000_000)
+            add(hosts, host_rows)
+            continue
+        # An open file: each GROUP BY reads one index (host or app, then time) and no table row
+        host_rows = part.conn.execute(
+            "SELECT (SELECT name FROM hosts WHERE hosts.id = g.host_id), g.cnt FROM "
+            "(SELECT host_id, COUNT(*) AS cnt FROM logs WHERE ts >= ? GROUP BY host_id) AS g",
+            (since_us,),
+        ).fetchall()
+        if any(name == "" for name, _ in host_rows):
+            host_rows = [r for r in host_rows if r[0] != ""] + _unnamed_host_rows(part, since_us)
+        add(hosts, host_rows)
+        add(apps, part.conn.execute(
+            "SELECT (SELECT name FROM apps WHERE apps.id = g.app_id), g.cnt FROM "
+            "(SELECT app_id, COUNT(*) AS cnt FROM logs WHERE ts >= ? GROUP BY app_id) AS g",
+            (since_us,),
+        ).fetchall())
+    return SourceCounts(sum(hosts.values()), hosts, apps)
+
+
+def _unnamed_host_rows(part: day_store.Part, since_us: int) -> list[tuple[str, int]]:
+    """A day file's logs with no host name, counted by address (as the Console names them)."""
+    return part.conn.execute(
+        "SELECT source_ip, COUNT(*) FROM logs WHERE host_id IN (SELECT id FROM hosts WHERE name = '') "
+        "AND ts >= ? GROUP BY source_ip",
+        (since_us,),
+    ).fetchall()

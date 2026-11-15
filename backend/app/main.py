@@ -80,6 +80,7 @@ from app.services.daily_digest import DailyDigestWorker
 from app.services.fts_indexer import FTSIndexWorker
 from app.services.retention import PruneWorker
 from app.services.storage_metrics import StorageMetricsWorker
+from app.services.top_sources import TopSourcesWorker
 from app.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ install_console_log_handler()
 _queue_consumer: Optional[QueueConsumer] = None
 _fts_worker: Optional[FTSIndexWorker] = None
 _metrics_worker: Optional[StorageMetricsWorker] = None
+_top_sources_worker: Optional[TopSourcesWorker] = None
 _prune_worker: Optional[PruneWorker] = None
 _daily_digest_worker: Optional[DailyDigestWorker] = None
 _syslog_server: Optional[SyslogServer] = None
@@ -385,7 +387,7 @@ def _check_day_files(conn) -> None:
 
 async def _start_services(db_path) -> None:
     """Everything start-up does once the database is at the current schema: settings, workers and listeners."""
-    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
+    global _queue_consumer, _fts_worker, _metrics_worker, _top_sources_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
     await asyncio.to_thread(get_or_create_master_key)
 
     # Finish what a crash left of a day file's deletion, and name day files the catalogue does not list
@@ -483,6 +485,10 @@ async def _start_services(db_path) -> None:
     _metrics_worker = StorageMetricsWorker(db_path)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_metrics_worker.run, "StorageMetricsWorker")))
 
+    # Top hosts and apps of the last 24 hours (Storage page), every 5 minutes
+    _top_sources_worker = TopSourcesWorker(db_path)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_top_sources_worker.run, "TopSourcesWorker")))
+
     # 5. Start PruneWorker (runs automated daily retention pruning)
     _prune_worker = PruneWorker(db_path)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_prune_worker.run, "PruneWorker")))
@@ -556,7 +562,7 @@ async def _start_services(db_path) -> None:
 
 async def _stop_services(db_path) -> None:
     """Stop what _start_services started (anything not started is skipped)."""
-    global _queue_consumer, _fts_worker, _metrics_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
+    global _queue_consumer, _fts_worker, _metrics_worker, _top_sources_worker, _prune_worker, _daily_digest_worker, _syslog_server, _docker_tailer, _docker_pool, _assembler, _alert_evaluator, _background_tasks, _internal_log_handler
     # Shutdown sequence
     logger.info("Shutting down background workers...")
     await backups.stop_backup_job()
@@ -612,6 +618,8 @@ async def _stop_services(db_path) -> None:
             await _metrics_worker.stop()
         except Exception as e:
             logger.warning(f"Error stopping StorageMetricsWorker: {e}")
+    if _top_sources_worker:
+        await _top_sources_worker.stop()
     if _alert_evaluator:
         try:
             await _alert_evaluator.stop()
