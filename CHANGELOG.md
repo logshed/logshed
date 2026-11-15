@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **AI notices in the alert rule dialog use the normal font**: The amber notes that AI enrichment needs an AI provider were set in a monospaced font.
 - **Host and app lists keep their height**: Choosing a second host or app in a list (the Console filters, drop rules, alert rules, Delete Logs) no longer adds a count in a circle beside the names, which made the field a pixel or two taller and moved the page below. The field already shows the names, or the first one with "(+N)".
 - **Voice control reaches the +1h button**: The button that extends a running maintenance session is now named for screen readers and voice control starting with the "+1h" it shows ("+1h: extend session ... by one hour"), so saying "click +1h" works.
 - **No log storm of its own in a UDP flood**: When more UDP syslog arrived than LogShed could take in, it logged a warning for every datagram it dropped, up to tens of thousands of lines a second, which a LogShed collecting its own container's logs then stored too. It now logs the first drop and then one line every 10 seconds with the number dropped since. Lost and UDP lost on the Navbar still count every one.

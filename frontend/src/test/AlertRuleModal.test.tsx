@@ -632,3 +632,18 @@ describe('AlertRuleModal regex or plain text', () => {
     expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
   });
 });
+
+describe('AlertRuleModal AI notices', () => {
+  it('writes the AI notices in the normal font, not monospace', () => {
+    const { unmount } = render(
+      <AlertRuleModal isOpen={true} ruleToEdit={null} channels={mockChannels} availableApps={[]} isAiConfigured={false} onClose={vi.fn()} onSuccess={vi.fn()} />
+    );
+    const notice = screen.getByText(/AI enrichment requires an active AI provider/).parentElement!;
+    expect(notice.className).not.toContain('font-mono');
+    unmount();
+    render(
+      <AlertRuleModal isOpen={true} ruleToEdit={mockRule} channels={mockChannels} availableApps={[]} isAiConfigured={false} onClose={vi.fn()} onSuccess={vi.fn()} />
+    );
+    expect(screen.getByText(/AI provider is disabled or not configured/).parentElement!.className).not.toContain('font-mono');
+  });
+});

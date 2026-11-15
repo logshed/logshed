@@ -626,7 +626,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           </p>
 
           {isEnrichmentDisabled && (
-            <div className="ml-6 p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning-300 font-mono">
+            <div className="ml-6 p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning-300">
               <span>AI enrichment requires an active AI provider. Configure an AI provider in Settings to enable enrichment.</span>
               <button
                 type="button"
@@ -640,7 +640,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           )}
 
           {!isAiConfigured && ruleToEdit?.ai_enrichment && (
-            <div className="ml-6 p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning-300 font-mono">
+            <div className="ml-6 p-2.5 bg-warning-950/40 border border-warning-800/60 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning-300">
               <span>AI provider is disabled or not configured. This rule will not be enriched until an AI provider is enabled in Settings.</span>
               <button
                 type="button"
