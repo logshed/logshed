@@ -1601,7 +1601,7 @@ describe('AlertsPanel hand-offs', () => {
     // The dialog fills its fields in an effect right after it opens
     await waitFor(() => expect(screen.getByPlaceholderText('e.g. Critical Auth Failure Spike')).toHaveValue('Alert on nginx'));
     expect(screen.getByRole('heading', { name: 'Create New Alert Rule' })).toBeInTheDocument();
-    expect(screen.getByTestId('alert-rule-log-reference')).toHaveTextContent('From log: Nginx upstream connection timeout');
+    expect(screen.getByLabelText('From log')).toHaveValue('Nginx upstream connection timeout');
 
     const createSpy = vi.spyOn(alertsApi, 'createAlertRule').mockResolvedValue({ ...mockRules[0], id: 9, name: 'Alert on nginx' });
     fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));

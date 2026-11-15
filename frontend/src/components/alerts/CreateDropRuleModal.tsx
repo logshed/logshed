@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ExternalLink, Play, RotateCcw } from 'lucide-react';
+import { ExternalLink, Play, RotateCcw, TextSelect } from 'lucide-react';
 import { DropRule } from '../../types.ts';
 import { createDropRule, updateDropRule, resetDropRuleCounter, testDropRule, previewDropRule } from '../../api/dropRules.ts';
 import { fetchAliases } from '../../api/aliases.ts';
@@ -10,9 +10,10 @@ import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
-import { buttonClass } from '../common/Button.tsx';
+import { Button, buttonClass } from '../common/Button.tsx';
 import { CHECKBOX_CLASS, controlClass, LABEL_CLASS, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 import { RulePreviewPanel } from './RulePreviewPanel.tsx';
+import { dropPatternFromSelection, useSelectedText } from '../../utils/selectionPattern.ts';
 
 const SEVERITY_RANGE_OPTIONS: SelectOption[] = [
   { value: '', label: 'Any severity' },
@@ -72,6 +73,9 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [sampleSeverity, setSampleSeverity] = useState<string>('');
   const [testResult, setTestResult] = useState<{ matched?: boolean; error?: string | null } | null>(null);
   const [isTesting, setIsTesting] = useState<boolean>(false);
+  const [selectedSample, onSampleSelect] = useSelectedText();
+  const selectionPattern = dropPatternFromSelection(selectedSample, isRegex);
+  const selectionTooLong = selectionPattern.pattern.length > MESSAGE_PATTERN_MAX_LENGTH;
 
   // Syslog host aliases (lowercased keys both ways), so the host list can show which IP is which alias
   const [hostAliases, setHostAliases] = useState<{ ipByAlias: Map<string, string>; aliasByIp: Map<string, string> }>(
@@ -502,9 +506,28 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               rows={2}
               value={sampleMessage}
               onChange={(e) => setSampleMessage(e.target.value)}
+              onSelect={onSampleSelect}
               placeholder="Paste a representative log line here..."
               className={controlClass({ mono: true })}
             />
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <Button
+                size="sm"
+                icon={<TextSelect className="w-3 h-3 text-accent-400" aria-hidden="true" />}
+                disabled={!selectionPattern.pattern || selectionTooLong}
+                onClick={() => {
+                  setMessagePattern(selectionPattern.pattern);
+                  setIsRegex(selectionPattern.isRegex);
+                }}
+              >
+                Use selection as pattern
+              </Button>
+              <span className="text-[11px] text-fg-muted">
+                {selectionTooLong
+                  ? `The selection is too long for a pattern (at most ${MESSAGE_PATTERN_MAX_LENGTH.toLocaleString()} characters).`
+                  : 'Select the part of the line that repeats.'}
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">

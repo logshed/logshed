@@ -1,5 +1,5 @@
 import React, { useId, useState, useEffect, useMemo } from 'react';
-import { Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
+import { Sparkles, RefreshCw, ExternalLink, TextSelect } from 'lucide-react';
 import { AlertRule, AlertRuleCreate, AlertRuleType, AlertRuleUpdate, NotificationChannel } from '../../types.ts';
 import { createAlertRule, previewAlertRule, updateAlertRule } from '../../api/alerts.ts';
 import { RulePreviewPanel } from './RulePreviewPanel.tsx';
@@ -9,9 +9,10 @@ import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { moreSevereLabel } from '../../utils/severityLabels.ts';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
-import { buttonClass } from '../common/Button.tsx';
-import { Checkbox, CHECKBOX_CLASS, controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
-import { RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { Button, buttonClass } from '../common/Button.tsx';
+import { Checkbox, CHECKBOX_CLASS, controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS, TextArea } from '../common/Field.tsx';
+import { MESSAGE_PATTERN_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { alertPatternFromSelection, useSelectedText } from '../../utils/selectionPattern.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
 
 /** Starting values for a new rule created from a log ("Create Alert Rule" in the log detail drawer). */
@@ -19,7 +20,7 @@ export interface AlertRulePrefill {
   name?: string;
   filterApps?: string[];
   filterHosts?: string[];
-  /** The log message, shown read-only under the pattern field so the user can copy the part to match. */
+  /** The log message, shown read-only under the pattern field so the user can select the part to match. */
   referenceMessage?: string;
 }
 
@@ -74,6 +75,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const initialFilterApps = activePrefill?.filterApps || EMPTY_APPS;
   const initialFilterHosts = activePrefill?.filterHosts || EMPTY_APPS;
   const referenceMessage = activePrefill?.referenceMessage || '';
+  const [selectedReference, onReferenceSelect] = useSelectedText();
   // Ties each visible label to its field (htmlFor and id)
   const fieldId = useId();
   const [formName, setFormName] = useState<string>('');
@@ -141,6 +143,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
     }
   }, [isOpen, ruleToEdit, channels, initialName, initialFilterApps, initialFilterHosts]);
 
+  const selectionPattern = alertPatternFromSelection(selectedReference, formIsRegex);
+  const selectionTooLong = selectionPattern.pattern.length > MESSAGE_PATTERN_MAX_LENGTH;
   const hostPattern = joinPatternList(formFilterHosts);
   const hostListTooLong = hostPattern.length > RULE_FILTER_MAX_LENGTH;
   const selfReportedKeys = useMemo(
@@ -576,13 +580,32 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
             </p>
           )}
           {referenceMessage && (
-            <p
-              className="text-[11px] text-fg-muted font-mono truncate select-text"
-              title={referenceMessage}
-              data-testid="alert-rule-log-reference"
-            >
-              From log: {referenceMessage}
-            </p>
+            <div className="space-y-1 pt-1" data-testid="alert-rule-log-reference">
+              {/* A copy to select from (editing it changes nothing): a read-only box cannot be
+                  selected from with the keyboard in Chromium */}
+              <TextArea
+                key={referenceMessage}
+                label="From log"
+                defaultValue={referenceMessage}
+                rows={2}
+                mono
+                onSelect={onReferenceSelect}
+                hint="Select the part of the line to match, then use it as the pattern. Editing this copy changes nothing."
+              />
+              <Button
+                size="sm"
+                icon={<TextSelect className="w-3 h-3 text-accent-400" aria-hidden="true" />}
+                disabled={!selectionPattern.pattern || selectionTooLong}
+                onClick={() => setFormMatchPattern(selectionPattern.pattern)}
+              >
+                Use selection as pattern
+              </Button>
+              {selectionTooLong && (
+                <p className="text-[11px] text-danger-400">
+                  The selection is too long for a pattern (at most {MESSAGE_PATTERN_MAX_LENGTH.toLocaleString()} characters).
+                </p>
+              )}
+            </div>
           )}
         </div>
 

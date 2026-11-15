@@ -450,13 +450,45 @@ describe('AlertRuleModal prefill from a log', () => {
     );
   });
 
-  it('shows the log message as a read-only reference line with the full text in its title', () => {
+  it('shows the whole log message in a box labelled From log', () => {
     renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: message });
-    const ref = screen.getByTestId('alert-rule-log-reference');
-    expect(ref).toHaveTextContent(`From log: ${message}`);
-    expect(ref).toHaveAttribute('title', message);
-    expect(ref.className).toContain('truncate');
-    expect(ref.tagName).not.toBe('INPUT');
+    const ref = screen.getByLabelText('From log') as HTMLTextAreaElement;
+    expect(ref.tagName).toBe('TEXTAREA');
+    expect(ref).toHaveValue(message);
+    expect(screen.getByRole('button', { name: 'Use selection as pattern' })).toBeDisabled();
+  });
+
+  it('uses the selected part of the log line as the pattern, escaped when the rule is a regular expression', () => {
+    const line = 'upstream timed out (110: Connection timed out) while reading [backend] 1.5s';
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: line });
+    const ref = screen.getByLabelText('From log') as HTMLTextAreaElement;
+    const select = (part: string) => {
+      const start = line.indexOf(part);
+      ref.setSelectionRange(start, start + part.length);
+      fireEvent.select(ref);
+    };
+    const pattern = screen.getByLabelText('Match Pattern');
+    const use = screen.getByRole('button', { name: 'Use selection as pattern' });
+
+    select(' (110: Connection timed out) ');
+    fireEvent.click(use);
+    expect(pattern).toHaveValue('(110: Connection timed out)');
+
+    fireEvent.click(screen.getByLabelText('Match as a regular expression'));
+    select('[backend] 1.5s');
+    fireEvent.click(use);
+    expect(pattern).toHaveValue('\\[backend\\] 1\\.5s');
+    expect(new RegExp((pattern as HTMLInputElement).value).test(line)).toBe(true);
+  });
+
+  it('refuses a selection longer than a pattern can be', () => {
+    const line = `start ${'x'.repeat(1200)}`;
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: line });
+    const ref = screen.getByLabelText('From log') as HTMLTextAreaElement;
+    ref.setSelectionRange(0, line.length);
+    fireEvent.select(ref);
+    expect(screen.getByRole('button', { name: 'Use selection as pattern' })).toBeDisabled();
+    expect(screen.getByText(/The selection is too long for a pattern/)).toBeInTheDocument();
   });
 
   it('treats the prefilled values as the starting point, so closing without edits does not warn', () => {
