@@ -229,6 +229,16 @@ describe('MaintenanceWindowTab mode and targets', () => {
     expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetApp: 'rest*' });
   });
 
+  it('picks a listed host when its name is typed and Enter pressed', () => {
+    const handlers = renderTab({ availableHosts: ['nas01', 'router'] });
+    fireEvent.click(screen.getByRole('button', { name: /^Host \(Optional\)/ }));
+    const search = screen.getByPlaceholderText('Search or add host...');
+    fireEvent.change(search, { target: { value: 'ROUTER' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetHost: 'router' });
+    expect(screen.queryByPlaceholderText('Search or add host...')).toBeNull();
+  });
+
   it('replaces the chosen host rather than adding a second one', () => {
     const handlers = renderTab({
       availableHosts: ['nas01', 'router'],

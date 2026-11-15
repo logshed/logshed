@@ -231,6 +231,16 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               if (e.key === 'Enter' && allowCustomInput && isSearchTermNew) {
                 e.preventDefault();
                 handleAddCustom();
+              } else if (e.key === 'Enter' && singleSelect) {
+                // One value at most: Enter on a name the list already has picks it
+                const term = searchTerm.trim().toLowerCase();
+                const match = allOptions.find((opt) => opt.toLowerCase() === term);
+                if (match) {
+                  e.preventDefault();
+                  setSearchTerm('');
+                  if (!selected.includes(match)) toggleOption(match);
+                  else setIsOpen(false);
+                }
               }
             }}
             placeholder={`Search or add ${label.toLowerCase()}...`}
