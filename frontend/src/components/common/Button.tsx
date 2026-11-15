@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 /**
  * The app's buttons. Each variant has one look everywhere; `className` is for layout only (width,
@@ -117,6 +118,41 @@ export const IconButton: React.FC<IconButtonProps> = ({
       className={className ? `${look} ${className}` : look}
       {...rest}
     >
+      {children}
+    </button>
+  );
+};
+
+export interface DisclosureButtonProps extends Omit<React.ComponentPropsWithRef<'button'>, 'aria-expanded' | 'onClick'> {
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}
+
+/**
+ * A row that opens and closes the part under it (an object in the log drawer's JSON tree): a chevron,
+ * then its content, left-aligned and wrapping. `aria-expanded` follows `open`.
+ */
+export const DisclosureButton: React.FC<DisclosureButtonProps> = ({
+  open,
+  onToggle,
+  type = 'button',
+  className,
+  children,
+  ...rest
+}) => {
+  const look =
+    'flex min-w-0 items-start gap-1 rounded-sm py-0.5 text-left hover:bg-raised cursor-pointer touch-manipulation';
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <button
+      type={type}
+      aria-expanded={open}
+      onClick={onToggle}
+      className={className ? `${look} ${className}` : look}
+      {...rest}
+    >
+      <Chevron className="mt-0.5 h-4 w-4 shrink-0 text-fg-muted" aria-hidden="true" />
       {children}
     </button>
   );

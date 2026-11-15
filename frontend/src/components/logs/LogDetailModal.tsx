@@ -9,7 +9,9 @@ import { ReportedHostNote } from './ReportedHostNote.tsx';
 import { stripAnsi, cleanLogMessageForDisplay, formatLocalTimestamp, formatFullTimestamp, formatUtcOffset } from '../../utils/formatters.ts';
 import { getCachedServerTimezone } from '../../api/settings.ts';
 import { CopyButton } from '../common/CopyButton.tsx';
-import { buttonClass } from '../common/Button.tsx';
+import { Button, buttonClass } from '../common/Button.tsx';
+import { JsonTree } from './JsonTree.tsx';
+import { parseJsonMessage } from '../../utils/jsonMessage.ts';
 import { CHECKBOX_CLASS } from '../common/Field.tsx';
 
 interface LogDetailModalProps {
@@ -95,12 +97,15 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // A JSON message shows as a tree or as text; the choice stays while the drawer steps between logs
+  const [messageView, setMessageView] = useState<'tree' | 'text'>('tree');
 
   useEffect(() => {
     if (!isOpen) {
       setShowDeleteConfirm(false);
       setIsDeleting(false);
       setDeleteError(null);
+      setMessageView('tree');
     }
   }, [isOpen]);
 
@@ -249,6 +254,8 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   // HTTP-ingested logs have neither a syslog packet nor container output as their raw text
   const rawLabel = isDockerSource ? 'Raw Container Output' : isSyslogRaw ? 'Raw Syslog Packet' : 'Raw Log Record';
   const cleanedPayload = cleanLogMessageForDisplay(log?.message || '');
+  const jsonMessage = useMemo(() => parseJsonMessage(log?.message), [log?.message]);
+  const showTree = jsonMessage !== null && messageView === 'tree';
 
   if (!log) return null;
 
@@ -500,26 +507,50 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
 
         {/* Formatted Message Box */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-2 mb-1.5">
+            <span className="text-[11px] font-semibold text-fg-soft uppercase tracking-wider flex items-center gap-1 whitespace-nowrap">
               <Terminal className="w-3.5 h-3.5 text-fg-muted" />
               <span>Message Payload</span>
             </span>
-            <CopyButton
-              text={cleanedPayload}
-              label="Copy Message"
-              title="Copy message payload"
-              className="-mr-1"
-            />
+            <div className="flex items-center gap-1 -mr-1 ml-auto">
+              {jsonMessage && (
+                <div role="group" aria-label="Show the message as" className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" aria-pressed={messageView === 'tree'} onClick={() => setMessageView('tree')}>
+                    Tree
+                  </Button>
+                  <Button variant="ghost" size="sm" aria-pressed={messageView === 'text'} onClick={() => setMessageView('text')}>
+                    Text
+                  </Button>
+                </div>
+              )}
+              <CopyButton text={cleanedPayload} label="Copy Message" title="Copy message payload" className="whitespace-nowrap" />
+            </div>
           </div>
-          <div className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto">
-            {/* Sanitized text element without dangerouslySetInnerHTML */}
-            {cleanedPayload.trim() ? (
-              cleanedPayload
-            ) : (
-              <span className="italic text-fg-subtle select-none">(empty message)</span>
-            )}
-          </div>
+          {showTree && jsonMessage ? (
+            <div className="bg-canvas border border-line rounded-lg p-2 max-h-96 overflow-y-auto select-text">
+              {jsonMessage.prefix && (
+                <div className="font-mono text-xs text-fg-soft whitespace-pre-wrap break-all px-1 pb-1 mb-1 border-b border-line-subtle">
+                  {jsonMessage.prefix}
+                </div>
+              )}
+              <JsonTree key={log.id} value={jsonMessage.value} label="Message as JSON" />
+            </div>
+          ) : (
+            // Focusable, so keyboard users can scroll a long message
+            <div
+              tabIndex={0}
+              role="region"
+              aria-label="Message text"
+              className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg text-xs whitespace-pre-wrap break-all select-text max-h-60 overflow-y-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
+            >
+              {/* Sanitized text element without dangerouslySetInnerHTML */}
+              {cleanedPayload.trim() ? (
+                cleanedPayload
+              ) : (
+                <span className="italic text-fg-subtle select-none">(empty message)</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Raw Syslog / Container Envelope */}
@@ -535,7 +566,12 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               className="-mr-1"
             />
           </div>
-          <div className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg-muted text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto">
+          <div
+            tabIndex={0}
+            role="region"
+            aria-label={rawLabel}
+            className="bg-canvas border border-line rounded-lg p-3 font-mono text-fg-muted text-[11px] whitespace-pre-wrap break-all select-text max-h-36 overflow-y-auto focus:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-500"
+          >
             {stripAnsi(log.raw).trim() ? (
               stripAnsi(log.raw)
             ) : (

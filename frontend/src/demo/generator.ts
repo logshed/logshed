@@ -25,6 +25,7 @@ const paths = ['/', '/api/states', '/web/index.html', '/library/sections/2/all',
 const TEMPLATES: Template[] = [
   ['docker', 'nginx-proxy', 6, 14, () => `${lanIp()} - - "GET ${pick(paths)} HTTP/2.0" ${pick([200, 200, 200, 304, 101])} ${n(120, 48000)} "-" "Mozilla/5.0"`],
   ['docker', 'nginx-proxy', 4, 2, () => `${wanIp()} - - "GET /.env HTTP/1.1" 404 153 "-" "curl/8.5.0"`],
+  ['docker', 'caddy', 6, 3, () => JSON.stringify({ level: 'info', ts: Date.now() / 1000, logger: 'http.log.access', msg: 'handled request', request: { remote_ip: lanIp(), method: 'GET', host: pick(['jellyfin.home.lan', 'paperless.home.lan', 'vault.home.lan']), uri: pick(paths), headers: { 'User-Agent': ['Mozilla/5.0'] } }, duration: Number((Math.random() / 10).toFixed(4)), size: n(120, 48000), status: pick([200, 200, 304, 404]) })],
   ['docker', 'jellyfin', 6, 5, () => pick(['[INF] Playback started: "The Expanse S02E04" on Living Room TV', '[INF] Transcoding stopped for session 4f2a', '[INF] Scheduled task "Scan Media Library" completed after 0 minute(s) and 41 seconds'])],
   ['docker', 'jellyfin', 4, 1, () => '[WRN] Slow HTTP response: GET /Items/8a1/Images/Primary took 2341ms'],
   ['docker', 'paperless', 6, 3, () => `[INFO] [paperless.consumer] Document "scan_${n(1000, 9999)}.pdf" consumption finished`],
