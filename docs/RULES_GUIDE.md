@@ -101,7 +101,7 @@ Choosing `Error (3) and more severe` matches Emergency (0), Alert (1), Critical 
 Text matched against the log message and the raw line, ignoring letter case. The checkbox under the field says how it is read:
 - **Plain text** (the checkbox off, the start for a new rule): the text is found anywhere in the message, and every character means itself. `failed password`, `C:\Temp` and `disk (sda)` match exactly those characters.
 - **Regular expression** (the checkbox on): `Failed (password|publickey) for .* from (?P<ip>\d+\.\d+\.\d+\.\d+)`. When plain text looks like a regular expression (it has one of `* + ? [ ] ( ) { } ^ $ |`, or a code such as `\d` or `\b`), the dialog offers **Match as a regular expression** under the field.
-- Leave the pattern empty or enter `*` to match all log entries satisfying the host, app and severity filters, either way.
+- Leave the pattern empty or enter `*` to match all log entries satisfying the host, app and severity filters, either way. Saving such a rule asks first (**Drop every log that matches?**, naming the hosts, apps and severity), because it discards everything from them; editing a rule that already had no pattern does not ask again.
 
 **Regular expressions:**
 - Backslash codes work as in any regular expression: `\bKilled` matches "Killed" at the start of a word, `error \d+` matches "error " followed by digits, and `foo\.bar` matches a literal dot.

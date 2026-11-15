@@ -7,6 +7,7 @@ import { Modal } from '../common/Modal.tsx';
 import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
+import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { lessSevereLabel } from '../../utils/severityLabels.ts';
 import { MESSAGE_PATTERN_MAX_LENGTH, NAME_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
@@ -42,6 +43,15 @@ interface CreateDropRuleModalProps {
   ruleToEdit?: DropRule | null;
 }
 
+/** Which logs a rule with no message pattern drops, as words: "from nas or pve, from the app nginx". */
+export function everyLogScope(hosts: string[], apps: string[], severityThreshold: number | null): string {
+  const parts: string[] = [];
+  if (hosts.length) parts.push(`from ${hosts.length > 1 ? 'the hosts' : 'the host'} ${hosts.join(', ')}`);
+  if (apps.length) parts.push(`${hosts.length ? 'and ' : ''}from ${apps.length > 1 ? 'the apps' : 'the app'} ${apps.join(', ')}`);
+  if (severityThreshold !== null) parts.push(`at ${lessSevereLabel(severityThreshold)}`);
+  return parts.length ? parts.join(' ') : 'from every source';
+}
+
 export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   isOpen,
   onClose,
@@ -64,6 +74,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [currentCount, setCurrentCount] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
+  const [showEveryLogConfirm, setShowEveryLogConfirm] = useState<boolean>(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState<boolean>(false);
 
   // Interactive tester states
@@ -276,6 +287,11 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
     }
   };
 
+  // A rule with no message pattern matches every message: saving one asks first, unless the rule
+  // being edited already had none
+  const matchesEveryMessage = (messagePattern.trim() || '*') === '*' && !isRegex;
+  const needsEveryLogConfirm = matchesEveryMessage && (!ruleToEdit || (ruleToEdit.message_pattern || '*') !== '*');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ruleName.trim()) {
@@ -283,7 +299,14 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
       return;
     }
     if (!hasFilterCriteria || sourceListTooLong || appListTooLong) return;
+    if (needsEveryLogConfirm) {
+      setShowEveryLogConfirm(true);
+      return;
+    }
+    await saveRule();
+  };
 
+  const saveRule = async () => {
     const effectivePattern = messagePattern.trim() || '*';
     try {
       setIsSubmitting(true);
@@ -666,6 +689,25 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
           </div>
         </div>
       </form>
+
+      <ConfirmDialog
+        isOpen={showEveryLogConfirm}
+        title="Drop every log that matches?"
+        onCancel={() => setShowEveryLogConfirm(false)}
+        onConfirm={() => {
+          setShowEveryLogConfirm(false);
+          void saveRule();
+        }}
+        confirmLabel="Drop every matching log"
+        confirmVariant="danger"
+        testId="drop-every-log-confirm"
+      >
+        <p>
+          This rule has no message pattern, so every log {everyLogScope(sources, apps, severityThreshold)} is
+          discarded as it arrives. Those logs are not stored, not shown in the Console and not counted by alert
+          rules, and cannot be recovered. Add a message pattern to drop only some of them.
+        </p>
+      </ConfirmDialog>
 
       <UnsavedChangesModal
         isOpen={showDiscardConfirm}

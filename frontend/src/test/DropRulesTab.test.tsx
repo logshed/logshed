@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DropRulesTab } from '../components/alerts/tabs/DropRulesTab.tsx';
 import * as dropRulesApi from '../api/dropRules.ts';
@@ -368,9 +368,13 @@ describe('DropRulesTab Component', () => {
       expect(screen.getByText(/Rule matched/i)).toBeInTheDocument();
     });
 
-    // Submit rule
+    // Submit rule: with no message pattern it asks first
     const saveBtn = screen.getByRole('button', { name: 'Create Rule' });
     fireEvent.click(saveBtn);
+    const confirm = await screen.findByTestId('drop-every-log-confirm');
+    expect(confirm).toHaveTextContent('every log from the app pvedaemon is discarded');
+    expect(createSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Drop every matching log' }));
 
     await waitFor(() => {
       expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
@@ -441,9 +445,12 @@ describe('DropRulesTab Component', () => {
       expect(screen.getByText(/Rule matched/i)).toBeInTheDocument();
     });
 
-    // Submit rule
+    // Submit rule: with no message pattern it asks first
     const saveBtn = screen.getByRole('button', { name: 'Create Rule' });
     fireEvent.click(saveBtn);
+    const confirm = await screen.findByTestId('drop-every-log-confirm');
+    expect(confirm).toHaveTextContent('every log from the app sshd at Info (6) and less severe is discarded');
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Drop every matching log' }));
 
     await waitFor(() => {
       expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({

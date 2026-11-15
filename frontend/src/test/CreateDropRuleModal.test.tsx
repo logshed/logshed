@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CreateDropRuleModal } from '../components/alerts/CreateDropRuleModal.tsx';
 import { splitPatternList } from '../utils/patternList.ts';
@@ -263,6 +263,11 @@ describe('CreateDropRuleModal host and app lists', () => {
     expect(screen.getByPlaceholderText('e.g. dnsmasq')).toHaveValue('sshd');
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    const confirm = await screen.findByTestId('drop-every-log-confirm');
+    expect(confirm).toHaveTextContent(
+      'every log from the hosts pve-node1, pve-node2, 192.168.1.* and from the apps sshd, cron* is discarded'
+    );
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Drop every matching log' }));
     await waitFor(() =>
       expect(createSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -449,5 +454,30 @@ describe('CreateDropRuleModal host aliases', () => {
     );
     await waitFor(() => expect(aliasesApi.fetchAliases).toHaveBeenCalled());
     expect(screen.queryByTestId('host-ip-alias-note')).toBeNull();
+  });
+});
+
+describe('Saving a drop rule with no message pattern', () => {
+  it('asks first, and Cancel saves nothing', async () => {
+    const createSpy = vi.spyOn(dropRulesApi, 'createDropRule');
+    render(<CreateDropRuleModal isOpen={true} onClose={vi.fn()} initialSource="truenas" availableSources={[]} availableApps={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    const confirm = await screen.findByTestId('drop-every-log-confirm');
+    expect(confirm).toHaveTextContent('every log from the host truenas is discarded');
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByTestId('drop-every-log-confirm')).not.toBeInTheDocument());
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not ask when the rule has a message pattern', async () => {
+    const createSpy = vi.spyOn(dropRulesApi, 'createDropRule').mockResolvedValue({} as never);
+    render(
+      <CreateDropRuleModal isOpen={true} onClose={vi.fn()} initialSource="truenas" initialMessage="smartd ok" availableSources={[]} availableApps={[]} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }));
+    await waitFor(() => expect(createSpy).toHaveBeenCalled());
+    expect(screen.queryByTestId('drop-every-log-confirm')).not.toBeInTheDocument();
   });
 });
