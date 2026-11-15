@@ -354,7 +354,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-fg font-mono font-medium">{item.alias}</span>
-                  <span className="text-fg-soft">
+                  <span className="text-fg-soft shrink-0 whitespace-nowrap">
                     <span className="text-fg-muted">Last seen </span>
                     <LastSeen at={lastSeen[item.ip]} now={now} timeZone={serverTimezone} />
                   </span>
@@ -368,9 +368,11 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
             ))}
             {selfReported.map((host) => (
               <div key={`reported-${host.ip}`} className="p-3.5 space-y-2" data-testid="self-reported-row">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-accent-400 font-semibold text-xs sm:text-sm">{host.ip}</span>
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-accent-400 font-semibold text-xs sm:text-sm truncate min-w-0" title={host.ip}>
+                    {host.ip}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <SelfReportedRowActions
                       host={host}
                       isSaving={makingAliasIp === host.ip}
@@ -381,10 +383,10 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-fg-soft font-mono truncate">{host.names[0]}</span>
+                    <span className="text-fg-soft font-mono truncate" title={host.names[0]}>{host.names[0]}</span>
                     <SelfReportedBadge host={host} />
                   </span>
-                  <span className="text-fg-soft">
+                  <span className="text-fg-soft shrink-0 whitespace-nowrap">
                     <span className="text-fg-muted">Last seen </span>
                     <LastSeen at={host.last_seen} now={now} timeZone={serverTimezone} />
                   </span>
@@ -435,7 +437,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
               >
                 <div className="font-mono text-accent-400 font-semibold">{host.ip}</div>
                 <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                  <span className="font-mono text-fg-soft truncate">{host.names[0]}</span>
+                  <span className="font-mono text-fg-soft truncate" title={host.names[0]}>{host.names[0]}</span>
                   <SelfReportedBadge host={host} />
                 </div>
                 <div className="text-fg-muted truncate pr-2">No alias set</div>

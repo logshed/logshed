@@ -4,6 +4,7 @@ Host aliases API endpoints for IP to Hostname mapping management.
 
 import asyncio
 import datetime
+import json
 import logging
 import sqlite3
 
@@ -11,7 +12,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.api.deps import get_current_user, run_db_query
 from app.collectors.syslog import reload_active_alias_caches
-from app.core.utils import load_docker_source_aliases, load_former_docker_aliases
+from app.core.day_files import KIND_DOCKER
+from app.core.utils import load_docker_source_aliases, load_former_docker_aliases, load_taken_host_names
 from app.models import (
     HostAliasCreate,
     HostAliasResponse,
@@ -69,7 +71,8 @@ def raise_if_alias_used_by_syslog(conn, alias: str) -> None:
 @router.get("", response_model=list[HostAliasResponse])
 async def list_aliases(user: dict = Depends(get_current_user)) -> list[HostAliasResponse]:
     """List all registered IP-to-hostname alias mappings."""
-    seen = get_source_activity().by_address()
+    # Docker containers' logs are the Docker host's (its own row), not the syslog alias's
+    seen = get_source_activity().by_address(exclude_kinds={KIND_DOCKER})
 
     def _get_all(conn):
         cursor = conn.cursor()
@@ -91,44 +94,54 @@ async def list_aliases(user: dict = Depends(get_current_user)) -> list[HostAlias
 
 # At most this many self-reported addresses are listed: syslog senders can make up names and addresses
 SELF_REPORTED_LIMIT = 200
+# And at most this many names per address (a sender whose lines misparse can report a new one each time)
+SELF_REPORTED_NAMES = 10
 
 
 @router.get("/self-reported", response_model=SelfReportedHostsResponse)
 async def list_self_reported_hosts(user: dict = Depends(get_current_user)) -> SelfReportedHostsResponse:
     """
     Addresses with no alias whose logs are shown by the host name they reported, with their names
-    and when each last sent a log, for Settings -> Sources to offer as aliases.
+    and when each last sent a log, for Settings -> Sources to offer as aliases. A name a configured
+    host uses is not listed (the Console shows that address by its IP), as in the host lists.
     """
-    seen = get_source_activity().by_address()
+    seen = get_source_activity().by_address(exclude_kinds={KIND_DOCKER})
 
-    def _query(conn) -> list[tuple[str, int, str]]:
+    def _query(conn) -> SelfReportedHostsResponse:
+        taken = sorted(load_taken_host_names(conn))
         try:
-            return conn.execute(
-                "SELECT source_ip, last_seen_us, name FROM reported_hosts"
-                " WHERE source_ip NOT IN (SELECT ip FROM host_aliases)"
+            rows = conn.execute(
+                """
+                SELECT source_ip, last_seen_us, name FROM (
+                    SELECT source_ip, last_seen_us, name, ROW_NUMBER() OVER (
+                        PARTITION BY source_ip ORDER BY last_seen_us DESC, lower(name), name
+                    ) AS rank
+                    FROM reported_hosts
+                    WHERE source_ip NOT IN (SELECT ip FROM host_aliases)
+                      AND lower(name) NOT IN (SELECT value FROM json_each(?))
+                ) WHERE rank <= ? ORDER BY source_ip, rank
+                """,
+                (json.dumps(taken), SELF_REPORTED_NAMES),
             ).fetchall()
         except sqlite3.OperationalError:
-            return []  # before schema 4
+            rows = []  # before schema 4
+        names: dict[str, list[str]] = {}
+        newest: dict[str, int] = {}
+        for ip, name_seen, name in rows:
+            names.setdefault(ip, []).append(name)
+            # reported_hosts is written at most once an hour per name: the in-memory time is closer
+            newest[ip] = max(newest.get(ip, 0), name_seen, seen.get(ip, 0))
+        order = sorted(names, key=lambda ip: (-newest[ip], ip))
+        return SelfReportedHostsResponse(
+            hosts=[
+                SelfReportedHost(ip=ip, names=names[ip], last_seen=us_to_iso(newest[ip]))
+                for ip in order[:SELF_REPORTED_LIMIT]
+            ],
+            truncated=len(order) > SELF_REPORTED_LIMIT,
+            limit=SELF_REPORTED_LIMIT,
+        )
 
-    rows = await run_db_query(_query)
-    names: dict[str, list[tuple[int, str]]] = {}
-    for ip, name_seen, name in rows:
-        names.setdefault(ip, []).append((name_seen, name))
-    hosts = []
-    for ip, pairs in names.items():
-        pairs.sort(key=lambda p: (-p[0], p[1].lower()))
-        # reported_hosts is written at most once an hour per name: the in-memory time is closer
-        newest = max(seen.get(ip, 0), pairs[0][0])
-        hosts.append((newest, ip, [n for _, n in pairs]))
-    hosts.sort(key=lambda h: (-h[0], h[1]))
-    return SelfReportedHostsResponse(
-        hosts=[
-            SelfReportedHost(ip=ip, names=host_names, last_seen=us_to_iso(newest))
-            for newest, ip, host_names in hosts[:SELF_REPORTED_LIMIT]
-        ],
-        truncated=len(hosts) > SELF_REPORTED_LIMIT,
-        limit=SELF_REPORTED_LIMIT,
-    )
+    return await run_db_query(_query)
 
 
 def _batch_update_log_aliases(conn, source_ip: str, target_alias: str, batch_size: int = 1000) -> None:

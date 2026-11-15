@@ -42,16 +42,16 @@ describe('Top sources card', () => {
     ).toBeInTheDocument();
   });
 
-  it('Filter in Console opens the Console on that host for the last 24 hours', async () => {
+  it('Filter in Console opens the Console on that host from the start of the card window', async () => {
     vi.spyOn(systemApi, 'fetchTopSources').mockResolvedValue(FIGURES);
     const popstate = vi.fn();
     window.addEventListener('popstate', popstate);
     render(<TopSourcesCard />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Show the last 24 hours of truenas in the Console' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the logs of truenas in the Console' }));
     window.removeEventListener('popstate', popstate);
 
-    expect(window.location.pathname + window.location.search).toBe('/?source=truenas&time=24h');
+    expect(window.location.pathname + window.location.search).toBe(`/?source=truenas&time=${encodeURIComponent('2026-11-14T13:00:00+00:00')}`);
     expect(popstate).toHaveBeenCalled();
   });
 

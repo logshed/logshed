@@ -16,10 +16,14 @@ const REFRESH_MS = 60_000;
 
 type Kind = 'host' | 'app';
 
-/** Opens the Console on the last 24 hours of one host or app (the same URL hand-off as View logs). */
-function filterInConsole(kind: Kind, name: string) {
+/**
+ * Opens the Console on one host or app from the start of the card's window (the same URL hand-off
+ * as View logs), so it counts the logs the card counted, and the ones that arrived since.
+ */
+function filterInConsole(kind: Kind, name: string, since: string | null) {
   const key = kind === 'host' ? 'source' : 'app';
-  window.history.pushState(null, '', `/?${key}=${encodeURIComponent(name)}&time=24h`);
+  const time = since ? encodeURIComponent(since) : '24h';
+  window.history.pushState(null, '', `/?${key}=${encodeURIComponent(name)}&time=${time}`);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
@@ -34,8 +38,9 @@ const SourceList: React.FC<{
   title: string;
   rows: SourceCount[];
   total: number;
+  since: string | null;
   onDropRule: (kind: Kind, name: string) => void;
-}> = ({ kind, title, rows, total, onDropRule }) => (
+}> = ({ kind, title, rows, total, since, onDropRule }) => (
   <div className="min-w-0">
     <h4 className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted mb-2">{title}</h4>
     {rows.length === 0 ? (
@@ -53,9 +58,9 @@ const SourceList: React.FC<{
                 <span className="text-fg-muted tabular-nums w-11 text-right">{share(row.count, total)}</span>
                 <IconButton
                   size="sm"
-                  onClick={() => filterInConsole(kind, row.name)}
+                  onClick={() => filterInConsole(kind, row.name, since)}
                   title="Filter in Console"
-                  label={`Show the last 24 hours of ${row.name} in the Console`}
+                  label={`Show the logs of ${row.name} in the Console`}
                 >
                   <Filter className="w-3.5 h-3.5" />
                 </IconButton>
@@ -117,8 +122,8 @@ export const TopSourcesCard: React.FC = () => {
   } else {
     body = (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <SourceList kind="host" title="Hosts" rows={data.hosts} total={data.total} onDropRule={(kind, name) => setDropRule({ kind, name })} />
-        <SourceList kind="app" title="Apps" rows={data.apps} total={data.total} onDropRule={(kind, name) => setDropRule({ kind, name })} />
+        <SourceList kind="host" title="Hosts" rows={data.hosts} total={data.total} since={data.since} onDropRule={(kind, name) => setDropRule({ kind, name })} />
+        <SourceList kind="app" title="Apps" rows={data.apps} total={data.total} since={data.since} onDropRule={(kind, name) => setDropRule({ kind, name })} />
       </div>
     );
   }

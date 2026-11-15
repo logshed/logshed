@@ -409,6 +409,12 @@ class TestFilterAndEnqueue:
         assert get_queue().qsize() == 0
         assert pipeline_mod.get_dropped_by_filter_count() == 1
 
+    def test_a_dropped_log_still_marks_its_source_as_seen(self):
+        from app.services.source_activity import get_source_activity
+
+        assert pipeline_mod.filter_and_enqueue(_make_entry(message="NOISE here", source_kind=1)) is False
+        assert get_source_activity().last_seen("10.0.0.1", 1) is not None
+
     def test_maintenance_drop_errors_discards_and_counts(self, monkeypatch):
         from app.services import maintenance_service
 

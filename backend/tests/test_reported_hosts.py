@@ -341,3 +341,23 @@ async def test_sources_lists_at_most_the_limit_newest_first(client, headers, env
     listed = await _self_reported(client, headers)
     assert [h["ip"] for h in listed["hosts"]] == ["10.0.0.2", "10.0.0.1"]
     assert (listed["truncated"], listed["limit"]) == (True, 2)
+
+
+@pytest.mark.asyncio
+async def test_sources_leaves_out_a_name_a_configured_host_now_uses(client, headers, env):
+    store_logs(env, _row("job done", "printer-hp", env=env))
+    # Another address takes the name as its alias: the Console shows the printer by its address
+    resp = await client.post("/api/aliases", json={"ip": "10.0.0.9", "alias": "Printer-HP"}, headers=headers)
+    assert resp.status_code == 200
+    assert (await _self_reported(client, headers))["hosts"] == []
+
+
+@pytest.mark.asyncio
+async def test_sources_lists_at_most_ten_names_per_address_newest_first(client, headers, env):
+    with open_db(env) as conn:
+        conn.executemany(
+            "INSERT INTO reported_hosts VALUES (?, ?, ?)",
+            [(f"name-{i:02d}", PRINTER_IP, 1_000 + i) for i in range(25)],
+        )
+    [host] = (await _self_reported(client, headers))["hosts"]
+    assert host["names"] == [f"name-{i:02d}" for i in range(24, 14, -1)]

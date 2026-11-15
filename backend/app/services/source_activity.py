@@ -60,12 +60,12 @@ class SourceActivity:
             self._dirty.discard(key)
             self._evicted.add(key)
 
-    def by_address(self) -> dict[str, int]:
-        """Each address's newest receive time over every source kind."""
+    def by_address(self, exclude_kinds: frozenset[int] | set[int] = frozenset()) -> dict[str, int]:
+        """Each address's newest receive time over every source kind but exclude_kinds."""
         newest: dict[str, int] = {}
         with self._lock:
-            for (address, _kind), seen in self._seen.items():
-                if seen > newest.get(address, 0):
+            for (address, kind), seen in self._seen.items():
+                if kind not in exclude_kinds and seen > newest.get(address, 0):
                     newest[address] = seen
         return newest
 

@@ -332,14 +332,19 @@ async def _source_activity_flush_worker() -> None:
     """Save when each source last sent a log once a minute, so it survives a restart."""
     from app.services.source_activity import get_source_activity
 
+    warned = False
     while True:
         try:
             await asyncio.sleep(60)
             await asyncio.to_thread(get_source_activity().flush)
+            warned = False
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.debug(f"Error saving when sources last sent a log: {e}")
+            # Once until a save works again: the times are kept in memory and retried each minute
+            if not warned:
+                logger.warning(f"Could not save when sources last sent a log (retried every minute): {e}")
+                warned = True
 
 
 async def _maintenance_sweep_worker(db_path) -> None:
@@ -620,6 +625,7 @@ async def _stop_services(db_path) -> None:
             logger.warning(f"Error stopping StorageMetricsWorker: {e}")
     if _top_sources_worker:
         await _top_sources_worker.stop()
+        _top_sources_worker = None
     if _alert_evaluator:
         try:
             await _alert_evaluator.stop()

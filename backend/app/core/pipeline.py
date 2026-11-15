@@ -376,6 +376,8 @@ def should_discard(entry: dict) -> bool:
         severity=entry.get("severity"),
     ) is not None:
         increment_dropped_by_filter_count(1)
+        # The source still sent it: "last seen" answers whether a device is sending
+        get_source_activity().note((entry,))
         return True
 
     from app.services.maintenance_service import record_maintenance_drop, should_drop_maintenance_error
@@ -388,6 +390,7 @@ def should_discard(entry: dict) -> bool:
     if maint_session_id is not None:
         record_maintenance_drop(maint_session_id)
         increment_dropped_by_filter_count(1)
+        get_source_activity().note((entry,))
         return True
 
     return False

@@ -192,11 +192,12 @@ export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 }
 
-/** List, create, update and delete routes for one collection. */
+/** An ISO time the given number of seconds ago. */
 function secondsAgo(seconds: number): string {
   return new Date(Date.now() - seconds * 1000).toISOString();
 }
 
+/** List, create, update and delete routes for one collection. */
 function crud<T extends { id: number }>(base: string, coll: store.Collection<T>, make: (body: Record<string, any>) => Omit<T, 'id'>): Array<[string, RegExp, Handler]> {
   const esc = escapeRegExp(base);
   const one = new RegExp(`^${esc}\\/(\\d+)$`);
@@ -434,7 +435,6 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     created_at: nowIso(), updated_at: nowIso(), is_connected: false, active_containers: 0, last_error: 'The demo cannot connect to Docker hosts.', last_activity: null, latency_ms: null,
   })),
   ['POST', /^\/api\/docker\/hosts\/test$/, () => { throw notInDemo('Testing a Docker connection'); }],
-  // The demo's devices all have aliases, so none is shown by a name it reported itself
   ['GET', /^\/api\/system\/storage\/top-sources$/, () => {
     const now = Date.now();
     const since = new Date(Math.floor(now / 3_600_000) * 3_600_000 - 23 * 3_600_000).toISOString();
@@ -443,6 +443,7 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
     const row = ([name, count]: (string | number)[]) => ({ name: String(name), count: Number(count) });
     return { as_of: new Date(now - 2 * 60_000).toISOString(), since, total: 81_430, hosts: hosts.map(row), apps: apps.map(row) };
   }],
+  // The demo's devices all have aliases, so none is shown by a name it reported itself
   ['GET', /^\/api\/aliases\/self-reported$/, () => ({ hosts: [], truncated: false, limit: 200 })],
   ['GET', /^\/api\/aliases$/, () => store.aliases.map((a, i) => ({ ...a, last_seen: secondsAgo(3 + i * 11) }))],
   ['POST', /^\/api\/aliases$/, (_m, _q, b) => {

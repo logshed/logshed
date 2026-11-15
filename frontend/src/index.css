@@ -163,7 +163,7 @@
   /* A range thumb's width: Firefox's thumb below is drawn at it, and Chromium's default thumb (with
      accent-color) is the same 16 px. Marks under a slider are placed with it (sliderMarkLeft). */
   :root {
-    --range-thumb-size: 1rem;
+    --range-thumb-size: 16px;
   }
 
   input[type="range"]::-moz-range-track {

@@ -221,3 +221,21 @@ class TestSourcesPage:
         assert resp.status_code == 200
         [nas] = [h for h in resp.json() if h["name"] == "nas"]
         assert nas["last_seen"] == us_to_iso(T0)
+
+
+class TestAliasRowsAndDocker:
+    @pytest.mark.asyncio
+    async def test_an_alias_row_ignores_container_logs_from_its_address(self, client, headers, db_file: Path):
+        with open_db(db_file) as conn:
+            conn.execute(
+                "INSERT INTO host_aliases (ip, alias, created_at) VALUES (?, 'nas', '2026-11-01T00:00:00+00:00')",
+                (NAS_IP,),
+            )
+        get_source_activity().note([{"source_ip": NAS_IP, "source_kind": KIND_SYSLOG}], now_us=T0)
+        # A Docker host at the same address keeps sending; the syslog sender has gone quiet
+        get_source_activity().note([{"source_ip": NAS_IP, "source_kind": KIND_DOCKER}], now_us=T0 + 500)
+
+        resp = await client.get("/api/aliases", headers=headers)
+
+        [nas] = resp.json()
+        assert nas["last_seen"] == us_to_iso(T0)

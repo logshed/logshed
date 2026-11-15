@@ -19,7 +19,7 @@ interface RetentionSliderProps {
 }
 
 /**
- * Where a mark for value sits under a range input: where the thumb's centre is at that value. The
+ * Where a mark for value sits under a range input: under the middle of the thumb at that value. The
  * thumb travels from half its width in from the left edge to half its width in from the right, so
  * a plain percentage of the full width is off by up to half a thumb near the ends.
  */

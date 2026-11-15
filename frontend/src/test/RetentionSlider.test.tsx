@@ -54,7 +54,7 @@ describe('RetentionSlider Component', () => {
     });
   });
 
-  it('places each tick where the slider thumb centre is at its value', () => {
+  it('places each tick under the middle of the slider thumb at its value', () => {
     render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
 
     [3, 7, 14, 30].forEach((val) => {
@@ -612,7 +612,7 @@ describe('RetentionSlider Component', () => {
 });
 
 describe('sliderMarkLeft', () => {
-  it('puts a mark where the thumb centre is: half a thumb in at each end, in proportion between', () => {
+  it('puts a mark under the middle of the thumb: half a thumb in at each end, in proportion between', () => {
     const at = (fraction: number) => `calc(var(--range-thumb-size) / 2 + (100% - var(--range-thumb-size)) * ${fraction})`;
     expect(sliderMarkLeft(1, 1, 30)).toBe(at(0));
     expect(sliderMarkLeft(3, 1, 30)).toBe(at(2 / 29));
