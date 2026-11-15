@@ -44,13 +44,13 @@ export interface DockerHostsTabProps {
 }
 
 /**
- * A Docker host's state: disabled, connected (with its running containers on a phone, where the table's
- * Containers column is missing), failing (with the error as its tooltip) or reconnecting.
+ * A Docker host's state: disabled, connected (with its running containers), failing (with the error
+ * as its tooltip) or reconnecting.
  */
-const HostStatusBadge: React.FC<{ host: DockerEndpoint; showContainers?: boolean }> = ({ host, showContainers = false }) => {
+const HostStatusBadge: React.FC<{ host: DockerEndpoint }> = ({ host }) => {
   if (!host.enabled) return <Badge>Disabled</Badge>;
   if (host.is_connected) {
-    return <Badge tone="success">{showContainers ? `Connected (${host.active_containers ?? 0} active)` : 'Connected'}</Badge>;
+    return <Badge tone="success">{`Connected (${host.active_containers ?? 0} active)`}</Badge>;
   }
   if (host.last_error) {
     return (
@@ -319,7 +319,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     </span>
 
                     <span className="text-fg-muted ml-2">Status:</span>
-                    <HostStatusBadge host={host} showContainers />
+                    <HostStatusBadge host={host} />
 
                     <span className="ml-2 whitespace-nowrap">
                       <span className="text-fg-muted">Last seen: </span>
@@ -379,11 +379,9 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
             <table className="w-full text-left border-collapse text-xs">
               <TableHead
                 columns={[
-                  { label: 'Name', className: 'whitespace-nowrap' },
+                  { label: 'Name and Alias', className: 'whitespace-nowrap' },
                   { label: 'Endpoint URL' },
-                  { label: 'Host Alias', className: 'whitespace-nowrap' },
-                  { label: 'Status', className: 'w-40 whitespace-nowrap' },
-                  { label: 'Containers', align: 'center', className: 'w-28 whitespace-nowrap' },
+                  { label: 'Status', className: 'whitespace-nowrap' },
                   { label: 'Last seen', className: 'w-28 whitespace-nowrap' },
                   { label: 'Actions', align: 'right' },
                 ]}
@@ -395,7 +393,9 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     <tr key={`host-${host.id}`} className="hover:bg-raised/40 transition">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-fg-strong whitespace-nowrap">{host.name}</span>
+                          <span className="font-semibold text-fg-strong whitespace-nowrap truncate max-w-40" title={host.name}>
+                            {host.name}
+                          </span>
                           {host.id === 1 && <Badge tone="accent">Primary</Badge>}
                           {host.tls_enabled && (
                             <Badge title="Mutual TLS configured">
@@ -404,16 +404,19 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             </Badge>
                           )}
                         </div>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-[11px] text-fg-soft max-w-xs truncate" title={host.url}>
-                        {host.url}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="font-mono text-[11px] text-fg-soft bg-canvas px-2 py-0.5 rounded-sm border border-line-subtle">
+                        {/* The alias sits under the name, as on a phone, so the URL has room */}
+                        <span
+                          className="inline-block mt-1 max-w-40 truncate font-mono text-[11px] text-fg-soft bg-canvas px-2 py-0.5 rounded-sm border border-line-subtle"
+                          title={`Host alias: ${host.source_alias}`}
+                        >
                           {host.source_alias}
                         </span>
                       </td>
-                      <td className="py-3 px-4 w-40 whitespace-nowrap">
+                      {/* Takes the width the other columns leave (max-w-0 w-full), so the table fits its card */}
+                      <td className="py-3 px-4 font-mono text-[11px] text-fg-soft max-w-0 w-full truncate" title={host.url}>
+                        {host.url}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 whitespace-nowrap">
                           <HostStatusBadge host={host} />
                           {host.enabled && host.is_connected && host.latency_ms != null && (
@@ -422,11 +425,6 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                             </span>
                           )}
                         </div>
-                      </td>
-                      <td className="py-3 px-4 w-28 text-center whitespace-nowrap">
-                        <span className="font-mono text-fg-soft">
-                          {host.enabled && host.is_connected ? host.active_containers ?? 0 : '0'}
-                        </span>
                       </td>
                       <td className="py-3 px-4 w-28 text-fg-soft">
                         <LastSeen at={lastSeen[host.id]} now={now} timeZone={serverTimezone} />

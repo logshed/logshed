@@ -71,7 +71,7 @@ describe('DockerHostsTab Component', () => {
     expect(screen.getByText('Primary Docker')).toBeInTheDocument();
     expect(screen.getByText('Remote Worker')).toBeInTheDocument();
     expect(screen.getByText('Primary')).toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.getByText('Connected (4 active)')).toBeInTheDocument();
     expect(screen.getByText('Error')).toBeInTheDocument();
   });
 
