@@ -5,6 +5,7 @@ import { testAlertRule } from '../../api/alerts.ts';
 import { Modal } from '../common/Modal.tsx';
 import { SEVERITIES } from '../common/SeverityBadge.tsx';
 import { SelectDropdown } from '../common/SelectDropdown.tsx';
+import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { buttonClass } from '../common/Button.tsx';
 import { controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
 import { splitPatternList } from '../../utils/patternList.ts';
@@ -142,22 +143,17 @@ export const AlertTestModal: React.FC<AlertTestModalProps> = ({
             placeholder="Host name or IP"
           />
           <div className="space-y-1">
-            <label htmlFor="test-sample-app" className={LABEL_TEXT_CLASS}>Sample App</label>
-            {/* Before the input: space-y-* spaces every child but the last, and a datalist is never shown */}
-            {availableApps.length > 0 && (
-              <datalist id="test-sample-apps-list">
-                {availableApps.map((app) => (
-                  <option key={app} value={app} />
-                ))}
-              </datalist>
-            )}
-            <input
-              id="test-sample-app"
-              type="text"
-              list="test-sample-apps-list"
-              value={testSampleApp}
-              onChange={(e) => setTestSampleApp(e.target.value)}
-              className={controlClass()}
+            <span id="test-sample-app-label" className={LABEL_TEXT_CLASS}>Sample App</span>
+            <MultiSelectDropdown
+              label="App"
+              placeholder="No app"
+              options={availableApps}
+              selected={testSampleApp.trim() ? [testSampleApp.trim()] : []}
+              onChange={(next) => setTestSampleApp(next[0] ?? '')}
+              allowCustomInput={true}
+              singleSelect={true}
+              variant="form"
+              labelledBy="test-sample-app-label"
             />
           </div>
         </div>

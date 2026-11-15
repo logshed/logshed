@@ -25,4 +25,27 @@ export default tseslint.config(
       }],
     },
   },
+  {
+    // Screens build their controls from components/common/ (docs/spec/frontend.md, section 4), which alone
+    // may use these elements. The browser's own <select> and suggestion popup look different on every
+    // system and ignore the dark theme, and the dropdowns add search, custom values and keyboard handling.
+    files: ['src/components/**/*.tsx', 'src/App.tsx'],
+    ignores: ['src/components/common/**'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message: 'Use SelectDropdown (components/common/SelectDropdown.tsx; variant "panel" in forms and dialogs, "toolbar" in toolbars), not a native <select>.',
+        },
+        {
+          selector: "JSXOpeningElement[name.name='datalist']",
+          message: 'Use MultiSelectDropdown (components/common/MultiSelectDropdown.tsx; variant "form", with singleSelect for one value and allowCustomInput for typed names), not a <datalist>.',
+        },
+        {
+          selector: "JSXOpeningElement[name.name=/^(input|TextField)$/] > JSXAttribute[name.name='list']",
+          message: 'Use MultiSelectDropdown (components/common/MultiSelectDropdown.tsx; variant "form", with singleSelect for one value and allowCustomInput for typed names), not a text box with list=.',
+        },
+      ],
+    },
+  },
 );

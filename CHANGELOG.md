@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Gemini on the stable API**: LogShed sends Gemini requests to Google's stable `v1` API instead of `v1beta`. The model list shows what `v1` offers; a saved model that only `v1beta` offers fails over to your fallback models, so pick another model under AI Provider in Settings if that happens.
 - **One way to select logs**: History search, the REST API, MCP and deletes now read their filters through the same code. A delete or delete preview with an unreadable `from` or `to` returns `422` with the same message as a search (it returned `400`), and a blank `from` or `to` in a delete is ignored as it is in a search, instead of making the delete match nothing.
 - **One look for each control**: Buttons, text boxes, labels, checkboxes, cards, sub-tabs and table headings are drawn the same way on every screen. Buttons have small rounded corners and line up in height, field labels are plain text, checkboxes are ticked in LogShed's blue, and confirmation dialogs share one pair of buttons.
+- **Sample App in Dry-Run Test is a dropdown**: The alert rule Dry-Run Test picks its sample app from LogShed's own list of apps, with a search box, as the maintenance window's app does, instead of the browser's suggestion popup. An app name not in the list can still be typed and added with Enter.
 
 ### Fixed
 

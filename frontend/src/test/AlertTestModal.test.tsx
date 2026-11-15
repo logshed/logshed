@@ -123,8 +123,8 @@ describe('AlertTestModal Component', () => {
 
     render(<AlertTestModal isOpen={true} rule={rule} availableApps={['nginx', 'sshd']} onClose={onClose} />);
 
-    const appInput = screen.getByLabelText('Sample App');
-    fireEvent.change(appInput, { target: { value: 'sshd' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Sample App/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^sshd/, pressed: false }));
     chooseOption(screen.getByLabelText('Sample Severity'), '6 - Info');
     fireEvent.click(screen.getByRole('button', { name: 'Run Test' }));
 
@@ -138,6 +138,23 @@ describe('AlertTestModal Component', () => {
         })
       );
       expect(screen.getByText('No Match Found')).toBeInTheDocument();
+    });
+  });
+
+  it('sends a sample app typed in the list that no log has used yet', async () => {
+    const testSpy = vi.spyOn(alertsApi, 'testAlertRule').mockResolvedValue({ matched: true });
+
+    render(<AlertTestModal isOpen={true} rule={mockRule} availableApps={['nginx']} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Sample App/ }));
+    const search = screen.getByPlaceholderText('Search or add app...');
+    fireEvent.change(search, { target: { value: 'cron' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(screen.getByRole('button', { name: /^Sample App cron/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Run Test' }));
+
+    await waitFor(() => {
+      expect(testSpy).toHaveBeenCalledWith(expect.objectContaining({ sample_app: 'cron' }));
     });
   });
 
