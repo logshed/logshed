@@ -216,20 +216,25 @@ async def test_alert_rule_route_refuses_an_unsafe_pattern_without_reading(client
         assert res.json()["error"] and res.json()["checked"] == 0
 
 
+@pytest.mark.parametrize("path, body", [
+    ("/api/alerts/preview", {"match_pattern": "x.*y", "is_regex": True}),
+    ("/api/drop-rules/preview", {"message_pattern": "x.*y", "is_regex": True}),
+])
 @pytest.mark.asyncio
-async def test_alert_rule_route_counts_pattern_timeouts(client, db, monkeypatch):
-    import app.services.alert_evaluator as evaluator
+async def test_routes_count_logs_whose_pattern_timed_out_without_logging_a_warning(client, db, monkeypatch, caplog, path, body):
+    from app.core import regex_validator
 
-    def _timed_out(compiled, text, rule_label="", timeout=None, on_timeout=None):
-        assert on_timeout is not None
-        on_timeout()
-        return False
-
-    monkeypatch.setattr(evaluator, "user_pattern_search", _timed_out)
-    store_logs(db, _log(2, "x"), _log(1, "y"))
-    res = await client.post("/api/alerts/preview", json={"match_pattern": "x+y", "is_regex": True})
-    # Each log's message and raw text both timed out
-    assert res.json()["pattern_timeouts"] == 4 and res.json()["matched"] == 0
+    # A limit no search of a long line can meet, so every search times out for real
+    monkeypatch.setattr(regex_validator, "USER_REGEX_TIMEOUT", 1e-9)
+    long_line = "x" + "a" * 200_000
+    store_logs(db, {**_log(2, long_line), "raw": "<30>" + long_line}, {**_log(1, long_line), "raw": "<30>" + long_line})
+    before = regex_validator.get_user_regex_timeout_counts()
+    with caplog.at_level("WARNING"):
+        res = await client.post(path, json=body)
+    # Message and raw both time out on each log: counted once per log
+    assert (res.json()["pattern_timeouts"], res.json()["matched"]) == (2, 0)
+    assert not [r for r in caplog.records if "match limit" in r.getMessage()]
+    assert regex_validator.get_user_regex_timeout_counts() == before
 
 
 @pytest.mark.asyncio

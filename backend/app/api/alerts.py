@@ -49,7 +49,14 @@ from app.services import alert_history
 from app.services.alert_evaluator import CompiledAlertRule, get_alert_evaluator
 from app.services.alert_presets import extract_ip_from_message, get_alert_presets, get_alert_preset_by_id
 from app.services.maintenance_service import MaintenanceSessionLimitError
-from app.services.rule_preview import PREVIEW_BUSY_DETAIL, PreviewBusy, is_alert_exempt, preview_response, run_preview
+from app.services.rule_preview import (
+    PREVIEW_BUSY_DETAIL,
+    PreviewBusy,
+    TimeoutCounter,
+    is_alert_exempt,
+    preview_response,
+    run_preview,
+)
 from app.core.regex_validator import alert_pattern_looks_like_regex, check_regex_safety, validate_regex_pattern
 from app.core.utils import normalize_pattern_list, parse_iso_to_epoch, parse_iso_to_utc_datetime
 
@@ -826,20 +833,19 @@ async def preview_alert_rule(
         ai_enrichment=False,
         is_enabled=True,
     )
-    timeouts = 0
-
-    def _count_timeout() -> None:
-        nonlocal timeouts
-        timeouts += 1
-
-    rule.on_pattern_timeout = _count_timeout
+    # Timeouts are counted here, not logged or held against any saved rule
+    timeouts = TimeoutCounter()
+    rule.timeout_label = None
+    rule.on_pattern_timeout = timeouts.hit
     try:
         result = await run_db_query(
-            lambda conn: run_preview(conn, rule.matches, severity_max=payload.filter_severity, skip=is_alert_exempt)
+            lambda conn: run_preview(
+                conn, timeouts.wrap(rule.matches), severity_max=payload.filter_severity, skip=is_alert_exempt
+            )
         )
     except PreviewBusy:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=PREVIEW_BUSY_DETAIL) from None
-    result.pattern_timeouts = timeouts
+    result.pattern_timeouts = timeouts.logs
     return preview_response(result)
 
 

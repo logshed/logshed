@@ -14,17 +14,23 @@ export function formatSpan(ms: number): string {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-/** The sentence that sums up a check, e.g. "Would have matched 12 of 3,400 logs from the last 24 hours." */
+/**
+ * The sentence that sums up a check, e.g. "Would have matched 12 of 3,400 logs from the last 24
+ * hours." scope names the logs the server read when it read only some (an alert rule's severity
+ * filter), e.g. "Warning (4) and more severe".
+ */
 export function previewSummary(
   result: RulePreviewResponse,
   verb: 'matched' | 'dropped',
   timeZone?: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  scope?: string
 ): string {
-  if (result.checked === 0) return 'No stored logs from the last 24 hours to check.';
+  const logs = scope ? `logs (${scope})` : 'logs';
+  if (result.checked === 0) return `No stored ${logs} from the last 24 hours to check.`;
   const counted = `Would have ${verb} ${result.matched.toLocaleString()}`;
   if (result.complete) {
-    return `${counted} of ${result.checked.toLocaleString()} logs from the last 24 hours.`;
+    return `${counted} of ${result.checked.toLocaleString()} ${logs} from the last 24 hours.`;
   }
   const back = result.oldest_checked ? Date.parse(result.oldest_checked) : NaN;
   const reach = Number.isNaN(back)
@@ -34,7 +40,7 @@ export function previewSummary(
     result.stopped_by === 'time'
       ? 'A check stops after 5 seconds.'
       : `A check reads at most ${result.row_cap.toLocaleString()} logs.`;
-  return `${counted} of the newest ${result.checked.toLocaleString()} logs${reach}. ${limit}`;
+  return `${counted} of the newest ${result.checked.toLocaleString()} ${logs}${reach}. ${limit}`;
 }
 
 interface RulePreviewPanelProps<T> {
@@ -44,6 +50,8 @@ interface RulePreviewPanelProps<T> {
   verb: 'matched' | 'dropped';
   /** What the count leaves out, shown under the result. */
   note: string;
+  /** The logs the server reads, when not all of them (previewSummary's scope). */
+  scope?: string;
   disabled?: boolean;
 }
 
@@ -51,7 +59,7 @@ interface RulePreviewPanelProps<T> {
  * "Check last 24h": counts the stored logs of the last 24 hours the rule would have matched,
  * with the newest few, using the rule's own matcher on the server.
  */
-export function RulePreviewPanel<T>({ request, run, verb, note, disabled = false }: RulePreviewPanelProps<T>) {
+export function RulePreviewPanel<T>({ request, run, verb, note, scope, disabled = false }: RulePreviewPanelProps<T>) {
   const timeZone = useServerTimezone();
   const key = JSON.stringify(request);
   const [outcome, setOutcome] = useState<{ key: string; result?: RulePreviewResponse; error?: string; at: number } | null>(null);
@@ -99,7 +107,7 @@ export function RulePreviewPanel<T>({ request, run, verb, note, disabled = false
         {result && (
           <>
             <p className="text-xs text-fg" data-testid="rule-preview-summary">
-              {previewSummary(result, verb, timeZone, shown!.at)}
+              {previewSummary(result, verb, timeZone, shown!.at, scope)}
             </p>
             {result.pattern_timeouts > 0 && (
               <p className="text-[11px] text-warning-300">

@@ -55,6 +55,30 @@ class PreviewResult:
     examples: list = field(default_factory=list)
 
 
+class TimeoutCounter:
+    """
+    Counts the logs on which a rule's pattern timed out (a log whose message and raw text both
+    time out counts once). Give hit to the rule as its on_pattern_timeout, and run wrap(matches).
+    """
+
+    def __init__(self) -> None:
+        self.logs = 0
+        self._hit = False
+
+    def hit(self) -> None:
+        self._hit = True
+
+    def wrap(self, matches: Callable[[dict[str, Any]], bool]) -> Callable[[dict[str, Any]], bool]:
+        def _matches(entry: dict[str, Any]) -> bool:
+            self._hit = False
+            matched = matches(entry)
+            if self._hit:
+                self.logs += 1
+            return matched
+
+        return _matches
+
+
 def is_alert_exempt(row: dict[str, Any]) -> bool:
     """True for a stored LogShed log written by the alert, notifier or AI code, which alert rules skip."""
     if row.get("app_name") not in ALERT_EXEMPT_APPS:

@@ -536,14 +536,14 @@ class RuleTimeoutTracker:
 def user_pattern_search(
     compiled: "regex.Pattern",
     text: Optional[str],
-    rule_label: str = "user pattern",
+    rule_label: Optional[str] = "user pattern",
     timeout: Optional[float] = None,
     on_timeout: Optional[Callable[[], None]] = None,
 ) -> bool:
     """
     Search `text` (truncated to 16,384 characters) with a compiled user pattern under a real
-    per-match timeout. A timeout counts against `rule_label`, logs a rate-limited WARNING,
-    calls `on_timeout` when given, and is treated as no match.
+    per-match timeout. A timeout counts against `rule_label` and logs a rate-limited WARNING
+    (neither when rule_label is None), calls `on_timeout` when given, and is treated as no match.
     """
     if text is None:
         return False
@@ -552,7 +552,8 @@ def user_pattern_search(
     try:
         return compiled.search(candidate, timeout=effective_timeout) is not None
     except TimeoutError:
-        _record_timeout(rule_label, effective_timeout)
+        if rule_label is not None:
+            _record_timeout(rule_label, effective_timeout)
         if on_timeout is not None:
             on_timeout()
         return False

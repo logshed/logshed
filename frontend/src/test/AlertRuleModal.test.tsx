@@ -481,6 +481,35 @@ describe('AlertRuleModal prefill from a log', () => {
     expect(new RegExp((pattern as HTMLInputElement).value).test(line)).toBe(true);
   });
 
+  it('ticking the regex box after a selection escapes it, and the regex hint does the same', () => {
+    const line = 'disk (sda) failed';
+    renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: line });
+    const ref = screen.getByLabelText('From log') as HTMLTextAreaElement;
+    ref.setSelectionRange(0, 10);
+    fireEvent.select(ref);
+    fireEvent.click(screen.getByRole('button', { name: 'Use selection as pattern' }));
+    const pattern = screen.getByLabelText('Match Pattern');
+    expect(pattern).toHaveValue('disk (sda)');
+    // The plain text looks like a regex: taking the hint keeps it matching the same text
+    fireEvent.click(screen.getByTestId('alert-rule-regex-hint').querySelector('button')!);
+    expect(pattern).toHaveValue('disk \\(sda\\)');
+    fireEvent.click(screen.getByLabelText('Match as a regular expression'));
+    expect(pattern).toHaveValue('disk (sda)');
+  });
+
+  it('forgets the selection when the dialog opens again for another log', () => {
+    const props = { isOpen: true, ruleToEdit: null, channels: mockChannels, availableApps: ['nginx'], onClose: vi.fn(), onSuccess: vi.fn() };
+    const { rerender } = render(<AlertRuleModal {...props} prefill={{ name: 'A', referenceMessage: 'first line here' }} />);
+    const ref = screen.getByLabelText('From log') as HTMLTextAreaElement;
+    ref.setSelectionRange(0, 5);
+    fireEvent.select(ref);
+    expect(screen.getByRole('button', { name: 'Use selection as pattern' })).not.toBeDisabled();
+    rerender(<AlertRuleModal {...props} isOpen={false} prefill={{ name: 'A', referenceMessage: 'first line here' }} />);
+    rerender(<AlertRuleModal {...props} prefill={{ name: 'B', referenceMessage: 'second line' }} />);
+    expect(screen.getByLabelText('From log')).toHaveValue('second line');
+    expect(screen.getByRole('button', { name: 'Use selection as pattern' })).toBeDisabled();
+  });
+
   it('refuses a selection longer than a pattern can be', () => {
     const line = `start ${'x'.repeat(1200)}`;
     renderPrefilled({ name: 'Alert on nginx', filterApps: ['nginx'], referenceMessage: line });

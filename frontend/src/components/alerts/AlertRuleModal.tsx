@@ -11,8 +11,8 @@ import { moreSevereLabel } from '../../utils/severityLabels.ts';
 import { UnsavedChangesModal } from '../common/UnsavedChangesModal.tsx';
 import { Button, buttonClass } from '../common/Button.tsx';
 import { Checkbox, CHECKBOX_CLASS, controlClass, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS, TextArea } from '../common/Field.tsx';
-import { MESSAGE_PATTERN_MAX_LENGTH, RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
-import { alertPatternFromSelection, useSelectedText } from '../../utils/selectionPattern.ts';
+import { RULE_FILTER_MAX_LENGTH } from '../../utils/fieldLimits.ts';
+import { alertPatternFromSelection, useSelectionPattern } from '../../utils/selectionPattern.ts';
 import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
 
 /** Starting values for a new rule created from a log ("Create Alert Rule" in the log detail drawer). */
@@ -75,7 +75,6 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const initialFilterApps = activePrefill?.filterApps || EMPTY_APPS;
   const initialFilterHosts = activePrefill?.filterHosts || EMPTY_APPS;
   const referenceMessage = activePrefill?.referenceMessage || '';
-  const [selectedReference, onReferenceSelect] = useSelectedText();
   // Ties each visible label to its field (htmlFor and id)
   const fieldId = useId();
   const [formName, setFormName] = useState<string>('');
@@ -94,6 +93,14 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState<boolean>(false);
+  const selection = useSelectionPattern(alertPatternFromSelection, formIsRegex);
+  const resetSelection = selection.reset;
+  // Ticking or unticking the regex box rewrites a pattern still as the selection put it in
+  const changeIsRegex = (next: boolean) => {
+    const rewritten = selection.toggled(formMatchPattern, next);
+    if (rewritten !== null) setFormMatchPattern(rewritten);
+    setFormIsRegex(next);
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -101,6 +108,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       return;
     }
     setShowDiscardConfirm(false);
+    resetSelection();
 
     if (ruleToEdit) {
       setFormName(ruleToEdit.name);
@@ -141,10 +149,8 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
       setFormIsEnabled(true);
       setFormError(null);
     }
-  }, [isOpen, ruleToEdit, channels, initialName, initialFilterApps, initialFilterHosts]);
+  }, [isOpen, ruleToEdit, channels, initialName, initialFilterApps, initialFilterHosts, resetSelection]);
 
-  const selectionPattern = alertPatternFromSelection(selectedReference, formIsRegex);
-  const selectionTooLong = selectionPattern.pattern.length > MESSAGE_PATTERN_MAX_LENGTH;
   const hostPattern = joinPatternList(formFilterHosts);
   const hostListTooLong = hostPattern.length > RULE_FILTER_MAX_LENGTH;
   const selfReportedKeys = useMemo(
@@ -559,7 +565,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           <Checkbox
             label="Match as a regular expression"
             checked={formIsRegex}
-            onChange={(e) => setFormIsRegex(e.target.checked)}
+            onChange={(e) => changeIsRegex(e.target.checked)}
             className="pt-0.5"
           />
           <p className="text-[11px] text-fg-muted">
@@ -572,7 +578,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
               This looks like a regular expression.{' '}
               <button
                 type="button"
-                onClick={() => setFormIsRegex(true)}
+                onClick={() => changeIsRegex(true)}
                 className="text-accent-400 hover:text-accent-300 underline cursor-pointer"
               >
                 Match as a regular expression
@@ -589,22 +595,22 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
                 defaultValue={referenceMessage}
                 rows={2}
                 mono
-                onSelect={onReferenceSelect}
+                onSelect={selection.onSelect}
                 hint="Select the part of the line to match, then use it as the pattern. Editing this copy changes nothing."
               />
               <Button
                 size="sm"
                 icon={<TextSelect className="w-3 h-3 text-accent-400" aria-hidden="true" />}
-                disabled={!selectionPattern.pattern || selectionTooLong}
-                onClick={() => setFormMatchPattern(selectionPattern.pattern)}
+                disabled={!selection.canUse}
+                onClick={() => {
+                  const next = selection.use();
+                  setFormMatchPattern(next.pattern);
+                  setFormIsRegex(next.isRegex);
+                }}
               >
                 Use selection as pattern
               </Button>
-              {selectionTooLong && (
-                <p className="text-[11px] text-danger-400">
-                  The selection is too long for a pattern (at most {MESSAGE_PATTERN_MAX_LENGTH.toLocaleString()} characters).
-                </p>
-              )}
+              {selection.problem && <p className="text-[11px] text-danger-400">{selection.problem}</p>}
             </div>
           )}
         </div>
@@ -619,6 +625,7 @@ export const AlertRuleModal: React.FC<AlertRuleModalProps> = ({
           }}
           run={previewAlertRule}
           verb="matched"
+          scope={formFilterSeverity === '' ? undefined : moreSevereLabel(Number(formFilterSeverity))}
           note="Counts single logs: the threshold, cooldown and maintenance windows are not applied, so a threshold or rate rule fires less often than this."
           disabled={hostListTooLong}
         />

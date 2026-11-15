@@ -205,7 +205,7 @@ To see how often a rule would have matched real logs, click **Check last 24h** i
 In the Console, click a log entry to open the Log Detail drawer, then click **Create Alert Rule** (next to **Create Drop Rule**). LogShed opens **Rules & History > Alert Rules** with a new rule dialog that starts with:
 - the name `Alert on <app>` (or `Alert on <host>` for a log with no app), the log's host in the Host Filter (its name as the Console shows it, or its IP address when it has none), and the log's app in the App Filter (when LogShed has seen that app before);
 - an empty Severity Filter and Match Pattern;
-- a **From log** box under the Match Pattern field with the whole log message (a copy: editing it changes nothing). Select the part you want to match and click **Use selection as pattern**: it becomes the Match Pattern, as written for plain text, or escaped (so every character means itself) when **Match as a regular expression** is ticked.
+- a **From log** box under the Match Pattern field with the log message as the log drawer shows it (a copy: editing it changes nothing). Select the part you want to match and click **Use selection as pattern**: it becomes the Match Pattern, as written for plain text, or escaped (so every character means itself) when **Match as a regular expression** is ticked. Ticking or unticking the box afterwards rewrites the pattern to match the same text, until you edit it. The drawer leaves out colour codes, so select text that has none inside it.
 
 Remove the host from the Host Filter to watch the app on every host. Closing the dialog without saving leaves you on Alert Rules.
 

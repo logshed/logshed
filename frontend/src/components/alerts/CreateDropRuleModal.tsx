@@ -13,7 +13,7 @@ import { joinPatternList, splitPatternList } from '../../utils/patternList.ts';
 import { Button, buttonClass } from '../common/Button.tsx';
 import { CHECKBOX_CLASS, controlClass, LABEL_CLASS, LABEL_TEXT_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
 import { RulePreviewPanel } from './RulePreviewPanel.tsx';
-import { dropPatternFromSelection, useSelectedText } from '../../utils/selectionPattern.ts';
+import { dropPatternFromSelection, useSelectionPattern } from '../../utils/selectionPattern.ts';
 
 const SEVERITY_RANGE_OPTIONS: SelectOption[] = [
   { value: '', label: 'Any severity' },
@@ -73,9 +73,13 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
   const [sampleSeverity, setSampleSeverity] = useState<string>('');
   const [testResult, setTestResult] = useState<{ matched?: boolean; error?: string | null } | null>(null);
   const [isTesting, setIsTesting] = useState<boolean>(false);
-  const [selectedSample, onSampleSelect] = useSelectedText();
-  const selectionPattern = dropPatternFromSelection(selectedSample, isRegex);
-  const selectionTooLong = selectionPattern.pattern.length > MESSAGE_PATTERN_MAX_LENGTH;
+  const selection = useSelectionPattern(dropPatternFromSelection, isRegex);
+  // Ticking or unticking the regex box rewrites a pattern still as the selection put it in
+  const changeIsRegex = (next: boolean) => {
+    const rewritten = selection.toggled(messagePattern, next);
+    if (rewritten !== null) setMessagePattern(rewritten);
+    setIsRegex(next);
+  };
 
   // Syslog host aliases (lowercased keys both ways), so the host list can show which IP is which alias
   const [hostAliases, setHostAliases] = useState<{ ipByAlias: Map<string, string>; aliasByIp: Map<string, string> }>(
@@ -128,6 +132,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
 
     if (isOpen && (!wasOpen || targetChanged)) {
       prevTargetKeyRef.current = currentTargetKey;
+      selection.reset();
       setTestResult(null);
       if (ruleToEdit) {
         setRuleName(ruleToEdit.name || ruleToEdit.app_pattern || ruleToEdit.source_pattern || '');
@@ -373,7 +378,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
             type="checkbox"
             id="modal-is-regex-checkbox"
             checked={isRegex}
-            onChange={(e) => setIsRegex(e.target.checked)}
+            onChange={(e) => changeIsRegex(e.target.checked)}
             className={CHECKBOX_CLASS}
           />
           <label htmlFor="modal-is-regex-checkbox" className="text-fg-soft cursor-pointer">
@@ -506,7 +511,7 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               rows={2}
               value={sampleMessage}
               onChange={(e) => setSampleMessage(e.target.value)}
-              onSelect={onSampleSelect}
+              onSelect={selection.onSelect}
               placeholder="Paste a representative log line here..."
               className={controlClass({ mono: true })}
             />
@@ -514,19 +519,20 @@ export const CreateDropRuleModal: React.FC<CreateDropRuleModalProps> = ({
               <Button
                 size="sm"
                 icon={<TextSelect className="w-3 h-3 text-accent-400" aria-hidden="true" />}
-                disabled={!selectionPattern.pattern || selectionTooLong}
+                disabled={!selection.canUse}
                 onClick={() => {
-                  setMessagePattern(selectionPattern.pattern);
-                  setIsRegex(selectionPattern.isRegex);
+                  const next = selection.use();
+                  setMessagePattern(next.pattern);
+                  setIsRegex(next.isRegex);
                 }}
               >
                 Use selection as pattern
               </Button>
-              <span className="text-[11px] text-fg-muted">
-                {selectionTooLong
-                  ? `The selection is too long for a pattern (at most ${MESSAGE_PATTERN_MAX_LENGTH.toLocaleString()} characters).`
-                  : 'Select the part of the line that repeats.'}
-              </span>
+              {selection.problem ? (
+                <span className="text-[11px] text-danger-400">{selection.problem}</span>
+              ) : (
+                <span className="text-[11px] text-fg-muted">Select the part of the line that repeats.</span>
+              )}
             </div>
           </div>
 

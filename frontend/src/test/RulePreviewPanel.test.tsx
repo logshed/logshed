@@ -68,6 +68,16 @@ describe('previewSummary', () => {
     );
   });
 
+  it('names the logs read when an alert rule\'s severity filter limited them', () => {
+    const scope = 'Warning (4) and more severe';
+    expect(previewSummary(result({ matched: 3, checked: 40 }), 'matched', 'UTC', NOW, scope)).toBe(
+      'Would have matched 3 of 40 logs (Warning (4) and more severe) from the last 24 hours.'
+    );
+    expect(previewSummary(result({ matched: 0, checked: 0 }), 'matched', 'UTC', NOW, scope)).toBe(
+      'No stored logs (Warning (4) and more severe) from the last 24 hours to check.'
+    );
+  });
+
   it('formats spans in minutes and hours', () => {
     expect([formatSpan(10_000), formatSpan(45 * 60000), formatSpan(60 * 60000), formatSpan(200 * 60000)]).toEqual([
       '1 min', '45 min', '1 h', '3 h 20 min',

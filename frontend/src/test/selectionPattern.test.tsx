@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { alertPatternFromSelection, dropPatternFromSelection, escapeRegex } from '../utils/selectionPattern.ts';
+import { alertPatternFromSelection, dropPatternFromSelection, escapeRegex, selectionProblem } from '../utils/selectionPattern.ts';
 import { CreateDropRuleModal } from '../components/alerts/CreateDropRuleModal.tsx';
 import * as aliasesApi from '../api/aliases.ts';
 
@@ -15,6 +15,16 @@ describe('patterns from a selection', () => {
   it('keeps an alert rule in its mode, trimmed', () => {
     expect(alertPatternFromSelection('  disk (sda) full ', false)).toEqual({ pattern: 'disk (sda) full', isRegex: false });
     expect(alertPatternFromSelection('disk (sda)', true)).toEqual({ pattern: 'disk \\(sda\\)', isRegex: true });
+  });
+
+  it('makes a lone * an escaped regular expression for an alert rule, as plain text it would match every log', () => {
+    expect(alertPatternFromSelection(' * ', false)).toEqual({ pattern: '\\*', isRegex: true });
+  });
+
+  it('refuses a selection across a line break or longer than a pattern can be', () => {
+    expect(selectionProblem('first\nsecond', 'first\nsecond')).toMatch(/Select within one line/);
+    expect(selectionProblem(' word\n', 'word')).toBeNull();
+    expect(selectionProblem('x', 'x'.repeat(1001))).toMatch(/too long/);
   });
 
   it('turns a drop rule selection holding a wildcard character into an escaped regular expression', () => {
@@ -66,6 +76,33 @@ describe('Use selection as pattern in the drop rule dialog', () => {
     expect(regexBox().checked).toBe(true);
     expect(new RegExp(pattern().value, 'i').test(line)).toBe(true);
     expect(new RegExp(pattern().value, 'i').test('GET /statusXfull=1')).toBe(false);
+  });
+
+  it('unticking the regex box after a selection puts the text back as written', () => {
+    const { select, use } = openFromLog();
+    select('GET /status?full=1');
+    fireEvent.click(use);
+    fireEvent.click(regexBox());
+    expect(regexBox().checked).toBe(false);
+    expect(pattern().value).toBe('GET /status?full=1');
+    fireEvent.click(regexBox());
+    expect(pattern().value).toBe('GET /status\\?full=1');
+    // A pattern edited after the selection is left as the user wrote it
+    fireEvent.change(pattern(), { target: { value: 'GET /status' } });
+    fireEvent.click(regexBox());
+    expect(pattern().value).toBe('GET /status');
+  });
+
+  it('forgets the selection when the dialog is closed and opened again', () => {
+    const props = { onClose: vi.fn(), initialApp: 'nginx', initialMessage: line };
+    const { rerender } = render(<CreateDropRuleModal isOpen={true} {...props} />);
+    const sample = screen.getByPlaceholderText('Paste a representative log line here...') as HTMLTextAreaElement;
+    sample.setSelectionRange(0, 3);
+    fireEvent.select(sample);
+    expect(screen.getByRole('button', { name: 'Use selection as pattern' })).not.toBeDisabled();
+    rerender(<CreateDropRuleModal isOpen={false} {...props} />);
+    rerender(<CreateDropRuleModal isOpen={true} {...props} initialMessage="another line" />);
+    expect(screen.getByRole('button', { name: 'Use selection as pattern' })).toBeDisabled();
   });
 
   it('escapes the selection when the rule is already a regular expression', () => {

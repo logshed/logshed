@@ -901,7 +901,7 @@ class RulePreviewResponse(BaseModel):
     row_cap: int = Field(0, description="Most logs one check reads")
     window_start: str = Field("", description="Start of the window (UTC, ISO 8601)")
     oldest_checked: Optional[str] = Field(None, description="Time of the oldest log checked (UTC, ISO 8601)")
-    pattern_timeouts: int = Field(0, description="Logs on which the pattern hit its per-match timeout (counted as no match)")
+    pattern_timeouts: int = Field(0, description="Logs on which the pattern hit its per-match timeout (counted as no match, not logged)")
     examples: list[LogEntry] = Field(default_factory=list, description="The newest matches, at most five")
     error: Optional[str] = Field(None, description="Why the pattern cannot be checked; nothing was read")
 

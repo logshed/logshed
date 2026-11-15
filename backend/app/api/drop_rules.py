@@ -40,7 +40,7 @@ from app.models import (
 )
 from app.services.drop_filter import CompiledDropRule, get_drop_filter
 from app.services.drop_presets import get_drop_presets, get_drop_preset_by_id
-from app.services.rule_preview import PREVIEW_BUSY_DETAIL, PreviewBusy, preview_response, run_preview
+from app.services.rule_preview import PREVIEW_BUSY_DETAIL, PreviewBusy, TimeoutCounter, preview_response, run_preview
 from app.core.regex_validator import check_regex_safety, compile_user_pattern, validate_regex_pattern
 from app.core.utils import normalize_pattern_list, split_pattern_list
 
@@ -620,13 +620,10 @@ async def preview_drop_rule(
         severity_threshold=payload.severity_threshold,
         compiled_regex=compiled_re,
     )
-    timeouts = 0
-
-    def _count_timeout() -> None:
-        nonlocal timeouts
-        timeouts += 1
-
-    rule.on_pattern_timeout = _count_timeout
+    # Timeouts are counted here, not logged or held against any saved rule
+    timeouts = TimeoutCounter()
+    rule.timeout_label = None
+    rule.on_pattern_timeout = timeouts.hit
 
     def _matches(entry: dict[str, Any]) -> bool:
         return rule.matches(
@@ -638,10 +635,10 @@ async def preview_drop_rule(
         )
 
     try:
-        result = await run_db_query(lambda conn: run_preview(conn, _matches))
+        result = await run_db_query(lambda conn: run_preview(conn, timeouts.wrap(_matches)))
     except PreviewBusy:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=PREVIEW_BUSY_DETAIL) from None
-    result.pattern_timeouts = timeouts
+    result.pattern_timeouts = timeouts.logs
     return preview_response(result)
 
 

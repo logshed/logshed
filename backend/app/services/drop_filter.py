@@ -52,6 +52,8 @@ class CompiledDropRule:
     display_order: int = 0
     # Set by DropFilter so pattern timeouts count towards disabling the rule automatically
     on_pattern_timeout: Optional[Callable[[], None]] = field(default=None, repr=False, compare=False)
+    # Whom a pattern timeout is counted and logged against (None: neither, for a check of stored logs)
+    timeout_label: Optional[str] = field(init=False, default=None, repr=False, compare=False)
     # Prepared from the patterns once, so each log is not lowercased and compared per rule
     _source_match: Optional[Callable[[Optional[str], Optional[str]], bool]] = field(
         init=False, default=None, repr=False, compare=False
@@ -61,6 +63,7 @@ class CompiledDropRule:
 
     def __post_init__(self) -> None:
         self._source_match = compile_host_list(self.source_pattern)
+        self.timeout_label = f"drop rule {self.id}"
         self._app_match = compile_wildcard_list(self.app_pattern)
         if self.message_pattern and not self.is_regex:
             pattern = self.message_pattern.strip().lower()
@@ -91,7 +94,7 @@ class CompiledDropRule:
             if self.compiled_regex is None or message is None:
                 return False
             return user_pattern_search(
-                self.compiled_regex, message, rule_label=f"drop rule {self.id}", on_timeout=self.on_pattern_timeout
+                self.compiled_regex, message, rule_label=self.timeout_label, on_timeout=self.on_pattern_timeout
             )
         if message_lower is None:
             return False

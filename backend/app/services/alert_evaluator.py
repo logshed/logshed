@@ -185,7 +185,8 @@ class CompiledAlertRule:
         self._invalid: bool = False
         # Set by AlertEvaluator so pattern timeouts count towards disabling the rule automatically
         self.on_pattern_timeout: Optional[Callable[[], None]] = None
-        self._timeout_label = f"alert rule {self.id} ({self.name})"
+        # Whom a pattern timeout is counted and logged against (None: neither, for a check of stored logs)
+        self.timeout_label: Optional[str] = f"alert rule {self.id} ({self.name})"
         if self.match_pattern and self.match_pattern.strip() and self.match_pattern.strip() != "*":
             clean_pat = self.match_pattern.strip()
             self._match_pattern_lower = clean_pat.lower()
@@ -267,7 +268,7 @@ class CompiledAlertRule:
             else:
                 if self.compiled_regex is None:
                     return False
-                label = self._timeout_label
+                label = self.timeout_label
                 on_timeout = self.on_pattern_timeout
                 if user_pattern_search(self.compiled_regex, message, rule_label=label, on_timeout=on_timeout):
                     return True
