@@ -1,7 +1,8 @@
 import React from 'react';
 import { SelectDropdown, SelectOption } from '../common/SelectDropdown.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
-import { LABEL_CLASS, SELECT_FIELD_CLASS, TextField } from '../common/Field.tsx';
+import { LABEL_CLASS, SELECT_FIELD_CLASS } from '../common/Field.tsx';
+import { MultiSelectDropdown } from '../common/MultiSelectDropdown.tsx';
 import { MaintenanceLogHandling } from '../../types.ts';
 
 /** What a maintenance window does and which logs it covers (no target: every log). */
@@ -73,39 +74,34 @@ export const MaintenanceScopeFields: React.FC<MaintenanceScopeFieldsProps> = ({
             onChange={(v) => onChange({ ...value, logHandling: v as MaintenanceLogHandling })}
           />
         </div>
-        {/* The suggestion lists sit outside the fields' spacing: a datalist is never shown */}
-        <datalist id={`${idPrefix}-hosts`}>
-          {availableHosts.map((host) => (
-            <option key={host} value={host} />
-          ))}
-        </datalist>
-        <datalist id={`${idPrefix}-apps`}>
-          {availableApps.map((app) => (
-            <option key={app} value={app} />
-          ))}
-        </datalist>
-        <TextField
-          label="Host (Optional)"
-          id={`${idPrefix}-host`}
-          type="text"
-          list={`${idPrefix}-hosts`}
-          maxLength={255}
-          mono
-          value={value.targetHost}
-          onChange={(e) => onChange({ ...value, targetHost: e.target.value })}
-          placeholder="Every host"
-        />
-        <TextField
-          label="App (Optional)"
-          id={`${idPrefix}-app`}
-          type="text"
-          list={`${idPrefix}-apps`}
-          maxLength={255}
-          mono
-          value={value.targetApp}
-          onChange={(e) => onChange({ ...value, targetApp: e.target.value })}
-          placeholder="Every app"
-        />
+        <div>
+          <span id={`${idPrefix}-host-label`} className={LABEL_CLASS}>Host (Optional)</span>
+          <MultiSelectDropdown
+            label="Host"
+            placeholder="Every host"
+            options={availableHosts}
+            selected={value.targetHost.trim() ? [value.targetHost.trim()] : []}
+            onChange={(next) => onChange({ ...value, targetHost: next[0] ?? '' })}
+            allowCustomInput={true}
+            singleSelect={true}
+            variant="form"
+            labelledBy={`${idPrefix}-host-label`}
+          />
+        </div>
+        <div>
+          <span id={`${idPrefix}-app-label`} className={LABEL_CLASS}>App (Optional)</span>
+          <MultiSelectDropdown
+            label="App"
+            placeholder="Every app"
+            options={availableApps}
+            selected={value.targetApp.trim() ? [value.targetApp.trim()] : []}
+            onChange={(next) => onChange({ ...value, targetApp: next[0] ?? '' })}
+            allowCustomInput={true}
+            singleSelect={true}
+            variant="form"
+            labelledBy={`${idPrefix}-app-label`}
+          />
+        </div>
       </div>
       <p className="text-[11px] text-fg-muted" data-testid={`${idPrefix}-scope-help`}>
         {targeted

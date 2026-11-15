@@ -18,6 +18,11 @@ export interface MultiSelectDropdownProps {
   labelledBy?: string;
   /** Optional second text for an option, shown after it in the list and matched by the search box. */
   optionHint?: (option: string) => string | undefined;
+  /**
+   * One value at most, for a field that stores a single string: picking or adding a value replaces
+   * the selection and closes the list, and there is no Select All.
+   */
+  singleSelect?: boolean;
 }
 
 export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
@@ -32,6 +37,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   note,
   labelledBy,
   optionHint,
+  singleSelect = false,
 }) => {
   const labelId = useId();
   const valueId = useId();
@@ -156,6 +162,9 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   const toggleOption = (option: string) => {
     if (selected.includes(option)) {
       onChange(selected.filter((item) => item !== option));
+    } else if (singleSelect) {
+      onChange([option]);
+      setIsOpen(false);
     } else {
       onChange([...selected, option]);
     }
@@ -177,8 +186,9 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   const handleAddCustom = () => {
     const trimmed = searchTerm.trim();
     if (trimmed && !selected.includes(trimmed)) {
-      onChange([...selected, trimmed]);
+      onChange(singleSelect ? [trimmed] : [...selected, trimmed]);
       setSearchTerm('');
+      if (singleSelect) setIsOpen(false);
     }
   };
 
@@ -254,7 +264,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
           {selected.length} of {options.length} selected
         </span>
         <div className="flex items-center gap-2">
-          {filteredOptions.length > 0 && (
+          {filteredOptions.length > 0 && !singleSelect && (
             <button
               type="button"
               onClick={handleSelectAll}

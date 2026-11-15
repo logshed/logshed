@@ -216,10 +216,29 @@ describe('MaintenanceWindowTab mode and targets', () => {
     const handlers = renderTab({ availableHosts: ['nas01'], availableApps: ['restic'] });
     chooseOption(screen.getByLabelText('Mode'), 'Silence alerts and drop error logs');
     expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, logHandling: 'drop_errors' });
-    fireEvent.change(screen.getByLabelText('Host (Optional)'), { target: { value: 'nas01' } });
+    // Picked from the list: the list closes
+    fireEvent.click(screen.getByRole('button', { name: /^Host \(Optional\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^nas01/, pressed: false }));
     expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetHost: 'nas01' });
-    fireEvent.change(screen.getByLabelText('App (Optional)'), { target: { value: 'restic' } });
-    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetApp: 'restic' });
+    expect(screen.queryByPlaceholderText('Search or add host...')).toBeNull();
+    // Typed as a pattern
+    fireEvent.click(screen.getByRole('button', { name: /^App \(Optional\)/ }));
+    const search = screen.getByPlaceholderText('Search or add app...');
+    fireEvent.change(search, { target: { value: 'rest*' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetApp: 'rest*' });
+  });
+
+  it('replaces the chosen host rather than adding a second one', () => {
+    const handlers = renderTab({
+      availableHosts: ['nas01', 'router'],
+      scope: { ...EMPTY_MAINTENANCE_SCOPE, targetHost: 'nas01' },
+    });
+    const trigger = screen.getByRole('button', { name: /^Host \(Optional\) nas01/ });
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('button', { name: 'Select All' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^router/, pressed: false }));
+    expect(handlers.onScopeChange).toHaveBeenLastCalledWith({ ...EMPTY_MAINTENANCE_SCOPE, targetHost: 'router' });
   });
 
   it('says what a window without a target does, and what one with a target does', () => {
@@ -294,7 +313,10 @@ describe('ScheduleEditorModal mode and targets', () => {
     render(<ScheduleEditorModal scheduleToEdit={null} onClose={vi.fn()} onSave={onSave} />);
     fill();
     chooseOption(screen.getByLabelText('Mode'), 'Silence alerts and drop error logs');
-    fireEvent.change(screen.getByLabelText('App (Optional)'), { target: { value: 'restic' } });
+    fireEvent.click(screen.getByRole('button', { name: /^App \(Optional\)/ }));
+    const search = screen.getByPlaceholderText('Search or add app...');
+    fireEvent.change(search, { target: { value: 'restic' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
     });
@@ -330,7 +352,7 @@ describe('ScheduleEditorModal mode and targets', () => {
         onSave={vi.fn()}
       />
     );
-    expect(screen.getByLabelText('Host (Optional)')).toHaveValue('nas01');
+    expect(screen.getByRole('button', { name: /^Host \(Optional\) nas01/ })).toBeInTheDocument();
     expect(screen.getByTestId('schedule-scope-help')).toHaveTextContent('Its error logs are discarded.');
   });
 });
