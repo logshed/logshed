@@ -321,11 +321,35 @@ async def test_sources_lists_each_address_shown_by_its_own_name_until_it_gets_an
     # The name a configured host uses ("truenas") is not self-reported, so it is not listed
     assert listed["truncated"] is False
     assert [(h["ip"], h["names"]) for h in listed["hosts"]] == [(PRINTER_IP, ["hp-m404", "printer-hp"])]
-    assert listed["hosts"][0]["last_seen"] == us_to_iso(9999999999999999)
+    # The address's own newest log, not the time a name was recorded
+    assert listed["hosts"][0]["last_seen"] == us_to_iso(1_000)
 
     resp = await client.post("/api/aliases", json={"ip": PRINTER_IP, "alias": "printer-hp"}, headers=headers)
     assert resp.status_code == 200
     assert (await _self_reported(client, headers))["hosts"] == []
+
+
+@pytest.mark.asyncio
+async def test_sources_shows_when_the_address_last_sent_after_its_alias_is_deleted(client, headers, env):
+    from app.services.source_activity import get_source_activity, us_to_iso
+
+    store_logs(env, _row("job done", "printer-hp", env=env))
+    get_source_activity().note([{"source_ip": PRINTER_IP, "source_kind": KIND_SYSLOG}], now_us=1_000)
+    assert (await client.post("/api/aliases", json={"ip": PRINTER_IP, "alias": "office"}, headers=headers)).status_code == 200
+    # Deleting the alias records the name again as seen now; the printer last sent at 1_000
+    assert (await client.delete(f"/api/aliases/{PRINTER_IP}", headers=headers)).status_code == 200
+    [host] = (await _self_reported(client, headers))["hosts"]
+    assert (host["names"], host["last_seen"]) == (["printer-hp"], us_to_iso(1_000))
+
+
+@pytest.mark.asyncio
+async def test_sources_falls_back_to_when_a_name_was_recorded(client, headers, env):
+    from app.services.source_activity import us_to_iso
+
+    with open_db(env) as conn:
+        conn.execute("INSERT INTO reported_hosts VALUES ('printer-hp', ?, 5000)", (PRINTER_IP,))
+    [host] = (await _self_reported(client, headers))["hosts"]
+    assert host["last_seen"] == us_to_iso(5000)
 
 
 @pytest.mark.asyncio

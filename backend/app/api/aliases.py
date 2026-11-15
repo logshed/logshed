@@ -129,8 +129,9 @@ async def list_self_reported_hosts(user: dict = Depends(get_current_user)) -> Se
         newest: dict[str, int] = {}
         for ip, name_seen, name in rows:
             names.setdefault(ip, []).append(name)
-            # reported_hosts is written at most once an hour per name: the in-memory time is closer
-            newest[ip] = max(newest.get(ip, 0), name_seen, seen.get(ip, 0))
+            # The address's own newest log when it is known: reported_hosts is written at most once an
+            # hour per name, and an alias deleted writes its names back as seen at that moment
+            newest[ip] = seen[ip] if ip in seen else max(newest.get(ip, 0), name_seen)
         order = sorted(names, key=lambda ip: (-newest[ip], ip))
         return SelfReportedHostsResponse(
             hosts=[
