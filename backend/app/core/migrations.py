@@ -676,6 +676,17 @@ CREATE TABLE IF NOT EXISTS reported_hosts (
 ) WITHOUT ROWID;
 """
 
+# When each source (address and kind of source) last sent a log, saved by
+# services/source_activity.py once a minute; rows outlive the logs, so "last seen" survives retention
+SOURCE_LAST_SEEN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS source_last_seen (
+    source_ip TEXT NOT NULL,
+    source_kind INTEGER NOT NULL,
+    last_seen_us INTEGER NOT NULL,
+    PRIMARY KEY (source_ip, source_kind)
+) WITHOUT ROWID;
+"""
+
 
 def _stored_time_us(value: Optional[str]) -> Optional[int]:
     """A legacy timestamp in microseconds, or None when it is missing or unreadable."""
@@ -739,6 +750,7 @@ def migrate_v4(conn: sqlite3.Connection) -> None:
       are added, and the logs table so far is listed as the legacy entry. No day file is made
       and no log row is touched: the first write after start-up makes the day's file;
     - reported_hosts lists the host names syslog senders reported and are shown by;
+    - source_last_seen keeps when each source last sent a log, across restarts;
     - alert rules can be limited to hosts (alert_rules.filter_host, NULL for every host);
     - alert rules store whether their pattern is a regular expression (alert_rules.is_regex), set
       for existing rules from how their pattern was read until now.
@@ -747,6 +759,7 @@ def migrate_v4(conn: sqlite3.Connection) -> None:
     _reencrypt_stored_secrets(conn)
     _run_script(conn, LOG_CATALOGUE_SCHEMA)
     _register_legacy_logs(conn)
+    _run_script(conn, SOURCE_LAST_SEEN_SCHEMA)
     _add_column(conn, "alert_rules", "filter_host", "TEXT")
     _store_alert_pattern_choice(conn)
 

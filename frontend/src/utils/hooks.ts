@@ -114,6 +114,16 @@ export function useMediaQuery(query: string): boolean {
 }
 
 
+/** The time now in milliseconds, updated every intervalMs while mounted (for "12s ago" texts). */
+export function useNow(intervalMs: number): number {
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
 /**
  * The server's configured time zone, for showing times the way the log stream does.
  * Starts from the cached settings and is undefined (browser time) until settings load.

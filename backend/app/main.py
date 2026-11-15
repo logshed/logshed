@@ -326,6 +326,20 @@ async def _drop_filter_flush_worker() -> None:
             await asyncio.sleep(10)
 
 
+async def _source_activity_flush_worker() -> None:
+    """Save when each source last sent a log once a minute, so it survives a restart."""
+    from app.services.source_activity import get_source_activity
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            await asyncio.to_thread(get_source_activity().flush)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Error saving when sources last sent a log: {e}")
+
+
 async def _maintenance_sweep_worker(db_path) -> None:
     """
     Background worker that closes expired maintenance sessions, flushes per-session
@@ -445,6 +459,11 @@ async def _start_services(db_path) -> None:
     init_drop_filter(db_path)
     _background_tasks.append(asyncio.create_task(_supervise_worker(_drop_filter_flush_worker, "DropFilterWorker")))
     _background_tasks.append(asyncio.create_task(_supervise_worker(_maintenance_sweep_worker, "MaintenanceSweepWorker", db_path)))
+
+    # When each source last sent a log (Settings -> Sources), read back from the last run
+    from app.services.source_activity import init_source_activity
+    await asyncio.to_thread(init_source_activity, db_path)
+    _background_tasks.append(asyncio.create_task(_supervise_worker(_source_activity_flush_worker, "SourceActivityWorker")))
 
     # Initialize in-memory alert evaluator
     from app.services.alert_evaluator import init_alert_evaluator
@@ -621,6 +640,12 @@ async def _stop_services(db_path) -> None:
         get_drop_filter().flush_counts()
     except Exception as e:
         logger.warning(f"Error flushing drop filter counts during shutdown: {e}")
+
+    try:
+        from app.services.source_activity import get_source_activity
+        await asyncio.wait_for(asyncio.to_thread(get_source_activity().flush), timeout=10.0)
+    except Exception as e:
+        logger.warning(f"Error saving when sources last sent a log during shutdown: {e}")
 
     # Persist maintenance drop counts recorded since the last 30s sweep (the consumer is stopped,
     # so no new drops arrive). Bounded so a locked database cannot hang shutdown.

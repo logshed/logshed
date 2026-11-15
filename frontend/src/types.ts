@@ -51,6 +51,8 @@ export interface HostAlias {
   alias: string;
   notes?: string | null;
   created_at: string;
+  /** When the address last sent a log (UTC), null when it has not since 1.4.0 */
+  last_seen?: string | null;
 }
 
 export interface AiProviderConfig {
@@ -794,6 +796,8 @@ export interface DockerEndpoint {
   last_error?: string | null;
   last_activity?: string | null;
   latency_ms?: number | null;
+  /** When any of the host's containers last sent a log (UTC) */
+  last_seen?: string | null;
 }
 
 export interface DockerEndpointCreate {

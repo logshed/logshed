@@ -447,3 +447,20 @@ export function formatDate(isoString?: string | null, timeZone?: string): string
 
 
 
+
+/**
+ * How long ago a time was, as "12s ago", "5 min ago", "3 h ago" or "2 days ago" ("just now" under
+ * five seconds, and for a time a little ahead of this browser's clock).
+ */
+export function formatAgo(isoString: string, nowMs: number = Date.now()): string {
+  const then = new Date(cleanIsoString(isoString)).getTime();
+  if (isNaN(then)) return '';
+  const seconds = Math.floor((nowMs - then) / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} days ago`;
+}

@@ -29,6 +29,7 @@ from app.collectors.docker_collector import (
 from app.collectors.docker_pool import TLS_HOSTNAME_HINT, is_tls_hostname_mismatch
 from app.collectors.syslog import reload_active_alias_caches
 from app.core.config import invalidate_settings_cache
+from app.core.day_files import KIND_DOCKER
 from app.core.net_guard import is_blocked_docker_address, parse_ip
 from app.core.security import decrypt_value, encrypt_value
 from app.core.utils import note_docker_alias_change
@@ -41,6 +42,7 @@ from app.services.alias_rename import (
 )
 from app.services import log_store
 from app.services.docker_endpoints import load_docker_endpoints, public_endpoint
+from app.services.source_activity import get_source_activity, us_to_iso
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +191,14 @@ class DockerEndpointResponse(BaseModel):
     last_error: Optional[str] = None
     last_activity: Optional[str] = None
     latency_ms: Optional[float] = None
+    # When any of the host's containers last sent a log (ISO 8601, UTC)
+    last_seen: Optional[str] = None
+
+
+def with_last_seen(endpoint: dict) -> dict:
+    """An endpoint's fields with last_seen: the newest log stored from its containers."""
+    address = effective_source_ip(endpoint.get("url"), endpoint.get("source_alias"), endpoint["id"])
+    return {**endpoint, "last_seen": us_to_iso(get_source_activity().last_seen(address, KIND_DOCKER))}
 
 
 class DockerEndpointCreateRequest(BaseModel):
@@ -265,13 +275,13 @@ async def list_docker_endpoints(
 
     if pool:
         statuses = await pool.get_statuses()
-        return [DockerEndpointResponse(**s) for s in statuses]
+        return [DockerEndpointResponse(**with_last_seen(s)) for s in statuses]
 
     def _query(conn: sqlite3.Connection):
         return [public_endpoint(row) for row in load_docker_endpoints(conn)]
 
     rows = await run_db_query(_query)
-    return [DockerEndpointResponse(**r) for r in rows]
+    return [DockerEndpointResponse(**with_last_seen(r)) for r in rows]
 
 
 @router.post("", response_model=DockerEndpointResponse)

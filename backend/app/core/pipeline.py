@@ -19,6 +19,7 @@ from collections import deque
 from app.core.day_files import KIND_INTERNAL
 from app.core.utils import SEVERITY_NAME_MAP
 from app.services import log_store
+from app.services.source_activity import get_source_activity
 
 
 logger = logging.getLogger(__name__)
@@ -1073,6 +1074,7 @@ class QueueConsumer:
         inserted, stored_batch = await self._insert_with_retries(batch)
         if inserted:
             record_ingest(len(stored_batch))
+            get_source_activity().note(stored_batch)
             # Broadcast to SSE subscribers on the event loop thread
             from app.core.sse import sse_manager
             await sse_manager.broadcast_batch(stored_batch)

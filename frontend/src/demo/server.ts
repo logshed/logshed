@@ -193,6 +193,10 @@ export function escapeRegExp(text: string): string {
 }
 
 /** List, create, update and delete routes for one collection. */
+function secondsAgo(seconds: number): string {
+  return new Date(Date.now() - seconds * 1000).toISOString();
+}
+
 function crud<T extends { id: number }>(base: string, coll: store.Collection<T>, make: (body: Record<string, any>) => Omit<T, 'id'>): Array<[string, RegExp, Handler]> {
   const esc = escapeRegExp(base);
   const one = new RegExp(`^${esc}\\/(\\d+)$`);
@@ -423,12 +427,14 @@ const ROUTES: Array<[string, RegExp, Handler]> = [
   }],
   ['PATCH', /^\/api\/tokens\/(\d+)$/, (m, _q, b) => found(store.tokens.update(Number(m[1]), b || {}))],
   ['DELETE', /^\/api\/tokens\/(\d+)$/, (m) => { store.tokens.remove(Number(m[1])); return { status: 'ok' }; }],
+  // Last seen a few seconds ago, worked out per request so the demo's times stay current
+  ['GET', /^\/api\/docker\/hosts$/, () => store.dockerHosts.items.map((h) => ({ ...h, last_seen: h.is_connected ? secondsAgo(2) : null }))],
   ...crud('/api/docker/hosts', store.dockerHosts, (b) => ({
     name: '', url: '', source_alias: '', enabled: true, tls_enabled: false, exclude_containers: '', ...b,
     created_at: nowIso(), updated_at: nowIso(), is_connected: false, active_containers: 0, last_error: 'The demo cannot connect to Docker hosts.', last_activity: null, latency_ms: null,
   })),
   ['POST', /^\/api\/docker\/hosts\/test$/, () => { throw notInDemo('Testing a Docker connection'); }],
-  ['GET', /^\/api\/aliases$/, () => store.aliases],
+  ['GET', /^\/api\/aliases$/, () => store.aliases.map((a, i) => ({ ...a, last_seen: secondsAgo(3 + i * 11) }))],
   ['POST', /^\/api\/aliases$/, (_m, _q, b) => {
     const entry = { ip: String(b?.ip || ''), alias: String(b?.alias || ''), notes: (b?.notes as string) ?? null, created_at: nowIso() };
     store.setAliases([...store.aliases.filter((a) => a.ip !== entry.ip), entry]);

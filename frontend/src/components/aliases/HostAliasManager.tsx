@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Server, Plus, Trash2, Edit2, AlertCircle, Loader2, ScrollText } from 'lucide-react';
 import { HostAlias } from '../../types.ts';
 import { fetchAliases, saveAlias, deleteAlias } from '../../api/aliases.ts';
-import { useMediaQuery } from '../../utils/hooks.ts';
+import { useMediaQuery, useNow, usePolling, useServerTimezone } from '../../utils/hooks.ts';
 import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { useAlias } from '../../context/AliasContext.tsx';
@@ -10,6 +10,10 @@ import { Button, IconButton } from '../common/Button.tsx';
 import { Card, CardHeader, SECTION_TITLE_CLASS } from '../common/Card.tsx';
 import { TextField } from '../common/Field.tsx';
 import { TABLE_HEAD_ROW } from '../common/Table.tsx';
+import { LastSeen } from '../common/LastSeen.tsx';
+
+// How often the rows' last-seen times are fetched again while the page is open
+const LAST_SEEN_REFRESH_MS = 30_000;
 
 interface HostAliasManagerProps {
   initialAddIp?: string | null;
@@ -53,6 +57,10 @@ const AliasRowActions: React.FC<{
   </>
 );
 
+function lastSeenByIp(list: HostAlias[]): Record<string, string | null | undefined> {
+  return Object.fromEntries(list.map((a) => [a.ip, a.last_seen]));
+}
+
 export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   initialAddIp,
   onAliasSaved,
@@ -60,6 +68,10 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
 }) => {
   const { bumpAliasVersion } = useAlias();
   const [aliases, setAliases] = useState<HostAlias[]>([]);
+  // Kept apart from aliases, so a refresh cannot reset an open Add or Edit dialog
+  const [lastSeen, setLastSeen] = useState<Record<string, string | null | undefined>>({});
+  const now = useNow(5000);
+  const serverTimezone = useServerTimezone();
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -85,6 +97,7 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
       setErrorMsg(null);
       const list = await fetchAliases();
       setAliases(list);
+      setLastSeen(lastSeenByIp(list));
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load host aliases.');
     } finally {
@@ -95,6 +108,12 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
   useEffect(() => {
     loadAliases();
   }, []);
+
+  usePolling(() => {
+    fetchAliases()
+      .then((list) => setLastSeen(lastSeenByIp(list)))
+      .catch(() => {});
+  }, LAST_SEEN_REFRESH_MS);
 
   useEffect(() => {
     if (initialAddIp && initialAddIp !== dismissedAddIpRef.current) {
@@ -250,7 +269,13 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
                     />
                   </div>
                 </div>
-                <div className="text-fg font-mono text-xs font-medium">{item.alias}</div>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-fg font-mono font-medium">{item.alias}</span>
+                  <span className="text-fg-soft">
+                    <span className="text-fg-muted">Last seen </span>
+                    <LastSeen at={lastSeen[item.ip]} now={now} timeZone={serverTimezone} />
+                  </span>
+                </div>
                 {item.notes && (
                   <div className="text-fg-muted text-xs">
                     {item.notes}
@@ -262,22 +287,26 @@ export const HostAliasManager: React.FC<HostAliasManagerProps> = ({
         ) : (
           /* Desktop Table View */
           <div className="divide-y divide-line-subtle text-xs">
-            <div className={`grid grid-cols-[160px_200px_1fr_160px] px-4 select-none ${TABLE_HEAD_ROW}`}>
+            <div className={`grid grid-cols-[160px_200px_1fr_110px_160px] px-4 select-none ${TABLE_HEAD_ROW}`}>
               <div className="py-2.5">Source IP</div>
               <div className="py-2.5">Friendly Alias</div>
               <div className="py-2.5">Notes</div>
+              <div className="py-2.5">Last seen</div>
               <div className="py-2.5 text-right">Actions</div>
             </div>
 
             {aliases.map((item) => (
               <div
                 key={item.ip}
-                className="grid grid-cols-[160px_200px_1fr_160px] px-4 py-2.5 items-center hover:bg-raised/50 transition"
+                className="grid grid-cols-[160px_200px_1fr_110px_160px] px-4 py-2.5 items-center hover:bg-raised/50 transition"
               >
                 <div className="font-mono text-accent-400 font-semibold">{item.ip}</div>
                 <div className="font-mono text-fg">{item.alias}</div>
                 <div className="text-fg-muted truncate pr-2">
                   {item.notes || '-'}
+                </div>
+                <div className="text-fg-soft">
+                  <LastSeen at={lastSeen[item.ip]} now={now} timeZone={serverTimezone} />
                 </div>
                 <div className="flex items-center justify-end gap-1.5">
                   <AliasRowActions

@@ -537,6 +537,9 @@ class HostAliasResponse(BaseModel):
     alias: str
     notes: Optional[str] = None
     created_at: str
+    last_seen: Optional[str] = Field(
+        None, description="When the address last sent a log (ISO 8601, UTC); null when it has not since schema 4."
+    )
 
 
 # ---------------------------------------------------------------------------

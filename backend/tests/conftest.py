@@ -78,6 +78,15 @@ def fast_passphrase_kdf():
 
 
 @pytest.fixture(autouse=True)
+def reset_source_activity():
+    """Start each test with no source seen: the map is process-wide and every stored batch adds to it."""
+    from app.services import source_activity
+    source_activity._activity = None
+    yield
+    source_activity._activity = None
+
+
+@pytest.fixture(autouse=True)
 def reset_drop_filter_counts():
     """Clear drops counted in memory by the process-wide drop filter, so a test that drops logs without a
     flush cannot add them to a later test's rule with the same id (the drop rules list adds pending counts)."""

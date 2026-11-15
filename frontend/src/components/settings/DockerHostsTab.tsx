@@ -23,7 +23,8 @@ import {
   deleteDockerEndpoint,
   testDockerEndpoint,
 } from '../../api/dockerHosts.ts';
-import { useMediaQuery } from '../../utils/hooks.ts';
+import { useMediaQuery, useNow, usePolling, useServerTimezone } from '../../utils/hooks.ts';
+import { LastSeen } from '../common/LastSeen.tsx';
 import { Modal } from '../common/Modal.tsx';
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx';
 import { DockerHostFormModal } from './DockerHostFormModal.tsx';
@@ -61,6 +62,10 @@ const HostStatusBadge: React.FC<{ host: DockerEndpoint; showContainers?: boolean
   return <Badge tone="warning">Reconnecting</Badge>;
 };
 
+function lastSeenById(list: DockerEndpoint[]): Record<number, string | null | undefined> {
+  return Object.fromEntries(list.map((h) => [h.id, h.last_seen]));
+}
+
 export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   initialEditEndpointId,
   initialAddHost,
@@ -72,6 +77,10 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   const isMobile = useMediaQuery('(max-width: 767px)');
   const { bumpAliasVersion } = useAlias();
   const [hosts, setHosts] = useState<DockerEndpoint[]>([]);
+  // Kept apart from hosts, so a refresh cannot reopen or reset an open dialog
+  const [lastSeen, setLastSeen] = useState<Record<number, string | null | undefined>>({});
+  const now = useNow(5000);
+  const serverTimezone = useServerTimezone();
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -111,6 +120,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
       setErrorMsg(null);
       const list = await fetchDockerEndpoints();
       setHosts(list);
+      setLastSeen(lastSeenById(list));
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load Docker endpoints.');
     } finally {
@@ -121,6 +131,12 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
   useEffect(() => {
     loadHosts();
   }, []);
+
+  usePolling(() => {
+    fetchDockerEndpoints()
+      .then((list) => setLastSeen(lastSeenById(list)))
+      .catch(() => {});
+  }, 30_000);
 
   const openAddModal = (initial?: { name?: string; url?: string; source_alias?: string } | null) => {
     setFormModal((prev) => ({ key: (prev?.key ?? 0) + 1, host: null, initialAddHost: initial }));
@@ -304,6 +320,13 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
 
                     <span className="text-fg-muted ml-2">Status:</span>
                     <HostStatusBadge host={host} showContainers />
+
+                    <span className="ml-2 whitespace-nowrap">
+                      <span className="text-fg-muted">Last seen: </span>
+                      <span className="text-fg-soft">
+                        <LastSeen at={lastSeen[host.id]} now={now} timeZone={serverTimezone} />
+                      </span>
+                    </span>
                   </div>
 
                   {testResult && (
@@ -356,11 +379,12 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
             <table className="w-full text-left border-collapse text-xs">
               <TableHead
                 columns={[
-                  { label: 'Name' },
+                  { label: 'Name', className: 'whitespace-nowrap' },
                   { label: 'Endpoint URL' },
-                  { label: 'Host Alias' },
+                  { label: 'Host Alias', className: 'whitespace-nowrap' },
                   { label: 'Status', className: 'w-40 whitespace-nowrap' },
                   { label: 'Containers', align: 'center', className: 'w-28 whitespace-nowrap' },
+                  { label: 'Last seen', className: 'w-28 whitespace-nowrap' },
                   { label: 'Actions', align: 'right' },
                 ]}
               />
@@ -371,7 +395,7 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                     <tr key={`host-${host.id}`} className="hover:bg-raised/40 transition">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-fg-strong">{host.name}</span>
+                          <span className="font-semibold text-fg-strong whitespace-nowrap">{host.name}</span>
                           {host.id === 1 && <Badge tone="accent">Primary</Badge>}
                           {host.tls_enabled && (
                             <Badge title="Mutual TLS configured">
@@ -403,6 +427,9 @@ export const DockerHostsTab: React.FC<DockerHostsTabProps> = ({
                         <span className="font-mono text-fg-soft">
                           {host.enabled && host.is_connected ? host.active_containers ?? 0 : '0'}
                         </span>
+                      </td>
+                      <td className="py-3 px-4 w-28 text-fg-soft">
+                        <LastSeen at={lastSeen[host.id]} now={now} timeZone={serverTimezone} />
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">

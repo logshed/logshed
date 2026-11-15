@@ -19,6 +19,7 @@ from app.services.alias_rename import (
     reload_after_alias_rename,
 )
 from app.services import log_store
+from app.services.source_activity import get_source_activity, us_to_iso
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ def raise_if_alias_used_by_syslog(conn, alias: str) -> None:
 @router.get("", response_model=list[HostAliasResponse])
 async def list_aliases(user: dict = Depends(get_current_user)) -> list[HostAliasResponse]:
     """List all registered IP-to-hostname alias mappings."""
+    seen = get_source_activity().by_address()
+
     def _get_all(conn):
         cursor = conn.cursor()
         cursor.execute("SELECT ip, alias, notes, created_at FROM host_aliases ORDER BY ip ASC")
@@ -71,6 +74,7 @@ async def list_aliases(user: dict = Depends(get_current_user)) -> list[HostAlias
                 alias=r["alias"],
                 notes=r["notes"],
                 created_at=str(r["created_at"]),
+                last_seen=us_to_iso(seen.get(r["ip"])),
             )
             for r in rows
         ]
