@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RetentionSlider } from '../components/storage/RetentionSlider.tsx';
+import { RetentionSlider, sliderMarkLeft } from '../components/storage/RetentionSlider.tsx';
 import { describeNextCleanup } from '../components/storage/PrunePreviewModal.tsx';
 import { formatBytes } from '../utils/formatters.ts';
 import * as systemApi from '../api/system.ts';
@@ -54,20 +54,12 @@ describe('RetentionSlider Component', () => {
     });
   });
 
-  it('positions ticks with percentage-based left styling matching slider thumbs', () => {
+  it('places each tick where the slider thumb centre is at its value', () => {
     render(<RetentionSlider retentionDays={14} onSaveRetention={vi.fn()} />);
 
-    const min = 1;
-    const max = 30;
-    const presets = [3, 7, 14, 30];
-
-    presets.forEach((val) => {
-      const expectedPercent = ((val - min) / (max - min)) * 100;
+    [3, 7, 14, 30].forEach((val) => {
       const tickContainer = screen.getByTitle(`Set retention to ${val} days`);
-      expect(tickContainer).toBeInTheDocument();
-      // jsdom keeps six significant digits of a percentage it reads back
-      expect(tickContainer.style.left).toMatch(/%$/);
-      expect(parseFloat(tickContainer.style.left)).toBeCloseTo(expectedPercent, 3);
+      expect(tickContainer.getAttribute('style')).toContain(sliderMarkLeft(val, 1, 30));
     });
   });
 
@@ -404,8 +396,8 @@ describe('RetentionSlider Component', () => {
     // Tick does not have NaN in left style
     const tick = screen.getByTitle('Set retention to 1 day');
     expect(tick).toBeInTheDocument();
-    expect(tick.style.left).toBe('0%');
-    expect(tick.style.left).not.toContain('NaN');
+    expect(tick.getAttribute('style')).toContain(sliderMarkLeft(1, 1, 1));
+    expect(tick.getAttribute('style')).not.toContain('NaN');
   });
 
   it('clamps retentionDays state when prop exceeds maxRetentionDays', () => {
@@ -616,5 +608,15 @@ describe('RetentionSlider Component', () => {
     });
     expect(onSaveMock).toHaveBeenCalledWith(7);
     expect(screen.queryByText(/Failed to update retention period/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('sliderMarkLeft', () => {
+  it('puts a mark where the thumb centre is: half a thumb in at each end, in proportion between', () => {
+    const at = (fraction: number) => `calc(var(--range-thumb-size) / 2 + (100% - var(--range-thumb-size)) * ${fraction})`;
+    expect(sliderMarkLeft(1, 1, 30)).toBe(at(0));
+    expect(sliderMarkLeft(3, 1, 30)).toBe(at(2 / 29));
+    expect(sliderMarkLeft(30, 1, 30)).toBe(at(1));
+    expect(sliderMarkLeft(5, 5, 5)).toBe(at(0));
   });
 });

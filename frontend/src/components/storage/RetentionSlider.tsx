@@ -18,6 +18,16 @@ interface RetentionSliderProps {
   onVacuumCompleted?: () => void;
 }
 
+/**
+ * Where a mark for value sits under a range input: where the thumb's centre is at that value. The
+ * thumb travels from half its width in from the left edge to half its width in from the right, so
+ * a plain percentage of the full width is off by up to half a thumb near the ends.
+ */
+export function sliderMarkLeft(value: number, min: number, max: number): string {
+  const fraction = max === min ? 0 : (value - min) / (max - min);
+  return `calc(var(--range-thumb-size) / 2 + (100% - var(--range-thumb-size)) * ${fraction})`;
+}
+
 export const RetentionSlider: React.FC<RetentionSliderProps> = ({
   retentionDays,
   maxRetentionDays = 30,
@@ -282,11 +292,10 @@ export const RetentionSlider: React.FC<RetentionSliderProps> = ({
         />
         <div className="relative h-6 text-[10px] font-mono text-fg-muted mt-1 select-none">
           {presets.map((val) => {
-            const leftPercent = max === min ? 0 : ((val - min) / (max - min)) * 100;
             return (
               <div
                 key={val}
-                style={{ left: `${leftPercent}%` }}
+                style={{ left: sliderMarkLeft(val, min, max) }}
                 onClick={() => !retentionOverridden && setDays(val)}
                 onKeyDown={(e) => {
                   if (!retentionOverridden && (e.key === 'Enter' || e.key === ' ')) {
